@@ -1,0 +1,235 @@
+from vivibox.cli import main
+
+
+def test_new_and_status(env, capsys):
+    assert main(["new", "demo", "Add health endpoint", "--draft"]) == 0
+    assert "Created demo-1" in capsys.readouterr().out
+
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "demo-1" in out and "plan" in out and "0/1" in out and "Add health endpoint" in out
+
+    assert main(["status", "demo-1"]) == 0
+    assert "created" in capsys.readouterr().out
+
+
+def test_unknown_project_fails_cleanly(env, capsys):
+    assert main(["new", "missing", "x", "--draft"]) == 1
+    assert "missing.toml" in capsys.readouterr().err
+
+
+def test_project_repo_must_be_git(env, capsys):
+    (env / "config" / "projects" / "bad.toml").write_text(f'repo = "{env}"\nverify = ["true"]\n')
+    assert main(["new", "bad", "x", "--draft"]) == 1
+    assert "not a git repository" in capsys.readouterr().err
+
+
+def test_status_without_tasks(env, capsys):
+    assert main(["status"]) == 0
+    assert "No tasks." in capsys.readouterr().out
+
+
+def test_risky_review_and_approval_move_the_task_on(env, capsys):
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Change the build", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    (task.repo / "pom.xml").write_text("<project/>\n")
+    capsys.readouterr()
+
+    assert main(["risky", "demo-1"]) == 0
+    assert "+<project/>" in capsys.readouterr().out
+
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.APPROVAL_RISKY):
+        task.transition(state)
+    assert main(["approve-risky", "demo-1"]) == 0
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+    assert main(["risky", "demo-1"]) == 0
+    assert "No changes" in capsys.readouterr().out
+
+
+def test_accept_and_reply_follow_the_checkpoints(env, capsys):
+    from vivibox import gate, supervisor
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Add health endpoint", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert main(["accept", "demo-1"]) == 1, "nothing to accept while planning"
+
+    task.transition(State.CHECKPOINT_PLAN)
+    assert main(["accept", "demo-1"]) == 1, "the template placeholder is not a criterion"
+    task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "endpoint returns 200"))
+    (task.meta / "handoff" / supervisor.QUESTION).write_text("unused")
+    assert main(["reply", "demo-1", "Use Postgres, not H2"]) == 0
+    assert task.read_state().state is State.PLAN
+    assert "Use Postgres, not H2" in (task.meta / "handoff" / "comments.md").read_text()
+    assert not (task.meta / "handoff" / supervisor.QUESTION).exists(), "answered questions are archived"
+    assert supervisor.next_prompt(task, "") == supervisor.PLAN_COMMENT_PROMPT
+
+    task.transition(State.CHECKPOINT_PLAN)
+    assert main(["accept", "demo-1"]) == 0
+    assert task.read_state().state is State.IMPLEMENT
+    assert (task.meta / gate.ACCEPTED_PLAN).exists()
+
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL)
+    (task.repo / "pom.xml").write_text("<project/>")
+    assert main(["accept", "demo-1"]) == 1, "unapproved risky files block done"
+    assert main(["approve-risky", "demo-1"]) == 0
+    assert main(["accept", "demo-1"]) == 0
+    assert not task.root.exists(), "accepting the work removes the task"
+    assert "is done" in capsys.readouterr().out
+
+
+def agent_commit(task, name):
+    import subprocess
+
+    (task.repo / name).write_text("x\n")
+    for args in (
+        ["add", name],
+        ["-c", "user.name=A", "-c", "user.email=a@b", "commit", "-q", "-m", f"Add {name}"],
+    ):
+        subprocess.run(["git", *args], cwd=task.repo, check=True, capture_output=True)
+
+
+def final_checkpoint(task):
+    from vivibox import gate
+    from vivibox.states import State
+
+    task.transition(State.CHECKPOINT_PLAN)
+    task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "done"))
+    assert main(["accept", task.id]) == 0
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL)
+
+
+def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, monkeypatch):
+    import subprocess
+
+    from vivibox.config import load_config, load_project
+    from vivibox.task import find_task
+
+    source = load_project("demo").repo
+    git = lambda *a: subprocess.run(["git", *a], cwd=source, capture_output=True, text=True).stdout  # noqa: E731
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    # Declined: the work waits in your checkout, uncommitted; no branch.
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    agent_commit(task, "one.txt")
+    final_checkpoint(task)
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "n")
+    assert main(["accept", "demo-1"]) == 0
+    assert (source / "one.txt").exists() and git("status", "--porcelain") == "A  one.txt\n"
+    assert 'as "Add one.txt"' in prompts[0], "the agent's commit message is the suggestion"
+    assert not task.root.exists() and "vivibox/demo-1" not in git("branch", "--list")
+    git("commit", "-q", "-m", "Mine")
+
+    # Accepted with an edited message.
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-2")
+    agent_commit(task, "two.txt")
+    final_checkpoint(task)
+    answers = iter(["e", "Add two"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    assert main(["accept", "demo-2"]) == 0
+    assert git("log", "-1", "--format=%s").strip() == "Add two" and git("status", "--porcelain") == ""
+
+    # --branch keeps the old way, for pull requests.
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-3")
+    agent_commit(task, "three.txt")
+    final_checkpoint(task)
+    assert main(["accept", "demo-3", "--branch"]) == 0
+    assert "vivibox/demo-3" in git("branch", "--list") and not (source / "three.txt").exists()
+
+
+def test_accept_refuses_over_your_staged_changes(env, capsys):
+    import subprocess
+
+    from vivibox.config import load_config, load_project
+    from vivibox.task import find_task
+
+    source = load_project("demo").repo
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    agent_commit(task, "one.txt")
+    final_checkpoint(task)
+    (source / "README.md").write_text("staged edit\n")
+    subprocess.run(["git", "add", "README.md"], cwd=source, check=True)
+    assert main(["accept", "demo-1"]) == 1 and "staged changes" in capsys.readouterr().err
+    assert task.root.exists(), "nothing is removed when accepting fails"
+
+
+def test_stop_pauses_and_rm_removes_everything(env, capsys, monkeypatch, tmp_path):
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert main(["stop", "demo-1"]) == 0
+    assert task.read_state().paused
+    assert main(["rm", "demo-1", "--yes"]) == 0
+    assert not task.root.exists()
+    assert main(["status"]) == 0 and "No tasks." in capsys.readouterr().out
+
+
+def test_rm_asks_first(env, monkeypatch):
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    assert main(["rm", "demo-1"]) == 1
+    assert find_task(load_config().tasks_dir, "demo-1").root.exists()
+
+
+def test_review_worktree_follows_the_task_and_is_removed_with_it(env, capsys):
+    import subprocess
+
+    from vivibox.config import load_config, load_project
+    from vivibox.repo import review_worktree_path
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    source = load_project("demo").repo
+    agent_commit(task, "one.txt")
+    (task.repo / ".idea").mkdir()
+    agent_commit(task, ".idea/vcs.xml")
+    assert main(["approve-risky", "demo-1"]) == 0
+    assert main(["review", "demo-1"]) == 0
+    copy = review_worktree_path(source, task.root)
+    # The test repository is called "repo", like the agent's clone, so the copy gets another name.
+    assert copy == task.root / "repo-review" and copy != task.repo
+    assert (copy / "one.txt").exists()
+    git = lambda *a: subprocess.run(["git", *a], cwd=copy, capture_output=True, text=True).stdout  # noqa: E731
+    assert git("status", "--porcelain") == "A  .idea/vcs.xml\nA  one.txt\n", "the agent's work is uncommitted"
+    assert git("rev-parse", "HEAD").strip() == task.read_state().base_commit
+    assert "vivibox/demo-1" not in git("branch", "--list"), "no branch in your repository before accept"
+
+    agent_commit(task, "two.txt")
+    (copy / ".idea" / "workspace.xml").write_text("<project/>")
+    (copy / ".idea" / "vcs.xml").write_text("rewritten by the IDE")
+    assert "A  .idea/vcs.xml" in git("status", "--porcelain").splitlines(), "IDE rewrites stay hidden"
+    assert main(["review", "demo-1"]) == 0, "a second review moves the copy; IDE files do not block it"
+    assert (copy / "two.txt").exists()
+
+    (copy / "Mine.java").write_text("class Mine {}")
+    assert main(["review", "demo-1"]) == 1, "your own changes in the copy are never overwritten"
+    (copy / "Mine.java").unlink()
+
+    (task.repo / "pom.xml").write_text("<project/>")
+    assert main(["review", "demo-1"]) == 1
+    assert "not approved" in capsys.readouterr().err
+
+    assert main(["rm", "demo-1", "--yes"]) == 0
+    assert not copy.exists()
+    worktrees = subprocess.run(["git", "worktree", "list"], cwd=source, capture_output=True, text=True).stdout
+    assert str(copy) not in worktrees, "git forgets the review copy too"

@@ -1,0 +1,25 @@
+# Copy to ~/.config/vivibox/config.toml and adjust.
+# Keep endpoints, model names and anything employer-specific in this file, never in the repo.
+
+# Absolute path, outside $HOME, mounted nosuid,nodev (host/setup.sh prepares it).
+tasks_dir = "/srv/vivibox"
+
+[limits]
+# Verification failures the writer may fix on its own before the task stops for you.
+max_iterations = 3
+
+# One entry per role. harness: "opencode" or "claude-code".
+[roles.writer]
+harness = "opencode"
+model = "anthropic/claude-sonnet-5"
+
+[notifications]
+# Desktop notifications (notify-send) when a task waits for you. Messages always appear in the
+# task's supervisor window too.
+desktop = true
+
+[review]
+# Command that opens a folder in your editor, with {path} where the folder goes ("code -n {path}");
+# without {path} it is added at the end. Left out, vivibox asks once, listing the editors it finds,
+# and writes your choice here. A project file can set its own 'ide' for that project.
+# ide = "idea {path}"

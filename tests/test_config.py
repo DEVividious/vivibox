@@ -1,0 +1,86 @@
+from pathlib import Path
+
+import pytest
+
+from vivibox.config import ConfigError, HostService, load_config, load_project
+
+WRITER = '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+
+
+def write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path.parent
+
+
+def test_loads_config_with_defaults(tmp_path):
+    base = write(
+        tmp_path / "config.toml",
+        'tasks_dir = "/srv/vivibox"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
+    )
+    config = load_config(base)
+    assert config.tasks_dir == Path("/srv/vivibox")
+    assert config.max_iterations == 3
+    assert config.roles["writer"].harness == "opencode"
+    assert config.desktop_notifications is True
+
+
+def test_desktop_notifications_can_be_turned_off(tmp_path):
+    text = 'tasks_dir = "/t"\n[notifications]\ndesktop = false\n' + WRITER
+    assert load_config(write(tmp_path / "config.toml", text)).desktop_notifications is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'tasks_dir = "relative"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
+        'tasks_dir = "/t"\n[roles.writer]\nharness = "other"\nmodel = "m"\n',
+        'tasks_dir = "/t"\n[roles.reviewer]\nharness = "opencode"\nmodel = "m"\n',
+        'tasks_dir = "/t"\n[limits]\nmax_iterations = 0\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
+        "tasks_dir = ",
+        'tasks_dir = "/t"\n[notifications]\ndesktop = "no"\n' + WRITER,
+    ],
+)
+def test_rejects_invalid_config(tmp_path, text):
+    with pytest.raises(ConfigError):
+        load_config(write(tmp_path / "config.toml", text))
+
+
+def test_missing_config_points_to_templates(tmp_path):
+    with pytest.raises(ConfigError, match="templates"):
+        load_config(tmp_path)
+
+
+def test_loads_project(tmp_path):
+    base = write(
+        tmp_path / "projects" / "shop.toml",
+        'repo = "/r"\nverify = ["mvn -B verify"]\nhost_services = ["host.docker.internal:5432"]\n',
+    )
+    project = load_project("shop", base.parent)
+    assert project.verify == ["mvn -B verify"]
+    assert project.host_services == [HostService("host.docker.internal", 5432)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'repo = "/r"\nverify = ["x"]\nhost_services = ["nohost"]\n',
+        'repo = "/r"\nverify = ["x"]\nhost_services = ["h:99999"]\n',
+    ],
+)
+def test_rejects_invalid_project(tmp_path, text):
+    base = write(tmp_path / "projects" / "shop.toml", text)
+    with pytest.raises(ConfigError):
+        load_project("shop", base.parent)
+
+
+@pytest.mark.parametrize("name", ["../etc", "Shop", "-x", ""])
+def test_rejects_unsafe_project_name(tmp_path, name):
+    with pytest.raises(ConfigError):
+        load_project(name, tmp_path)
+
+
+def test_a_new_project_may_have_no_verify_yet(tmp_path):
+    """The plan you accept sets it; a project can exist before the code does."""
+    base = write(tmp_path / "projects" / "fresh.toml", 'repo = "/r"\nverify = []\n')
+    assert load_project("fresh", base.parent).verify == []

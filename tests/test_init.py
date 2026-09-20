@@ -1,0 +1,96 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+from conftest import make_repo
+
+from vivibox import init
+from vivibox.cli import main
+from vivibox.config import load_project
+
+
+def gradle_project(path: Path, gradle: str, source: str) -> Path:
+    make_repo(path)
+    (path / "gradlew").write_text("#!/bin/sh\n")
+    (path / "gradle" / "wrapper").mkdir(parents=True)
+    (path / "gradle" / "wrapper" / "gradle-wrapper.properties").write_text(
+        f"distributionUrl=https\\://services.gradle.org/distributions/gradle-{gradle}-bin.zip\n"
+    )
+    (path / "build.gradle").write_text(f"sourceCompatibility = '{source}'\n")
+    return path
+
+
+@pytest.mark.parametrize(
+    "gradle,source,java",
+    [("7.3.3", "11", "17"), ("8.10", "17", ""), ("6.9", "1.8", "11"), ("8.10", "21", "")],
+)
+def test_gradle_projects_get_a_jdk_their_gradle_runs_on(tmp_path, gradle, source, java):
+    found = init.detect(gradle_project(tmp_path / "shop", gradle, source))
+    assert found.verify == ["bash gradlew test --no-daemon --console=plain"]
+    assert found.java == java
+
+
+def test_maven_and_npm(tmp_path):
+    maven = make_repo(tmp_path / "api")
+    (maven / "mvnw").write_text("")
+    (maven / "pom.xml").write_text(
+        "<properties><maven.compiler.release>17</maven.compiler.release></properties>"
+    )
+    assert init.detect(maven).verify == ["bash mvnw -B verify"]
+    assert init.detect(maven).java == "", "Java 21 builds code written for 17"
+    web = make_repo(tmp_path / "Web_App")
+    (web / "package.json").write_text("{}")
+    found = init.detect(web)
+    assert found.verify == ["npm ci && npm test"] and found.name == "web-app"
+
+
+def test_init_writes_the_project_once(env, tmp_path, capsys):
+    repo = gradle_project(tmp_path / "shop", "7.3.3", "11")
+    assert main(["init", str(repo / "gradle"), "--yes"]) == 0
+    project = load_project("shop")
+    assert project.repo == repo and project.java == "17"
+    assert main(["init", str(repo), "--yes", "--name", "shop-again"]) == 1
+    assert "already project shop" in capsys.readouterr().err
+
+
+def test_init_asks_first_and_writes_nothing_without_a_terminal(env, tmp_path):
+    repo = gradle_project(tmp_path / "shop", "8.10", "21")
+    assert main(["init", str(repo)]) == 1
+    assert not (env / "config" / "projects" / "shop.toml").exists()
+
+
+def test_init_outside_a_repository(env, tmp_path, capsys):
+    (tmp_path / "plain").mkdir()
+    assert main(["init", str(tmp_path / "plain"), "--yes", "--verify", "true"]) == 1
+    assert "not a git repository" in capsys.readouterr().err
+
+
+def test_init_can_start_a_repository_from_scratch(env, tmp_path):
+    from vivibox.config import load_project
+
+    fresh = tmp_path / "clicker"
+    assert main(["init", str(fresh), "--git", "--yes", "--verify", "npm test"]) == 0
+    project = load_project("clicker")
+    assert project.repo == fresh and project.verify == ["npm test"]
+    assert (fresh / ".git").is_dir() and (fresh / "README.md").exists()
+    log = subprocess.run(["git", "log", "--oneline"], cwd=fresh, capture_output=True, text=True).stdout
+    assert "Initial commit" in log
+
+
+def test_a_project_from_scratch_gets_its_command_from_the_first_plan(env, tmp_path):
+    from vivibox import actions, gate
+    from vivibox.config import load_project
+    from vivibox.states import State
+
+    fresh = tmp_path / "clicker"
+    actions.setup_project(fresh, "clicker", [], create=True)
+    assert load_project("clicker").verify == [], "nothing to run until the plan says what"
+
+    task = actions.create("clicker", "A click counter page")
+    plan = '+++\nverify = ["npm test"]\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it counts clicks\n'
+    task.plan_path.write_text(plan)
+    task.transition(State.CHECKPOINT_PLAN)
+    actions.accept_plan(task, load_project("clicker"))
+    assert load_project("clicker").verify == ["npm test"], "the project keeps it for its next task"
+    assert actions.verify_commands(task, load_project("clicker")) == ["npm test"]
+    assert (task.meta / gate.ACCEPTED_PLAN).exists()

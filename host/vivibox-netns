@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Egress firewall for a task pod. Installed root-owned to /usr/local/libexec/vivibox-netns by
+# host/setup.sh and allowed through sudo, so vivibox needs no other root access.
+#
+#   vivibox-netns apply <sidecar> [<ipv4>:<port> ...]   (re)apply rules, allowing only the listed host services
+#   vivibox-netns clear <sidecar>                        remove the rules
+#   vivibox-netns show  <sidecar>                        print the rules
+#
+# Rules live in the network namespace of the pod's Sysbox sidecar, which the agent container shares.
+# They cover traffic leaving through the sidecar's uplink (eth0): from the agent, the sidecar and
+# containers nested in it. Traffic between the agent and nested containers stays inside the pod.
+# Inside the pod: DNS and the listed host services are allowed, other private and link-local
+# addresses (the host, your LAN, VPN networks) are rejected, the internet stays open.
+# IPv6 leaving the pod is rejected.
+#
+# Every argument is validated before anything runs as root. The script only acts on running
+# containers named like vivibox pod sidecars that run under sysbox-runc.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+CHAIN=VIVIBOX-EGRESS
+SIDECAR_NAME='^vivibox-[a-z0-9][a-z0-9-]*-[0-9]+-dind$'
+PRIVATE_V4=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10)
+
+usage() {
+  echo "usage: vivibox-netns apply <sidecar> [<ipv4>:<port> ...] | clear <sidecar> | show <sidecar>" >&2
+  exit 2
+}
+die() { echo "vivibox-netns: $*" >&2; exit 1; }
+
+valid_target() {
+  local ip=${1%:*} port=${1##*:} octet
+  [[ "$1" == *:* && "$port" =~ ^[0-9]{1,5}$ ]] && ((port >= 1 && port <= 65535)) || return 1
+  [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  IFS=. read -ra octets <<<"$ip"
+  for octet in "${octets[@]}"; do ((10#$octet <= 255)) || return 1; done
+}
+
+[[ $# -ge 2 ]] || usage
+cmd=$1 sidecar=$2
+shift 2
+case "$cmd" in
+  apply) ;;
+  clear | show) [[ $# -eq 0 ]] || usage ;;
+  *) usage ;;
+esac
+[[ "$sidecar" =~ $SIDECAR_NAME ]] || die "not an vivibox sidecar name: $sidecar"
+for target in "$@"; do
+  valid_target "$target" || die "not <ipv4>:<port>: $target"
+done
+[[ $EUID -eq 0 ]] || die "must run as root (sudo)"
+
+read -r running runtime pid < <(docker inspect -f '{{.State.Running}} {{.HostConfig.Runtime}} {{.State.Pid}}' \
+  -- "$sidecar" 2>/dev/null) || die "no such container: $sidecar"
+[[ "$running" == true ]] || die "container is not running: $sidecar"
+[[ "$runtime" == sysbox-runc ]] || die "container does not run under sysbox-runc: $sidecar"
+[[ "$pid" =~ ^[1-9][0-9]*$ ]] || die "no process for container: $sidecar"
+
+ipt() { nsenter -t "$pid" -n iptables -w "$@"; }
+ip6t() { nsenter -t "$pid" -n ip6tables -w "$@"; }
+
+remove() {
+  local t
+  for t in ipt ip6t; do
+    for parent in OUTPUT FORWARD; do
+      while "$t" -C "$parent" -o eth0 -j "$CHAIN" 2>/dev/null; do "$t" -D "$parent" -o eth0 -j "$CHAIN"; done
+    done
+    if "$t" -n -L "$CHAIN" >/dev/null 2>&1; then
+      "$t" -F "$CHAIN"
+      "$t" -X "$CHAIN"
+    fi
+  done
+}
+
+case "$cmd" in
+  show)
+    ipt -S "$CHAIN" 2>/dev/null || echo "no IPv4 rules"
+    ip6t -S "$CHAIN" 2>/dev/null || echo "no IPv6 rules"
+    ;;
+  clear)
+    remove
+    ;;
+  apply)
+    remove
+    ipt -N "$CHAIN"
+    ipt -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    ipt -A "$CHAIN" -p udp --dport 53 -j ACCEPT
+    ipt -A "$CHAIN" -p tcp --dport 53 -j ACCEPT
+    for target in "$@"; do
+      ipt -A "$CHAIN" -p tcp -d "${target%:*}" --dport "${target##*:}" -j ACCEPT
+    done
+    for net in "${PRIVATE_V4[@]}"; do
+      ipt -A "$CHAIN" -p tcp -d "$net" -j REJECT --reject-with tcp-reset
+      ipt -A "$CHAIN" -d "$net" -j REJECT --reject-with icmp-admin-prohibited
+    done
+    ip6t -N "$CHAIN"
+    ip6t -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    ip6t -A "$CHAIN" -j REJECT --reject-with icmp6-adm-prohibited
+    for parent in OUTPUT FORWARD; do
+      ipt -I "$parent" 1 -o eth0 -j "$CHAIN"
+      ip6t -I "$parent" 1 -o eth0 -j "$CHAIN"
+    done
+    ;;
+esac

@@ -1,0 +1,18 @@
+# 'vivibox init' in your repository writes this file for you, from its build files.
+# By hand: copy to ~/.config/vivibox/projects/<name>.toml; the file name is the project name.
+
+# Your local clone. Tasks clone from it; accepted work lands back in it.
+repo = "~/projects/example"
+
+# Verification commands, run by the gate on a fresh clone of the agent's commits, in order.
+verify = ["mvn -B verify"]
+
+# Extra files that run code on IDE import or on the host, on top of the built-in list.
+risky_extra = []
+
+# Services on the host the agent may connect to (network only), as host:port.
+host_services = []
+
+# A JDK other than the image's Java 21, installed with mise: "17" means Corretto 17,
+# "temurin-11" picks a vendor. Leave empty for Java 21.
+java = ""

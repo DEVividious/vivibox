@@ -92,6 +92,9 @@ def test_every_plan_carries_the_standing_criterion_about_failing_tests():
         criteria = " ".join(c.text for c in parse_plan(text.replace("{{kind}}", "feature")).criteria)
         assert "red.md" in criteria, f"{name}: nowhere to record the evidence"
         assert "fail" in criteria, f"{name}: nothing says the test must be seen failing first"
+        # A task wrote 20 red.md entries that all read ERR_MODULE_NOT_FOUND: the tests had never
+        # run, so nothing was shown about what they check. The criterion has to rule that out.
+        assert "assertion" in criteria, f"{name}: an import error would still pass for red"
 
 
 def test_the_agent_is_told_how_to_record_it():
@@ -100,6 +103,8 @@ def test_the_agent_is_told_how_to_record_it():
     rules = (files("vivibox") / "templates" / "instructions.md").read_text()
     assert "/task/handoff/red.md" in rules
     assert "cannot fail is worse than no test" in rules
+    assert "an assertion that failed, not an error that stopped the test from starting" in rules
+    assert "Record the values the assertion compared" in rules, "a bare name proves nothing"
 
 
 def test_the_criteria_heading_is_found_at_any_level():
@@ -118,3 +123,17 @@ def test_a_heading_of_any_level_ends_the_criteria():
     """'# Out of scope' has to close the section too, or its checkboxes become criteria."""
     plan = parse_plan(PLAN.replace("## Out of scope", "# Out of scope"))
     assert "not a criterion" not in [c.text for c in plan.criteria]
+
+
+def test_a_criterion_wrapped_over_two_lines_keeps_all_of_it():
+    """Plans wrap long criteria. The continuation was dropped, so the checklist the agent ticks said
+    less than the plan did: a criterion demanding '81.2 mm +/- 0.5 and 15.0 mm tall' reached it as
+    '...are 81.2 mm', without the tolerance or the height, and was ticked in that form."""
+    plan = parse_plan(
+        PLAN.replace(
+            "- [x] endpoint returns 200",
+            "- [x] endpoint returns 200\n      and the body names the failing field",
+        )
+    )
+    assert plan.criteria[0].text == "endpoint returns 200 and the body names the failing field"
+    assert len(plan.criteria) == 3, "a wrapped line is not a criterion of its own"

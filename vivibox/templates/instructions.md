@@ -28,6 +28,12 @@ container. The user reviews your work at checkpoints; an orchestrator verifies i
   difference is minutes. Append to
   `/task/handoff/red.md`: the test's name, and the line of failure it showed. If you cannot make a
   test fail that way, it is testing nothing; say so in your answer instead of leaving it there.
+- Red means an assertion that failed, not an error that stopped the test from starting. A missing
+  module, a failed import, a compile error or a missing file mean the check never ran, so they
+  prove nothing about it: write the module or function first, empty or returning nothing, then the
+  test, and only then read the failure. Record the values the assertion compared, not just its
+  name. `expected 81.2, got 0` shows the test can tell right from wrong; `cannot find module`
+  shows only that you had not written it yet, which was never in doubt.
 - Node, npm, Python and uv are ready here, and `mise` installs any other toolchain you need, Go and
   Ruby included. Pick the language the task calls for, not the one that happens to be installed:
   `mise use <tool>@<version>` writes a `mise.toml` the gate reads too. That file is a build file, so

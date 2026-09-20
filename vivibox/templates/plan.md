@@ -23,7 +23,8 @@ collab = "supervised"
 
 ## Acceptance criteria
 
-- [ ] Every test added was seen failing before the change that makes it pass, recorded in red.md
+- [ ] Every test added was seen failing on its own assertion, not on a missing module, before
+      the change that makes it pass, with the compared values recorded in red.md
 - [ ] Replace with an observable outcome you can check
 
 ## Out of scope

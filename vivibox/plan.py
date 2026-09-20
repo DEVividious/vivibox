@@ -56,13 +56,22 @@ def _criteria(body: str) -> list[Criterion]:
     """The heading counts at any level. The template mixes '# Goal' with '## Acceptance criteria',
     and an agent that tidies them to one level would otherwise leave a plan whose criteria are all
     there and none of which are found."""
-    criteria, inside = [], False
+    criteria, inside, open_item = [], False, False
     for line in body.splitlines():
         if m := HEADING.match(line):
-            inside = m.group(1).casefold() == CRITERIA_HEADING.casefold()
+            inside, open_item = m.group(1).casefold() == CRITERIA_HEADING.casefold(), False
             continue
         if inside and (m := CHECKBOX.match(line)):
             criteria.append(Criterion(m.group(2).strip(), m.group(1) != " "))
+            open_item = True
+            continue
+        # A long criterion wraps. Without this the tail is dropped and the agent ticks a criterion
+        # that asks less than the plan does, which is worse than one it cannot find at all.
+        if open_item and line.startswith((" ", "\t")) and line.strip():
+            last = criteria[-1]
+            criteria[-1] = Criterion(f"{last.text} {line.strip()}", last.done)
+            continue
+        open_item = False
     return criteria
 
 

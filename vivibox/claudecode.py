@@ -17,7 +17,7 @@ import shlex
 
 from . import keys
 from . import secrets as secrets_module
-from .opencode import HarnessError, Turn
+from .opencode import HARNESS_MOUNT, INSTRUCTIONS, HarnessError, Turn
 from .pod import Pod
 from .secrets import MOUNT
 
@@ -49,14 +49,20 @@ def parse_result(output: str) -> Turn:
                 "cache_creation_input_tokens",
             )
         )
-        # is_error is the turn's own verdict; terminal_reason says how the run ended.
-        failed = bool(result.get("is_error")) or result.get("terminal_reason") not in (None, "completed")
+        # is_error is the turn's own verdict; terminal_reason says how the run ended. A denial is
+        # neither: the turn was stopped from using a tool and reported success having skipped the
+        # work, which is how the first real run came back finished with an empty handoff directory.
+        denied = result.get("permission_denials") or []
+        failed = (
+            bool(result.get("is_error"))
+            or result.get("terminal_reason") not in (None, "completed")
+            or bool(denied)
+        )
+        named = ("is_error", "terminal_reason", "stop_reason", "api_error_status")
         error = (
             ""
             if not failed
-            else json.dumps(
-                {k: result.get(k) for k in ("is_error", "terminal_reason", "stop_reason", "api_error_status")}
-            )
+            else json.dumps({**{k: result.get(k) for k in named}, "permission_denials": denied[:5]})
         )
         return Turn(
             result.get("session_id") or "",
@@ -95,17 +101,33 @@ class ClaudeCode:
     def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
         self.ensure_ready()
         args = ["claude", "-p", "--output-format", "json", "--model", self.model]
+        # The pod is the boundary, as it is for opencode: inside it the agent may edit and run
+        # anything, and nobody is there to answer a prompt during a headless turn. Without this the
+        # turn reports success having quietly skipped every tool it was not allowed to use.
+        args += ["--permission-mode", "bypassPermissions"]
+        # The plan and the answers live outside the repository, and claude will not touch a
+        # directory it was not given.
         args += ["--resume", session] if session else []
-        quoted = " ".join(shlex.quote(a) for a in [*args, prompt])
+        # --add-dir takes a list, so it swallows anything after it: with the prompt as the last
+        # argument claude read it as another directory and refused the turn for having no input.
+        # stdin keeps the two apart and takes a prompt of any length or shape.
+        args += ["--add-dir", "/task/handoff", HARNESS_MOUNT]
+        # The same briefing opencode gets from its config, which claude has no way to read. The
+        # file is read in the container, so the shell there substitutes it.
+        brief = f'--append-system-prompt "$(cat {INSTRUCTIONS})"'
+        rest = " ".join(shlex.quote(a) for a in args[1:])
+        quoted = f"{args[0]} {brief} {rest}"
         run = (
             f"ANTHROPIC_API_KEY=$(cat {MOUNT}/anthropic) {quoted}"
             if self.metered
             else (f"env -u ANTHROPIC_API_KEY {quoted}")
         )
-        p = self.pod.exec("bash", "-c", run, check=False)
+        p = self.pod.exec("bash", "-c", f"printf %s {shlex.quote(prompt)} | {run}", check=False)
         turn = parse_result(p.stdout)
-        if p.returncode != 0 and turn.ok:
-            turn.ok, turn.error = False, (p.stderr or p.stdout).strip()[-2000:]
+        if p.returncode != 0:
+            # Whatever the parser made of an empty stdout, the shell's own words say more.
+            turn.ok = False
+            turn.error = (p.stderr.strip() or turn.error or p.stdout.strip())[-2000:]
         self.keep_refreshed_login()
         return turn
 

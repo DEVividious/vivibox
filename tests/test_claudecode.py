@@ -79,9 +79,22 @@ def test_a_subscription_turn_cannot_be_billed_to_a_key():
     left in the environment would otherwise bill a turn the task list shows as costing nothing."""
     pod = FakePod()
     ClaudeCode(pod, "claude-opus-5", metered=False).turn("go")
-    assert "env -u ANTHROPIC_API_KEY claude -p" in commands(pod)
+    assert "env -u ANTHROPIC_API_KEY claude " in commands(pod)
     assert "ANTHROPIC_API_KEY=$(cat" not in commands(pod)
     assert CREDENTIALS in commands(pod), "the login is installed where claude looks"
+
+
+def test_a_turn_is_given_its_briefing_and_the_handoff_directory():
+    """Without these claude reports a finished turn having written nothing: the plan and the
+    answers live outside the repository, and it will not touch a directory it was not given."""
+    pod = FakePod()
+    ClaudeCode(pod, "claude-opus-5").turn("go")
+    ran = commands(pod)
+    assert "--add-dir /task/handoff" in ran
+    turn_command = next(c for c in pod.ran if " claude " in c)
+    assert turn_command.startswith("printf %s "), "the prompt goes on stdin, clear of --add-dir"
+    assert "--permission-mode bypassPermissions" in ran
+    assert '--append-system-prompt "$(cat /task/harness/instructions.md)"' in ran
 
 
 def test_a_metered_turn_gets_the_key_and_no_login():
@@ -90,3 +103,14 @@ def test_a_metered_turn_gets_the_key_and_no_login():
     ClaudeCode(pod, "claude-opus-5", metered=True).turn("go")
     assert "ANTHROPIC_API_KEY=$(cat" in commands(pod)
     assert CREDENTIALS not in commands(pod)
+
+
+def test_a_turn_stopped_from_using_a_tool_is_not_a_finished_turn():
+    """The first real run came back ok with an empty handoff directory: claude had been refused
+    every write and said nothing about it. A turn that reports success having done nothing moves
+    the task on from work that never happened."""
+    blocked = json.loads(DONE)
+    blocked["permission_denials"] = [{"tool_name": "Write", "tool_input": {"file_path": "/task/handoff/x"}}]
+    turn = parse_result(json.dumps(blocked))
+    assert not turn.ok
+    assert "permission_denials" in turn.error and "Write" in turn.error

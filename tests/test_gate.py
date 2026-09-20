@@ -115,7 +115,9 @@ def test_gate_passes_when_everything_is_done(task):
     pod = FakePod()
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     assert result.passed and not result.risky
-    assert pod.commands == ["mvn -B verify"]
+    # The toolchain a project declared has to be installed before anything tries to use it: a shim
+    # exists only for an installed tool, so a Go project would fail with "go: command not found".
+    assert pod.commands == ["mise install --yes", "mvn -B verify"]
     assert "output of mvn -B verify" in result.log.read_text()
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_FINAL
     assert task.events()[-1]["type"] == "gate"

@@ -68,6 +68,17 @@ def test_plan_turn_copies_draft_and_stops_at_checkpoint(task):
     assert not sup.step(), "waits for you at a checkpoint"
 
 
+def test_a_plan_you_review_has_no_notes_left_for_the_agent(task):
+    def draft_with_notes(t):
+        (t.meta / "handoff" / "plan-draft.md").write_text(
+            DRAFT.replace("# Goal", "# Goal\n\n<!-- Why it happens, found in the code. -->")
+        )
+
+    sup, _ = make(task, FakeHarness(task, [draft_with_notes]))
+    assert sup.step()
+    assert "<!--" not in task.plan_path.read_text()
+
+
 def test_auto_plan_goes_straight_to_implementation(task):
     task.set_auto_plan(True)
     harness = FakeHarness(task, [write_draft])

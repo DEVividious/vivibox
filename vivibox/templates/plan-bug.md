@@ -29,7 +29,8 @@ collab = "supervised"
 
 ## Acceptance criteria
 
-- [ ] A test reproduces the bug: it fails without the fix and passes with it
+- [ ] A test reproduces the bug: it fails without the fix and passes with it, recorded in red.md
+- [ ] Every other test added was seen failing first too, recorded the same way
 - [ ] Replace with an observable outcome you can check
 
 ## Out of scope

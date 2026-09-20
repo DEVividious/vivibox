@@ -23,3 +23,10 @@ desktop = true
 # without {path} it is added at the end. Left out, vivibox asks once, listing the editors it finds,
 # and writes your choice here. A project file can set its own 'ide' for that project.
 # ide = "idea {path}"
+
+[network]
+# Addresses task pods are given, one /28 per task, so each task has its own address and its ports
+# collide with no other task. The default is TEST-NET-2, which RFC 5737 reserves for documentation:
+# no real network and no product may use it, so nothing on your machine collides with it. Change it
+# only if something here already routes this range; host/setup.sh --check says so if it does.
+# pool = "198.51.100.0/24"

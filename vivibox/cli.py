@@ -275,6 +275,52 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if result.passed else 1
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    if args.stop:
+        actions.demo_stop(args.task)
+        print("Stopped.")
+        return 0
+    result = actions.demo(args.task, ask=not args.no_ask, reply=args.reply or "")
+    if result.proposed and not args.yes:
+        print(f"The last task you accepted in this project was run like this:\n\n{result.proposed}\n")
+        print(f"If that still applies: vivibox demo {args.task} --yes")
+        return 0
+    if result.proposed:
+        result = actions.use_instruction(args.task, result.proposed)
+    if result.question:
+        print(f"The agent asks:\n\n{result.question}\n")
+        print(f'Answer with: vivibox demo {args.task} --reply "…"')
+        return 1
+    if not result.commands:
+        print(
+            "Nothing here says how to run this project. Add 'demo' to its project file, "
+            'for example demo = ["npm run dev"], or let the agent work it out.'
+        )
+        return 1
+    where = {
+        "task": "this task's instruction",
+        "project": "your project file",
+        "compose": "the repository's compose file",
+        "agent": "the agent, written to this task's instruction",
+    }
+    print(f"From {where.get(result.source, result.source)}:")
+    for command in result.commands:
+        print(f"  {command}")
+    for url in result.urls:
+        print(f"\nListening: {url}")
+    for listener in result.unreachable:
+        print(f"\nPort {listener.port} is {listener.why_not}.\nStart it on 0.0.0.0 instead.")
+    if result.starting:
+        # Still installing or compiling. Calling that a failure sends you debugging a working app.
+        print(f"\nStill starting, nothing listening yet. Its output so far:\n{result.log or '(none)'}")
+        print(f"Look again with 'vivibox status {args.task}'.")
+        return 0
+    if not result.listening:
+        print(f"\nIt stopped without listening. Last output:\n{result.log or '(none)'}")
+        return 1
+    return 0
+
+
 def cmd_risky(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     diffs = actions.risky_diffs(task, project)
@@ -387,6 +433,14 @@ def parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify", help="run the verification gate now")
     verify.add_argument("task", help="task id")
     verify.set_defaults(func=cmd_verify)
+
+    demo = sub.add_parser("demo", help="run the project in its pod so you can look at it")
+    demo.add_argument("task", help="task id")
+    demo.add_argument("--stop", action="store_true", help="stop what is running")
+    demo.add_argument("--reply", help="answer what the agent asked, and let it carry on")
+    demo.add_argument("--yes", action="store_true", help="use the instruction from the last task")
+    demo.add_argument("--no-ask", action="store_true", help="do not ask the agent when nothing is known")
+    demo.set_defaults(func=cmd_demo)
 
     risky = sub.add_parser("risky", help="show changes to files that run code on the host")
     risky.add_argument("task", help="task id")

@@ -88,7 +88,14 @@ test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`) and, when t
 a JDK other than the image's Java 21, for example Java 17 for Gradle 7. It shows the file and writes
 it to `~/.config/vivibox/projects/<name>.toml` only when you confirm. For a folder that is empty or
 does not exist yet, it starts a git repository there with a first commit, so an app can be built
-from nothing. Nothing is set up by just running `vivibox` somewhere. Edit the file to add services on your host the agent may reach:
+from nothing. Nothing is set up by just running `vivibox` somewhere.
+
+The pod comes with Node, npm, Python, uv and Java 21 ready to run, and `mise` installs any other
+toolchain a task needs. A project that wants different versions, or another language, commits its
+own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
+before it reaches your checkout.
+
+Edit the file to add services on your host the agent may reach:
 
 ```toml
 repo = "~/projects/myproject"
@@ -116,7 +123,7 @@ The footer shows only the keys that do something for the selected task:
 
 | Key | Action |
 |---|---|
-| `d` or Enter | show or hide the details of the selected task: its plan, the files it changed, the risky-file diff or the agent's question |
+| `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket (the first line is its title), and optionally `--auto` or `--draft` |
@@ -196,6 +203,54 @@ Changes your IDE makes to its own project files (`.idea/`, `*.iml`, `.vscode/`) 
 ignored. Changes of yours are never overwritten: vivibox stops and names the files. Do not open
 `/srv/vivibox/<id>/repo` in an IDE. It is the agent's working copy, and IDEs rewrite their project
 files when they open it.
+
+### Running the app
+
+`vivibox demo <id>`, or `v` in the view, starts the project inside its pod and opens it:
+
+```
+$ vivibox demo myshop-1
+From your project file:
+  docker compose up -d db
+  ./gradlew bootRun
+Listening: http://198.51.100.3:8080
+```
+
+The port is not configured anywhere. vivibox asks the kernel what began listening after the
+commands ran, so whatever the project is — Vite, uvicorn, Spring Boot, three services from a
+compose file — the address it prints is the one that is actually open. That also makes the usual
+mistake legible instead of silent:
+
+```
+Port 8080 is bound to localhost inside the pod, so nothing outside can reach it.
+Start it on 0.0.0.0 instead.
+```
+
+The commands come from the task's own run instruction when it has one, then from `demo` in the
+project file if you set one, then from the repository's compose file. When none of those says,
+vivibox asks the agent: it reads the README and the build files, may start a database, and can ask
+you back when the choice is yours. Answer with `--reply "…"`, or in the view, and the same
+conversation carries on until the project comes up. That conversation is separate from the task's
+own, so a question about how to run something can never stop the work itself.
+
+What it works out is written to `.task/handoff/demo.md` inside the task, as short markdown whose
+shell blocks are the commands. It stays there: nothing is copied into your repository. Accepting
+the task keeps the instruction in the history, and the next task in that project is offered it
+after you have read it, so the model works this out once rather than once per task.
+
+`vivibox demo <id> --stop` stops it; so does stopping the pod. `vivibox pod shell <id>` is still
+there when you would rather run it by hand.
+
+Each task has its own address, so two tasks can serve on the same port without colliding, and the
+port you use inside the pod is the port you use from outside. Addresses come from
+`198.51.100.0/24`, a range RFC 5737 reserves for documentation so that nothing else may use it; a
+task holds one until you accept or remove it, and `network.pool` in `config.toml` changes where they
+come from.
+
+A frontend that calls its backend by container name is a separate matter: that name is resolved by
+the browser on your machine, which knows nothing about it. Let the frontend call a path on its own
+origin and forward it server-side (`server.proxy` in Vite, rewrites in Next, or a backend that
+serves the built frontend). That also settles CORS.
 
 ### Stopping and removing
 

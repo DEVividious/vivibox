@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import image
+from vivibox import image, toolchain
 from vivibox.config import HostService
 from vivibox.pod import FIREWALL, Pod
 
@@ -168,3 +168,76 @@ def test_pod_restart_keeps_images_and_firewall(env):
     assert (
         agent(env, f"curl -fsS -m 5 -o /dev/null http://{pod.gateway()}:{no}/", check=False).returncode != 0
     )
+
+
+def test_demo_finds_the_port_the_project_opened(env):
+    """The whole point: nothing says which port, so vivibox asks the kernel what opened."""
+    pod = env["pod"]
+    serve_on = 'node -e \'require("http").createServer((q,s)=>s.end("up")).listen(8931,"0.0.0.0")\''
+    heard = pod.demo_start([serve_on], wait=30)
+    try:
+        assert [listener.port for listener in heard] == [8931]
+        assert heard[0].reachable and not heard[0].why_not
+        page = subprocess.run(
+            ["curl", "-sS", "-m", "5", f"http://{pod.address()}:8931/"], capture_output=True, text=True
+        )
+        assert page.stdout == "up", "reachable from this machine, not only inside the pod"
+    finally:
+        pod.demo_stop()
+
+
+def test_demo_says_when_the_project_listens_where_nobody_can_reach_it(env):
+    pod = env["pod"]
+    loopback = 'node -e \'require("http").createServer((q,s)=>s.end("up")).listen(8932,"127.0.0.1")\''
+    heard = pod.demo_start([loopback], wait=30)
+    try:
+        assert [listener.port for listener in heard] == [8932]
+        assert not heard[0].reachable
+        assert "nothing outside can reach it" in heard[0].why_not
+    finally:
+        pod.demo_stop()
+
+
+def test_demo_gives_up_and_keeps_the_output_when_the_command_fails(env):
+    pod = env["pod"]
+    assert pod.demo_start(["echo 'no such thing' >&2; exit 1"], wait=10) == []
+    assert "no such thing" in pod.demo_log(), "the log says why, instead of a link to nowhere"
+    assert not pod.demo_running()
+
+
+def test_every_default_toolchain_runs_without_project_setup(env):
+    """Node was baked into the image and Python was only a mise shim with no version selected, so
+    'python -V' failed while 'node -v' worked. An agent reading the container then picked Node for
+    every task, whatever the task needed, and called it a constraint of the environment."""
+    wanted = (("node", "-v"), ("npm", "-v"), ("python", "-V"), ("uv", "--version"), ("java", "-version"))
+    for tool, flag in wanted:
+        got = agent(env, f"{tool} {flag}", check=False)
+        assert got.returncode == 0, f"{tool} is not usable out of the box: {got.stdout}{got.stderr}"
+    # The README promises Java 21 when a project names no other; it held only while a cache shared
+    # between tasks happened to have one version of it installed.
+    assert "21." in agent(env, "java -version 2>&1").stdout
+
+
+def test_a_project_can_bring_a_toolchain_the_image_never_had(env):
+    """The sandbox is the whole point: a task that needs Go must be able to have Go."""
+    repo = env["pod"].repo
+    agent(env, f"cd {repo} && mise use go@1.25")
+    got = agent(env, f"cd {repo} && go version")
+    assert "go1.25" in got.stdout, got.stdout + got.stderr
+
+
+def test_a_project_jdk_still_beats_the_image_default(env):
+    """The image now declares Java 21, and a project that needs another JDK (Gradle 7 on Java 17)
+    must still get it. The mise shim is on PATH in both containers, so a project JDK that did not
+    come first would be silently overruled by the default."""
+    ref = image.build()[0]
+    # Built the way actions.py builds it: the project JDK reaches the containers through this env.
+    where = toolchain.agent_env("17", image.env(ref))
+    pod = Pod(f"jdkcheck-{random.randint(1000, 9999)}", env["repo"], ref, [], agent_env=where)
+    try:
+        pod.up()
+        toolchain.ensure(pod, "17")
+        got = pod.exec("bash", "-c", "java -version 2>&1").stdout
+        assert "17." in got, f"the project JDK has to come first on PATH: {got}"
+    finally:
+        pod.remove()

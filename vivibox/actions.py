@@ -20,8 +20,9 @@ from pathlib import Path
 
 from . import context, gate, ide, image, opencode, repo, secrets, supervisor, toolchain, ui
 from . import init as project_init
+from . import pod as pod_module
 from .config import PROJECT_NAME, Config, ConfigError, Project, config_dir, load_config, load_project
-from .plan import KINDS, parse_plan
+from .plan import KINDS, PlanError, parse_plan
 from .pod import Mount, Pod, PodError
 from .risky import Approvals
 from .states import State
@@ -53,7 +54,10 @@ def task_pod(task_id: str) -> Pod:
     ]
     ref = image.image_ref()
     env = {"OPENCODE_CONFIG": opencode.CONFIG, **toolchain.agent_env(project.java, image.env(ref))}
-    return Pod(task.id, task.repo, ref, project.host_services, mounts, env, gate_dir=task.root / "gate")
+    return Pod(
+        task.id, task.repo, ref, project.host_services, mounts, env,
+        gate_dir=task.root / "gate", network_pool=load_config().network_pool,
+    )  # fmt: skip
 
 
 # The agent view runs on a tmux server of its own: your own tmux sessions and key bindings stay as they
@@ -207,10 +211,165 @@ def setup_project(path: Path, name: str, verify: list[str], java: str = "", crea
     target = config_dir() / "projects" / f"{name}.toml"
     if target.exists():
         raise ConfigError(f"project {name} is already set up in {target}; pick another name")
-    found = project_init.Detected(name, top, [c.strip() for c in verify if c.strip()], java)
+    found = project_init.Detected(
+        name, top, [c.strip() for c in verify if c.strip()], project_init.detect_demo(top), java
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(project_init.render(found))
     return target
+
+
+# --- running the project for you to look at -------------------------------------------------------
+
+DEMO_FILE = "demo.md"
+# Its own question and its own session: the supervisor watches handoff/question.md to decide when a
+# task stops for you, so working out how to run something must never be able to halt the work itself.
+DEMO_QUESTION = "demo-question.md"
+DEMO_SESSION = "demo-session"
+BASH_BLOCK = re.compile(r"```(?:bash|sh|shell)\n(.*?)```", re.DOTALL)
+# Longer than this and the agent has written documentation instead of an instruction.
+MAX_INSTRUCTION = 3000
+
+DEMO_ASK = """Work out how to start this project so a person can open it in a browser, and write
+that down. Do not change what the project does.
+
+Read the README and the build files first; they usually say. You may run commands to check that
+what you found works.
+
+Two things decide whether it is usable:
+- The app must listen on 0.0.0.0. Bound to localhost it answers inside this container only, and
+  nothing outside can reach it. Most dev servers bind localhost unless told otherwise.
+- Anything the app needs to come up (a database, for instance) has to be started first. You have a
+  Docker daemon here, so a container is a fine way to do that.
+
+Write it to /task/handoff/demo.md as short markdown: the commands in ```bash blocks, in the order
+they must run, with the app itself last. Around them put only what a person needs to know, in a
+line or two. This is a note on how to start the project, not documentation: if it grows past a
+screen, you have misunderstood it.
+
+If a decision is mine rather than yours - which profile, which port, which of two ways the project
+can be run - do not guess. Write the question to /task/handoff/demo-question.md and leave demo.md
+alone. I will answer and you can carry on."""
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
+
+
+@dataclass
+class Demo:
+    """What happened when the project was started for you to look at."""
+
+    commands: list[str] = field(default_factory=list)
+    # Where it came from: this task's instruction, your project file, the repository, the agent.
+    source: str = ""
+    address: str = ""
+    listening: list[pod_module.Listener] = field(default_factory=list)
+    log: str = ""
+    question: str = ""
+    # An instruction from an earlier task, waiting for you to say it still applies.
+    proposed: str = ""
+    # Nothing listens yet, but the command is still running: a slow install is not a failure, and
+    # calling it one sends you looking for a broken app instead of waiting a moment longer.
+    starting: bool = False
+
+    @property
+    def urls(self) -> list[str]:
+        return [f"http://{self.address}:{p.port}" for p in self.listening if p.reachable]
+
+    @property
+    def unreachable(self) -> list[pod_module.Listener]:
+        return [p for p in self.listening if not p.reachable]
+
+
+def instruction_commands(text: str) -> list[str]:
+    """The commands of an instruction: its shell blocks, in order. The prose around them is yours."""
+    return [line for block in BASH_BLOCK.findall(text) for line in block.strip().splitlines() if line.strip()]
+
+
+def demo_instruction(task: Task) -> str:
+    return _read(task.meta / "handoff" / DEMO_FILE)
+
+
+def write_instruction(task: Task, text: str) -> Path:
+    path = task.meta / "handoff" / DEMO_FILE
+    path.write_text(text.rstrip() + "\n")
+    return path
+
+
+def demo_from_history(project_name: str) -> str:
+    """How the last task you accepted in this project was run. A record, never run on its own."""
+    for entry in history(limit=50):
+        if entry["project"] == project_name and entry.get("demo"):
+            return entry["demo"]
+    return ""
+
+
+def demo_commands(project: Project, task: Task) -> tuple[list[str], str]:
+    """This task's own instruction first, then what you set, then the repository's own answer."""
+    if found := instruction_commands(demo_instruction(task)):
+        return found, "task"
+    if project.demo:
+        return list(project.demo), "project"
+    if found := project_init.detect_demo(task.repo):
+        return found, "compose"
+    return [], ""
+
+
+def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, str]:
+    """A conversation of its own, in a session of its own, so that neither its questions nor its
+    failures can touch the task's state. Returns the instruction it wrote and anything it asks."""
+    handoff = task.meta / "handoff"
+    (handoff / DEMO_QUESTION).unlink(missing_ok=True)
+    kept = handoff / DEMO_SESSION
+    session = _read(kept) if reply else ""
+    turn = opencode.OpenCode(pod).turn(reply or DEMO_ASK, session=session, title=f"{task.id}-demo")
+    if turn.session:
+        kept.write_text(turn.session)
+    task.event("turn", cost=turn.cost, tokens=turn.tokens, kind="demo")
+    if not turn.ok:
+        raise PodError(f"the agent could not work out how to run this: {turn.error or turn.text}")
+    text = demo_instruction(task)
+    if len(text) > MAX_INSTRUCTION:
+        raise PodError(
+            f"the agent wrote {len(text)} characters of instruction; that is documentation, not a "
+            f"note on how to start the project. Ask it again, or write {DEMO_FILE} yourself"
+        )
+    return text, _read(handoff / DEMO_QUESTION)
+
+
+def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> Demo:
+    """Runs the project in the task's pod and watches for it to listen. Nothing here moves the task
+    between states: working out how to run something must not be able to stop the work."""
+    task, project = load(task_id)
+    pod = task_pod(task_id)
+    pod.up()
+    commands, source = demo_commands(project, task)
+    question = ""
+    if not commands and (earlier := demo_from_history(project.name)) and not reply:
+        return Demo(source="history", address=pod.address(), proposed=earlier)
+    if not commands and (ask or reply):
+        _, question = ask_agent_how_to_run(task, pod, reply)
+        commands, source = instruction_commands(demo_instruction(task)), "agent"
+    if not commands:
+        return Demo([], source, pod.address(), question=question)
+    heard = pod.demo_start(commands, workdir=str(task.repo), wait=wait)
+    still_going = not heard and pod.demo_running()
+    return Demo(commands, source, pod.address(), heard, pod.demo_log(), question, starting=still_going)
+
+
+def use_instruction(task_id: str, text: str, wait: float = 40) -> Demo:
+    """Takes on an instruction you have read and approved, for this task only."""
+    task, project = load(task_id)
+    write_instruction(task, text)
+    return demo(task_id, ask=False, wait=wait)
+
+
+def demo_stop(task_id: str) -> None:
+    task_pod(task_id).demo_stop()
 
 
 # --- lifecycle ----------------------------------------------------------------------------------
@@ -505,6 +664,14 @@ def forget(task_id: str) -> None:
     path.write_text("".join(line + "\n" for line in kept))
 
 
+def accepted_criteria(task: Task) -> list[str]:
+    """What the task set out to deliver. Read before its directory goes, or nothing is left of it."""
+    try:
+        return [c.text for c in parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).criteria]
+    except (OSError, PlanError):
+        return []
+
+
 def remember(done: Finished, project: Project, commit: str) -> None:
     path = history_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -516,6 +683,9 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         "commit": commit[:10],
         "branch": done.branch,
         "conflicts": done.conflicts,
+        "criteria": done.criteria,
+        "created": done.created,
+        "demo": done.demo,
         "finished": now(),
     }
     with path.open("a") as f:
@@ -531,6 +701,12 @@ class Finished:
     branch: str = ""
     conflicts: list[str] = field(default_factory=list)
     status: str = ""
+    # The criteria the plan was accepted with; the gate passed, so the agent reported all of them met.
+    criteria: list[str] = field(default_factory=list)
+    # When you asked for the task, not when it finished; the list shows both.
+    created: str = ""
+    # How this task's project was run, kept as a record so the next task need not work it out again.
+    demo: str = ""
 
 
 def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
@@ -546,6 +722,9 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
     st = task.read_state()
     done = Finished(task.id, project.repo, ui.cost(task), suggested_message(project.repo, st.base_commit,
                                                                             commit, st.goal))  # fmt: skip
+    done.criteria = accepted_criteria(task)
+    done.created = st.created
+    done.demo = demo_instruction(task)
     if branch_only:
         done.branch = repo.create_branch(project.repo, task.id, commit)
     else:

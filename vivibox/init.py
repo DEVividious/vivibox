@@ -20,6 +20,7 @@ class Detected:
     name: str
     repo: Path
     verify: list[str]
+    demo: list[str] = field(default_factory=list)
     java: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -67,8 +68,18 @@ def newest_jdk_for_gradle(version: tuple[int, int]) -> int:
     return 11
 
 
+# The project's own answer to "how do I run this", written by people who know it. Nothing we could
+# work out from the build files beats it, so it is the only thing detection claims to know.
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+
+
+def detect_demo(repo: Path) -> list[str]:
+    return ["docker compose up"] if any((repo / name).exists() for name in COMPOSE_FILES) else []
+
+
 def detect(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
+    found.demo = detect_demo(repo)
     level = source_level(repo)
     newest = IMAGE_JAVA
     if (repo / "gradlew").exists():
@@ -101,6 +112,8 @@ def render(found: Detected) -> str:
     verify = ", ".join(f'"{c}"' for c in found.verify)
     home = Path.home()
     repo = f"~/{found.repo.relative_to(home)}" if found.repo.is_relative_to(home) else str(found.repo)
+    demo = ", ".join(f'"{c}"' for c in found.demo)
     return (
-        f'repo = "{repo}"\nverify = [{verify}]\njava = "{found.java}"\nrisky_extra = []\nhost_services = []\n'
+        f'repo = "{repo}"\nverify = [{verify}]\ndemo = [{demo}]\njava = "{found.java}"\n'
+        "risky_extra = []\nhost_services = []\n"
     )

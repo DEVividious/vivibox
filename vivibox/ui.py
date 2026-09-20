@@ -34,7 +34,13 @@ def width() -> int:
 
 
 def shorten(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: max(limit - 1, 0)].rstrip() + "…"
+    """Cuts to fit at a space, because a word cut in half reads like something went wrong. Falls back
+    to cutting mid-word when the last space is so far back that whole words would be lost."""
+    if len(text) <= limit:
+        return text
+    cut = text[: max(limit - 1, 0)]
+    word, _, _ = cut.rpartition(" ")
+    return (word if len(word) >= limit // 2 else cut).rstrip() + "…"
 
 
 def ago(ts: str, now: datetime | None = None) -> str:
@@ -98,7 +104,7 @@ def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, no
     """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest."""
     states = [(task, task.read_state()) for task in tasks]
     states.sort(key=lambda ts: ORDER.index(group(ts[1])))
-    header = ("TASK", "STATUS", "CRITERIA", "COST", "UPDATED", "GOAL")
+    header = ("TASK", "STATUS", "CRITERIA", "COST", "CREATED", "UPDATED", "GOAL")
     rows = []
     for task, st in states:
         spent = cost(task)
@@ -108,15 +114,16 @@ def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, no
                 activity(st, max_iterations) if group(st) != "Stopped" else "stopped",
                 criteria(task),
                 f"${spent:.2f}" if spent else "-",
+                ago(st.created, now),
                 ago(st.updated, now),
                 st.goal,
                 COLORS[group(st)],
             )
         )
-    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(5)]
+    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(6)]
     # Piped output keeps the whole goal, for grep.
-    goal_width = max(width() - sum(widths) - 3 * 5, 20) if style.color else 10_000
-    lines = ["   ".join([*(h.ljust(w) for h, w in zip(header[:5], widths, strict=True)), header[5]])]
+    goal_width = max(width() - sum(widths) - 3 * 6, 20) if style.color else 10_000
+    lines = ["   ".join([*(h.ljust(w) for h, w in zip(header[:6], widths, strict=True)), header[6]])]
     for *cells, goal, color in rows:
         padded = [c.ljust(w) for c, w in zip(cells, widths, strict=True)]
         padded[1] = style(padded[1], color)

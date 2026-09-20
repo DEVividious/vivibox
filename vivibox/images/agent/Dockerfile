@@ -36,6 +36,15 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && npm install -g --no-fund --no-audit "opencode-ai@${OPENCODE_VERSION}" \
  && npm cache clean --force
 
+# Default toolchains. /etc/mise/config.toml is mise's system-wide config, so it applies in the gate
+# container too, whose /config is a fresh tmpfs that loses anything mise writes to HOME. Without it
+# the shims are on PATH and fail with "no version set", which reads as "this language is missing"
+# and quietly pushed every agent towards node. A project that wants other versions, or another
+# language entirely, puts its own mise.toml in the repository: that file wins over this one, and
+# the user approves it as a build file before it reaches their checkout.
+RUN mkdir -p /etc/mise \
+ && printf '[tools]\npython = "3.13"\nuv = "0.12"\njava = "corretto-21"\n' > /etc/mise/config.toml
+
 # -o: tolerate an ID that already exists in the base image.
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \

@@ -23,6 +23,8 @@ PACKAGES=(tmux jq libnotify-bin curl)
 # Docker inside Sysbox containers uses its default 172.17.0.0/16; the host daemon must not.
 BIP=172.20.0.1/16
 POOL=172.25.0.0/16
+# Where task networks are cut from; keep in step with DEFAULT_NETWORK_POOL in vivibox/config.py.
+TASK_POOL=198.51.100.0/24
 SYSBOX_VERSION=0.7.1
 SYSBOX_DEB="sysbox-ce_${SYSBOX_VERSION}.linux_amd64.deb"
 SYSBOX_SHA256=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5
@@ -70,6 +72,13 @@ if docker_networks_set; then
 else
   need "Docker networks: bip $BIP, address pool $POOL in $DOCKER_CFG (restarts Docker)" do_docker_networks
 fi
+
+# A task's address must not be one your machine already routes somewhere else (a VPN, a LAN).
+if ip -4 route | awk '{print $1}' | grep -q "^${TASK_POOL%.*.*}\."; then
+  ip -4 route | grep "^${TASK_POOL%.*.*}\." >&2
+  die "$TASK_POOL overlaps an existing route (VPN?); set network.pool in ~/.config/vivibox/config.toml"
+fi
+ok "task network pool $TASK_POOL is free"
 
 sysbox_registered() { docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw sysbox-runc; }
 if dpkg-query -W -f='${Status}' sysbox-ce 2>/dev/null | grep -q 'install ok installed' && sysbox_registered; then

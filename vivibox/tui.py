@@ -6,10 +6,12 @@ and asks. Slow steps (starting a pod, accepting work) run in threads so the view
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from textual import events, on, work
@@ -55,6 +57,88 @@ def criteria(task: Task) -> str:
         return "-"
 
 
+def checklist(task: Task) -> list[str]:
+    """Every criterion of the accepted plan, and which of them the agent reports as met."""
+    try:
+        wanted = [c.text for c in parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).criteria]
+        missing = set(gate.missing_criteria(task))
+    except (OSError, PlanError, gate.GateError):
+        return []
+    return [f"- {'☐' if text in missing else '☑'} {text}" for text in wanted]
+
+
+@dataclass
+class PodView:
+    """What the pod is doing right now: asked once, used for both the panel and the keys."""
+
+    address: str = ""
+    listening: list = field(default_factory=list)
+    demo: bool = False
+    log: str = ""
+
+    @property
+    def reachable(self) -> list:
+        """The ports something outside the pod can actually open."""
+        return [p for p in self.listening if p.reachable]
+
+    @property
+    def state(self) -> str:
+        """What became of the demo, named once so the row and the panel cannot drift apart.
+        `local` is its own state and not `starting`: nothing is coming, the app bound the wrong
+        interface, and waiting for it is waiting forever."""
+        if not self.demo:
+            return "stopped" if self.log else ""
+        if self.reachable:
+            return "live"
+        return "local" if self.listening else "starting"
+
+    def lines(self) -> list[str]:
+        """What the pod is doing, in the states that can be told apart from outside it."""
+        if not self.address:
+            return []
+        where = [f"[{self.address}:{p.port}](http://{self.address}:{p.port})" for p in self.reachable]
+        shown = ", ".join(where)
+        closed = ", ".join(f"`{p.port}`" for p in self.listening if not p.reachable)
+        state = {
+            "live": f"running · open at {shown}",
+            "local": f"running, but {closed} is bound to localhost and nothing outside can reach it",
+            "starting": "running, nothing listening yet",
+        }.get(self.state, "not running")
+        out = [f"Pod `{self.address}` · demo {state}"]
+        if not self.demo and self.log:
+            # It ran and is gone. What it said last is the only thing that explains why.
+            out += ["", "It stopped. Its last output:", "", f"```\n{self.log}\n```"]
+        return out
+
+
+def pod_views(task_ids: list[str]) -> dict[str, PodView]:
+    """What every task's pod is doing. One question for all the addresses, then one per pod that is
+    up; asking each pod separately for each thing is what would make this too slow to do often."""
+    pods = {task_id: actions.Pod(task_id, Path("."), "") for task_id in task_ids}
+    found = actions.pod_module.addresses([pod.sidecar for pod in pods.values()])
+    views = {}
+    for task_id, pod in pods.items():
+        if not (address := found.get(pod.sidecar, "")):
+            views[task_id] = PodView()
+            continue
+        probe = pod.probe()
+        views[task_id] = PodView(address, probe.listening, probe.demo, probe.log)
+    return views
+
+
+def pod_view(task_id: str) -> PodView:
+    return pod_views([task_id])[task_id]
+
+
+def last_gate(task: Task) -> str:
+    """How the last gate run went, so a checklist that has not moved still shows whether work has."""
+    for event in reversed(task.events()):
+        if event["type"] == "gate":
+            outcome = "passed" if event["data"].get("passed") else "failed"
+            return f"Gate {outcome} at {event['ts'][11:19]}."
+    return "The gate has not run yet."
+
+
 def projects() -> list[str]:
     """The projects you can work in; one whose repository is gone is not offered."""
     broken = actions.broken_projects()
@@ -76,6 +160,13 @@ def finished_detail(entry: dict) -> str:
         where = f"on branch `{entry['branch']}`"
     else:
         where = "in your checkout"
+    # Tasks accepted before criteria were kept have none; say so rather than show an empty list.
+    met = entry.get("criteria")
+    delivered = (
+        ["**It was accepted as meeting:**", "", *(f"- ☑ {text}" for text in met), ""]
+        if met
+        else ["*Its criteria were not recorded; it finished before vivibox kept them.*", ""]
+    )
     return "\n".join(
         [
             f"### {entry['id']} · done",
@@ -86,12 +177,15 @@ def finished_detail(entry: dict) -> str:
             "",
             f"Its work is {where}, from commit `{entry['commit']}`.",
             "",
+            *delivered,
             "Press `x` to forget it, `h` to hide finished tasks.",
         ]
     )
 
 
-def detail(task: Task, st: TaskState, max_iterations: int, running: bool = True) -> str:
+def detail(
+    task: Task, st: TaskState, max_iterations: int, running: bool = True, pod: PodView | None = None
+) -> str:
     """What you need to decide on this task, as markdown."""
     head = [
         f"### {st.id} · {ui.activity(st, max_iterations)}",
@@ -99,6 +193,8 @@ def detail(task: Task, st: TaskState, max_iterations: int, running: bool = True)
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)} · ${ui.cost(task):.2f}*",
         "",
     ]
+    if shown := (pod if pod is not None else pod_view(st.id)).lines():
+        head += [*shown, ""]
     handoff = task.meta / "handoff"
     if not running and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
         head += [
@@ -146,6 +242,16 @@ def detail(task: Task, st: TaskState, max_iterations: int, running: bool = True)
                 "Help with `r`, or look at the agent with `w`.",
             ]  # fmt: skip
         )
+    elif items := checklist(task):
+        # What the task is still short of. The agent ticks these itself and the gate only checks
+        # that none is left open, so a tick is what the agent claims, not something vivibox saw.
+        body = [
+            "**Acceptance criteria**, as the agent reports them:",
+            "",
+            *items,
+            "",
+            f"{last_gate(task)} Look at the agent with `w`.",
+        ]
     else:
         events = task.events()[-8:]
         body = ["**Recent events**", ""] + [
@@ -194,13 +300,14 @@ class Confirm(Dialog):
 
 
 class Reply(Dialog):
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, prompt: str = ""):
         super().__init__()
         self.task_id = task_id
+        self.prompt = prompt or f"Your comment for the agent on {task_id}"
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"Your comment for the agent on {self.task_id} (ctrl+s sends):")
+            yield Label(f"{self.prompt} (ctrl+s sends):")
             yield EdgeTextArea(id="comment")
             with Horizontal(classes="buttons"):
                 yield Button("Send", variant="primary", id="send")
@@ -496,6 +603,17 @@ class CommitWork(Dialog):
 WAITING_ONLY = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY}
 
 
+class LiveFooter(Footer):
+    """Textual's Footer stops redrawing while the terminal has no focus (bindings_changed in
+    widgets/_footer.py returns early). The keys are what tells you a task now needs you, so they
+    must appear while you are in another window, not once you click back into the terminal."""
+
+    def bindings_changed(self, screen) -> None:
+        self._bindings_ready = True
+        if self.is_attached and screen is self.screen:
+            self.call_after_refresh(self.recompose)
+
+
 class Vivibox(App):
     TITLE = "vivibox"
     CSS = """
@@ -522,6 +640,8 @@ class Vivibox(App):
         Binding("o", "open_ide", "Open in IDE"),
         Binding("p", "approve_risky", "Approve risky"),
         Binding("w", "watch", "Watch agent"),
+        Binding("v", "demo", "Run it"),
+        Binding("v", "demo_stop", "Stop it"),
         # One key, two meanings: the footer shows the one that applies to the selected task.
         Binding("s", "start_task", "Start"),
         Binding("s", "stop_task", "Stop"),
@@ -548,15 +668,19 @@ class Vivibox(App):
         yield DataTable(id="tasks", cursor_type="row", zebra_stripes=True)
         with VerticalScroll(id="detail", classes="hidden"):
             yield Markdown("", id="detail-text")
-        yield Footer()
+        yield LiveFooter()
 
     def on_mount(self) -> None:
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
+        self.pods: dict[str, PodView] = {}  # what each task's pod is doing, refreshed off the loop
+        self.waiting = self.working = 0
         self.table = self.query_one(DataTable)
         self.panel = self.query_one("#detail")
         self.text = self.query_one("#detail-text", Markdown)
         table = self.table
-        self.status_column = table.add_columns("TASK", "STATUS", "CRITERIA", "COST", "UPDATED", "GOAL")[1]
+        columns = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST", "CREATED", "UPDATED", "GOAL")
+        keys = table.add_columns(*columns)
+        self.status_column, self.demo_column = keys[1], keys[2]
         self.reload()
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
@@ -597,25 +721,50 @@ class Vivibox(App):
         for task, st in pairs:
             spent = ui.cost(task)
             table.add_row(
-                st.id, self.status(st), criteria(task), f"${spent:.2f}" if spent else "-",
-                ui.ago(st.updated), st.goal, key=st.id,
+                st.id, self.status(st), self.demo_cell(st.id), criteria(task),
+                f"${spent:.2f}" if spent else "-",
+                ui.ago(st.created), ui.ago(st.updated), st.goal, key=st.id,
             )  # fmt: skip
         live = {st.id for _, st in pairs}
         self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
         for entry in self.done:
             table.add_row(
-                entry["id"], "[green]  done[/]", "-", f"${entry['cost']:.2f}",
+                entry["id"], "[green]  done[/]", "-", "-", f"${entry['cost']:.2f}",
+                ui.ago(entry["created"]) if entry.get("created") else "-",
                 ui.ago(entry["finished"]), entry["title"], key=entry["id"],
             )  # fmt: skip
         ids = [st.id for _, st in pairs] + [e["id"] for e in self.done]
         if selected in ids:
             table.move_cursor(row=ids.index(selected))
-        waiting = sum(st.state in WAITING_ONLY for _, st in pairs)
-        working = sum(self.busy(st) for _, st in pairs)
-        parts = [f"{waiting} waiting for you" if waiting else "nothing waiting for you"]
-        self.sub_title = " · ".join(parts + ([f"{working} working"] if working else []))
+        self.waiting = sum(st.state in WAITING_ONLY for _, st in pairs)
+        self.working = sum(self.busy(st) for _, st in pairs)
+        self.set_sub_title()
         self.show_detail()
         self.refresh_bindings()
+        self.look_at_pods([st.id for _, st in pairs])
+
+    def demo_cell(self, task_id: str) -> str:
+        """Whether this task is serving anything, on the row itself: the list is what you look at.
+        The addresses stay in the panel, where they are clickable and all of them fit; a single port
+        here would have to pick one of a front end and a back end, and pick it silently."""
+        view = self.pods.get(task_id)
+        if view is None or not view.address or not (state := view.state):
+            return "-"
+        color = {"live": "green", "local": "yellow", "starting": "yellow", "stopped": "red"}[state]
+        # How many came up separates "the back end died" from "everything is there".
+        count = f" ×{len(view.reachable)}" if len(view.reachable) > 1 else ""
+        return f"[{color}]{state}{count}[/]"
+
+    def set_sub_title(self) -> None:
+        parts = [f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you"]
+        if self.working:
+            parts.append(f"{self.working} working")
+        self.sub_title = " · ".join(parts)
+
+    @property
+    def pod(self) -> PodView:
+        """The selected task's pod, for the panel and for which keys the footer offers."""
+        return self.pods.get(self.selected_id() or "", PodView())
 
     def busy(self, st: TaskState) -> bool:
         """The agent or the gate is at work and nothing is needed from you."""
@@ -656,7 +805,7 @@ class Vivibox(App):
             return
         pick = self.selected()
         if pick:
-            text = detail(*pick, self.config.max_iterations, self.is_running(pick[1].id))
+            text = detail(*pick, self.config.max_iterations, self.is_running(pick[1].id), self.pod)
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
         else:
@@ -686,10 +835,26 @@ class Vivibox(App):
         self.show_detail()
         self.refresh_bindings()
 
+    @work(thread=True, exclusive=True, group="pod-view")
+    def look_at_pods(self, task_ids: list[str]) -> None:
+        """Asking the pods means running docker, which is far too slow for the event loop.
+        Exclusive: a refresh that arrives while one is in flight replaces it."""
+        self.call_from_thread(self.pods_answered, pod_views(task_ids) if task_ids else {})
+
+    def pods_answered(self, found: dict) -> None:
+        if found == self.pods:
+            return
+        self.pods = found
+        for task_id in found:
+            with contextlib.suppress(Exception):  # the row may have gone while docker was thinking
+                self.table.update_cell(task_id, self.demo_column, self.demo_cell(task_id))
+        self.show_detail()
+        self.refresh_bindings()
+
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
-                        "start_task", "stop_task", "remove")  # fmt: skip
+                        "start_task", "stop_task", "remove", "demo", "demo_stop")  # fmt: skip
         if action not in task_actions:  # new, quit, and moving focus in dialogs
             return True
         pick = self.selected()
@@ -708,6 +873,10 @@ class Vivibox(App):
             "start_task": state is not State.DONE and not running,
             "stop_task": state is not State.DONE and running,
             "remove": True,
+            # Worth looking at once there is something to look at. Running it again while it
+            # runs is a restart, which is what you want after the agent has changed something.
+            "demo": state in (State.CHECKPOINT_FINAL, State.IMPLEMENT, State.VERIFY),
+            "demo_stop": self.pod.demo,
         }
         return allowed.get(action, True)
 
@@ -836,6 +1005,86 @@ class Vivibox(App):
             self.reload()
 
         self.push_screen(Confirm(f"Approve the risky files of {task.id} as shown?", "Approve"), approve)
+
+    @on(Markdown.LinkClicked)
+    def open_link(self, event: Markdown.LinkClicked) -> None:
+        """An address in the details panel: what the agent is running, opened in your browser."""
+        event.prevent_default()
+        self.open_url(event.href)
+
+    def action_demo_stop(self) -> None:
+        task, _ = self.selected()
+        self.stop_demo(task.id)
+
+    @work(thread=True)
+    def stop_demo(self, task_id: str) -> None:
+        try:
+            actions.demo_stop(task_id)
+        except Exception as e:
+            self.call_from_thread(self.fail, e)
+            return
+        self.call_from_thread(self.notify, "Stopped.", timeout=3)
+        self.call_from_thread(self.reload)
+
+    def action_demo(self) -> None:
+        """Runs the project in its pod so you can open it. When nothing says how, the agent works it
+        out without asking first: you pressed the key that means run it, and there is no second
+        answer you could give. An instruction an earlier task left behind is a real choice, though,
+        because it may be stale, so that one is still yours to confirm."""
+        task, project = actions.load(self.selected()[1].id)
+        if actions.demo_commands(project, task)[0]:
+            self.run_demo(task.id)
+            return
+        if earlier := actions.demo_from_history(project.name):
+            asked = f"The last task you accepted was run like this:\n\n{earlier}\n\nStill right?"
+            self.push_screen(
+                Confirm(asked, "Use it"),
+                # Saying no means work it out again, not do nothing: you asked for it to run.
+                lambda yes: self.run_demo(task.id, use=earlier) if yes else self.run_demo(task.id, ask=True),
+            )
+            return
+        self.run_demo(task.id, ask=True)
+
+    @work(thread=True)
+    def run_demo(self, task_id: str, ask: bool = False, use: str = "", reply: str = "") -> None:
+        self.call_from_thread(self.notify, "Working on it…" if ask else "Starting it…", timeout=3)
+        try:
+            if use:
+                result = actions.use_instruction(task_id, use)
+            else:
+                result = actions.demo(task_id, ask=ask or bool(reply), reply=reply)
+        except Exception as e:
+            self.call_from_thread(self.fail, e)
+            return
+        if result.question:
+            self.call_from_thread(self.answer_demo, task_id, result.question)
+        elif urls := result.urls:
+            self.call_from_thread(self.open_url, urls[0])
+        elif blocked := result.unreachable:
+            self.call_from_thread(
+                self.notify, f"Port {blocked[0].port} is {blocked[0].why_not}", severity="warning", timeout=10
+            )
+        elif not result.commands:
+            self.say("Still nothing says how to run it")
+        elif result.starting:
+            # It is alive and installing or compiling. The DEMO column is watching and will say when.
+            self.call_from_thread(
+                self.notify, "Still starting; the DEMO column says when it listens", timeout=8
+            )
+        else:
+            self.say("It stopped without listening; press d for what it said")
+        self.call_from_thread(self.reload)
+
+    def say(self, message: str) -> None:
+        self.call_from_thread(self.notify, message, severity="error", timeout=8)
+
+    def answer_demo(self, task_id: str, question: str) -> None:
+        """The agent asked something only you can decide. Answering carries the same conversation on,
+        and none of it can move the task between states."""
+        self.push_screen(
+            Reply(task_id, f"Working out how to run it, the agent asks:\n\n{question}\n\nYour answer"),
+            lambda text: self.run_demo(task_id, reply=text) if text else None,
+        )
 
     def action_watch(self) -> None:
         task, _ = self.selected()

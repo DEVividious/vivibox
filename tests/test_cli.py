@@ -7,7 +7,8 @@ def test_new_and_status(env, capsys):
 
     assert main(["status"]) == 0
     out = capsys.readouterr().out
-    assert "demo-1" in out and "plan" in out and "0/1" in out and "Add health endpoint" in out
+    # 0/2: the placeholder criterion, plus the standing one about seeing each test fail first.
+    assert "demo-1" in out and "plan" in out and "0/2" in out and "Add health endpoint" in out
 
     assert main(["status", "demo-1"]) == 0
     assert "created" in capsys.readouterr().out

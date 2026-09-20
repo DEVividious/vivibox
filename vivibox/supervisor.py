@@ -18,7 +18,7 @@ from typing import Protocol
 
 from . import gate
 from .opencode import Turn
-from .plan import PlanError, parse_plan
+from .plan import PlanError, parse_plan, without_notes
 from .risky import Change
 from .states import State, waits_for_user
 from .task import Task, TaskState
@@ -210,7 +210,8 @@ class Supervisor:
                 State.CHECKPOINT_PLAN, f"no valid plan draft ({e}); edit the plan yourself or reply"
             )
             return
-        shutil.copyfile(draft, self.task.plan_path)
+        # Without the template's notes: from here the plan is yours to read, not a form to fill.
+        self.task.plan_path.write_text(without_notes(draft.read_text()))
         if plan.summary:
             self.task.set_goal(plan.summary)
         if st.auto_plan and not self.risky_changes():

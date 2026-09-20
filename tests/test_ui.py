@@ -22,6 +22,16 @@ def test_shorten():
     assert ui.shorten("a long goal text", 8) == "a long…"
 
 
+def test_shorten_does_not_cut_a_word_in_half():
+    title = "Serve latest FPL dream team on a FastAPI page with cached data and offline fallback"
+    assert ui.shorten(title, 72) == "Serve latest FPL dream team on a FastAPI page with cached data and…"
+
+
+def test_shorten_cuts_mid_word_when_there_is_no_better_place():
+    assert ui.shorten("Supercalifragilisticexpialidocious", 20) == "Supercalifragilisti…"
+    assert ui.shorten("tiny wordsfollowedbyaverylongoneindeed", 30) == "tiny wordsfollowedbyaverylong…"
+
+
 def test_style_is_plain_without_color():
     assert plain("x", "bold") == "x"
     assert ui.Style(True)("x", "bold") == "\033[1mx\033[0m"
@@ -38,7 +48,7 @@ def test_list_is_a_table_with_waiting_tasks_first(tmp_path):
     stopped.set_paused(True)
     out = ui.task_list([stopped, working, waiting], lambda t: "0/1", 3, plain)
     lines = out.splitlines()
-    assert lines[0].split() == ["TASK", "STATUS", "CRITERIA", "COST", "UPDATED", "GOAL"]
+    assert lines[0].split() == ["TASK", "STATUS", "CRITERIA", "COST", "CREATED", "UPDATED", "GOAL"]
     assert lines[1].startswith("demo-1") and "review the plan" in lines[1]
     assert lines[2].startswith("demo-2") and "implementing (attempt 2/3)" in lines[2] and "$0.25" in lines[2]
     assert lines[3].startswith("demo-3") and "stopped" in lines[3]

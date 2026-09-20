@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 MODES = ("code-only", "full-system")
 KINDS = ("feature", "bug", "other")
 COLLAB = ("supervised", "loop")
-CRITERIA_HEADING = "## Acceptance criteria"
+CRITERIA_HEADING = "Acceptance criteria"
+HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
 MAX_SUMMARY = 100
 CHECKBOX = re.compile(r"^\s*[-*] \[( |x|X)\] (.+)$")
 
@@ -52,10 +53,13 @@ def _split_header(text: str) -> tuple[str, str]:
 
 
 def _criteria(body: str) -> list[Criterion]:
+    """The heading counts at any level. The template mixes '# Goal' with '## Acceptance criteria',
+    and an agent that tidies them to one level would otherwise leave a plan whose criteria are all
+    there and none of which are found."""
     criteria, inside = [], False
     for line in body.splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == CRITERIA_HEADING
+        if m := HEADING.match(line):
+            inside = m.group(1).casefold() == CRITERIA_HEADING.casefold()
             continue
         if inside and (m := CHECKBOX.match(line)):
             criteria.append(Criterion(m.group(2).strip(), m.group(1) != " "))
@@ -65,6 +69,12 @@ def _criteria(body: str) -> list[Criterion]:
 COMMENT = re.compile(r"<!--.*?-->\s*", re.DOTALL)
 
 
+def without_notes(text: str) -> str:
+    """The plan without the notes the template leaves for whoever writes it. They are guidance for
+    writing a plan, not part of one, so they go as soon as a plan comes back written."""
+    return COMMENT.sub("", text)
+
+
 def body(text: str) -> str:
     """The plan as it concerns you: without the header the agent works from and without the
     instructions the template leaves for it."""
@@ -72,7 +82,7 @@ def body(text: str) -> str:
         _, rest = _split_header(text)
     except PlanError:
         rest = text
-    return COMMENT.sub("", rest).strip()
+    return without_notes(rest).strip()
 
 
 def parse_plan(text: str) -> Plan:

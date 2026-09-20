@@ -60,3 +60,18 @@ def test_helper_rejects_bad_targets(target):
 def test_helper_validates_before_requiring_root():
     result = helper("apply", "vivibox-shop-1-dind", "172.20.0.1:5432", "192.168.1.10:8080")
     assert result.returncode == 1 and "must run as root" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "pool",
+    ["198.51.100.0", "198.51.100.0/", "198.51.100.0/31", "198.51.100.0/7", "256.0.0.0/24", "x/24"],
+)
+def test_helper_rejects_a_bad_pool(pool):
+    result = helper("apply", "vivibox-shop-1-dind", "--pool", pool)
+    assert result.returncode == 1 and "not an ipv4 network" in result.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="checks the non-root path")
+def test_helper_takes_a_pool_before_the_targets():
+    result = helper("apply", "vivibox-shop-1-dind", "--pool", "198.51.100.0/24", "172.20.0.1:5432")
+    assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"

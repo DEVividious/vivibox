@@ -7,6 +7,8 @@ read-only: under Sysbox, root in a nested container would otherwise write to it 
 
 from __future__ import annotations
 
+import ipaddress
+import shlex
 import shutil
 import socket
 import subprocess
@@ -15,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import HostService
+from .config import DEFAULT_NETWORK_POOL, TASK_NETWORK_BITS, HostService
 
 DIND_IMAGE = "docker:29.8.1-dind"
 SOCKET_DIR = "/run/vivibox-docker"
@@ -30,6 +32,11 @@ CACHES = {
     "corepack": "/cache/corepack",
 }
 HOST_GATEWAY = "host.docker.internal"
+# Running the project for you to look at: its process group, its output, both inside the pod.
+DEMO_PID = "/tmp/vivibox-demo.pid"
+DEMO_LOG = "/tmp/vivibox-demo.log"
+DEMO_ALIVE = f'test -f {DEMO_PID} && kill -0 "$(cat {DEMO_PID})" 2>/dev/null'
+DEMO_KILL = f'test -f {DEMO_PID} && kill -TERM -"$(cat {DEMO_PID})" 2>/dev/null; rm -f {DEMO_PID}'
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
@@ -40,6 +47,86 @@ class PodError(Exception):
 
 def run(cmd: Sequence[str]) -> subprocess.CompletedProcess:
     return subprocess.run(list(cmd), capture_output=True, text=True)
+
+
+@dataclass(frozen=True)
+class Listener:
+    """A port something in the pod listens on. Bound to localhost it answers inside the pod only,
+    which is the one mistake that makes a running app look like a broken one."""
+
+    port: int
+    reachable: bool
+
+    @property
+    def why_not(self) -> str:
+        return "" if self.reachable else "bound to localhost inside the pod, so nothing outside can reach it"
+
+
+# Both questions in one exec: the agent container shares the sidecar's network namespace, so its
+# /proc/net/tcp is the pod's, and its /tmp holds what the demo left behind.
+PROBE = f"""({DEMO_ALIVE}) && echo RUNNING || echo STOPPED
+cat /proc/sys/net/ipv4/ip_local_port_range
+awk '$4=="0A"{{print $2}}' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+echo --
+tail -n 25 {DEMO_LOG} 2>/dev/null"""
+
+
+@dataclass(frozen=True)
+class PodProbe:
+    """What the pod is doing, asked once."""
+
+    listening: list[Listener] = field(default_factory=list)
+    demo: bool = False
+    log: str = ""
+
+
+def parse_listening(text: str, from_table: bool = False) -> list[Listener]:
+    """The kernel's listening sockets. First line is the ephemeral range, whose ports belong to the
+    pod's own Docker daemon rather than to anything you started."""
+    first, *rest = text.splitlines() or [""]
+    low = first.split()[0] if first.split() else ""
+    ephemeral = int(low) if low.isdigit() else 32768
+    found: dict[int, bool] = {}
+    for line in rest:
+        fields = line.split()
+        # In the raw table 0A is TCP_LISTEN and the address is field 2; awk has already picked it.
+        local = fields[1] if from_table and len(fields) > 3 and fields[3] == "0A" else ""
+        local = local or (fields[0] if not from_table and fields else "")
+        if not local or ":" not in local:
+            continue
+        address, _, port_hex = local.rpartition(":")
+        try:
+            port = int(port_hex, 16)
+        except ValueError:
+            continue
+        if port >= ephemeral:
+            continue
+        # All zeros is 0.0.0.0 or ::; a port bound both ways is reachable, so the widest wins.
+        found[port] = found.get(port, False) or set(address) == {"0"}
+    return [Listener(port, reachable) for port, reachable in sorted(found.items())]
+
+
+def addresses(sidecars: Sequence[str], runner: Runner = run) -> dict[str, str]:
+    """Where each pod answers, for many pods at once: asking one at a time is what makes a list slow."""
+    if not sidecars:
+        return {}
+    template = "{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
+    found = runner(["docker", "inspect", "-f", template, *sidecars])
+    out = {}
+    for line in found.stdout.splitlines():
+        name, _, address = line.strip().partition(" ")
+        if address:
+            out[name.lstrip("/")] = address
+    return out
+
+
+@dataclass(frozen=True)
+class DemoState:
+    """What became of the project you started. Nothing here is a health check: a process can be up
+    and wedged, and only the app itself knows that. This is what the kernel and the log can say."""
+
+    running: bool
+    log: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,6 +151,8 @@ class Pod:
     agent_env: dict[str, str] = field(default_factory=dict)
     # Where the gate builds a fresh clone of the committed work; outside anything the agent can write.
     gate_dir: Path | None = None
+    # Addresses task networks are cut from; see config.Config.network_pool.
+    network_pool: str = DEFAULT_NETWORK_POOL
     runner: Runner = run
 
     @property
@@ -83,6 +172,10 @@ class Pod:
         return f"{self.gate_dir}/src"
 
     @property
+    def network(self) -> str:
+        return f"vivibox-{self.task_id}-net"
+
+    @property
     def volumes(self) -> dict[str, str]:
         return {"docker": f"vivibox-{self.task_id}-docker", "socket": f"vivibox-{self.task_id}-socket"}
 
@@ -98,7 +191,125 @@ class Pod:
 
     # --- commands ---------------------------------------------------------------------------
 
-    def sidecar_command(self) -> list[str]:
+    def taken_subnets(self) -> list[ipaddress.IPv4Network]:
+        """Every subnet Docker has handed out, here or to anything else on this machine."""
+        ids = self._run("docker", "network", "ls", "-q").stdout.split()
+        if not ids:
+            return []
+        listed = self._run(
+            "docker", "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", *ids
+        ).stdout
+        taken = []
+        for word in listed.split():
+            try:
+                taken.append(ipaddress.IPv4Network(word, strict=False))
+            except ValueError:
+                continue  # an IPv6 subnet, or anything else that is not one of ours to avoid
+        return taken
+
+    def free_subnet(self) -> ipaddress.IPv4Network:
+        pool = ipaddress.IPv4Network(self.network_pool)
+        taken = self.taken_subnets()
+        for candidate in pool.subnets(new_prefix=TASK_NETWORK_BITS):
+            if not any(candidate.overlaps(other) for other in taken):
+                return candidate
+        raise PodError(
+            f"no free address range left in {pool}: every /{TASK_NETWORK_BITS} is in use. "
+            "Remove tasks you have finished with, or widen network.pool in config.toml"
+        )
+
+    def ensure_network(self) -> ipaddress.IPv4Network:
+        """The task's own network. Its address is then its own, so its ports are nobody else's."""
+        found = self._run(
+            "docker", "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}}{{end}}",
+            self.network, check=False,
+        )  # fmt: skip
+        if found.returncode == 0 and found.stdout.strip():
+            return ipaddress.IPv4Network(found.stdout.strip())
+        subnet = self.free_subnet()
+        self._run("docker", "network", "create", "--subnet", str(subnet), self.network)
+        return subnet
+
+    def address(self) -> str:
+        """Where the pod answers, from the host and from inside itself alike. Empty when it is down."""
+        template = f'{{{{(index .NetworkSettings.Networks "{self.network}").IPAddress}}}}'
+        found = self._run("docker", "inspect", "-f", template, self.sidecar, check=False)
+        return found.stdout.strip() if found.returncode == 0 else ""
+
+    def listening(self) -> list[Listener]:
+        """What is listening in the pod, read from the kernel so no tool has to be in the image.
+        Ephemeral ports are left out: they belong to the pod's own Docker daemon."""
+        found = self._run(
+            "docker", "exec", self.sidecar, "sh", "-c",
+            "cat /proc/sys/net/ipv4/ip_local_port_range; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+            check=False,
+        )  # fmt: skip
+        if found.returncode != 0:
+            return []
+        return parse_listening(found.stdout, from_table=True)
+
+    def demo_running(self) -> bool:
+        return self.demo_state().running
+
+    def probe(self) -> PodProbe:
+        """One question of the pod instead of two, so a list of tasks stays cheap to keep current."""
+        found = self._run("docker", "exec", self.agent, "sh", "-c", PROBE, check=False)
+        if found.returncode != 0:
+            return PodProbe()
+        head, _, log = found.stdout.partition("\n--\n")
+        state, _, rows = head.partition("\n")
+        return PodProbe(parse_listening(rows), state.strip() == "RUNNING", log.strip())
+
+    def demo_state(self) -> DemoState:
+        """Whether what you started is still alive, and its last output, in one question: a crash
+        is only useful if it comes with the reason, and the reason is in the log."""
+        script = f"({DEMO_ALIVE}) && echo RUNNING || echo STOPPED; tail -n 25 {DEMO_LOG} 2>/dev/null"
+        found = self._run("docker", "exec", self.agent, "sh", "-c", script, check=False)
+        if found.returncode != 0:
+            return DemoState(False, "")
+        first, _, rest = found.stdout.partition("\n")
+        return DemoState(first.strip() == "RUNNING", rest.strip())
+
+    def demo_stop(self) -> None:
+        """Kills the whole process group: a build tool starting a server leaves children behind."""
+        self._run("docker", "exec", self.agent, "sh", "-c", DEMO_KILL, check=False)
+
+    def demo_log(self, lines: int = 20) -> str:
+        found = self._run("docker", "exec", self.agent, "tail", "-n", str(lines), DEMO_LOG, check=False)
+        return found.stdout.strip() if found.returncode == 0 else ""
+
+    def demo_start(self, commands: Sequence[str], workdir: str = "", wait: float = 40) -> list[Listener]:
+        """Runs the project the way the project is run, in the agent's container, and waits for it
+        to listen. Returns the ports that were not there before; empty means nothing came up.
+
+        setsid: the commands outlive the exec that started them, so the app stays up while you look
+        at it, and its whole process group can be stopped later in one go.
+        """
+        self.demo_stop()
+        # A port the last run held is not free the moment its process is killed, and starting again
+        # on the same port would then look like nothing came up. Wait for the picture to settle.
+        before = {listener.port for listener in self.listening()}
+        settle = time.monotonic() + 10
+        while time.monotonic() < settle:
+            time.sleep(0.5)
+            now_ports = {listener.port for listener in self.listening()}
+            if now_ports == before:
+                break
+            before = now_ports
+        script = " && ".join(commands)
+        started = f"setsid sh -c {shlex.quote(script)} > {DEMO_LOG} 2>&1 < /dev/null & echo $! > {DEMO_PID}"
+        self._run("docker", "exec", "-d", "-w", workdir or str(self.repo), self.agent, "sh", "-c", started)
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            fresh = [listener for listener in self.listening() if listener.port not in before]
+            if fresh:
+                return fresh
+            if not self.demo_running():
+                return []  # it exited; the log says why
+            time.sleep(0.5)
+        return []
+
+    def sidecar_command(self, address: str = "") -> list[str]:
         # The daemon listens only on the unix socket. 666: the socket is owned by root of the
         # Sysbox user namespace, the agent runs as your UID, and only this pair mounts the volume.
         daemon = (
@@ -110,6 +321,7 @@ class Pod:
         return [
             "docker", "run", "-d", "--name", self.sidecar, "--runtime=sysbox-runc",
             "--label", f"vivibox.task={self.task_id}",
+            "--network", self.network, *(("--ip", address) if address else ()),
             "--add-host", f"{HOST_GATEWAY}:host-gateway",
             "-e", "DOCKER_TLS_CERTDIR=",
             "-v", f"{self.volumes['docker']}:/var/lib/docker",
@@ -178,7 +390,10 @@ class Pod:
             # The agent joins the sidecar's network namespace, which a sidecar restart replaces.
             self._run("docker", "rm", "-f", self.agent, check=False)
             if self._state(self.sidecar) is None:
-                self._run(*self.sidecar_command())
+                # Pinned rather than left to Docker: this address goes into your configuration files,
+                # so it has to be the same one after every restart.
+                subnet = self.ensure_network()
+                self._run(*self.sidecar_command(str(subnet[2])))
             else:
                 self._run("docker", "start", self.sidecar)
             self._wait_for_daemon(timeout)
@@ -229,6 +444,7 @@ class Pod:
         self._run(
             "docker", "volume", "rm", *self.volumes.values(), f"vivibox-{self.task_id}-config", check=False
         )
+        self._run("docker", "network", "rm", self.network, check=False)
 
     # --- inside the pod ---------------------------------------------------------------------
 
@@ -255,17 +471,25 @@ class Pod:
         raise PodError(f"{HOST_GATEWAY} missing in {self.sidecar}")
 
     def firewall_targets(self) -> list[str]:
-        targets = []
+        """Every address a name answers with, not just the first: a service behind a load balancer
+        or round-robin DNS reaches you on several, and allowing one of them fails at random."""
+        targets: list[str] = []
         for s in self.host_services:
             if s.host == HOST_GATEWAY:
-                ip = self.gateway()
+                found = [self.gateway()]
             else:
                 try:
-                    ip = socket.getaddrinfo(s.host, s.port, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+                    where = socket.getaddrinfo(s.host, s.port, socket.AF_INET, socket.SOCK_STREAM)
                 except OSError as e:
                     raise PodError(f"cannot resolve host service {s.host}: {e}") from None
-            targets.append(f"{ip}:{s.port}")
+                found = sorted({r[4][0] for r in where})
+            targets += [f"{ip}:{s.port}" for ip in found if f"{ip}:{s.port}" not in targets]
         return targets
 
     def apply_firewall(self) -> None:
-        self._run("sudo", "-n", FIREWALL, "apply", self.sidecar, *self.firewall_targets())
+        # The pool is not a private range, so the helper has to be told to reject it by name:
+        # without that, one task could reach another task's ports.
+        self._run(
+            "sudo", "-n", FIREWALL, "apply", self.sidecar,
+            "--pool", self.network_pool, *self.firewall_targets(),
+        )  # fmt: skip

@@ -23,10 +23,19 @@ SIDECAR_NAME='^vivibox-[a-z0-9][a-z0-9-]*-[0-9]+-dind$'
 PRIVATE_V4=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10)
 
 usage() {
-  echo "usage: vivibox-netns apply <sidecar> [<ipv4>:<port> ...] | clear <sidecar> | show <sidecar>" >&2
+  echo "usage: vivibox-netns apply <sidecar> [--pool <cidr>] [<ipv4>:<port> ...]" >&2
+  echo "       vivibox-netns clear <sidecar> | show <sidecar>" >&2
   exit 2
 }
 die() { echo "vivibox-netns: $*" >&2; exit 1; }
+
+valid_pool() {
+  local net=${1%/*} bits=${1##*/} octet
+  [[ "$1" == */* && "$bits" =~ ^[0-9]{1,2}$ ]] && ((bits >= 8 && bits <= 30)) || return 1
+  [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  IFS=. read -ra octets <<<"$net"
+  for octet in "${octets[@]}"; do ((10#$octet <= 255)) || return 1; done
+}
 
 valid_target() {
   local ip=${1%:*} port=${1##*:} octet
@@ -45,6 +54,15 @@ case "$cmd" in
   *) usage ;;
 esac
 [[ "$sidecar" =~ $SIDECAR_NAME ]] || die "not an vivibox sidecar name: $sidecar"
+# The task networks are cut from a pool that need not be private (the default is a documentation
+# range), so it is rejected by name: without this a task could reach another task's ports.
+pool=""
+if [[ "${1-}" == "--pool" ]]; then
+  [[ $# -ge 2 ]] || usage
+  pool=$2
+  valid_pool "$pool" || die "not an ipv4 network: $pool"
+  shift 2
+fi
 for target in "$@"; do
   valid_target "$target" || die "not <ipv4>:<port>: $target"
 done
@@ -89,7 +107,7 @@ case "$cmd" in
     for target in "$@"; do
       ipt -A "$CHAIN" -p tcp -d "${target%:*}" --dport "${target##*:}" -j ACCEPT
     done
-    for net in "${PRIVATE_V4[@]}"; do
+    for net in "${PRIVATE_V4[@]}" ${pool:+"$pool"}; do
       ipt -A "$CHAIN" -p tcp -d "$net" -j REJECT --reject-with tcp-reset
       ipt -A "$CHAIN" -d "$net" -j REJECT --reject-with icmp-admin-prohibited
     done

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import tomllib
@@ -9,6 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HARNESSES = ("opencode", "claude-code")
+# TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
+DEFAULT_NETWORK_POOL = "198.51.100.0/24"
+# One task needs one address, for its sidecar; the agent and the gate share that container's network.
+TASK_NETWORK_BITS = 28
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
 
@@ -31,6 +36,9 @@ class Config:
     desktop_notifications: bool = True
     # Command that opens a directory in your IDE ("idea", "code"); offered when work is ready for review.
     ide: str = ""
+    # Addresses the task networks are cut from, one /28 per task. The default is TEST-NET-2, which
+    # RFC 5737 reserves for documentation: nothing may use it in a real network, so nothing collides.
+    network_pool: str = DEFAULT_NETWORK_POOL
 
 
 @dataclass(frozen=True)
@@ -46,6 +54,8 @@ class Project:
     verify: list[str]
     risky_extra: list[str] = field(default_factory=list)
     host_services: list[HostService] = field(default_factory=list)
+    # How to run the project so you can look at it, in order; the last one is the app itself.
+    demo: list[str] = field(default_factory=list)
     # A JDK other than the image's Java 21, as a mise version: "17" means Corretto 17.
     java: str = ""
     # The editor for this project's review copies, when it differs from the one in config.toml.
@@ -101,7 +111,18 @@ def load_config(base: Path | None = None) -> Config:
     ide = data.get("review", {}).get("ide", "")
     if not isinstance(ide, str):
         raise ConfigError(f'{path}: review.ide must be a command, e.g. "idea"')
-    return Config(tasks_dir, max_iterations, roles, desktop, ide)
+    pool = data.get("network", {}).get("pool", DEFAULT_NETWORK_POOL)
+    if not isinstance(pool, str):
+        raise ConfigError(f'{path}: network.pool must be a range, e.g. "{DEFAULT_NETWORK_POOL}"')
+    try:
+        parsed = ipaddress.IPv4Network(pool, strict=True)
+    except ValueError as e:
+        raise ConfigError(f"{path}: network.pool: {e}") from None
+    if parsed.prefixlen > TASK_NETWORK_BITS:
+        raise ConfigError(
+            f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
+        )
+    return Config(tasks_dir, max_iterations, roles, desktop, ide, str(parsed))
 
 
 def _host_service(text: str, where: Path) -> HostService:
@@ -131,4 +152,7 @@ def load_project(name: str, base: Path | None = None) -> Project:
     ide = data.get("ide", "")
     if not isinstance(ide, str):
         raise ConfigError(f'{path}: ide must be a command, e.g. "code {{path}}"')
-    return Project(name, repo, verify, risky_extra, services, java, ide)
+    demo = data.get("demo", [])
+    if not isinstance(demo, list) or not all(isinstance(c, str) and c.strip() for c in demo):
+        raise ConfigError(f'{path}: demo must be a list of commands, e.g. ["npm run dev"]')
+    return Project(name, repo, verify, risky_extra, services, demo, java, ide)

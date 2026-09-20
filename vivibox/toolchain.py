@@ -21,6 +21,16 @@ def agent_env(java: str, image_env: dict[str, str]) -> dict[str, str]:
     return {"JAVA_HOME": JDK_LINK, "PATH": f"{JDK_LINK}/bin:{image_env.get('PATH', '/usr/bin:/bin')}"}
 
 
+def install_declared(pod: Pod, gate: bool = False) -> None:
+    """Install whatever the checkout's own mise.toml asks for, on top of the image's defaults.
+
+    A shim exists only for a tool that is installed, so a project that chose Go or Ruby would
+    otherwise fail with 'command not found' — which names the symptom and hides the cause. Failure
+    is not raised: the verify command runs next and says what is actually missing.
+    """
+    (pod.gate_exec if gate else pod.exec)("bash", "-c", "mise install --yes", check=False)
+
+
 def ensure(pod: Pod, java: str, gate: bool = False) -> None:
     """In the agent container, or with gate=True in the gate container, which has its own /config."""
     if not java:

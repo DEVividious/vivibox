@@ -43,8 +43,11 @@ def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
     A project with no verify command of its own (a new one) gets it from the plan."""
     text = task.plan_path.read_text()
     plan = parse_plan(text)
-    if not plan.criteria or any(c.text == PLACEHOLDER for c in plan.criteria):
-        raise GateError("the plan needs its own acceptance criteria")
+    if any(c.text == PLACEHOLDER for c in plan.criteria):
+        raise GateError("the plan still carries the template's placeholder criterion; replace it")
+    if not plan.criteria:
+        # Name the heading: the criteria are usually written, just not where this looks for them.
+        raise GateError("no '- [ ]' criteria under an 'Acceptance criteria' heading in the plan")
     if not project_verify and not plan.verify:
         raise GateError(
             "this project has no command that builds and tests it yet; the plan must set one, "
@@ -169,6 +172,7 @@ def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], 
     result = GateResult(log)
     pod.gate_up()
     try:
+        toolchain.install_declared(pod, gate=True)
         toolchain.ensure(pod, java, gate=True)
         with log.open("w") as out:
             head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()

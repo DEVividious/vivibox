@@ -23,6 +23,7 @@ collab = "supervised"
 
 ## Acceptance criteria
 
+- [ ] Every test added was seen failing before the change that makes it pass, recorded in red.md
 - [ ] Replace with an observable outcome you can check
 
 ## Out of scope

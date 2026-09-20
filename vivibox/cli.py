@@ -140,6 +140,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)
     harness = opencode.OpenCode(pod)
+    planner = actions.harness_for("planner", pod)
 
     def agent_window(st) -> None:
         # Your view of the agent, ready once the harness session exists; reopened if you closed it.
@@ -160,6 +161,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         prepare_review=lambda: actions.prepare_review(task, project),
         project_verify=project.verify,
         save_verify=lambda commands: actions.save_verify(project, commands),
+        planner=planner,
     )
     (task.meta / actions.SUPERVISOR_PID).write_text(str(os.getpid()))
     print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)

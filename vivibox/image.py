@@ -99,6 +99,7 @@ def checks(uid: int, gid: int) -> list[Check]:
         Check("docker client and compose", "docker --version && docker compose version", "Docker Compose"),
         Check("no docker daemon in the image", "command -v dockerd || echo none", "none"),
         Check("opencode", "opencode --version", "."),
+        Check("claude code", "claude --version", "(Claude Code)"),
         Check("mise", "mise --version", "linux"),
         Check("ripgrep", "rg --version | head -1", "ripgrep"),
         Check(

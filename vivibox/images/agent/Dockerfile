@@ -15,6 +15,7 @@ FROM ${MISE_IMAGE} AS mise
 FROM ${BASE_IMAGE}
 
 ARG OPENCODE_VERSION=1.18.31
+ARG CLAUDE_CODE_VERSION=2.1.278
 ARG UID=1000
 ARG GID=1000
 
@@ -34,6 +35,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
  && corepack enable \
  && npm install -g --no-fund --no-audit "opencode-ai@${OPENCODE_VERSION}" \
+      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 
 # Default toolchains. /etc/mise/config.toml is mise's system-wide config, so it applies in the gate

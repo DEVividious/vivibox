@@ -15,6 +15,9 @@ from pathlib import Path
 from . import keys
 
 MOUNT = "/run/vivibox-secrets"
+# The Claude subscription login, when a role runs on it. It opens an account rather than a metered
+# budget, so it travels the same way as a key: tmpfs, read-only, only for tasks that need it.
+CLAUDE_LOGIN = "claude-code-login.json"
 
 
 def runtime_dir(task_id: str) -> Path:
@@ -28,13 +31,22 @@ def _write(path: Path, value: str) -> None:
         f.write(value)
 
 
-def prepare(task_id: str, providers: list[str], get_key: Callable[[str], str] = keys.get_key) -> Path:
+def prepare(
+    task_id: str,
+    providers: list[str],
+    get_key: Callable[[str], str] = keys.get_key,
+    claude_login: bool = False,
+) -> Path:
     """Writes the provider keys and a server password for the task; keeps an existing password."""
     d = runtime_dir(task_id)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(d, 0o700)
     for provider in providers:
         _write(d / provider, get_key(provider))
+    if claude_login:
+        _write(d / CLAUDE_LOGIN, keys.get_login())
+    else:
+        (d / CLAUDE_LOGIN).unlink(missing_ok=True)
     if not (d / "server-password").exists():
         _write(d / "server-password", random.token_urlsafe(24))
     return d

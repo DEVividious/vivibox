@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
 
-from . import context, gate, ide, image, opencode, repo, secrets, supervisor, toolchain, ui
+from . import claudecode, context, gate, ide, image, opencode, repo, secrets, supervisor, toolchain, ui
 from . import init as project_init
 from . import pod as pod_module
 from .config import PROJECT_NAME, Config, ConfigError, Project, config_dir, load_config, load_project
@@ -53,7 +53,11 @@ def task_pod(task_id: str) -> Pod:
         Mount(str(runtime), secrets.MOUNT, read_only=True),
     ]
     ref = image.image_ref()
-    env = {"OPENCODE_CONFIG": opencode.CONFIG, **toolchain.agent_env(project.java, image.env(ref))}
+    env = {
+        "OPENCODE_CONFIG": opencode.CONFIG,
+        "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR,
+        **toolchain.agent_env(project.java, image.env(ref)),
+    }
     return Pod(
         task.id, task.repo, ref, project.host_services, mounts, env,
         gate_dir=task.root / "gate", network_pool=load_config().network_pool,
@@ -118,9 +122,35 @@ def attach_command(task_id: str) -> list[str]:
 
 def writer(config: Config) -> tuple[str, str]:
     role = config.roles["writer"]
-    if role.harness != "opencode":
-        raise ConfigError(f"harness '{role.harness}' is not supported yet; use opencode")
+    if role.harness != opencode.NAME:
+        raise ConfigError(
+            f"the writer runs on '{role.harness}', and only opencode can write yet. "
+            "Put claude-code on the planner instead."
+        )
     return role.harness, role.model
+
+
+def harness_for(role_name: str, pod: Pod) -> object:
+    """The tool a role talks through. Two roles on the same harness share nothing but the pod."""
+    role = load_config().roles[role_name]
+    if role.harness == claudecode.NAME:
+        return claudecode.ClaudeCode(pod, role.model, role.metered)
+    return opencode.OpenCode(pod)
+
+
+def provider_keys(config: Config) -> list[str]:
+    """Every metered provider a role needs. One role's key is not enough once roles can differ."""
+    found = []
+    for role in config.roles.values():
+        if role.harness == opencode.NAME and (p := opencode.provider_of(role.model)) not in found:
+            found.append(p)
+        elif role.harness == claudecode.NAME and role.metered and "anthropic" not in found:
+            found.append("anthropic")
+    return found
+
+
+def wants_claude_login(config: Config) -> bool:
+    return any(r.harness == claudecode.NAME and not r.metered for r in config.roles.values())
 
 
 # --- setting up a project ------------------------------------------------------------------------
@@ -444,7 +474,7 @@ def start(task_id: str, resume: bool = False) -> str:
     _, model = writer(config)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
-    secrets.prepare(task.id, [opencode.provider_of(model)])
+    secrets.prepare(task.id, provider_keys(config), claude_login=wants_claude_login(config))
     changed = opencode.prepare(task, model, project.verify)
     pod = task_pod(task.id)
     pod.up()

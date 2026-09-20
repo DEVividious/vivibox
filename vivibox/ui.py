@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .states import State
@@ -53,8 +54,35 @@ def ago(ts: str, now: datetime | None = None) -> str:
     return "just now"
 
 
-def cost(task: Task) -> float:
-    return sum(e["data"].get("cost") or 0 for e in task.events() if e["type"] == "turn")
+@dataclass(frozen=True)
+class Spend:
+    """What a task cost, kept apart by whether it was money. A subscription turn reports a list
+    price, so adding the two would give a number that is neither a bill nor a usage figure."""
+
+    metered: float = 0.0
+    listed: float = 0.0
+
+    def __bool__(self) -> bool:
+        return bool(self.metered or self.listed)
+
+    def __str__(self) -> str:
+        if not self.listed:
+            return f"${self.metered:.2f}"
+        return f"${self.metered:.2f} + ${self.listed:.2f}*" if self.metered else f"${self.listed:.2f}*"
+
+
+def cost(task: Task) -> Spend:
+    metered = listed = 0.0
+    for event in task.events():
+        if event["type"] != "turn":
+            continue
+        spent = event["data"].get("cost") or 0
+        # Turns recorded before roles were all metered, and said nothing either way.
+        if event["data"].get("metered", True):
+            metered += spent
+        else:
+            listed += spent
+    return Spend(round(metered, 6), round(listed, 6))
 
 
 # What the task needs, in words, and the commands for your next step.
@@ -113,7 +141,7 @@ def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, no
                 st.id,
                 activity(st, max_iterations) if group(st) != "Stopped" else "stopped",
                 criteria(task),
-                f"${spent:.2f}" if spent else "-",
+                str(spent) if spent else "-",
                 ago(st.created, now),
                 ago(st.updated, now),
                 st.goal,
@@ -136,7 +164,7 @@ def task_detail(task: Task, criteria, max_iterations: int, events: int, style: S
     name = group(st)
     meta = [f"{criteria(task)} criteria", ago(st.updated)]
     if spent := cost(task):
-        meta.append(f"${spent:.2f}")
+        meta.append(str(spent))
     lines = [
         f"{style(st.id, 'bold')}  {style(activity(st, max_iterations), COLORS[name])}"
         f"  {style(' · '.join(meta), 'dim')}",

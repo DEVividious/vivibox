@@ -763,7 +763,8 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
         )
     commit = fetch_work(task, project)
     st = task.read_state()
-    done = Finished(task.id, project.repo, ui.cost(task), suggested_message(project.repo, st.base_commit,
+    spent = ui.cost(task).metered
+    done = Finished(task.id, project.repo, spent, suggested_message(project.repo, st.base_commit,
                                                                             commit, st.goal))  # fmt: skip
     done.criteria = accepted_criteria(task)
     done.created = st.created

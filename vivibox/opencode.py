@@ -101,6 +101,8 @@ def parse_events(output: str) -> Turn:
 
 class OpenCode:
     name = NAME
+    # A provider key is always billed per token.
+    metered = True
 
     def __init__(self, pod: Pod):
         self.pod = pod

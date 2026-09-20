@@ -190,7 +190,7 @@ def detail(
     head = [
         f"### {st.id} · {ui.activity(st, max_iterations)}",
         "",
-        f"*criteria {criteria(task)} · updated {ui.ago(st.updated)} · ${ui.cost(task):.2f}*",
+        f"*criteria {criteria(task)} · updated {ui.ago(st.updated)} · {ui.cost(task)}*",
         "",
     ]
     if shown := (pod if pod is not None else pod_view(st.id)).lines():
@@ -722,7 +722,7 @@ class Vivibox(App):
             spent = ui.cost(task)
             table.add_row(
                 st.id, self.status(st), self.demo_cell(st.id), criteria(task),
-                f"${spent:.2f}" if spent else "-",
+                str(spent) if spent else "-",
                 ui.ago(st.created), ui.ago(st.updated), st.goal, key=st.id,
             )  # fmt: skip
         live = {st.id for _, st in pairs}

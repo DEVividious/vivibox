@@ -53,6 +53,9 @@ PLAN_COMMENT_PROMPT = """The user commented on your plan. Read the newest entry 
 class Harness(Protocol):
     # Names the conversation it owns: sessions are kept one per harness, never one per task.
     name: str
+    # False when a turn's reported cost is a list price rather than money spent, as it is on a
+    # subscription. A total that added the two would be neither.
+    metered: bool
 
     def turn(self, prompt: str, session: str = "", title: str = "") -> Turn: ...
 
@@ -186,6 +189,8 @@ class Supervisor:
         self.task.event(
             "turn",
             state=str(st.state),
+            harness=harness.name,
+            metered=getattr(harness, "metered", True),
             ok=turn.ok,
             cost=turn.cost,
             tokens=turn.tokens,

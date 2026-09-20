@@ -63,3 +63,23 @@ def test_detail_shows_next_step_and_events(tmp_path):
     out = ui.task_detail(task, lambda t: "1/1", 3, 20, plain)
     assert "review the work" in out and "vivibox accept demo-1" in out
     assert "current=checkpoint:final" in out
+
+
+def test_subscription_spend_is_kept_apart_from_money(tmp_path):
+    """claude reports a subscription turn at API list prices. Adding that to metered spend would
+    give a number that is neither a bill nor a usage figure, and the column would read as a bill."""
+    task = create_task(tmp_path, "demo", "goal", "")
+    task.event("turn", state="plan", harness="claude-code", metered=False, cost=0.58, tokens=1)
+    task.event("turn", state="implement", harness="opencode", metered=True, cost=0.06, tokens=1)
+
+    spent = ui.cost(task)
+    assert (spent.metered, spent.listed) == (0.06, 0.58)
+    assert str(spent) == "$0.06 + $0.58*", "the star is what says the second half is not money"
+
+
+def test_turns_recorded_before_roles_still_count_as_money(tmp_path):
+    """Every turn until now was on a provider key, and none of them said so."""
+    task = create_task(tmp_path, "demo", "goal", "")
+    task.event("turn", state="implement", cost=0.03, tokens=1)
+    assert ui.cost(task) == ui.Spend(0.03, 0.0)
+    assert str(ui.cost(task)) == "$0.03", "no star where there is nothing to explain"

@@ -71,3 +71,27 @@ def test_task_numbers_are_not_reused(tmp_path):
     first = create_task(tmp_path, "shop", "first", "{{goal}}")
     shutil.rmtree(first.root)
     assert create_task(tmp_path, "shop", "second", "{{goal}}").id == "shop-2"
+
+
+def test_sessions_are_kept_one_per_harness(tmp_path):
+    """Planning may run on claude-code and writing on opencode. A single session id for the task
+    would be handed to whichever harness ran next, and that harness has never heard of it."""
+    task = create_task(tmp_path, "shop", "goal", "")
+    task.set_session("opencode", "ses_abc")
+    task.set_session("claude-code", "fdcccc7a-1a4d")
+    st = task.read_state()
+    assert st.sessions == {"opencode": "ses_abc", "claude-code": "fdcccc7a-1a4d"}
+    task.set_session("opencode", "")
+    assert task.read_state().sessions == {"claude-code": "fdcccc7a-1a4d"}, "cleared, not emptied"
+
+
+def test_a_task_started_before_roles_keeps_its_conversation(tmp_path):
+    """Every session written until now was opencode's, under a plain 'session' key. Losing it would
+    start a fresh conversation on a task already half done, with only its files to go on."""
+    task = create_task(tmp_path, "shop", "goal", "")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data.pop("sessions", None)
+    data["session"] = "ses_from_before"
+    path.write_text(json.dumps(data))
+    assert task.read_state().sessions == {"opencode": "ses_from_before"}

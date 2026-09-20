@@ -25,7 +25,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo = tmp_path / "repo"
     make_repo(repo)
     (cfg / "config.toml").write_text(
-        f'tasks_dir = "{tmp_path / "tasks"}"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+        f'tasks_dir = "{tmp_path / "tasks"}"\n'
+        '[roles.planner]\nharness = "opencode"\nmodel = "m"\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
     )
     (cfg / "projects" / "demo.toml").write_text(f'repo = "{repo}"\nverify = ["true"]\n')
     monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(cfg))

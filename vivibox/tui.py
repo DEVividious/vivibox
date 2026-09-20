@@ -877,7 +877,7 @@ class Vivibox(App):
             "edit_plan": state is State.CHECKPOINT_PLAN or (state is State.PLAN and not running),
             "open_ide": state is State.CHECKPOINT_FINAL,
             "approve_risky": state is State.APPROVAL_RISKY,
-            "watch": running and bool(pick[1].session),
+            "watch": running and bool(pick[1].sessions),
             "start_task": state is not State.DONE and not running,
             "stop_task": state is not State.DONE and running,
             "remove": True,

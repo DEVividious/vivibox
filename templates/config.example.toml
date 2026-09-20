@@ -8,7 +8,17 @@ tasks_dir = "/srv/vivibox"
 # Verification failures the writer may fix on its own before the task stops for you.
 max_iterations = 3
 
-# One entry per role. harness: "opencode" or "claude-code".
+# One entry per role; planner and writer are both required. harness: "opencode" or "claude-code".
+# Planning is where a wrong decision costs the most and the fewest tokens are spent, so it is worth
+# a stronger model than the one that writes the code.
+# auth applies to claude-code only and decides what vivibox puts in the container: "api-key" bills
+# you per token, "subscription" uses your Claude login and reports a cost at list prices that is
+# not money you spent. The task list marks that cost with a star.
+[roles.planner]
+harness = "claude-code"
+model = "claude-opus-5"
+auth = "subscription"
+
 [roles.writer]
 harness = "opencode"
 model = "anthropic/claude-sonnet-5"

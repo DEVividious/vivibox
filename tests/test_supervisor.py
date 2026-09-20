@@ -15,6 +15,8 @@ DRAFT = (
 
 
 class FakeHarness:
+    name = "opencode"
+
     def __init__(self, task, actions=()):
         self.task, self.actions, self.prompts = task, list(actions), []
 
@@ -62,7 +64,7 @@ def test_plan_turn_copies_draft_and_stops_at_checkpoint(task):
     sup, notes = make(task, harness)
     assert sup.step()
     st = task.read_state()
-    assert st.state is State.CHECKPOINT_PLAN and st.session == "ses_1"
+    assert st.state is State.CHECKPOINT_PLAN and st.sessions == {"opencode": "ses_1"}
     assert "health endpoint returns 200" in task.plan_path.read_text()
     assert harness.prompts == [supervisor.PLAN_PROMPT] and notes == ["plan ready for review"]
     assert not sup.step(), "waits for you at a checkpoint"

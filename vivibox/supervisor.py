@@ -51,6 +51,9 @@ PLAN_COMMENT_PROMPT = """The user commented on your plan. Read the newest entry 
 
 
 class Harness(Protocol):
+    # Names the conversation it owns: sessions are kept one per harness, never one per task.
+    name: str
+
     def turn(self, prompt: str, session: str = "", title: str = "") -> Turn: ...
 
 
@@ -141,6 +144,14 @@ class Supervisor:
     # The project's verify commands, and where to keep the ones a plan brings for a new project.
     project_verify: list[str] = field(default_factory=list)
     save_verify: Callable[[list[str]], None] = lambda commands: None
+    # The role that plans. None means the writer plans too, which is what a caller with one harness
+    # gets; the command line always passes both, because the config always names both.
+    planner: Harness | None = None
+
+    def harness_for(self, state: State) -> Harness:
+        """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
+        is worth a different model, and sometimes a different tool, from the one that types."""
+        return self.planner if state is State.PLAN and self.planner else self.harness
 
     def step(self) -> bool:
         """Does one unit of work. False when there is nothing to do until you act."""
@@ -167,9 +178,11 @@ class Supervisor:
     # --- states -----------------------------------------------------------------------------
 
     def _turn(self, st: TaskState, prompt: str) -> Turn | None:
-        turn = self.harness.turn(prompt, session=st.session, title=f"{self.task.id}: {st.goal}"[:80])
-        if turn.session and turn.session != st.session:
-            self.task.set_session(turn.session)
+        harness = self.harness_for(st.state)
+        was = st.sessions.get(harness.name, "")
+        turn = harness.turn(prompt, session=was, title=f"{self.task.id}: {st.goal}"[:80])
+        if turn.session and turn.session != was:
+            self.task.set_session(harness.name, turn.session)
         self.task.event(
             "turn",
             state=str(st.state),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,7 +29,9 @@ class TaskState:
     created: str
     updated: str
     base_commit: str = ""
-    session: str = ""
+    # One harness conversation each: a planner on claude-code and a writer on opencode do not share
+    # a session, and handing one the other's id starts an error, not a conversation.
+    sessions: dict[str, str] = field(default_factory=dict)
     # Accept the agent's plan without stopping for you (vivibox new --auto).
     auto_plan: bool = False
 
@@ -57,10 +59,14 @@ class Task:
         st.iteration = 1
         self._write_state(st)
 
-    def set_session(self, session: str) -> None:
-        """The harness session; empty to start a new one (the plan and handoff carry the context)."""
+    def set_session(self, harness: str, session: str) -> None:
+        """This harness's session; empty forgets it, and the next turn starts a new one from the
+        plan and handoff files."""
         st = self.read_state()
-        st.session = session
+        if session:
+            st.sessions[harness] = session
+        else:
+            st.sessions.pop(harness, None)
         self._write_state(st)
 
     def set_paused(self, paused: bool) -> None:
@@ -91,6 +97,9 @@ class Task:
     def read_state(self) -> TaskState:
         data = json.loads((self.meta / "state.json").read_text())
         data["state"] = State(data["state"])
+        # Tasks written before roles carry one session, and it was always opencode's.
+        if "sessions" not in data and data.get("session"):
+            data["sessions"] = {"opencode": data["session"]}
         # Fields a newer vivibox added are ignored: a running supervisor may be older than the CLI.
         return TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
 

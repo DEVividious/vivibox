@@ -4,7 +4,9 @@ import pytest
 
 from vivibox.config import ConfigError, HostService, load_config, load_project
 
-WRITER = '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+ROLES = (
+    '[roles.planner]\nharness = "opencode"\nmodel = "m"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+)
 
 
 def write(path: Path, text: str) -> Path:
@@ -16,7 +18,7 @@ def write(path: Path, text: str) -> Path:
 def test_loads_config_with_defaults(tmp_path):
     base = write(
         tmp_path / "config.toml",
-        'tasks_dir = "/srv/vivibox"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
+        'tasks_dir = "/srv/vivibox"\n' + ROLES,
     )
     config = load_config(base)
     assert config.tasks_dir == Path("/srv/vivibox")
@@ -26,19 +28,20 @@ def test_loads_config_with_defaults(tmp_path):
 
 
 def test_desktop_notifications_can_be_turned_off(tmp_path):
-    text = 'tasks_dir = "/t"\n[notifications]\ndesktop = false\n' + WRITER
+    text = 'tasks_dir = "/t"\n[notifications]\ndesktop = false\n' + ROLES
     assert load_config(write(tmp_path / "config.toml", text)).desktop_notifications is False
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        'tasks_dir = "relative"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
-        'tasks_dir = "/t"\n[roles.writer]\nharness = "other"\nmodel = "m"\n',
+        'tasks_dir = "relative"\n' + ROLES,
+        'tasks_dir = "/t"\n[roles.planner]\nharness = "opencode"\nmodel = "m"\n'
+        '[roles.writer]\nharness = "other"\nmodel = "m"\n',
         'tasks_dir = "/t"\n[roles.reviewer]\nharness = "opencode"\nmodel = "m"\n',
-        'tasks_dir = "/t"\n[limits]\nmax_iterations = 0\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n',
+        'tasks_dir = "/t"\n[limits]\nmax_iterations = 0\n' + ROLES,
         "tasks_dir = ",
-        'tasks_dir = "/t"\n[notifications]\ndesktop = "no"\n' + WRITER,
+        'tasks_dir = "/t"\n[notifications]\ndesktop = "no"\n' + ROLES,
     ],
 )
 def test_rejects_invalid_config(tmp_path, text):
@@ -84,3 +87,40 @@ def test_a_new_project_may_have_no_verify_yet(tmp_path):
     """The plan you accept sets it; a project can exist before the code does."""
     base = write(tmp_path / "projects" / "fresh.toml", 'repo = "/r"\nverify = []\n')
     assert load_project("fresh", base.parent).verify == []
+
+
+CLAUDE = '[roles.planner]\nharness = "claude-code"\nmodel = "claude-opus-5"\n'
+
+
+def test_claude_code_must_say_which_credential_it_gets(tmp_path):
+    """Nothing in what claude reports says whether it ran on a subscription or a key: the cost comes
+    back at list prices either way. vivibox is the one that decides, so the role has to say, and
+    what it says is what reaches the container."""
+    text = 'tasks_dir = "/t"\n' + CLAUDE + '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    with pytest.raises(ConfigError, match="auth"):
+        load_config(write(tmp_path / "config.toml", text))
+
+    ok = text.replace(CLAUDE, CLAUDE + 'auth = "subscription"\n')
+    config = load_config(write(tmp_path / "config.toml", ok))
+    assert config.roles["planner"].auth == "subscription"
+    assert not config.roles["planner"].metered, "its cost is list price, not money you spent"
+    assert config.roles["writer"].metered, "a provider key is always real spend"
+
+
+def test_auth_is_refused_where_it_would_mean_nothing(tmp_path):
+    """opencode always runs on a provider key. Accepting auth there would let a config claim a
+    subscription for spend that is metered, and the cost column would repeat the claim."""
+    text = (
+        'tasks_dir = "/t"\n[roles.planner]\nharness = "opencode"\nmodel = "m"\nauth = "subscription"\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    )
+    with pytest.raises(ConfigError, match="claude-code only"):
+        load_config(write(tmp_path / "config.toml", text))
+
+
+def test_planning_and_writing_are_both_required(tmp_path):
+    """No falling back to the writer's model: you would think you had configured a planner and be
+    planning on whatever types, with nothing to tell you."""
+    only_writer = 'tasks_dir = "/t"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    with pytest.raises(ConfigError, match="planner"):
+        load_config(write(tmp_path / "config.toml", only_writer))

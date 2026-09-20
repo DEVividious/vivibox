@@ -18,6 +18,7 @@ from .pod import Pod
 from .secrets import MOUNT
 from .task import Task
 
+NAME = "opencode"
 PORT = 39417
 URL = f"http://127.0.0.1:{PORT}"
 HARNESS_MOUNT = "/task/harness"
@@ -99,6 +100,8 @@ def parse_events(output: str) -> Turn:
 
 
 class OpenCode:
+    name = NAME
+
     def __init__(self, pod: Pod):
         self.pod = pod
 

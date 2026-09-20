@@ -143,8 +143,8 @@ def cmd_supervise(args: argparse.Namespace) -> int:
 
     def agent_window(st) -> None:
         # Your view of the agent, ready once the harness session exists; reopened if you closed it.
-        if st.session:
-            actions.agent_view(task, harness.attach_command(st.session))
+        if session := st.sessions.get(harness.name, ""):
+            actions.agent_view(task, harness.attach_command(session))
 
     sup = supervisor.Supervisor(
         task,

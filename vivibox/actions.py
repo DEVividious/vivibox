@@ -108,9 +108,11 @@ def attach_command(task_id: str) -> list[str]:
     task, _ = load(task_id)
     st = task.read_state()
     if not tmux_has(tmux_session(task_id)):
-        if not st.session or not supervisor_running(task):
+        # Only opencode has a window to attach to; a claude-code turn is watched through its log.
+        watchable = st.sessions.get(opencode.NAME, "")
+        if not watchable or not supervisor_running(task):
             raise PodError(f"{task_id}: the agent is not working now; nothing to watch")
-        agent_view(task, opencode.OpenCode(task_pod(task_id)).attach_command(st.session))
+        agent_view(task, opencode.OpenCode(task_pod(task_id)).attach_command(watchable))
     return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
 
 
@@ -453,10 +455,10 @@ def start(task_id: str, resume: bool = False) -> str:
     else:
         harness.ensure_server()
     st = task.read_state()
-    if st.session and not harness.session_exists(st.session):
+    if (was := st.sessions.get(harness.name, "")) and not harness.session_exists(was):
         # The harness lost the conversation; the task goes on from its plan and handoff files.
-        task.set_session("")
-        task.event("session_lost", session=st.session)
+        task.set_session(harness.name, "")
+        task.event("session_lost", harness=harness.name, session=was)
     interrupted = st.state in (State.PLAN, State.IMPLEMENT) and (st.paused or resume)
     if interrupted and not (task.meta / supervisor.NEXT_PROMPT).exists():
         supervisor.set_next_prompt(task, supervisor.RESUME_PROMPT)

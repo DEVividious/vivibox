@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HARNESSES = ("opencode", "claude-code")
+API_KEY, SUBSCRIPTION = "api-key", "subscription"
+AUTH = (API_KEY, SUBSCRIPTION)
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
@@ -26,6 +28,14 @@ class ConfigError(Exception):
 class Role:
     harness: str
     model: str
+    # Which credential vivibox gives this role, for claude-code only. It does not describe how you
+    # happen to be logged in; it decides what reaches the container, so the two cannot disagree.
+    # A subscription turn reports a cost at API list prices, which is not money you spent.
+    auth: str = API_KEY
+
+    @property
+    def metered(self) -> bool:
+        return self.auth == API_KEY
 
 
 @dataclass(frozen=True)
@@ -102,9 +112,22 @@ def load_config(base: Path | None = None) -> Config:
             raise ConfigError(f"{path}: roles.{name}.harness must be one of {HARNESSES}")
         if not isinstance(role.get("model"), str):
             raise ConfigError(f"{path}: roles.{name}.model must be a string")
-        roles[name] = Role(harness, role["model"])
-    if "writer" not in roles:
-        raise ConfigError(f"{path}: missing role 'writer'")
+        auth = role.get("auth")
+        if harness == "claude-code":
+            if auth not in AUTH:
+                raise ConfigError(f"{path}: roles.{name}.auth must be one of {AUTH}")
+        elif auth is not None:
+            raise ConfigError(
+                f"{path}: roles.{name}.auth applies to claude-code only; {harness} always uses a "
+                "provider key, which is always metered"
+            )
+        roles[name] = Role(harness, role["model"], auth or API_KEY)
+    for needed in ("planner", "writer"):
+        if needed not in roles:
+            raise ConfigError(
+                f"{path}: missing role '{needed}'. Planning and writing are chosen separately so "
+                "the model that decides need not be the model that types."
+            )
     desktop = data.get("notifications", {}).get("desktop", True)
     if not isinstance(desktop, bool):
         raise ConfigError(f"{path}: notifications.desktop must be true or false")

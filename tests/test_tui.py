@@ -465,7 +465,7 @@ def test_the_row_says_whether_that_task_is_serving_anything(env, monkeypatch):
         assert await until(pilot, lambda: "starting" in cell(app)), "up, but no port yet"
         answer[0] = tui.PodView("198.51.100.2", [], demo=False, log="Error: exploded")
         assert await until(pilot, lambda: "stopped" in cell(app)), "and when it dies"
-        assert app.is_running
+        assert app.screen_stack, "the view is still up, not crashed in a worker"
 
     run(scenario)
 
@@ -549,7 +549,7 @@ def test_the_view_follows_the_pod_on_its_own(env, monkeypatch):
         assert await until(pilot, lambda: app.pod == up), "asked again on its own"
         assert await until(pilot, lambda: "198.51.100.2:8000" in app.shown), "and the panel says so"
         await pilot.pause()
-        assert app.is_running
+        assert app.screen_stack, "the view is still up, not crashed in a worker"
 
     run(scenario)
 
@@ -576,3 +576,19 @@ def test_running_it_does_not_stop_to_ask_permission_to_work_out_how(env, monkeyp
         assert not app.screen_stack[1:], "and puts no question in your way"
 
     run(scenario)
+
+
+def test_a_pod_answer_arriving_after_you_quit_is_dropped(env):
+    """Asking the pods runs docker in a thread, which can outlast the app. The answer then arrives
+    for a view with no screen left and raised ScreenStackError, surfacing in whatever test happened
+    to be running next."""
+    new_task("Waiting")
+    app = Vivibox()
+
+    async def go():
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+
+    asyncio.run(go())
+    assert not app.screen_stack, "the app is gone; docker was still thinking"
+    app.pods_answered({"demo-1": tui.PodView("198.51.100.2", [], demo=True)})

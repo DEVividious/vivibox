@@ -234,3 +234,28 @@ def test_review_worktree_follows_the_task_and_is_removed_with_it(env, capsys):
     assert not copy.exists()
     worktrees = subprocess.run(["git", "worktree", "list"], cwd=source, capture_output=True, text=True).stdout
     assert str(copy) not in worktrees, "git forgets the review copy too"
+
+
+def test_leaving_the_agent_view_says_nothing_to_your_scrollback(monkeypatch):
+    """tmux prints '[detached (from session ...)]' after leaving its own screen, so the line lands
+    on the normal one and is still there after vivibox closes. '-E true' replaces the exiting
+    client with a command that does nothing, and tmux reports nothing."""
+    from types import SimpleNamespace
+
+    from vivibox import actions
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(actions, "tmux", lambda *a, **kw: calls.append(list(a)))
+    task = SimpleNamespace(id="demo-1")
+
+    monkeypatch.setattr(actions, "tmux_has", lambda target: False)
+    actions.agent_view(task, ["echo", "hi"])
+    binding = next(c for c in calls if c[0] == "bind-key")
+    assert binding[-2:] == ["-E", "true"], binding
+
+    # The keys belong to the server, which outlives any one session, so an old binding has to be
+    # replaced even when there is nothing to create.
+    calls.clear()
+    monkeypatch.setattr(actions, "tmux_has", lambda target: True)
+    actions.agent_view(task, ["echo", "hi"])
+    assert calls == [actions.LEAVE_BINDING], calls

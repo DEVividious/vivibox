@@ -768,13 +768,13 @@ class Vivibox(App):
 
     def busy(self, st: TaskState) -> bool:
         """The agent or the gate is at work and nothing is needed from you."""
-        return ui.group(st) == "Working" and self.is_running(st.id)
+        return ui.group(st) == "Working" and self.agent_running(st.id)
 
     def status(self, st: TaskState) -> str:
         group = ui.group(st)
         color = {"yellow": "yellow", "cyan": "cyan", "dim": "grey50", "green": "green"}[ui.COLORS[group]]
         text = "stopped" if group == "Stopped" else ui.activity(st, self.config.max_iterations)
-        if group == "Working" and not self.is_running(st.id):
+        if group == "Working" and not self.agent_running(st.id):
             text = "not started" if st.state is State.PLAN else "not running"  # s starts it
         mark = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else " "
         return f"[{color}]{mark} {text}[/]"
@@ -797,7 +797,7 @@ class Vivibox(App):
         task_id = self.selected_id()
         return next(((t, st) for t, st in self.pairs if st.id == task_id), None)
 
-    def is_running(self, task_id: str) -> bool:
+    def agent_running(self, task_id: str) -> bool:
         return task_id in self.running
 
     def show_detail(self) -> None:
@@ -805,7 +805,7 @@ class Vivibox(App):
             return
         pick = self.selected()
         if pick:
-            text = detail(*pick, self.config.max_iterations, self.is_running(pick[1].id), self.pod)
+            text = detail(*pick, self.config.max_iterations, self.agent_running(pick[1].id), self.pod)
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
         else:
@@ -832,6 +832,10 @@ class Vivibox(App):
 
     @on(DataTable.RowHighlighted)
     def highlighted(self) -> None:
+        # Queued messages can still arrive after the view is gone, and both of these reach for the
+        # screen. There is nothing to redraw for a view that has closed.
+        if not self.screen_stack:
+            return
         self.show_detail()
         self.refresh_bindings()
 
@@ -839,10 +843,14 @@ class Vivibox(App):
     def look_at_pods(self, task_ids: list[str]) -> None:
         """Asking the pods means running docker, which is far too slow for the event loop.
         Exclusive: a refresh that arrives while one is in flight replaces it."""
-        self.call_from_thread(self.pods_answered, pod_views(task_ids) if task_ids else {})
+        found = pod_views(task_ids) if task_ids else {}
+        # Docker can take longer than the app lives, and a closed view has nobody to tell.
+        if self.screen_stack:
+            self.call_from_thread(self.pods_answered, found)
 
     def pods_answered(self, found: dict) -> None:
-        if found == self.pods:
+        # Checked again here: the app can close between that check and this call.
+        if found == self.pods or not self.screen_stack:
             return
         self.pods = found
         for task_id in found:
@@ -861,7 +869,7 @@ class Vivibox(App):
         if not pick:
             # A finished task is history: you can only look at it or forget it.
             return action == "remove" and self.finished_entry(self.selected_id()) is not None
-        state, running = pick[1].state, self.is_running(pick[1].id)
+        state, running = pick[1].state, self.agent_running(pick[1].id)
         allowed = {
             "accept": state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL),
             "reply": state in WAITING_ONLY,

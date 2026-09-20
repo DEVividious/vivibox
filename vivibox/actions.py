@@ -64,6 +64,10 @@ def task_pod(task_id: str) -> Pod:
 # are, and Ctrl-q leaves the view from anywhere in it.
 TMUX = ["tmux", "-L", "vivibox", "-f", "/dev/null"]
 LEAVE_KEY = "C-q"
+# '-E true' replaces the detaching client with a command that does nothing. Without it tmux
+# prints "[detached (from session ...)]" after leaving its own screen, so the line lands on the
+# normal one and is still in your scrollback once vivibox closes.
+LEAVE_BINDING = ["bind-key", "-n", LEAVE_KEY, "detach-client", "-E", "true"]
 
 
 def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:
@@ -78,14 +82,21 @@ def tmux_has(target: str) -> bool:
     return tmux("has-session", "-t", target).returncode == 0
 
 
+def leave_key() -> None:
+    tmux(*LEAVE_BINDING)
+
+
 def agent_view(task: Task, command: list[str]) -> None:
     """A tmux session showing the agent, opened when missing; closing it never touches the agent."""
     session = tmux_session(task.id)
     if tmux_has(session):
+        # The keys live on the server, which outlives any one session, so a server still running
+        # from before carries an older binding. Setting it again is cheap.
+        leave_key()
         return
     tmux("new-session", "-d", "-s", session, "-n", "agent", shlex.join(command), check=True)
     for option in (
-        ["bind-key", "-n", LEAVE_KEY, "detach-client"],
+        LEAVE_BINDING,
         ["set-option", "-g", "status-right", " Ctrl-q: back to vivibox "],
         ["set-option", "-g", "status-left", f" {task.id} "],
         ["set-option", "-g", "status-left-length", "40"],

@@ -5,9 +5,13 @@ from vivibox.config import ConfigError, config_dir, load_config
 
 
 @pytest.fixture
-def fresh(env):
-    """A machine where vivibox runs for the first time: no config.toml."""
+def fresh(env, monkeypatch):
+    """A machine where vivibox runs for the first time: no config.toml. The template's tasks
+    directory is /srv/vivibox, yours: tasks made here go to the test's own."""
     (config_dir() / "config.toml").unlink()
+    template = firstrun.template().replace('"/srv/vivibox"', f'"{env / "tasks"}"')
+    assert str(env / "tasks") in template
+    monkeypatch.setattr(firstrun, "template", lambda: template)
     return env
 
 

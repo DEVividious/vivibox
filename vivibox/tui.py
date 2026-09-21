@@ -1293,6 +1293,8 @@ class Vivibox(App):
         self.done: list[dict] = []
         self.show_done = True
         self.has_done = False
+        # Tasks whose demo is being started or worked out, and what it is doing: shown as working.
+        self.starting: dict[str, str] = {}
         self.frame = 0
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
         self.running: set[str] = set()
@@ -1448,6 +1450,7 @@ class Vivibox(App):
             len(self.done),
             bool(projects()),
             self.has_done,
+            tuple(sorted(self.starting.items())),
         )
 
     def reload(self) -> None:
@@ -1521,8 +1524,8 @@ class Vivibox(App):
         return self.pods.get(self.selected_id() or "", PodView())
 
     def busy(self, st: TaskState) -> bool:
-        """The agent or the gate is at work and nothing is needed from you."""
-        return ui.group(st) == "Working" and self.agent_running(st.id)
+        """The agent or the gate is at work and nothing is needed from you, or the demo is starting."""
+        return (ui.group(st) == "Working" and self.agent_running(st.id)) or st.id in self.starting
 
     def status(self, st: TaskState) -> str:
         group = ui.group(st)
@@ -1530,6 +1533,8 @@ class Vivibox(App):
         text = "stopped" if group == "Stopped" else ui.activity(st, self.config.max_iterations)
         if group == "Working" and not self.agent_running(st.id):
             text = "not started" if st.state is State.PLAN else "not running"  # s starts it
+        if doing := self.starting.get(st.id):
+            color, text = "cyan", doing
         mark = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else " "
         return f"[{color}]{mark} {text}[/]"
 
@@ -1887,9 +1892,25 @@ class Vivibox(App):
             return
         self.run_demo(task.id, ask=True)
 
+    def demo_busy(self, task_id: str, doing: str) -> None:
+        """What the demo is doing, in the task's status, with the spinner a working agent has; ""
+        when it is done, one way or the other."""
+        if doing:
+            self.starting[task_id] = doing
+        else:
+            self.starting.pop(task_id, None)
+        self.reload()
+
     @work(thread=True)
     def run_demo(self, task_id: str, ask: bool = False, use: str = "", reply: str = "") -> None:
-        self.call_from_thread(self.notify, "Working on it…" if ask else "Starting it…", timeout=3)
+        doing = "working out how to run it" if ask or reply else "starting the demo"
+        self.call_from_thread(self.demo_busy, task_id, doing)
+        try:
+            self.demo_outcome(task_id, ask, use, reply)
+        finally:
+            self.call_from_thread(self.demo_busy, task_id, "")
+
+    def demo_outcome(self, task_id: str, ask: bool, use: str, reply: str) -> None:
         try:
             if use:
                 result = actions.use_instruction(task_id, use)
@@ -1915,7 +1936,6 @@ class Vivibox(App):
             )
         else:
             self.say("It stopped without listening; press d for what it said")
-        self.call_from_thread(self.reload)
 
     def say(self, message: str) -> None:
         self.call_from_thread(self.notify, message, severity="error", timeout=8)

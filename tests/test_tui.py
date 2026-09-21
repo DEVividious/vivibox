@@ -1210,3 +1210,33 @@ def test_a_new_task_can_be_filled_in_on_a_short_terminal(env, height):
         assert not buttons.overlaps(writer), "nothing hidden behind the buttons"
 
     run(scenario, size=(100, height))
+
+
+def test_starting_the_demo_shows_in_the_status_like_a_working_agent(env, monkeypatch):
+    """Starting a server takes a while; the row says so, with the spinner, until it is up or not."""
+    import threading
+
+    task = new_task()
+    release = threading.Event()
+
+    def slow_demo(task_id, ask=True, reply=""):
+        release.wait(5)
+        return actions.Demo(commands=["npm run dev"], starting=True)
+
+    monkeypatch.setattr(actions, "demo", slow_demo)
+
+    async def scenario(app, pilot):
+        worker = app.run_demo(task.id)
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if task.id in app.starting:
+                break
+        cell = str(app.table.get_cell(task.id, app.status_column))
+        assert "starting the demo" in cell and app.busy(task.read_state()), "shown as at work"
+        release.set()
+        await worker.wait()
+        await pilot.pause()
+        assert task.id not in app.starting
+        assert "starting the demo" not in str(app.table.get_cell(task.id, app.status_column))
+
+    run(scenario)

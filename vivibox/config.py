@@ -17,6 +17,19 @@ DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 TASK_NETWORK_BITS = 28
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Set by vivibox in the pod: passing your own value would break the pod, not configure the project.
+RESERVED_ENV = {
+    "DOCKER_HOST",
+    "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE",
+    "TESTCONTAINERS_HOST_OVERRIDE",
+    "HUSKY",
+    "OPENCODE_CONFIG",
+    "CLAUDE_CONFIG_DIR",
+    "JAVA_HOME",
+    "PATH",
+    "HOME",
+}
 
 
 class ConfigError(Exception):
@@ -61,6 +74,9 @@ class Project:
     java: str = ""
     # The editor for this project's review copies, when it differs from the one in config.toml.
     ide: str = ""
+    # Variables the build needs from your shell, e.g. a package registry token your login sets:
+    # the agent and the gate get their values from the environment vivibox was started in.
+    pass_env: list[str] = field(default_factory=list)
 
 
 def config_dir() -> Path:
@@ -171,4 +187,9 @@ def load_project(name: str, base: Path | None = None) -> Project:
     demo = data.get("demo", [])
     if not isinstance(demo, list) or not all(isinstance(c, str) and c.strip() for c in demo):
         raise ConfigError(f'{path}: demo must be a list of commands, e.g. ["npm run dev"]')
-    return Project(name, repo, verify, risky_extra, services, demo, java, ide)
+    pass_env = data.get("pass_env", [])
+    if not isinstance(pass_env, list) or not all(isinstance(n, str) and ENV_NAME.match(n) for n in pass_env):
+        raise ConfigError(f'{path}: pass_env must be a list of variable names, e.g. ["NPM_TOKEN"]')
+    if reserved := sorted(set(pass_env) & RESERVED_ENV):
+        raise ConfigError(f"{path}: pass_env: vivibox sets {', '.join(reserved)} in the pod itself")
+    return Project(name, repo, verify, risky_extra, services, demo, java, ide, pass_env)

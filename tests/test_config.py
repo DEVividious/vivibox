@@ -64,11 +64,24 @@ def test_loads_project(tmp_path):
     assert project.host_services == [HostService("host.docker.internal", 5432)]
 
 
+def test_a_project_passes_variables_from_your_shell(tmp_path):
+    base = write(
+        tmp_path / "projects" / "shop.toml",
+        'repo = "/r"\nverify = ["x"]\npass_env = ["REPO_TOKEN", "ACCOUNT_ID"]\n',
+    )
+    assert load_project("shop", base.parent).pass_env == ["REPO_TOKEN", "ACCOUNT_ID"]
+    base = write(tmp_path / "projects" / "old.toml", 'repo = "/r"\nverify = ["x"]\n')
+    assert load_project("old", base.parent).pass_env == []
+
+
 @pytest.mark.parametrize(
     "text",
     [
         'repo = "/r"\nverify = ["x"]\nhost_services = ["nohost"]\n',
         'repo = "/r"\nverify = ["x"]\nhost_services = ["h:99999"]\n',
+        'repo = "/r"\nverify = ["x"]\npass_env = ["TOKEN=abc"]\n',
+        'repo = "/r"\nverify = ["x"]\npass_env = "TOKEN"\n',
+        'repo = "/r"\nverify = ["x"]\npass_env = ["DOCKER_HOST"]\n',
     ],
 )
 def test_rejects_invalid_project(tmp_path, text):

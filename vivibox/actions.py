@@ -84,7 +84,7 @@ def task_pod(task_id: str) -> Pod:
         **toolchain.agent_env(project.java, image.env(ref)),
     }
     return Pod(
-        task.id, task.repo, ref, project.host_services, mounts, env,
+        task.id, task.repo, ref, project.host_services, mounts, env, project.pass_env,
         gate_dir=task.root / "gate", network_pool=load_config().network_pool,
     )  # fmt: skip
 
@@ -700,6 +700,15 @@ def start(task_id: str, resume: bool = False) -> str:
     """Starts or resumes the task's pod, agent and supervisor. Returns the model."""
     config = load_config()
     task, project = load(task_id)
+    pod = task_pod(task.id)
+    if missing := pod.missing_env():
+        # Docker would start the pod without them, and the build would fail later for a reason
+        # the agent cannot fix.
+        raise PodError(
+            f"{', '.join(missing)} not set: the {project.name} project passes "
+            f"{'it' if len(missing) == 1 else 'them'} to the task from the shell vivibox runs in "
+            "(pass_env). Set them, e.g. with your login command, then start vivibox from that shell."
+        )
     _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
@@ -707,7 +716,6 @@ def start(task_id: str, resume: bool = False) -> str:
     used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)
-    pod = task_pod(task.id)
     pod.up()
     toolchain.ensure(pod, project.java)
     harness = opencode.OpenCode(pod)

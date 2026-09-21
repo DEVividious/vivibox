@@ -42,9 +42,14 @@ def task(tmp_path):
 
 
 class FakePod:
-    def __init__(self, fail=()):
+    def __init__(self, fail=(), output="", passed=()):
         self.fail = set(fail)
         self.commands = []
+        self.output = output
+        self.passed = list(passed)
+
+    def passed_values(self):
+        return self.passed
 
     def gate_up(self):
         self.up = True
@@ -56,7 +61,7 @@ class FakePod:
         assert self.up, "commands run in the gate container"
         self.commands.append(cmd[-1])
         rc = 1 if cmd[-1] in self.fail else 0
-        return subprocess.CompletedProcess(cmd, rc, stdout=f"output of {cmd[-1]}\n", stderr="")
+        return subprocess.CompletedProcess(cmd, rc, stdout=f"output of {cmd[-1]}\n{self.output}", stderr="")
 
 
 def tick(task, *items):
@@ -241,3 +246,11 @@ def test_a_criterion_the_agent_wrapped_still_counts_as_ticked(tmp_path):
         "      red.md\n"
     )
     assert gate.missing_criteria(t) == [], gate.missing_criteria(t)
+
+
+def test_the_log_hides_the_values_of_passed_variables(task):
+    gate.accept_plan(task, ["true"])
+    pod = FakePod(output="GET https://repo/?token=s3cr3t-token 401\n", passed=["s3cr3t-token"])
+    result = gate.run_gate(task, pod, ["mvn -B verify"], [])
+    log = result.log.read_text()
+    assert "s3cr3t-token" not in log and "token=*** 401" in log

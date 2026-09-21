@@ -334,3 +334,20 @@ def test_the_view_does_not_open_on_an_image_that_fails_its_checks(env, monkeypat
     assert fake.main([]) == 1
     assert not fake.opened
     assert "fails its checks (java); see: vivibox image check" in capsys.readouterr().err
+
+
+def test_a_task_does_not_start_without_the_variables_its_project_passes(env, monkeypatch, tmp_path):
+    import pytest
+
+    from vivibox import actions, image
+    from vivibox.pod import Pod, PodError
+
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text() + 'pass_env = ["REPO_TOKEN"]\n')
+    monkeypatch.delenv("REPO_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(image, "exists", lambda ref: True)
+    monkeypatch.setattr(Pod, "up", lambda self: pytest.fail("the pod started without REPO_TOKEN"))
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    with pytest.raises(PodError, match="REPO_TOKEN not set.*pass_env"):
+        actions.start("demo-1")

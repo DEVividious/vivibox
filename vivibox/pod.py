@@ -8,6 +8,7 @@ read-only: under Sysbox, root in a nested container would otherwise write to it 
 from __future__ import annotations
 
 import ipaddress
+import os
 import shlex
 import shutil
 import socket
@@ -149,6 +150,9 @@ class Pod:
     # not change (.git config and hooks); added by the layers that own them.
     agent_mounts: list[Mount] = field(default_factory=list)
     agent_env: dict[str, str] = field(default_factory=dict)
+    # Names of variables passed from vivibox's own environment (Project.pass_env). Given to docker
+    # by name only, so their values are never on a command line.
+    passed_env: list[str] = field(default_factory=list)
     # Where the gate builds a fresh clone of the committed work; outside anything the agent can write.
     gate_dir: Path | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
@@ -350,6 +354,7 @@ class Pod:
             # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
             "-e", "HUSKY=0",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
+            *(arg for name in self.passed_env for arg in ("-e", name)),
             *(arg for m in mounts for arg in ("-v", m.arg())),
             "-w", str(self.repo),
             self.image, "sleep", "infinity",
@@ -375,10 +380,18 @@ class Pod:
             "-e", "TESTCONTAINERS_HOST_OVERRIDE=localhost",
             "-e", "HUSKY=0",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
+            *(arg for name in self.passed_env for arg in ("-e", name)),
             *(arg for m in mounts for arg in ("-v", m.arg())),
             "-w", str(self.gate_dir),
             self.image, "sleep", "infinity",
         ]  # fmt: skip
+
+    def passed_values(self) -> list[str]:
+        """The values of the passed variables, for keeping them out of logs."""
+        return [v for name in self.passed_env if len(v := os.environ.get(name, "")) >= 4]
+
+    def missing_env(self) -> list[str]:
+        return [name for name in self.passed_env if not os.environ.get(name)]
 
     # --- lifecycle --------------------------------------------------------------------------
 

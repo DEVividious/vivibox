@@ -113,14 +113,23 @@ toolchain a task needs. A project that wants different versions, or another lang
 own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
 before it reaches your checkout.
 
-Edit the file to add services on your host the agent may reach:
+Edit the file to add services on your host the agent may reach, or variables the build needs:
 
 ```toml
 repo = "~/projects/myproject"
 verify = ["bash gradlew test --no-daemon --console=plain"]
 java = "17"                                     # empty for Java 21
 host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
+pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
 ```
+
+`pass_env` is for what a build reads from its environment, such as a package registry token that a
+settings file in the repository refers to (`${env.REPO_TOKEN}` in Maven's settings.xml). The agent
+and the gate get the values from the shell you start vivibox in, so set them first, for example
+with your login command: `my_login && vivibox`. A task will not start while one is missing. The
+agent can read them, since it runs the build, so pass a token that only reads packages. The gate's
+log shows `***` in their place. A token that expires needs a fresh start: log in again, start
+vivibox from that shell, and stop and start the task with `s`.
 
 A repository you move or delete leaves its project file behind. vivibox does not offer a project it
 cannot work in: it names those on start and offers to forget them, which removes the project file

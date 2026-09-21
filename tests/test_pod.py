@@ -67,6 +67,19 @@ def test_agent_container_is_unprivileged(pod):
     assert not any("/var/run/docker.sock" in a for a in cmd), "never the host's Docker socket"
 
 
+def test_passed_variables_reach_both_containers_by_name_only(pod, tmp_path, monkeypatch):
+    monkeypatch.setenv("REPO_TOKEN", "s3cr3t-token")
+    monkeypatch.delenv("ACCOUNT_ID", raising=False)
+    pod.passed_env = ["REPO_TOKEN", "ACCOUNT_ID"]
+    pod.gate_dir = tmp_path / "gate"
+    for cmd in (pod.agent_command(), pod.gate_command()):
+        i = cmd.index("REPO_TOKEN")
+        assert cmd[i - 1] == "-e", "docker takes the value from its own environment"
+        assert not any("s3cr3t-token" in a for a in cmd), "never on a command line"
+    assert pod.missing_env() == ["ACCOUNT_ID"]
+    assert pod.passed_values() == ["s3cr3t-token"]
+
+
 def test_sidecar_mounts_repo_read_only_and_listens_only_on_socket(pod):
     cmd = pod.sidecar_command()
     assert f"{pod.repo}:{pod.repo}:ro" in cmd

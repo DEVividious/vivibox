@@ -115,5 +115,5 @@ def render(found: Detected) -> str:
     demo = ", ".join(f'"{c}"' for c in found.demo)
     return (
         f'repo = "{repo}"\nverify = [{verify}]\ndemo = [{demo}]\njava = "{found.java}"\n'
-        "risky_extra = []\nhost_services = []\n"
+        "risky_extra = []\nhost_services = []\npass_env = []\n"
     )

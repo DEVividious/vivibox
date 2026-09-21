@@ -210,6 +210,13 @@ def uncommitted(repo_dir: Path) -> list[str]:
     return [line[3:] for line in status.splitlines()]
 
 
+def masked(text: str, values: list[str]) -> str:
+    """The log without the values of passed variables: the agent reads it, and you might paste it."""
+    for value in values:
+        text = text.replace(value, "***")
+    return text
+
+
 def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], java: str = "") -> GateResult:
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
@@ -227,7 +234,7 @@ def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], 
                 out.flush()
                 started = time.monotonic()
                 p = pod.gate_exec("bash", "-c", command, check=False)
-                out.write(p.stdout + p.stderr + f"\n[exit {p.returncode}]\n\n")
+                out.write(masked(p.stdout + p.stderr, pod.passed_values()) + f"\n[exit {p.returncode}]\n\n")
                 result.commands.append(
                     CommandResult(command, p.returncode == 0, round(time.monotonic() - started, 1))
                 )

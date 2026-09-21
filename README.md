@@ -67,11 +67,16 @@ import your opencode.json…*:
   and every value of an MCP server's headers and environment, go to vivibox's key store, never to
   its config files.
 
-Every task gets the MCP servers you brought over. A remote one is reached from the task's pod; a
-local one, such as Serena, runs its command inside the pod, where `uvx` and `npx` are at hand.
+Every task gets the MCP servers that are on. A remote one is reached from the task's pod; a local
+one runs its command inside the pod, so it must be something the pod has (`uvx` and `npx` are at
+hand; a program installed only on your machine is not). vivibox brings Serena itself, installed in
+the agent image and set up on the task's repository; it is off until you turn it on.
 
-`k` in the view lists your providers, to add, import or remove one, whenever you like. The first
-model you pick for a role becomes its default in config.toml. The same, from a shell:
+`k` in the view, *Providers & MCP*, lists what you have. From there: *Add provider…*, *Import
+opencode.json…*, and *Manage…*, where you tick what is on and remove what you no longer want. A
+provider turned off offers no models; an MCP server turned off is given to no task; both keep their
+keys for when you turn them on again. The first model you pick for a role becomes its default in
+config.toml. The same, from a shell:
 
 ```bash
 vivibox auth set anthropic                                 # asks for the key
@@ -136,7 +141,7 @@ The footer shows only the keys that do something for the selected task:
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
-| `k` | your providers and MCP servers: add a provider from opencode's list with a key, import an opencode.json, or remove one |
+| `k` | providers & MCP: add a provider from opencode's list with a key, import an opencode.json, or manage what is on and remove what is not wanted |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |

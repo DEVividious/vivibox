@@ -242,9 +242,11 @@ def available_models(refresh: bool = False) -> dict[str, list[str]]:
     except (OSError, ValueError):
         cached = {}
     # Your own providers list their models themselves; opencode knows nothing of them.
-    found, now_ = {name: listed for name, listed in providers.models().items() if listed}, time.time()
+    on = lambda name: providers.enabled(providers.PROVIDER, name)  # noqa: E731
+    found = {name: listed for name, listed in providers.models().items() if listed and on(name)}
+    now_ = time.time()
     for provider in keys.list_keys():
-        if provider in found:
+        if provider in found or not on(provider) or providers.is_mcp_secret(provider):
             continue
         entry = cached.get(provider) or {}
         if not refresh and entry.get("models") and now_ - entry.get("at", 0) < MODELS_CACHE_SECONDS:

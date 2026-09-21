@@ -118,3 +118,11 @@ def test_lfs_is_refused(tmp_path):
     (source / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
     with pytest.raises(r.RepoError, match="LFS"):
         r.prepare(source, tmp_path / "repo", "demo-1", tmp_path)
+
+
+def test_what_tools_in_the_pod_write_is_not_the_agent_s_to_commit(cloned):
+    """Serena keeps its project file and caches in .serena/ of the repository it reads."""
+    repo = cloned[1]
+    (repo / ".serena").mkdir()
+    (repo / ".serena" / "project.yml").write_text("name: demo\n")
+    assert git(repo, "status", "--porcelain") == ""

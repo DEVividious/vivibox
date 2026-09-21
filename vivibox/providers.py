@@ -79,9 +79,59 @@ def definition(provider: str) -> dict:
     return found
 
 
+# MCP servers vivibox brings itself, installed in the agent image: off until you turn one on.
+BUILTIN_MCP = {
+    "serena": {
+        "type": "local",
+        "command": ["serena", "start-mcp-server", "--context", "ide", "--project", "/task/repo",
+                    "--enable-web-dashboard", "false", "--open-web-dashboard", "false"],
+    },
+}  # fmt: skip
+
+
+def state_path() -> Path:
+    return config_dir() / "enabled.json"
+
+
+def _state() -> dict:
+    return _load(state_path())
+
+
+def enabled(kind: str, name: str) -> bool:
+    """Yours are on until you turn them off; vivibox's own MCP servers are off until you turn them on."""
+    state = _state()
+    if kind == MCP and name in BUILTIN_MCP:
+        return name in state.get("builtin_on", [])
+    return name not in state.get("off", {}).get(kind, [])
+
+
+def set_enabled(kind: str, name: str, on: bool) -> None:
+    state = _state()
+    if kind == MCP and name in BUILTIN_MCP:
+        names = set(state.get("builtin_on", []))
+        state["builtin_on"] = sorted(names | {name} if on else names - {name})
+    else:
+        off = state.setdefault("off", {})
+        names = set(off.get(kind, []))
+        off[kind] = sorted(names - {name} if on else names | {name})
+    _save(state_path(), state)
+
+
+def task_mcp() -> dict[str, dict]:
+    """The MCP servers a task gets: yours that are on, and vivibox's own you turned on."""
+    found = {name: entry for name, entry in load_mcp().items() if enabled(MCP, name)}
+    found |= {name: copy.deepcopy(entry) for name, entry in BUILTIN_MCP.items() if enabled(MCP, name)}
+    return found
+
+
+def is_mcp_secret(name: str) -> bool:
+    """A key store entry of an MCP server, not a provider's key: their names start so."""
+    return name.startswith("mcp.")
+
+
 def mcp_secrets() -> list[str]:
     """The key store entries the MCP servers read in a task's pod."""
-    return sorted(set(MOUNTED.findall(json.dumps(load_mcp()))))
+    return sorted(set(MOUNTED.findall(json.dumps(task_mcp()))))
 
 
 def without_comments(text: str) -> str:
@@ -248,6 +298,9 @@ def _mcp(name: str, given: dict, env: dict[str, str], base: Path, yours: dict) -
         what = "local " + (" ".join(command) if isinstance(command, list) else str(command))
     same = yours.get(name) == entry and all(_stored_secret(k) == v for k, v in secrets.items())
     status = "new" if name not in yours else "same" if same else "replaces"
+    if name in BUILTIN_MCP:
+        # vivibox's own runs in the pod; a command from your machine would not be there.
+        status = "builtin"
     return Found(MCP, name, what, ", ".join(said) or "none needed", status, entry, secrets)
 
 

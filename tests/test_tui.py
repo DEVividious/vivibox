@@ -1019,9 +1019,9 @@ def test_an_import_lists_what_it_brings_and_you_decide_on_what_you_have(env, tmp
         ' "models": {"coder": {}}},'
         '"deepseek": {"options": {"apiKey": "sk-theirs"}}},'
         ' "mcp": {"company": {"type": "remote", "url": "https://mcp.acme.example"},'
-        ' "serena": {"type": "local", "command": ["uvx", "serena"]}}}'
+        ' "tools": {"type": "local", "command": ["npx", "tools-mcp"]}}}'
     )
-    providers.bring_over([f for f in providers.read_opencode(source).found if f.name == "serena"])
+    providers.bring_over([f for f in providers.read_opencode(source).found if f.name == "tools"])
 
     async def scenario(app, pilot):
         app.import_opencode(lambda names: None)
@@ -1039,9 +1039,9 @@ def test_an_import_lists_what_it_brings_and_you_decide_on_what_you_have(env, tmp
         acme, deepseek = rows("provider")
         assert "acme  1 model, key from $ACME_KEY" in acme[0] and acme[1:] == (True, False), "new: ticked"
         assert "differs from yours: tick to overwrite" in deepseek[0] and deepseek[1:] == (False, False)
-        company, serena = rows("mcp")
+        company, tools = rows("mcp")
         assert "remote https://mcp.acme.example" in company[0] and company[1:] == (True, False)
-        assert "same as yours" in serena[0] and serena[1:] == (False, True), "nothing to decide"
+        assert "same as yours" in tools[0] and tools[1:] == (False, True), "nothing to decide"
         assert "not for vivibox: agent" in " ".join(str(w.render()) for w in screen.query(Label))
         screen.query_one("#import").press()
         await pilot.pause()
@@ -1049,7 +1049,7 @@ def test_an_import_lists_what_it_brings_and_you_decide_on_what_you_have(env, tmp
     run(scenario)
     assert keys.get_key("deepseek") == "sk-mine", "yours kept: you did not tick it"
     assert keys.get_key("acme") == "acme-secret"
-    assert list(providers.load()) == ["acme"] and sorted(providers.load_mcp()) == ["company", "serena"]
+    assert list(providers.load()) == ["acme"] and sorted(providers.load_mcp()) == ["company", "tools"]
 
 
 def test_a_file_is_judged_before_you_pick_it(env, tmp_path):
@@ -1113,25 +1113,47 @@ def test_the_project_is_a_list_even_with_one_project(env):
     run(scenario)
 
 
-def test_k_lists_your_providers_and_removes_one(env):
+def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env):
     from vivibox import keys, providers
 
     keys.set_key("deepseek", "sk-mine")
+    keys.set_key("openai", "sk-other")
 
     async def scenario(app, pilot):
         await pilot.press("k")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ManageProviders)
-        assert screen.rows == [("provider", "deepseek", "key sk-… (7)")]
-        screen.query_one("#remove").press()
+        assert [(r[1], r[3]) for r in screen.rows] == [
+            ("deepseek", True),
+            ("openai", True),
+            ("serena", False),
+        ]
+        screen.query_one("#manage").press()
+        await pilot.pause()
+        manage = app.screen
+        assert isinstance(manage, tui.ManageItems)
+        items = manage.query_one("#items", SelectionList)
+        items.deselect(1)  # openai off
+        items.select(2)  # vivibox's Serena on
+        manage.query_one("#save").press()
+        await pilot.pause()
+        assert [(r[1], r[3]) for r in app.screen.rows] == [
+            ("deepseek", True),
+            ("openai", False),
+            ("serena", True),
+        ]
+        app.screen.query_one("#manage").press()
+        await pilot.pause()
+        app.screen.query_one("#items", SelectionList).highlighted = 0
+        app.screen.query_one("#remove").press()
         await pilot.pause()
         await pilot.press("enter")  # confirm
         await pilot.pause()
-        assert app.screen.rows == [] and not app.screen.query_one("#remove").display
 
     run(scenario)
-    assert keys.list_keys() == {} and providers.load() == {}
+    assert "deepseek" not in keys.list_keys() and keys.get_key("openai") == "sk-other"
+    assert not providers.enabled(providers.PROVIDER, "openai") and providers.enabled(providers.MCP, "serena")
 
 
 def test_the_view_says_your_opencode_configuration_can_be_brought_over(env, monkeypatch):

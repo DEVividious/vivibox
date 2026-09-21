@@ -118,6 +118,11 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path) -> str:
     base = git("rev-parse", "HEAD", cwd=repo).stdout.strip()
     for d in git_dirs(repo):
         _sanitize(d)
+    # What tools in the pod write into the repository and nobody means to commit: Serena's project
+    # file and caches. Here, not in the project's .gitignore, which is yours.
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    with (repo / ".git" / "info" / "exclude").open("a") as f:
+        f.write("\n# vivibox: written by tools in the task's pod\n.serena/\n")
     (meta / PROTECTION_RECORD).write_text(json.dumps(_fingerprint(repo), indent=2) + "\n")
     who = identity(source)
     (meta / "gitconfig").write_text(

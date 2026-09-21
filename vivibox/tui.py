@@ -702,6 +702,7 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
 STATUS = {
     "replaces": "  [yellow]differs from yours: tick to overwrite[/]",
     "same": "  [dim]same as yours[/]",
+    "builtin": "  [dim]vivibox has its own: turn it on in Manage[/]",
 }
 
 
@@ -729,7 +730,7 @@ class ChooseImport(Dialog):
                         import_label(f),
                         i,
                         f.status == "new",
-                        disabled=f.status == "same",
+                        disabled=f.status in ("same", "builtin"),
                     )
                     for i, f in enumerate(self.reading.found)
                     if f.kind == kind
@@ -889,11 +890,11 @@ class ImportSource(Dialog):
         self.dismiss(None)
 
 
-def provider_rows() -> list[tuple[str, str, str]]:
-    """Your providers and MCP servers, as (kind, name, what vivibox has for it)."""
+def provider_rows() -> list[tuple[str, str, str, bool]]:
+    """Your providers and MCP servers, and vivibox's own: (kind, name, what it is, whether it is on)."""
     stored, defined = keys.list_keys(), providers.load()
     rows = []
-    for name in sorted((set(stored) - set(providers.mcp_secrets())) | set(defined)):
+    for name in sorted({n for n in stored if not providers.is_mcp_secret(n)} | set(defined)):
         key = (
             f"key {stored[name]}"
             if name in stored
@@ -905,25 +906,34 @@ def provider_rows() -> list[tuple[str, str, str]]:
         if name in defined:
             n = len(defined[name].get("models", {}))
             said.append(f"your endpoint, {n} model{'s' * (n != 1)}")
-        rows.append((providers.PROVIDER, name, ", ".join(said)))
-    for name, entry in sorted(providers.load_mcp().items()):
-        where = entry.get("url", "") if entry.get("type") == "remote" else " ".join(entry.get("command", []))
-        rows.append((providers.MCP, name, f"MCP server, {entry.get('type', 'local')} {where}"))
+        rows.append((providers.PROVIDER, name, ", ".join(said), providers.enabled(providers.PROVIDER, name)))
+    servers = {**providers.load_mcp(), **providers.BUILTIN_MCP}
+    for name, entry in sorted(servers.items()):
+        where = (
+            entry.get("url", "") if entry.get("type") == "remote" else " ".join(entry.get("command", [])[:1])
+        )
+        own = " (comes with vivibox)" if name in providers.BUILTIN_MCP else ""
+        said = f"MCP server, {entry.get('type', 'local')} {where}{own}"
+        rows.append((providers.MCP, name, said, providers.enabled(providers.MCP, name)))
     return rows
 
 
+def row_label(name: str, said: str, on: bool) -> str:
+    state = "" if on else "  [yellow]off[/]"
+    return f"{escape(name)}  [dim]{escape(ui.shorten(said, 70))}[/]{state}"
+
+
 class ManageProviders(Dialog):
-    """The providers vivibox can run models of, and the MCP servers every task gets: added here,
-    imported from an opencode.json, or removed."""
+    """Your providers and MCP servers: add a provider, import an opencode.json, or manage what is on."""
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Your providers and MCP servers:")
+            yield Label("Providers & MCP")
             yield OptionList(id="providers", classes="catalog")
             with Horizontal(classes="buttons"):
                 yield Button("Add provider…", variant="primary", id="add")
                 yield Button("Import opencode.json…", id="import")
-                yield Button("Remove", id="remove")
+                yield Button("Manage…", id="manage")
                 yield Button("Close", id="close")
 
     def on_mount(self) -> None:
@@ -934,14 +944,12 @@ class ManageProviders(Dialog):
         self.rows = provider_rows()
         options = self.query_one("#providers", OptionList)
         options.clear_options()
-        if self.rows:
-            options.add_options([f"{escape(n)}  [dim]{escape(said)}[/]" for _, n, said in self.rows])
-            options.highlighted = 0
-        else:
-            options.add_option(Option("none yet: add a provider, or import an opencode.json", disabled=True))
-        self.query_one("#remove").display = bool(self.rows)
+        options.add_options([row_label(n, said, on) for _, n, said, on in self.rows])
+        mine = [r for r in self.rows if r[1] not in providers.BUILTIN_MCP]
+        if not mine:
+            options.add_option(Option("no providers yet: add one, or import an opencode.json", disabled=True))
 
-    def changed(self, names: list[str]) -> None:
+    def changed(self, names) -> None:
         if names:
             self.fill()
             self.app.refresh_models()
@@ -952,26 +960,70 @@ class ManageProviders(Dialog):
             self.app.push_screen(AddProvider(self.app.catalog, importing=False), self.changed)
         elif event.button.id == "import":
             self.app.import_opencode(self.changed)
-        elif event.button.id == "remove":
-            at = self.query_one("#providers", OptionList).highlighted
-            if at is None or at >= len(self.rows):
-                return
-            kind, name, _ = self.rows[at]
-            what = "MCP server" if kind == providers.MCP else "provider"
-
-            def answered(yes: bool) -> None:
-                if yes and providers.forget(name, kind):
-                    self.notify(f"Removed {name}.")
-                    self.changed([name])
-
-            self.app.push_screen(
-                Confirm(f"Remove the {what} {name} and its secrets from vivibox?", "Remove"), answered
-            )
+        elif event.button.id == "manage":
+            self.app.push_screen(ManageItems(), self.changed)
         else:
             self.dismiss(None)
 
     def key_escape(self) -> None:
         self.dismiss(None)
+
+
+class ManageItems(Dialog):
+    """What is on: a ticked provider's models are offered for a task, a ticked MCP server is given to
+    every task. Unticking keeps it, and its key, for later; Remove takes it away. Save applies."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Tick what is on; Remove takes the highlighted one away with its secrets.")
+            self.rows = provider_rows()
+            yield SelectionList[int](
+                *(Selection(row_label(n, said, True), i, on) for i, (_, n, said, on) in enumerate(self.rows)),
+                id="items",
+                classes="catalog",
+            )
+            with Horizontal(classes="buttons"):
+                yield Button("Save", variant="primary", id="save")
+                yield Button("Remove", variant="error", id="remove")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#items").focus()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        items = self.query_one("#items", SelectionList)
+        if event.button.id == "save":
+            ticked = set(items.selected)
+            changed = []
+            for i, (kind, name, _, on) in enumerate(self.rows):
+                if (i in ticked) != on:
+                    providers.set_enabled(kind, name, i in ticked)
+                    changed.append(name)
+            self.dismiss(changed)
+        elif event.button.id == "remove":
+            at = items.highlighted
+            if at is None or at >= len(self.rows):
+                return
+            kind, name, _, _ = self.rows[at]
+            if name in providers.BUILTIN_MCP:
+                self.notify(f"{name} comes with vivibox; untick it to turn it off.", severity="warning")
+                return
+            what = "MCP server" if kind == providers.MCP else "provider"
+
+            def answered(yes: bool) -> None:
+                if yes and providers.forget(name, kind):
+                    self.notify(f"Removed {name}.")
+                    self.dismiss([name])
+
+            self.app.push_screen(
+                Confirm(f"Remove the {what} {name} and its secrets from vivibox?", "Remove"), answered
+            )
+        else:
+            self.dismiss([])
+
+    def key_escape(self) -> None:
+        self.dismiss([])
 
 
 class AddProvider(Dialog):
@@ -1306,7 +1358,9 @@ class Vivibox(App):
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
     Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
-    AddProvider, ChooseImport, ImportSource, ManageProviders, BrowseFile { align: center middle; }
+    AddProvider, ChooseImport, ImportSource, ManageProviders, ManageItems, BrowseFile {
+        align: center middle;
+    }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),
@@ -1329,7 +1383,7 @@ class Vivibox(App):
         Binding("i", "new_project", "New project"),
         Binding("P", "new_project", "New project", show=False),
         Binding("x", "remove", "Delete"),
-        Binding("k", "providers", "Providers"),
+        Binding("k", "providers", "Providers & MCP"),
         Binding("q", "quit", "Quit"),
     ]
 

@@ -102,6 +102,7 @@ def checks(uid: int, gid: int) -> list[Check]:
         Check("claude code", "claude --version", "(Claude Code)"),
         Check("mise", "mise --version", "linux"),
         Check("ripgrep", "rg --version | head -1", "ripgrep"),
+        Check("serena, the MCP server vivibox offers", "serena --help | head -1", "Usage"),
         Check(
             "no secrets in the image environment",
             "env | cut -d= -f1 | grep -iE 'token|secret|key|password|auth' || echo none",

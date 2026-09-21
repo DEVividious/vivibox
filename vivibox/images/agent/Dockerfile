@@ -7,15 +7,18 @@ ARG DOCKER_CLI_IMAGE=docker:29.8.1-cli
 ARG NODE_IMAGE=node:24.21.0-trixie-slim
 ARG MISE_IMAGE=jdxcode/mise:2026.9.11
 ARG BASE_IMAGE=maven:3.9.16-amazoncorretto-21-debian
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.8
 
 FROM ${DOCKER_CLI_IMAGE} AS docker-cli
 FROM ${NODE_IMAGE} AS node
 FROM ${MISE_IMAGE} AS mise
+FROM ${UV_IMAGE} AS uv
 
 FROM ${BASE_IMAGE}
 
 ARG OPENCODE_VERSION=1.18.31
 ARG CLAUDE_CODE_VERSION=2.1.278
+ARG SERENA_VERSION=v1.7.0
 ARG UID=1000
 ARG GID=1000
 
@@ -37,6 +40,14 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && npm install -g --no-fund --no-audit "opencode-ai@${OPENCODE_VERSION}" \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
+
+# Serena, the MCP server vivibox offers itself (off until you turn it on): installed here with its
+# own Python, outside /cache, so a project's mise versions cannot break it and it needs no download
+# when a task starts. It reads the task's repository through language servers it fetches per language.
+COPY --from=uv /uv /usr/local/bin/uv
+RUN UV_PYTHON_INSTALL_DIR=/opt/python UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    uv tool install --python 3.13 --no-cache "git+https://github.com/oraios/serena@${SERENA_VERSION}" \
+ && serena --help >/dev/null
 
 # Default toolchains. /etc/mise/config.toml is mise's system-wide config, so it applies in the gate
 # container too, whose /config is a fresh tmpfs that loses anything mise writes to HOME. Without it

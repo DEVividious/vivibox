@@ -152,9 +152,9 @@ SERVERS = """{
   "mcp": {
     "company": {"type": "remote", "url": "https://mcp.acme.example/sse",
                 "headers": {"Authorization": "Bearer mcp-secret"}},
-    "serena": {"type": "local",
-               "command": ["uvx", "--from", "git+https://github.com/oraios/serena", "serena"],
-               "environment": {"SERENA_TOKEN": "{env:SERENA_TOKEN}"}}
+    "tools": {"type": "local",
+              "command": ["npx", "-y", "@acme/tools-mcp"],
+              "environment": {"TOOLS_TOKEN": "{env:TOOLS_TOKEN}"}}
   },
   "agent": {}
 }"""
@@ -168,45 +168,43 @@ def servers(env, tmp_path):
 
 
 def test_mcp_servers_come_over_with_their_secrets_in_the_key_store(servers):
-    reading = providers.read_opencode(servers, env={"SERENA_TOKEN": "serena-secret"})
+    reading = providers.read_opencode(servers, env={"TOOLS_TOKEN": "tools-secret"})
     assert [(f.kind, f.name, f.what) for f in reading.found] == [
         ("mcp", "company", "remote https://mcp.acme.example/sse"),
-        ("mcp", "serena", "local uvx --from git+https://github.com/oraios/serena serena"),
+        ("mcp", "tools", "local npx -y @acme/tools-mcp"),
     ]
     assert reading.left == ["agent"]
     providers.bring_over(reading.found)
     stored = providers.mcp_path().read_text()
-    assert "mcp-secret" not in stored and "serena-secret" not in stored
+    assert "mcp-secret" not in stored and "tools-secret" not in stored
     assert keys.get_key("mcp.company.authorization") == "Bearer mcp-secret"
-    assert keys.get_key("mcp.serena.serena_token") == "serena-secret"
-    assert providers.mcp_secrets() == ["mcp.company.authorization", "mcp.serena.serena_token"]
+    assert keys.get_key("mcp.tools.tools_token") == "tools-secret"
+    assert providers.mcp_secrets() == ["mcp.company.authorization", "mcp.tools.tools_token"]
 
 
 def test_a_task_gets_the_mcp_servers_pointing_at_mounted_secrets(servers):
-    providers.import_opencode(servers, env={"SERENA_TOKEN": "t"})
+    providers.import_opencode(servers, env={"TOOLS_TOKEN": "t"})
     mcp = opencode.config("deepseek/deepseek-v4-flash")["mcp"]
     assert mcp["company"]["headers"] == {
         "Authorization": "{file:/run/vivibox-secrets/mcp.company.authorization}"
     }
-    assert mcp["serena"]["environment"] == {
-        "SERENA_TOKEN": "{file:/run/vivibox-secrets/mcp.serena.serena_token}"
-    }
+    assert mcp["tools"]["environment"] == {"TOOLS_TOKEN": "{file:/run/vivibox-secrets/mcp.tools.tools_token}"}
 
 
 def test_what_you_have_is_told_apart_from_what_differs(servers):
-    env = {"SERENA_TOKEN": "t"}
+    env = {"TOOLS_TOKEN": "t"}
     assert {f.status for f in providers.read_opencode(servers, env=env).found} == {"new"}
     providers.import_opencode(servers, env=env)
     assert {f.status for f in providers.read_opencode(servers, env=env).found} == {"same"}
-    status = {f.name: f.status for f in providers.read_opencode(servers, env={"SERENA_TOKEN": "other"}).found}
-    assert status == {"company": "same", "serena": "replaces"}, "a changed secret is a difference too"
+    status = {f.name: f.status for f in providers.read_opencode(servers, env={"TOOLS_TOKEN": "other"}).found}
+    assert status == {"company": "same", "tools": "replaces"}, "a changed secret is a difference too"
 
 
 def test_removing_an_mcp_server_removes_its_secrets(servers):
-    providers.import_opencode(servers, env={"SERENA_TOKEN": "t"})
+    providers.import_opencode(servers, env={"TOOLS_TOKEN": "t"})
     assert providers.forget("company", providers.MCP)
     assert "company" not in providers.load_mcp() and "mcp.company.authorization" not in keys.list_keys()
-    assert "mcp.serena.serena_token" in keys.list_keys()
+    assert "mcp.tools.tools_token" in keys.list_keys()
 
 
 def test_a_file_with_neither_is_refused(env, tmp_path):
@@ -223,3 +221,36 @@ def test_a_fresh_download_is_offered_first(env, tmp_path):
     (home / "Downloads" / "report.json").write_text("{}")
     found = providers.discover([], env={"HOME": str(home)})
     assert found == [(home / "Downloads" / "opencode (1).json", 2)]
+
+
+def test_vivibox_own_serena_is_off_until_turned_on_and_runs_on_the_task_repository(env):
+    assert "serena" not in providers.task_mcp()
+    providers.set_enabled(providers.MCP, "serena", True)
+    serena = opencode.config("deepseek/deepseek-v4-flash")["mcp"]["serena"]
+    assert serena["command"][:2] == ["serena", "start-mcp-server"] and "/task/repo" in serena["command"]
+    providers.set_enabled(providers.MCP, "serena", False)
+    assert "mcp" not in opencode.config("deepseek/deepseek-v4-flash")
+
+
+def test_a_server_turned_off_is_kept_but_not_given_to_tasks(servers):
+    providers.import_opencode(servers, env={"TOOLS_TOKEN": "t"})
+    providers.set_enabled(providers.MCP, "company", False)
+    assert "company" in providers.load_mcp() and "company" not in providers.task_mcp()
+    assert providers.mcp_secrets() == ["mcp.tools.tools_token"], "its secret is not mounted either"
+
+
+def test_a_serena_from_your_machine_is_not_imported_over_vivibox_own(env, tmp_path):
+    path = tmp_path / "opencode.json"
+    path.write_text('{"mcp": {"serena": {"type": "local", "command": ["serena", "start-mcp-server"]}}}')
+    (found,) = providers.read_opencode(path, env={}).found
+    assert found.status == "builtin"
+
+
+def test_a_provider_turned_off_offers_no_models(env, monkeypatch, tmp_path):
+    keys.set_key("deepseek", "k")
+    monkeypatch.setattr(actions, "provider_models", lambda p: [f"{p}/m"])
+    monkeypatch.setattr(actions, "models_cache", lambda: tmp_path / "cache.json")
+    assert "deepseek" in actions.available_models(refresh=True)
+    providers.set_enabled(providers.PROVIDER, "deepseek", False)
+    assert "deepseek" not in actions.available_models(refresh=True)
+    assert keys.get_key("deepseek") == "k", "its key is kept for when it is on again"

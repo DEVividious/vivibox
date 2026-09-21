@@ -60,7 +60,7 @@ def config(model: str, used: list[str] | tuple = ()) -> dict:
         "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow"},
         "provider": {name: provider_entry(name) for name in names},
         # The MCP servers you brought over from opencode; their secrets are mounted like keys.
-        **({"mcp": servers} if (servers := providers.load_mcp()) else {}),
+        **({"mcp": servers} if (servers := providers.task_mcp()) else {}),
         "instructions": [INSTRUCTIONS],
     }
 

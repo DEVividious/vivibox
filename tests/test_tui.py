@@ -1569,7 +1569,7 @@ def test_the_panel_shows_times_on_your_clock(env, monkeypatch):
 def test_a_task_never_started_does_not_claim_it_was_interrupted(env):
     task = new_task()
     shown = detail(task, task.read_state(), 3, running=False)
-    assert "Not started yet" in shown and "`s` starts it" in shown
+    assert "Not started yet" in shown and "`s` start" in shown
     assert "goes on from where it was" not in shown
     task.event("started", model="m")
     assert "goes on from where it was" in detail(task, task.read_state(), 3, running=False)
@@ -1654,7 +1654,7 @@ def test_a_failed_task_looks_failed_and_s_starts_it_again(env, monkeypatch):
         await pilot.press("d")
         await pilot.pause()
         shown = screen_text(app)
-        assert "429 Too Many Requests" in shown and "Press s to try again" in shown
+        assert "429 Too Many Requests" in shown and "Next: s try again" in shown
         await pilot.press("s")
         await app.workers.wait_for_complete()
         assert actions.started == [failed.id]
@@ -1713,3 +1713,89 @@ def test_w_is_only_named_when_there_is_an_agent_to_watch(env):
     task.set_session("opencode", "ses_1")
     assert "Look at the agent with `w`" in detail(task, task.read_state(), 3, running=True)
     assert "`w`" not in detail(task, task.read_state(), 3, running=False)
+
+
+def blocked_on_verification(goal="Goal"):
+    task = implementing(goal)
+    task.transition(State.VERIFY)
+    task.event("gate", passed=False)
+    (task.meta / "handoff" / "verify-feedback.md").write_text(
+        "# Verification failed\n\n- Command failed: `mvn`\n"
+    )
+    (task.meta / "handoff" / "verify.log").write_text("[ERROR] boom\n")
+    task.transition(State.CHECKPOINT_BLOCKED, reason="verification still failing")
+    return task
+
+
+def test_g_verifies_a_blocked_task_again_and_is_offered_only_there(env):
+    task = blocked_on_verification()
+    other = new_task()
+    at_plan_checkpoint(other)
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=[st.id for _, st in app.pairs].index(other.id))
+        await pilot.pause()
+        assert not app.check_action("verify_again", ()), "nothing to verify at the plan"
+        app.table.move_cursor(row=[st.id for _, st in app.pairs].index(task.id))
+        await pilot.pause()
+        assert app.check_action("verify_again", ())
+        await pilot.press("g")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert task.read_state().state is State.VERIFY
+        assert actions.started == [task.id], "nobody was running it"
+        assert any("Verifying" in str(n.message) for n in app._notifications)
+
+    run(scenario)
+
+
+def test_the_next_step_comes_first_in_the_panel(env):
+    task = blocked_on_verification()
+    shown = detail(task, task.read_state(), 3, running=True)
+    lines = [line for line in shown.splitlines() if line.strip()]
+    assert lines[2].startswith("**Next:**"), lines[:3]
+    assert "`g` verify again" in lines[2] and "`r`" in lines[2]
+    assert lines[2].index("`g`") < shown.index("What the build said")
+
+
+def test_a_running_verification_is_shown_as_running(env, monkeypatch):
+    task = implementing()
+    task.transition(State.VERIFY)
+    log = task.meta / "log" / "verify-1-120000.log"
+    log.write_text(
+        "# fresh clone of commit abc\n\n$ mvn -B verify\n[INFO] Scanning\n[INFO] Compiling 12 files\n"
+    )
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "**Verification running**" in shown and "`mvn -B verify`" in shown
+    assert "[INFO] Compiling 12 files" in shown and "The gate has not run yet" not in shown
+    assert f"`{log}`" in shown, "where the whole log is"
+
+
+def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
+    # The pager takes the terminal over (App.suspend), which Pilot cannot do; the command is tested.
+    task = blocked_on_verification()
+    (task.meta / "log" / "verify-1-120000.log").write_text("old\n")
+    newest = task.meta / "log" / "verify-2-130000.log"
+    newest.write_text("new\n")
+    monkeypatch.setenv("PAGER", "less -R")
+    assert tui.newest_log(task) == newest
+    assert tui.pager_command(newest) == ["less", "-R", str(newest)]
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert app.check_action("show_log", ())
+
+    run(scenario)
+
+
+def test_l_is_offered_only_when_there_is_a_log(env):
+    task = new_task()
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert not app.check_action("show_log", ())
+        (task.meta / "log" / "supervisor.log").write_text("Supervising\n")
+        assert app.check_action("show_log", ())
+
+    run(scenario)

@@ -28,7 +28,9 @@ TRANSITIONS: dict[State, set[State]] = {
     # Approved: continue to the checkpoint the risky change was blocking.
     # Rejected: back to the agent.
     State.APPROVAL_RISKY: CHECKPOINTS | {State.PLAN, State.IMPLEMENT},
-    State.CHECKPOINT_BLOCKED: {State.IMPLEMENT},
+    # Your reply sends the agent back; "verify again" runs the checks once more without it, for
+    # when what failed was outside the code (a token, Docker, a service).
+    State.CHECKPOINT_BLOCKED: {State.IMPLEMENT, State.VERIFY},
     State.CHECKPOINT_FINAL: {State.DONE, State.IMPLEMENT},
     State.DONE: set(),
 }

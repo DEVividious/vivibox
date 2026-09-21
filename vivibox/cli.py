@@ -378,6 +378,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_again(args: argparse.Namespace) -> int:
+    task, _ = actions.load(args.task)
+    actions.verify_again(task)
+    print(f"Verifying {task.id} again, without a turn of the agent.")
+    carry_on(task)
+    return 0
+
+
 def cmd_risky(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     diffs = actions.risky_diffs(task, project)
@@ -529,6 +537,13 @@ def parser() -> argparse.ArgumentParser:
     demo.add_argument("--yes", action="store_true", help="use the instruction from the last task")
     demo.add_argument("--no-ask", action="store_true", help="do not ask the agent when nothing is known")
     demo.set_defaults(func=cmd_demo)
+
+    again = sub.add_parser(
+        "verify-again",
+        help="a blocked task: run the verification once more, without the agent, e.g. after a token expired",
+    )
+    again.add_argument("task", help="task id")
+    again.set_defaults(func=cmd_verify_again)
 
     risky = sub.add_parser("risky", help="show changes to files that run code on the host")
     risky.add_argument("task", help="task id")

@@ -17,6 +17,14 @@ def test_ago():
     assert ui.ago(at(days=2), now) == "2 d ago"
 
 
+def test_lasting_is_a_duration_not_a_moment():
+    now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    at = lambda **kw: (now - timedelta(**kw)).isoformat()  # noqa: E731
+    assert ui.lasting(at(seconds=20), now) == ""
+    assert ui.lasting(at(minutes=7), now) == "for 7 min"
+    assert ui.lasting(at(hours=2), now) == "for 2 h"
+
+
 def test_shorten():
     assert ui.shorten("short", 10) == "short"
     assert ui.shorten("a long goal text", 8) == "a long…"

@@ -60,7 +60,8 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 - A key is a verb and the selected row is its object: `e` edits, `x` deletes, `o` opens in the
   IDE, `n` makes a new task. A letter has one verb; a pair of opposites may share one (`s` for
   start and stop, `v` for run app and stop app).
-- Decisions: `a` accept, `r` reply, `p` approve.
+- Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
+  agent). `l` opens the newest log in the pager.
 - Dialogs: Esc cancels, Enter submits a one-line field, Ctrl+S submits a multi-line one, arrows
   move between fields. A dialog that cannot send what it was given stays open and says why.
 - Red is for a button that stops, deletes or forgets. Such a dialog with lasting loss opens with
@@ -89,7 +90,8 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 
 ## 6. The next step is always visible
 
-- The panel says which keys move the task on, before any log or diff.
+- The panel's first line after the header is `Next:` with the keys that move the task on
+  (`tui.next_steps`), before any log or diff. The body explains; it does not repeat the keys.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 
@@ -113,6 +115,5 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 Rules above that the code does not meet yet. Remove a line when it is fixed.
 
 - §2: the panel still says "gate" ("Gate failed at…"), and the command is `vivibox rm`.
-- §5: no state shows how long it has lasted; while verification runs the panel does not show it.
-- §6: a blocked task's keys come after the build log, not before it.
+- §5: only a running verification shows how long it has lasted; implementing does not.
 - §7: at 80 columns the goal column is off the screen and the footer loses keys.

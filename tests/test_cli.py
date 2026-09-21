@@ -420,3 +420,35 @@ def test_status_calls_a_task_what_the_view_calls_it(env, capsys):
     out = capsys.readouterr().out
     assert "agent turn failed" in out and "429 Too Many Requests" in out
     assert "vivibox resume demo-1" in out
+
+
+def test_verify_again_from_the_shell_starts_a_task_nobody_runs(env, capsys):
+    from vivibox import actions
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_BLOCKED):
+        task.transition(s)
+    capsys.readouterr()
+    assert main(["verify-again", "demo-1"]) == 0
+    out = capsys.readouterr().out
+    assert task.read_state().state is State.VERIFY and actions.started == ["demo-1"]
+    assert "Verifying demo-1 again" in out
+    assert main(["status", "demo-1"]) == 0
+
+
+def test_a_blocked_task_offers_verify_again_next(env, capsys):
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_BLOCKED):
+        task.transition(s)
+    capsys.readouterr()
+    assert main(["status", "demo-1"]) == 0
+    assert "vivibox verify-again demo-1" in capsys.readouterr().out

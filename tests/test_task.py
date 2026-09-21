@@ -106,3 +106,9 @@ def test_a_task_can_run_a_role_on_another_model(tmp_path):
     assert task.read_state().models == {"planner": "claude-opus-5"}
     task.set_model("planner", "")
     assert task.read_state().models == {}, "cleared, so the config decides again"
+
+
+def test_a_blocked_task_can_go_back_to_verification_without_the_agent():
+    from vivibox.states import check_transition
+
+    check_transition(State.CHECKPOINT_BLOCKED, State.VERIFY)

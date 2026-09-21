@@ -80,7 +80,8 @@ with your login command: `my_login && vivibox`. A task will not start while one 
 agent can read them, since it runs the build, so pass a token that only reads packages. Unlike
 model keys, they are in the containers' environment, where `docker inspect` shows them. The gate's
 log shows `***` in their place. A token that expires needs a fresh start: log in again, start
-vivibox from that shell, and stop and start the task with `s`.
+vivibox from that shell, and stop and start the task with `s`; a task that got blocked on it is
+verified again with `g`.
 
 A repository you move or delete leaves its project file behind. vivibox does not offer a project it
 cannot work in: it names those on start and offers to forget them, which removes the project file

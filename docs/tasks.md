@@ -24,6 +24,8 @@ The footer shows only the keys that do something for the selected task:
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
 | `p` | approve changes to risky files |
+| `g` | a task blocked on a failed verification: run the verification again without the agent, for when the cause was outside the code (a token expired, Docker, a service) |
+| `l` | read the newest verification log, or the supervisor's, in your pager |
 | `w` | watch or talk to the agent; Ctrl-q brings you back (Esc there interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start or resume it |
@@ -65,6 +67,7 @@ vivibox attach myproject-1            # watch or talk to the agent (Ctrl-q leave
 | `vivibox reply <id> "comment"` | reject, ask for changes, or answer the agent's question |
 | `vivibox reply <id> "comment" --criterion "…"` | send finished or stuck work back with a new acceptance criterion (repeat for more): it joins the accepted plan, and the gate holds the work to it like the rest |
 | `vivibox risky <id>` / `vivibox approve-risky <id>` | review and approve changes to files that run code on your host |
+| `vivibox verify-again <id>` | a blocked task: run the verification once more, without the agent |
 
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a

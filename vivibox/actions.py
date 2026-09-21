@@ -925,6 +925,17 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
     return target
 
 
+def verify_again(task: Task) -> None:
+    """Runs the verification once more on the work as it is, without a turn of the agent. For a
+    failure whose cause was outside the code: an expired token, Docker, a service that was down.
+    A reply would cost a turn and invite the agent to change code that was fine."""
+    if task.read_state().state is not State.CHECKPOINT_BLOCKED:
+        raise gate.GateError(
+            f"{task.id} is not blocked on a failed verification; only that is verified again"
+        )
+    task.transition(State.VERIFY, reason="verify again")
+
+
 def risky_target(task: Task) -> State:
     """The checkpoint the risky change was holding back, recorded when the task entered approval."""
     entered = next(e["data"] for e in reversed(task.events()) if e["type"] == "state")

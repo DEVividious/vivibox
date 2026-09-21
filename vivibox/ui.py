@@ -52,6 +52,12 @@ def clock(ts: str) -> str:
     return datetime.fromisoformat(ts).astimezone().strftime("%H:%M:%S")
 
 
+def lasting(ts: str, now: datetime | None = None) -> str:
+    """How long since ts, as a duration: "for 3 min", "for 2 h"; "" under a minute."""
+    since = ago(ts, now)
+    return "" if since == "just now" else f"for {since.removesuffix(' ago')}"
+
+
 def ago(ts: str, now: datetime | None = None) -> str:
     seconds = int(((now or datetime.now(UTC)) - datetime.fromisoformat(ts)).total_seconds())
     if seconds < 60:
@@ -111,7 +117,10 @@ def cost(task: Task) -> Spend:
 WAITING = {
     State.CHECKPOINT_PLAN: ("review the plan", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
     State.CHECKPOINT_FINAL: ("review the work", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
-    State.CHECKPOINT_BLOCKED: ("needs your help", ['vivibox reply {id} "…"', "vivibox attach {id}"]),
+    State.CHECKPOINT_BLOCKED: (
+        "needs your help",
+        ['vivibox reply {id} "…"', "vivibox verify-again {id}", "vivibox attach {id}"],
+    ),
     State.APPROVAL_RISKY: ("approve risky files", ["vivibox risky {id}"]),
 }
 WORKING = {State.PLAN: "planning", State.IMPLEMENT: "implementing", State.VERIFY: "verifying"}

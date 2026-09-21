@@ -332,3 +332,44 @@ def test_an_error_in_the_supervisor_leaves_its_reason_with_the_task(task):
     st = task.read_state()
     assert st.paused and st.problem == "stopped on an error: network vivibox-demo-1 not found"
     assert "network vivibox-demo-1 not found" in notes[-1]
+
+
+def blocked(task, harness):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    task.transition(State.CHECKPOINT_BLOCKED, reason="verification still failing")
+    (task.meta / "handoff" / "verify-feedback.md").write_text("# Verification failed\n")
+
+
+def test_verifying_again_runs_the_gate_without_a_turn_of_the_agent(task):
+    from vivibox import actions
+
+    harness = FakeHarness(task)
+    blocked(task, harness)
+    actions.verify_again(task)
+    st = task.read_state()
+    assert st.state is State.VERIFY and st.iteration == 2, "no new attempt: nothing was written"
+    assert task.events()[-1]["data"]["reason"] == "verify again"
+    sup, notes = make(task, harness, results=[gate_result(True)])
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_FINAL and harness.prompts == []
+
+
+def test_verifying_again_that_fails_again_waits_for_you_with_fresh_feedback(task):
+    from vivibox import actions
+
+    harness = FakeHarness(task)
+    blocked(task, harness)
+    actions.verify_again(task)
+    sup, notes = make(task, harness, results=[gate_result(False)])
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED and harness.prompts == []
+    assert "still failing" in notes[-1]
+
+
+def test_only_a_blocked_task_can_be_verified_again(task):
+    from vivibox import actions, gate
+
+    task.transition(State.CHECKPOINT_PLAN)
+    with pytest.raises(gate.GateError, match="verified again"):
+        actions.verify_again(task)

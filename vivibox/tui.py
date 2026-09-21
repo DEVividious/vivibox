@@ -151,6 +151,62 @@ def build_said(log: Path) -> list[str]:
     return ["#### What the build said", "", f"```\n{ui.log_excerpt(text)}\n```", "", f"Full log: `{log}`", ""]
 
 
+def newest_log(task: Task) -> Path | None:
+    """The log to read when something went wrong: the newest verification's, else the supervisor's."""
+    logs = sorted((task.meta / "log").glob("verify-*.log"), key=lambda p: p.stat().st_mtime)
+    if logs:
+        return logs[-1]
+    supervisor_log = task.meta / "log" / "supervisor.log"
+    return supervisor_log if supervisor_log.exists() else None
+
+
+def verification_running(task: Task, st: TaskState) -> list[str]:
+    """What the verification is doing right now: how long, which command, its last lines. The
+    log is written as the commands run, so it is the one thing that moves while you wait."""
+    log = newest_log(task)
+    text = read(log) if log and log.name.startswith("verify-") else ""
+    commands = re.findall(r"^\$ (.+)$", text, re.MULTILINE)
+    running = " ".join(filter(None, ["**Verification running**", ui.lasting(st.updated)]))
+    lines = [running + (f": `{commands[-1]}`" if commands else "") + "."]
+    if text:
+        tail = "\n".join(text.splitlines()[-12:])
+        lines += ["", f"```\n{tail}\n```", "", f"Full log: `{log}`"]
+    return lines
+
+
+def pager_command(path: Path) -> list[str]:
+    pager = os.environ.get("PAGER") or shutil.which("less") or "more"
+    return [*pager.split(), str(path)]
+
+
+def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod: PodView) -> str:
+    """The keys that move this task on, first thing in the panel. Only keys the footer offers now:
+    a hint the footer contradicts is worse than none."""
+    watch = " · `w` look at the agent" if watchable(st, running) else ""
+    if seen.problem:
+        return "`s` try again"
+    if seen.status in ("not started",):
+        return "`e` write the plan yourself · `s` start"
+    if seen.status in ("stopped", "not running"):
+        return "`s` start; it goes on from where it was"
+    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
+        return "`c` copy the prompt for a browser · `C` for a CLI · `e` paste the plan"
+    if st.state is State.CHECKPOINT_PLAN:
+        return "`a` accept the plan · `r` send it back with a comment · `e` edit it"
+    if st.state is State.CHECKPOINT_FINAL:
+        return "`o` open the review copy · `v` run the app · `a` accept · `r` ask for changes"
+    if st.state is State.APPROVAL_RISKY:
+        return "`p` approve the files as shown · `r` send the agent back"
+    if st.state is State.CHECKPOINT_BLOCKED:
+        if (task.meta / "handoff" / supervisor.QUESTION).exists():
+            return "`r` answer" + watch
+        return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
+    if st.state is State.VERIFY:
+        log = newest_log(task)
+        return "wait for the verification" + (" · `l` read its log so far" if log else "")
+    return "wait" + watch + " · `s` stop"
+
+
 def gate_failed(task: Task) -> bool:
     gates = [e for e in task.events() if e["type"] == "gate"]
     return bool(gates) and not gates[-1]["data"].get("passed")
@@ -257,6 +313,8 @@ def detail(
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
         f" · planning + implementation {ui.cost(task)}*",
         "",
+        f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
+        "",
     ]
     said = [e for e in task.events() if e["type"] == "serena"]
     if said and (said[-1]["data"].get("on") or providers.serena_mode() == "auto"):
@@ -271,21 +329,18 @@ def detail(
             "",
             f"```\n{seen.problem}\n```",
             "",
-            "Press `s` to try again; the task goes on from where it was.",
+            "The task goes on from where it was once started again.",
             "",
         ]
     elif seen.status == "not started":
-        head += ["**Not started yet.** `e` opens the plan to write it yourself; `s` starts it.", ""]
+        head += ["**Not started yet.**", ""]
     elif seen.group != "Working" and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
-        head += [
-            "**The agent is not working on this task.** Press `s`; it goes on from where it was.",
-            "",
-        ]
+        head += ["**The agent is not working on this task.**", ""]
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         body = [
-            "**Plan this task in your own chat.** `c` copies the prompt for a chat in your browser,",
-            "`C` the one for a CLI in your checkout (claude, gemini). When the plan is final, `e`",
-            "opens the answer file: paste the chat's answer there and save. A CLI writes it itself.",
+            "**Plan this task in your own chat.** The prompt for a chat in your browser, or for a CLI",
+            "in your checkout (claude, gemini). When the plan is final, paste the chat's answer into the",
+            "answer file and save. A CLI writes it itself.",
             "",
             # What leaves your machine with the browser prompt, written by an agent: worth a look
             # before it goes to another provider. The CLI prompt carries none of it.
@@ -307,8 +362,8 @@ def detail(
         except Exception as e:  # shown, not fatal: the view must keep working
             copy, stat = "?", f"({e})"
         body = [
-            "**Ready for your review.** Press `o` to open it in your IDE, where the agent's work shows",
-            "as uncommitted changes; `a` accepts it into your checkout, `r` asks for changes.",
+            "**Ready for your review.** In your IDE the agent's work shows as uncommitted changes;",
+            "accepting it puts them in your checkout.",
             "",
             f"Review copy: `{copy}`",
             "",
@@ -321,14 +376,13 @@ def detail(
             diffs = [str(e)]
         body = [
             "**Risky files changed.** They run code on your machine when your IDE imports the project.",
-            "`p` approves them as shown, `r` sends the agent back with your comment.",
             "",
             *(f"```diff\n{d.rstrip()}\n```" for d in diffs),
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = read(handoff / supervisor.QUESTION)
         body = (
-            ["**The agent asks:**", "", question, "", "Answer with `r`."]
+            ["**The agent asks:**", "", question]
             if question
             else [
                 "**Verification keeps failing.**",
@@ -336,9 +390,10 @@ def detail(
                 read(handoff / "verify-feedback.md"),
                 "",
                 *build_said(handoff / "verify.log"),
-                "Help with `r`." + watch,
             ]  # fmt: skip
         )
+    elif st.state is State.VERIFY and seen.group == "Working":
+        body = verification_running(task, st)
     elif items := checklist(task):
         # What the task is still short of. The agent ticks these itself and the gate only checks
         # that none is left open, so a tick is what the agent claims, not something vivibox saw.
@@ -1644,6 +1699,8 @@ class Vivibox(App):
         Binding("C", "copy_prompt_cli", "Copy CLI prompt"),
         Binding("o", "open_ide", "Open in IDE"),
         Binding("p", "approve_risky", "Approve risky"),
+        Binding("g", "verify_again", "Verify again"),
+        Binding("l", "show_log", "Log"),
         Binding("w", "watch", "Watch agent"),
         Binding("m", "models", "Model"),
         Binding("v", "demo", "Run app"),
@@ -2014,7 +2071,7 @@ class Vivibox(App):
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
                         "start_task", "stop_task", "remove", "demo", "demo_stop",
-                        "models", "copy_prompt", "copy_prompt_cli")  # fmt: skip
+                        "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
         if action == "details":  # nothing to show details of; an open panel can still be closed
@@ -2041,6 +2098,10 @@ class Vivibox(App):
             "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "approve_risky": state is State.APPROVAL_RISKY,
+            # Only a failed verification is worth running again; a question needs an answer.
+            "verify_again": state is State.CHECKPOINT_BLOCKED
+            and not (pick[0].meta / "handoff" / supervisor.QUESTION).exists(),
+            "show_log": newest_log(pick[0]) is not None,
             "watch": watchable(pick[1], running),
             # Not again while one of them is under way. A task that stopped on a failure still has
             # its supervisor, and what it needs is a start, not a stop followed by a start.
@@ -2244,6 +2305,24 @@ class Vivibox(App):
             self.notify(f"Opening {path}")
         except Exception as e:
             self.fail(e)
+
+    def action_verify_again(self) -> None:
+        task, _ = self.selected()
+        try:
+            actions.verify_again(task)
+        except Exception as e:
+            self.fail(e)
+        else:
+            self.go_on(task, f"Verifying {task.id} again")
+        self.reload()
+
+    def action_show_log(self) -> None:
+        """The newest verification log, or the supervisor's, in your pager."""
+        task, _ = self.selected()
+        log = newest_log(task)
+        if log is not None:
+            with self.suspend():
+                subprocess.run(pager_command(log))
 
     def action_approve_risky(self) -> None:
         task, _ = self.selected()

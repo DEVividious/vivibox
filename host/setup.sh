@@ -6,6 +6,8 @@
 #   host/setup.sh           check, list the changes, apply them after confirmation
 #   host/setup.sh --check   only check; exit status 1 if something is missing
 #
+# It first checks the kernel can run Sysbox, and stops if it cannot.
+#
 # What it sets up:
 #   - packages: tmux (agent sessions), jq, libnotify-bin (desktop notifications), curl;
 #   - Docker networks moved off the ranges Docker uses inside Sysbox containers (restarts Docker);
@@ -96,6 +98,24 @@ pick_docker_ranges() {
   echo "${chosen[*]}"
 }
 
+# Whether Sysbox, and so vivibox, can run on a kernel: idmapped mounts from 5.12, or shiftfs from
+# 5.5. Takes the release (uname -r) and whether the shiftfs module is there.
+kernel_verdict() {
+  local release=$1 shiftfs=$2 major minor
+  IFS=. read -r major minor _ <<<"${release%%-*}"
+  if ((major > 5 || (major == 5 && minor >= 12))); then
+    echo "kernel $release: vivibox can run (Sysbox uses idmapped mounts)"
+  elif ((major == 5 && minor >= 5)) && [[ "$shiftfs" == yes ]]; then
+    echo "kernel $release: vivibox can run (Sysbox uses shiftfs)"
+  elif ((major == 5 && minor >= 5)); then
+    echo "kernel $release: vivibox cannot run; Sysbox needs 5.12+ or the shiftfs module (Ubuntu has it)" >&2
+    return 1
+  else
+    echo "kernel $release: vivibox cannot run; Sysbox needs Linux 5.12 or newer" >&2
+    return 1
+  fi
+}
+
 # Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -117,6 +137,11 @@ command -v docker >/dev/null || die "Docker is not installed"
 docker info >/dev/null 2>&1 || die "cannot talk to Docker; is your user in the docker group?"
 
 echo "Checking host…"
+
+shiftfs=no
+modinfo shiftfs >/dev/null 2>&1 && shiftfs=yes
+verdict=$(kernel_verdict "$(uname -r)" "$shiftfs") || exit 1
+ok "$verdict"
 
 missing_packages=()
 for p in "${PACKAGES[@]}"; do

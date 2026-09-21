@@ -127,3 +127,23 @@ def test_docker_ranges_can_be_chosen_and_are_still_checked():
     ]
     taken = setup_fn("pick_docker_ranges 10.0.0.0/8", chosen)
     assert taken.returncode == 1 and "10.77.0.0/16 overlaps the route to 10.0.0.0/8" in taken.stderr
+
+
+@pytest.mark.parametrize(
+    ("release", "shiftfs", "runs"),
+    [
+        ("7.0.0-31-generic", "no", True),
+        ("6.8.0-45-generic", "no", True),
+        ("5.15.0-122-generic", "no", True),
+        ("5.12.0", "no", True),
+        ("5.11.0-27-generic", "no", False),
+        ("5.11.0-27-generic", "yes", True),
+        ("5.4.0-200-generic", "yes", False),
+        ("4.18.0-553.el8_10.x86_64", "no", False),
+    ],
+)
+def test_the_kernel_says_whether_vivibox_can_run(release, shiftfs, runs):
+    result = setup_fn(f"kernel_verdict {release} {shiftfs}")
+    assert (result.returncode == 0) is runs
+    said = result.stdout if runs else result.stderr
+    assert f"kernel {release}: vivibox {'can' if runs else 'cannot'} run" in said

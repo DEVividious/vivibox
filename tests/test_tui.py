@@ -2,7 +2,7 @@ import asyncio
 import subprocess
 
 import pytest
-from textual.widgets import Input, Label, Select, TextArea
+from textual.widgets import Input, Label, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
 from vivibox import actions, gate, tui
@@ -903,6 +903,10 @@ def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env
         app.screen.query_one("#source", Input).value = str(source)
         app.screen.query_one("#import").press()
         await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseImport), "you see what comes before it comes"
+        assert keys.list_keys() == {}, "nothing kept yet"
+        app.screen.query_one("#import").press()
+        await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert isinstance(app.screen, tui.NewTask)
@@ -1004,3 +1008,41 @@ def test_arrows_in_the_search_walk_the_list(env):
         assert app.screen.focused is app.screen.query_one("#key"), "Enter goes on to the key"
 
     run(scenario)
+
+
+def test_an_import_lists_what_it_brings_and_keeps_only_what_you_tick(env, tmp_path, monkeypatch):
+    """Nothing merged behind your back: each provider is listed with where its key comes from, one
+    that would replace yours says so, and the rest of the file is named as left behind."""
+    from vivibox import keys, providers
+
+    keys.set_key("deepseek", "sk-mine")
+    monkeypatch.setenv("ACME_KEY", "acme-secret")
+    source = tmp_path / "opencode.json"
+    source.write_text(
+        '{"mcp": {"jira": {}}, "agent": {}, "provider": {'
+        '"acme": {"options": {"baseURL": "https://ai.acme.example/v1", "apiKey": "{env:ACME_KEY}"},'
+        ' "models": {"coder": {}}},'
+        '"deepseek": {"options": {"apiKey": "sk-theirs"}}}}'
+    )
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.AddProvider([]))
+        await pilot.pause()
+        app.screen.query_one("#source", Input).value = str(source)
+        app.screen.query_one("#import").press()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, tui.ChooseImport)
+        rows = [
+            str(screen.query_one("#found", SelectionList).get_option_at_index(i).prompt) for i in range(2)
+        ]
+        assert "acme  1 models, key from $ACME_KEY" in rows[0] and "replaces" not in rows[0]
+        assert "deepseek" in rows[1] and "replaces the one you have" in rows[1]
+        assert "left in the file: mcp, agent" in " ".join(str(w.render()) for w in screen.query(Label))
+        screen.query_one("#found", SelectionList).deselect(1)  # keep your own DeepSeek key
+        screen.query_one("#import").press()
+        await pilot.pause()
+
+    run(scenario)
+    assert keys.get_key("deepseek") == "sk-mine" and keys.get_key("acme") == "acme-secret"
+    assert list(providers.load()) == ["acme"]

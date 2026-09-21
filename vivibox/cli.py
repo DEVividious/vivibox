@@ -400,8 +400,21 @@ def cmd_auth(args: argparse.Namespace) -> int:
         keys.set_key(args.provider, value)
         print(f"Stored {args.provider}: {keys.masked(keys.get_key(args.provider))} in {keys.store()}")
     elif args.action == "import":
-        for p in providers.import_opencode(Path(args.provider or providers.DEFAULT_SOURCE)):
-            print(f"{p.name:20} {p.models} models, key {p.key}")
+        reading = providers.read_opencode(Path(args.provider or providers.DEFAULT_SOURCE))
+        for f in reading.found:
+            print(
+                f"{f.name:20} {f.models} models, key {f.key}"
+                + ("  (replaces the one you have)" if f.replaces else "")
+            )
+        if reading.left:
+            print(f"Only providers come over; left in the file: {', '.join(reading.left)}.")
+        if sys.stdin.isatty() and input(f"Import these {len(reading.found)}? [y/N] ").strip().lower() not in (
+            "y",
+            "yes",
+        ):
+            print("Nothing imported.")
+            return 1
+        providers.bring_over(reading.found)
         print(f"Kept in {providers.path()}; pick their models when you create a task, or press m.")
     elif args.action == "rm":
         if not args.provider:

@@ -57,9 +57,11 @@ Run `vivibox`. The first time, it builds the agent image (a few minutes), writes
 no model until you create your first task. Its list of models ends with *+ add a provider, or
 import your opencode.json…*:
 
-- a provider opencode knows (deepseek, anthropic, openai, openrouter, google, …) and your key, or
-- every provider of an opencode.json you already use, such as your employer's endpoint with its
-  models. The definitions go to `~/.config/vivibox/providers.json`, and each key, whether written
+- a provider from opencode's own list, searched as you type, and your key, or
+- the providers of an opencode.json you already use, such as your employer's endpoint with its
+  models. You see each one first, with where its key comes from and whether it replaces one you
+  have, and untick what you want to leave out; only providers come over, not MCP servers or
+  agents. The definitions go to `~/.config/vivibox/providers.json`, and each key, whether written
   in the file, `{env:NAME}` or `{file:path}`, to vivibox's key store.
 
 The first model you pick for a role becomes its default in config.toml. The same, from a shell:

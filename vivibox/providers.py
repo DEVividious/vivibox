@@ -15,7 +15,7 @@ import copy
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import keys
@@ -79,11 +79,24 @@ def without_comments(text: str) -> str:
 
 
 @dataclass(frozen=True)
-class Imported:
+class Found:
+    """A provider of an opencode.json, read and not yet brought over."""
+
     name: str
     models: int
-    # Where the key came from, or why there is none.
+    # Where the key comes from, or why there is none; never the key itself.
     key: str
+    # You already have a provider by this name, which bringing this one over would replace.
+    replaces: bool
+    entry: dict = field(repr=False)
+    secret: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
+class Reading:
+    found: list[Found]
+    # The rest of the file (mcp, agent, ...): vivibox brings over providers only.
+    left: list[str]
 
 
 def _resolve(value: str, env: dict[str, str], base: Path) -> tuple[str, str]:
@@ -103,8 +116,8 @@ def _resolve(value: str, env: dict[str, str], base: Path) -> tuple[str, str]:
         return "", f"{p} cannot be read"
 
 
-def import_opencode(source: Path, env: dict[str, str] | None = None) -> list[Imported]:
-    """Brings every provider of an opencode.json over, with its key; returns what came."""
+def read_opencode(source: Path, env: dict[str, str] | None = None) -> Reading:
+    """What an opencode.json has to bring over, changing nothing yet."""
     env = dict(os.environ) if env is None else env
     source = Path(os.path.expanduser(source))
     try:
@@ -113,26 +126,40 @@ def import_opencode(source: Path, env: dict[str, str] | None = None) -> list[Imp
         raise ConfigError(f"cannot read {source}: {e.strerror}") from None
     except ValueError as e:
         raise ConfigError(f"{source} is not JSON: {e}") from None
-    found = data.get("provider") if isinstance(data, dict) else None
-    if not isinstance(found, dict) or not found:
+    given = data.get("provider") if isinstance(data, dict) else None
+    if not isinstance(given, dict) or not given:
         raise ConfigError(f"{source} defines no providers")
-    stored, imported = load(), []
-    for name, given in found.items():
-        if not keys.PROVIDER.match(name) or not isinstance(given, dict):
+    yours = set(load()) | set(keys.list_keys())
+    found = []
+    for name, definition in given.items():
+        if not keys.PROVIDER.match(name) or not isinstance(definition, dict):
             raise ConfigError(f"{source}: provider '{name}' cannot be named that way in vivibox")
-        entry = copy.deepcopy(given)
+        entry = copy.deepcopy(definition)
         options = entry.setdefault("options", {})
-        key, said = "", "none in the file"
-        if isinstance(raw := options.pop("apiKey", None), str):
-            key, said = _resolve(raw, env, source.parent)
-        if key:
-            keys.set_key(name, key)
-        elif raw is None:
+        raw = options.pop("apiKey", None)
+        secret, said = _resolve(raw, env, source.parent) if isinstance(raw, str) else ("", "none needed")
+        if raw is None:
             entry[KEYLESS] = True
         if not options:
             entry.pop("options")
-        stored[name] = entry
-        imported.append(Imported(name, len(entry.get("models", {})), said if key or raw else "none needed"))
+        found.append(Found(name, len(entry.get("models", {})), said, name in yours, entry, secret))
+    left = [k for k in data if k not in ("provider", "$schema")]
+    return Reading(found, left)
+
+
+def bring_over(chosen: list[Found]) -> None:
+    """Keeps the providers you chose, and their keys; a key the file did not give is left as it is."""
+    stored = load()
+    for f in chosen:
+        if f.secret:
+            keys.set_key(f.name, f.secret)
+        stored[f.name] = f.entry
     path().parent.mkdir(parents=True, exist_ok=True)
     path().write_text(json.dumps(stored, indent=2) + "\n")
-    return imported
+
+
+def import_opencode(source: Path, env: dict[str, str] | None = None) -> list[Found]:
+    """Brings every provider of an opencode.json over; returns what came."""
+    found = read_opencode(source, env).found
+    bring_over(found)
+    return found

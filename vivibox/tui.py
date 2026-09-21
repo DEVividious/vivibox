@@ -32,6 +32,7 @@ from textual.widgets import (
     Markdown,
     OptionList,
     Select,
+    SelectionList,
     Static,
     TextArea,
 )
@@ -630,6 +631,47 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
     return found
 
 
+class ChooseImport(Dialog):
+    """What an opencode.json brings: every provider, ticked, and a warning on the ones that replace
+    a provider you have. Dismisses with those you keep ticked, or [] when you leave."""
+
+    def __init__(self, source: Path, reading: providers.Reading):
+        super().__init__()
+        self.source, self.reading = source, reading
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            home = str(Path.home())
+            shown = (
+                str(self.source).replace(home, "~", 1) if str(self.source).startswith(home) else self.source
+            )
+            yield Label(f"Providers in {escape(str(shown))}.")
+            yield Label("Untick the ones to leave out:")
+            rows = []
+            for i, f in enumerate(self.reading.found):
+                label = f"{escape(f.name)}  {f.models} models, key {escape(f.key)}"
+                if f.replaces:
+                    label += "  [yellow]replaces the one you have[/]"
+                rows.append((label, i, True))
+            yield SelectionList[int](*rows, id="found")
+            if self.reading.left:
+                yield Label(f"Only providers come over; left in the file: {', '.join(self.reading.left)}.")
+            with Horizontal(classes="buttons"):
+                yield Button("Import", variant="primary", id="import")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#found").focus()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        ticked = self.query_one("#found", SelectionList).selected if event.button.id == "import" else []
+        self.dismiss([self.reading.found[i] for i in sorted(ticked)])
+
+    def key_escape(self) -> None:
+        self.dismiss([])
+
+
 class AddProvider(Dialog):
     """A provider opencode knows, picked from its list, with your key; or every provider of an
     opencode.json you already use, such as your employer's endpoint. Dismisses with the providers
@@ -720,14 +762,19 @@ class AddProvider(Dialog):
                 keys.set_key(name, self.query_one("#key", Input).value)
                 self.dismiss([name])
             elif event.button.id == "import":
-                found = providers.import_opencode(Path(self.query_one("#source", Input).value.strip()))
-                for p in found:
-                    self.notify(f"{p.name}: {p.models} models, key {p.key}", timeout=10)
-                self.dismiss([p.name for p in found])
+                source = Path(self.query_one("#source", Input).value.strip()).expanduser()
+                self.app.push_screen(ChooseImport(source, providers.read_opencode(source)), self.imported)
             else:
                 self.dismiss([])
         except (keys.KeyStoreError, ConfigError) as e:
             self.query_one("#problem", Label).update(f"[red]{e.args[0]}[/]")
+
+    def imported(self, chosen: list[providers.Found]) -> None:
+        if not chosen:
+            return  # back to this dialog, to pick another file or add one by name
+        providers.bring_over(chosen)
+        self.notify(f"Imported {', '.join(f.name for f in chosen)}.", timeout=8)
+        self.dismiss([f.name for f in chosen])
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:
@@ -939,7 +986,7 @@ class Vivibox(App):
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
     Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
-    AddProvider { align: center middle; }
+    AddProvider, ChooseImport { align: center middle; }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),

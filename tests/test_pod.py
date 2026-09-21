@@ -96,6 +96,7 @@ def test_sidecar_mounts_repo_read_only_and_listens_only_on_socket(pod):
     assert "--host=unix:///run/vivibox-docker/docker.sock" in script and "tcp://" not in script
     # After a restart the old socket is still there; chmod on it would miss the daemon's new one.
     assert script.index("rm -f /run/vivibox-docker/docker.sock") < script.index("dockerd")
+    assert "DOCKER_MIN_API_VERSION=1.24 dind dockerd" in script, "older Testcontainers still finds Docker"
 
 
 def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):

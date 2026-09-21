@@ -152,6 +152,12 @@ def test_parallel_maven_builds_share_a_local_repository(env):
     agent(env, f"{go} & a=$!; {go} & b=$!; wait $a && wait $b")
 
 
+def test_docker_answers_the_api_version_older_testcontainers_speaks(env):
+    # Testcontainers before 1.21 asks for API 1.32, which Docker 29 refuses unless told otherwise.
+    result = agent(env, "DOCKER_API_VERSION=1.32 docker version --format '{{.Server.Version}}'", check=False)
+    assert result.returncode == 0, result.stderr
+
+
 def test_maven_build_with_testcontainers(env):
     result = agent(env, "mvn -B -f app/pom.xml verify", check=False)
     assert result.returncode == 0, result.stdout[-3000:]

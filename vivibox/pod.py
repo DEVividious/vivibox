@@ -320,8 +320,11 @@ class Pod:
         # The socket left by the last run goes first: the wait would find it at once, chmod it, and
         # the daemon would then replace it with one the agent cannot use ("permission denied").
         # The trap passes docker stop on to the daemon, which then shuts down cleanly.
+        # Docker 29 refuses API versions below 1.40, and Testcontainers before 1.21 speaks 1.32: it
+        # would find no Docker at all while `docker version` works. 1.24 is the oldest it still knows.
         daemon = (
-            f"rm -f {SOCKET}; dind dockerd --host=unix://{SOCKET} >/var/log/dockerd.log 2>&1 & "
+            f"rm -f {SOCKET}; DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} "
+            ">/var/log/dockerd.log 2>&1 & "
             'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
             f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
         )

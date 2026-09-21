@@ -35,10 +35,10 @@ def at_plan_checkpoint(task):
     task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works"))
 
 
-def run(scenario):
+def run(scenario, size=(140, 40)):
     async def go():
         app = Vivibox()
-        async with app.run_test(size=(140, 40)) as pilot:
+        async with app.run_test(size=size) as pilot:
             await pilot.pause()
             await scenario(app, pilot)
 
@@ -1185,3 +1185,26 @@ def test_the_import_from_adding_a_provider_comes_back_with_what_came(env, tmp_pa
 
     run(scenario)
     assert added == [["acme"]]
+
+
+@pytest.mark.parametrize("height", [20, 24, 30, 50])
+def test_a_new_task_can_be_filled_in_on_a_short_terminal(env, height):
+    """Every field and button reachable however few rows the terminal has: the fields scroll, the
+    buttons stay in view. On a laptop's terminal they had been cut off below the screen."""
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        for wid in ("#project", "#goal", "#auto", "#role-planner", "#role-writer", "#create", "#cancel"):
+            widget = app.screen.query_one(wid)
+            widget.focus()
+            await pilot.pause()
+            await pilot.pause()
+            r = widget.region
+            assert r.height > 0 and r.y >= 1 and r.y + r.height <= height - 1, f"{wid} out of view: {r}"
+        buttons = app.screen.query_one("#create").region
+        writer = app.screen.query_one("#role-writer").region
+        assert not buttons.overlaps(writer), "nothing hidden behind the buttons"
+
+    run(scenario, size=(100, height))

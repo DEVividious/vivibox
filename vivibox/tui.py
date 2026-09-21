@@ -314,6 +314,11 @@ from scratch. Then n hands them a task."""
 NO_TASKS = "No tasks yet. Press n to create one."
 
 
+class Fields(VerticalScroll, can_focus=False, inherit_bindings=False):
+    """A dialog's fields, scrolling when the terminal is short. No keys of its own: the arrows move
+    between fields, as everywhere in a dialog, and scrolling follows the field you are on."""
+
+
 class Dialog(ModalScreen):
     """Arrow keys move between fields and buttons wherever the focused field does not use them
     itself: left and right move the cursor in a text field, up and down open a list."""
@@ -1046,35 +1051,36 @@ class NewTask(Dialog):
         names = projects()
         chosen = self.preselect if self.preselect in names else names[0]
         with Vertical(classes="dialog"):
-            # A list even with one project in it: the dialog looks the same however many you have.
-            yield Label("Project")
-            yield Select([(n, n) for n in names], value=chosen, allow_blank=False, id="project")
-            yield Select(
-                [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
-                 ("Other: refactoring, tests, upkeep", "other")],
-                value="feature", allow_blank=False, id="kind",
-            )  # fmt: skip
-            yield Label(
-                "What should the agent do? A line, or a whole ticket with its context and constraints."
-            )
-            yield Label(
-                "@~/path/file.md hands the agent a copy of a file or folder. ctrl+s creates the task."
-            )
-            suggestions = OptionList(id="suggestions")
-            suggestions.display = False
-            yield DescriptionArea(suggestions, Path.cwd(), id="goal", classes="description")
-            yield suggestions
-            yield Checkbox("Accept the agent's plan without stopping (--auto)", id="auto")
-            yield Checkbox("Only create it, to write the plan myself (--draft)", id="draft")
-            # Each role on config.toml's choice unless you pick another; m changes it later.
-            config = load_config()
-            for name in sorted(config.roles):
-                offered = actions.choices(name, config, self.available)
-                configured = actions.configured_choice(config, name)
-                with Horizontal(classes="role"):
-                    yield Label(name.capitalize(), classes="role-name")
-                    options = [(actions.choice_label(c, configured), c) for c in offered]
-                    yield Select(options, value=configured, allow_blank=False, id=f"role-{name}")
+            # The fields scroll on a short terminal; the buttons below them stay in view.
+            with Fields(classes="fields"):
+                # A list even with one project in it: the dialog looks the same however many you have.
+                yield Label("Project")
+                yield Select([(n, n) for n in names], value=chosen, allow_blank=False, id="project")
+                yield Select(
+                    [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
+                     ("Other: refactoring, tests, upkeep", "other")],
+                    value="feature", allow_blank=False, id="kind",
+                )  # fmt: skip
+                yield Label(
+                    "What should the agent do? A line, or a whole ticket with its context and constraints."
+                    " @~/path/file.md hands the agent a copy of a file or folder. ctrl+s creates the task.",
+                    classes="wrap",
+                )
+                suggestions = OptionList(id="suggestions")
+                suggestions.display = False
+                yield DescriptionArea(suggestions, Path.cwd(), id="goal", classes="description")
+                yield suggestions
+                yield Checkbox("Accept the agent's plan without stopping (--auto)", id="auto")
+                yield Checkbox("Only create it, to write the plan myself (--draft)", id="draft")
+                # Each role on config.toml's choice unless you pick another; m changes it later.
+                config = load_config()
+                for name in sorted(config.roles):
+                    offered = actions.choices(name, config, self.available)
+                    configured = actions.configured_choice(config, name)
+                    with Horizontal(classes="role"):
+                        yield Label(name.capitalize(), classes="role-name")
+                        options = [(actions.choice_label(c, configured), c) for c in offered]
+                        yield Select(options, value=configured, allow_blank=False, id=f"role-{name}")
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
                 yield Button("Set up another project…", id="project-setup")
@@ -1098,8 +1104,22 @@ class NewTask(Dialog):
             }
         )
 
+    # The dialog's frame, padding and buttons: what the fields leave room for.
+    CHROME = 9
+
     def on_mount(self) -> None:
         self.for_project(str(self.query_one("#project", Select).value))
+        self.call_after_refresh(self.fit)
+
+    def on_resize(self) -> None:
+        self.call_after_refresh(self.fit)
+
+    def fit(self) -> None:
+        """The fields as tall as they are, or as the screen allows, when a short terminal would push
+        the buttons off it; then they scroll, and the buttons stay in view."""
+        fields = self.query_one(Fields)
+        room = int(self.size.height * 0.9) - self.CHROME
+        fields.styles.max_height = max(5, room)
         self.query_one("#goal", TextArea).focus()
 
     @on(Select.Changed, "#project")
@@ -1226,6 +1246,8 @@ class Vivibox(App):
     #suggestions { max-height: 8; border: none; background: $boost; }
     #editors { max-height: 12; margin: 1 0; }
     .buttons { height: auto; margin-top: 1; }
+    .fields { height: auto; }
+    .wrap { width: 100%; }
     .buttons Button { margin-right: 2; }
     .files { color: $text-muted; margin: 1 0; }
     .role { height: auto; }

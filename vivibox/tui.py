@@ -804,6 +804,20 @@ class PathTree(DirectoryTree):
     def filter_paths(self, paths):
         return [p for p in paths if shows(self.mode, p)]
 
+    async def _on_click(self, event: events.Click) -> None:
+        """A click marks, and opens or closes a folder; it picks nothing. Picking is Enter, Select,
+        or a double click: a single one picked whatever the mouse passed over."""
+        event.prevent_default()  # the tree's own handler would select, and so pick, on every click
+        meta = event.style.meta
+        if "line" not in meta:
+            return
+        self.cursor_line = meta["line"]
+        node = self.cursor_node
+        if event.chain >= 2:
+            self.action_select_cursor()
+        elif node is not None and node.allow_expand:
+            node.toggle()
+
     def render_label(self, node, base_style, style):
         label = super().render_label(node, base_style, style)
         path = node.data.path if node.data else None
@@ -889,12 +903,15 @@ class Browse(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(f"[b]{escape(self.title_text)}[/]")
-            yield Label("→ opens a folder · ← closes it · Enter picks · Backspace goes up", classes="files")
+            yield Label(
+                "→ opens a folder · ← closes it · Enter or Select picks · Backspace goes up", classes="files"
+            )
             tree = PathTree(self.start, self.mode, id="tree", classes="tree")
             tree.auto_expand = False  # Enter picks; the arrows open and close
             yield tree
             yield Label("", id="verdict")
             with Horizontal(classes="buttons"):
+                yield Button("Select", variant="primary", id="select")
                 if self.mode == FOLDER:  # a project from scratch starts in a folder not made yet
                     yield Button("New folder…", id="new-folder")
                 yield Button("Cancel", id="cancel")
@@ -909,6 +926,18 @@ class Browse(Dialog):
             node.data.path if node is not None and node.data else Path(self.query_one("#tree", PathTree).path)
         )
         return path if path.is_dir() else path.parent
+
+    @on(Button.Pressed, "#select")
+    def select_marked(self) -> None:
+        node = self.query_one("#tree", PathTree).cursor_node
+        if node is None or not node.data:
+            return
+        path = node.data.path
+        ok, said = self.judged(path)
+        if ok:
+            self.dismiss(path)
+        else:
+            self.notify(said or "Pick one of the marked entries.", severity="warning")
 
     @on(Button.Pressed, "#new-folder")
     def new_folder(self) -> None:

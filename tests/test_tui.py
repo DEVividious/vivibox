@@ -1422,3 +1422,62 @@ def test_the_folder_browser_opens_with_right_and_picks_with_enter(env, tmp_path,
 
     run(scenario)
     assert picked == [home / "work" / "shop"]
+
+
+def test_a_click_marks_a_folder_and_select_or_new_folder_act_on_it(env, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "work").mkdir(parents=True)
+    (home / "zoo").mkdir()
+    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    picked = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        await pilot.pause()
+        browser = app.screen
+        tree = browser.query_one("#tree", tui.PathTree)
+        await pilot.click("#tree", offset=(8, 1))  # the "work" line
+        await pilot.pause()
+        assert app.screen is browser, "a click picks nothing"
+        assert tree.cursor_node.data.path == home / "work"
+        browser.query_one("#new-folder").press()
+        await pilot.pause()
+        await pilot.press(*"shop", "enter")
+        await pilot.pause()
+
+    run(scenario)
+    assert picked == [home / "work" / "shop"] and (home / "work" / "shop").is_dir(), "made where you clicked"
+
+
+def test_select_picks_the_marked_folder(env, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "work").mkdir(parents=True)
+    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    picked = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        await pilot.pause()
+        await pilot.click("#tree", offset=(8, 1))
+        await pilot.pause()
+        app.screen.query_one("#select").press()
+        await pilot.pause()
+
+    run(scenario)
+    assert picked == [home / "work"]
+
+
+def test_a_double_click_picks(env, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "work").mkdir(parents=True)
+    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    picked = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        await pilot.pause()
+        await pilot.click("#tree", offset=(8, 1), times=2)
+        await pilot.pause()
+
+    run(scenario)
+    assert picked == [home / "work"]

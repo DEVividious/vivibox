@@ -310,16 +310,27 @@ def test_a_project_whose_folder_is_gone_is_offered_for_removal(env, tmp_path, mo
     run(scenario)
 
 
-def test_the_first_run_asks_for_a_project(env, tmp_path, monkeypatch):
+def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path, monkeypatch):
+    """No dialog you did not ask for: the view says what to press, and a task cannot be started
+    before there is a project to put it in."""
     (env / "config" / "projects" / "demo.toml").unlink()
     monkeypatch.chdir(tmp_path)
 
     async def scenario(app, pilot):
         await pilot.pause()
-        assert isinstance(app.screen, NewProject), "nothing to work on: set up a project first"
-        await pilot.press("escape")
+        assert not isinstance(app.screen, NewProject)
+        shown = str(app.query_one("#empty").render())
+        assert "No projects yet" in shown and "Press i" in shown and not app.table.display
+        assert not app.check_action("new", ()), "n is hidden with no project"
+        await pilot.press("n")
         await pilot.pause()
-        assert not projects()
+        assert not isinstance(app.screen, tui.NewTask)
+        (env / "config" / "projects" / "demo.toml").write_text(
+            f'repo = "{env / "repo"}"\nverify = ["true"]\n'
+        )
+        app.reload()
+        await pilot.pause()
+        assert app.check_action("new", ()) and "No tasks yet" in str(app.query_one("#empty").render())
 
     run(scenario)
 

@@ -31,6 +31,7 @@ from textual.widgets import (
     Markdown,
     OptionList,
     Select,
+    Static,
     TextArea,
 )
 
@@ -289,6 +290,13 @@ def detail(
 
 
 # --- dialogs ------------------------------------------------------------------------------------
+
+
+NO_PROJECTS = """No projects yet, so your agents are sitting idle.
+
+Press i to give them one: a repository you already have, or an empty folder to start a project
+from scratch. Then n hands them a task."""
+NO_TASKS = "No tasks yet. Press n to create one."
 
 
 class Dialog(ModalScreen):
@@ -834,6 +842,7 @@ class Vivibox(App):
     TITLE = "vivibox"
     CSS = """
     DataTable { height: 1fr; }
+    #empty { height: 1fr; padding: 2 4; color: $text-muted; }
     #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
     #detail.hidden { display: none; }
     .dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
@@ -896,6 +905,7 @@ class Vivibox(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield DataTable(id="tasks", cursor_type="row", zebra_stripes=True)
+        yield Static("", id="empty")  # in the table's place while there is nothing to list
         with VerticalScroll(id="detail", classes="hidden"):
             yield Markdown("", id="detail-text")
         yield LiveFooter()
@@ -942,12 +952,10 @@ class Vivibox(App):
             self.available = None
 
     def check_projects(self) -> None:
-        """A project whose repository is gone is offered for removal; then, if none is left, set one up."""
+        """A project whose repository is gone is offered for removal. With none left, the view says
+        how to add one rather than open a dialog you did not ask for."""
         broken = actions.broken_projects()
         if not broken:
-            if not projects():
-                # Nothing to work on yet: the first thing to do is point vivibox at a repository.
-                self.new_project()
             return
         listed = "\n".join(f"{name}: {why}" for name, why in broken.items())
         question = f"These projects cannot be worked in:\n\n{listed}\n\nForget them?"
@@ -958,8 +966,7 @@ class Vivibox(App):
                     actions.forget_project(name)
                 except ConfigError as e:
                     self.fail(e)
-            if not projects():
-                self.new_project()
+            self.reload()
 
         self.push_screen(Confirm(question, "Forget"), answered)
 
@@ -986,7 +993,8 @@ class Vivibox(App):
             for task, st in self.pairs
         )
         pods = tuple(sorted((k, v.state, len(v.reachable)) for k, v in self.pods.items()))
-        return tasks, pods, self.show_done, self.selected_id(), len(self.done)
+        # With no project the panel says how to add one, and n is hidden until there is one.
+        return tasks, pods, self.show_done, self.selected_id(), len(self.done), bool(projects())
 
     def reload(self) -> None:
         """Re-reads every task; the only place that does, so key checks stay cheap."""
@@ -1020,6 +1028,9 @@ class Vivibox(App):
                 ui.ago(entry["finished"]), entry["title"], key=entry["id"],
             )  # fmt: skip
         ids = [st.id for _, st in pairs] + [e["id"] for e in self.done]
+        empty = self.query_one("#empty", Static)
+        table.display, empty.display = bool(ids), not ids
+        empty.update("" if ids else NO_TASKS if projects() else NO_PROJECTS)
         if selected in ids:
             table.move_cursor(row=ids.index(selected))
         self.waiting = sum(st.state in WAITING_ONLY for _, st in pairs)
@@ -1095,7 +1106,7 @@ class Vivibox(App):
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
         else:
-            text = "No tasks yet. Press `n` to create one."
+            text = NO_TASKS if projects() else NO_PROJECTS
         if text != self.shown:  # redrawing resets the scroll position
             self.shown = text
             self.text.update(text)
@@ -1150,7 +1161,9 @@ class Vivibox(App):
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
                         "start_task", "stop_task", "remove", "demo", "demo_stop",
                         "models", "copy_prompt", "copy_prompt_cli")  # fmt: skip
-        if action not in task_actions:  # new, quit, and moving focus in dialogs
+        if action == "new":
+            return bool(projects())  # a task needs a project to be in
+        if action not in task_actions:  # quit, and moving focus in dialogs
             return True
         pick = self.selected()
         if not pick:
@@ -1555,7 +1568,7 @@ class Vivibox(App):
 
     def action_new(self, preselect: str = "") -> None:
         if not projects():
-            self.new_project()
+            self.notify("A task needs a project first; press i to add one.")
             return
 
         def create(form: dict) -> None:

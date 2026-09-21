@@ -286,3 +286,51 @@ def test_the_models_offered_are_the_ones_you_configured(env):
     from vivibox import actions
 
     assert actions.models_offered() == ["m"], "both roles name the same model, offered once"
+
+
+class FakeImage:
+    """The image module as far as starting the view uses it."""
+
+    def __init__(self, monkeypatch, built: bool, failing: tuple[str, ...] = ()):
+        from vivibox import cli, image, tui
+
+        self.built = built
+        self.builds = 0
+        self.opened = False
+        monkeypatch.setattr(image, "image_ref", lambda: "vivibox-agent:abc")
+        monkeypatch.setattr(image, "exists", lambda ref: self.built)
+        monkeypatch.setattr(image, "build", self.build)
+        checks = [(image.Check(name, "", ""), name not in failing, "") for name in ("node", "java")]
+        monkeypatch.setattr(image, "run_checks", lambda ref: checks)
+        monkeypatch.setattr(tui, "run", self.open)
+        self.main = cli.main
+
+    def build(self):
+        self.builds += 1
+        self.built = True
+        return "vivibox-agent:abc", True
+
+    def open(self):
+        self.opened = True
+        return 0
+
+
+def test_the_view_builds_the_image_it_needs_first(monkeypatch, capsys):
+    fake = FakeImage(monkeypatch, built=False)
+    assert fake.main([]) == 0
+    assert fake.builds == 1 and fake.opened
+    assert "Building the agent image vivibox-agent:abc" in capsys.readouterr().out
+
+
+def test_the_view_opens_at_once_with_the_image_built(monkeypatch, capsys):
+    fake = FakeImage(monkeypatch, built=True)
+    assert fake.main([]) == 0
+    assert fake.builds == 0 and fake.opened
+    assert capsys.readouterr().out == ""
+
+
+def test_the_view_does_not_open_on_an_image_that_fails_its_checks(monkeypatch, capsys):
+    fake = FakeImage(monkeypatch, built=False, failing=("java",))
+    assert fake.main([]) == 1
+    assert not fake.opened
+    assert "fails its checks (java); see: vivibox image check" in capsys.readouterr().err

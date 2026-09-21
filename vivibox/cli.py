@@ -95,6 +95,19 @@ def cmd_image_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def ensure_image() -> None:
+    """The view starts with the agent image ready: built the first time, and again whenever its
+    definition changed, which an update of vivibox can do."""
+    ref = image.image_ref()
+    if image.exists(ref):
+        return
+    print(f"Building the agent image {ref}; the first time takes a few minutes.", flush=True)
+    image.build()
+    failed = [check.name for check, ok, _ in image.run_checks(ref) if not ok]
+    if failed:
+        raise PodError(f"the agent image fails its checks ({', '.join(failed)}); see: vivibox image check")
+
+
 def cmd_image_check(args: argparse.Namespace) -> int:
     ref = image.image_ref()
     if not image.exists(ref):
@@ -562,6 +575,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command is None:
             from . import tui  # the view's library loads only when you use it
 
+            ensure_image()
             return tui.run()
         return args.func(args)
     except (

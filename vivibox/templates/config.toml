@@ -25,7 +25,7 @@ model = "Opus on claude.ai"          # a label for your task list; vivibox runs 
 
 [roles.writer]
 harness = "opencode"
-model = "anthropic/claude-sonnet-5"
+model = ""                           # picked in the view the first time you create a task
 
 [notifications]
 # Desktop notifications (notify-send) when a task waits for you. Messages always appear in the

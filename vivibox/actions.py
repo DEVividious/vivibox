@@ -21,12 +21,14 @@ from pathlib import Path
 from . import (
     claudecode,
     context,
+    firstrun,
     gate,
     ide,
     image,
     keys,
     manual,
     opencode,
+    providers,
     repo,
     secrets,
     supervisor,
@@ -168,6 +170,8 @@ def role_of(task: Task | None, role_name: str, config: Config | None = None) -> 
 
 # A choice for a role: the harness it runs in and the model, "" for a manual role.
 Choice = tuple[str, str]
+# The last entry of every list of models: adding a provider, or importing your opencode.json.
+ADD: Choice = ("add", "")
 MODELS_CACHE_SECONDS = 24 * 3600
 
 
@@ -193,8 +197,11 @@ def available_models(refresh: bool = False) -> dict[str, list[str]]:
         cached = json.loads(path.read_text())
     except (OSError, ValueError):
         cached = {}
-    found, now_ = {}, time.time()
+    # Your own providers list their models themselves; opencode knows nothing of them.
+    found, now_ = {name: listed for name, listed in providers.models().items() if listed}, time.time()
     for provider in keys.list_keys():
+        if provider in found:
+            continue
         entry = cached.get(provider) or {}
         if not refresh and entry.get("models") and now_ - entry.get("at", 0) < MODELS_CACHE_SECONDS:
             found[provider] = entry["models"]
@@ -227,7 +234,9 @@ def choices(role_name: str, config: Config, available: dict[str, list[str]] | No
     found += [(r.harness, r.model) for r in config.roles.values() if r.harness == opencode.NAME]
     if role_name == "writer":
         found = [c for c in found if c[0] == opencode.NAME]
-    return list(dict.fromkeys(found))
+    # A role with no model yet shows that it has none, and no model of its own twice.
+    found = [c for c in found if c[1] or c[0] == manual.NAME or c == found[0]]
+    return [*dict.fromkeys(found), ADD]
 
 
 def configured_choice(config: Config, role_name: str) -> Choice:
@@ -237,6 +246,10 @@ def configured_choice(config: Config, role_name: str) -> Choice:
 
 def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
     harness, model = choice
+    if choice == ADD:
+        return "+ add a provider, or import your opencode.json…"
+    if not model and harness != manual.NAME:
+        return "no model yet: pick one below, or add a provider"
     text = "you, in your own chat" if harness == manual.NAME else model
     if harness == claudecode.NAME:
         text += " (Claude Code)"
@@ -279,9 +292,12 @@ def provider_keys(config: Config, task: Task | None = None) -> list[str]:
     """Every metered provider a role needs, on the models this task runs them on: a task moved to
     another provider's model needs that provider's key, not the one config.toml's model uses."""
     found = []
-    for role in (role_of(task, name, config) for name in config.roles):
+    for name, role in ((n, role_of(task, n, config)) for n in config.roles):
+        if not role.model and role.harness == opencode.NAME:
+            raise ConfigError(f"the {name} has no model yet; pick one when you create a task, or press m")
         if role.harness == opencode.NAME and (p := opencode.provider_of(role.model)) not in found:
-            found.append(p)
+            if not providers.keyless(p):
+                found.append(p)
         elif role.harness == claudecode.NAME and "anthropic" not in found:
             found.append("anthropic")
     return found
@@ -589,6 +605,10 @@ def create(
             raise ConfigError("only opencode can write yet; give the writer a provider/model")
         if (harness, model) != configured_choice(config, role):
             chosen[role] = (harness, model)
+    for role in config.roles:
+        harness, model = chosen.get(role) or configured_choice(config, role)
+        if harness != manual.NAME and not model:
+            raise ConfigError(f"the {role} has no model yet; pick one, or add a provider")
     project = load_project(project_name)
     if not project.repo.is_dir():
         raise ConfigError(f"{project.repo} is gone; project {project_name} has nothing to work on")
@@ -610,6 +630,10 @@ def create(
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     task.set_base_commit(base)
+    for role, (harness, model) in list(chosen.items()):
+        if not config.roles[role].model and harness == config.roles[role].harness:
+            firstrun.remember(role, harness, model)  # the first model you pick becomes the default
+            del chosen[role]
     for role, (harness, model) in chosen.items():
         # The harness is kept only when it differs, so a task on another model keeps following
         # config.toml's harness, as m has always left it.
@@ -629,7 +653,9 @@ def start(task_id: str, resume: bool = False) -> str:
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
     secrets.prepare(task.id, provider_keys(config, task))
-    changed = opencode.prepare(task, model, project.verify)
+    used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
+            if r.harness == opencode.NAME]  # fmt: skip
+    changed = opencode.prepare(task, model, project.verify, used)
     pod = task_pod(task.id)
     pod.up()
     toolchain.ensure(pod, project.java)

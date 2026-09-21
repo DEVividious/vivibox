@@ -34,7 +34,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from . import actions, context, gate, ide, manual, supervisor, ui
+from . import actions, context, gate, ide, keys, manual, providers, supervisor, ui
 from .config import ConfigError, load_config
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -609,6 +609,56 @@ class ChooseModel(ModalScreen["actions.Choice | None"]):
         self.dismiss(None)
 
 
+class AddProvider(Dialog):
+    """A provider opencode knows, with your key, or every provider of an opencode.json you already
+    use, such as your employer's endpoint. Dismisses with the providers added, or [] when you leave."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Add a provider opencode knows (deepseek, anthropic, openai, openrouter, google, …)")
+            yield Input(placeholder="provider", id="provider")
+            yield Input(placeholder="API key (not shown)", password=True, id="key")
+            yield Label("or bring over every provider of an opencode.json you use, with its models and key:")
+            yield Input(str(providers.DEFAULT_SOURCE), suggester=PathSuggester(), id="source")
+            yield Label("", id="problem")
+            with Horizontal(classes="buttons"):
+                yield Button("Add", variant="primary", id="add")
+                yield Button("Import", id="import")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#provider", Input).focus()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        try:
+            if event.button.id == "add":
+                name = self.query_one("#provider", Input).value.strip().lower()
+                keys.set_key(name, self.query_one("#key", Input).value)
+                self.dismiss([name])
+            elif event.button.id == "import":
+                found = providers.import_opencode(Path(self.query_one("#source", Input).value.strip()))
+                for p in found:
+                    self.notify(f"{p.name}: {p.models} models, key {p.key}", timeout=10)
+                self.dismiss([p.name for p in found])
+            else:
+                self.dismiss([])
+        except (keys.KeyStoreError, ConfigError) as e:
+            self.query_one("#problem", Label).update(f"[red]{e.args[0]}[/]")
+
+    @on(Input.Submitted)
+    def submitted(self, event: Input.Submitted) -> None:
+        self.query_one("#import" if event.input.id == "source" else "#add", Button).press()
+
+    def key_escape(self) -> None:
+        self.dismiss([])
+
+
+def first_model(available: dict[str, list[str]] | None, added: list[str]) -> str:
+    """The first model of the providers you just added, to put the role on."""
+    return next((m for name in added for m in (available or {}).get(name, [])), "")
+
+
 class NewTask(Dialog):
     def __init__(self, preselect: str = "", available: dict[str, list[str]] | None = None):
         super().__init__()
@@ -682,6 +732,44 @@ class NewTask(Dialog):
     def for_project(self, name: str) -> None:
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
         self.query_one("#kind", Select).display = not actions.empty_project(name)
+
+    @on(Select.Changed, ".role Select")
+    def role_changed(self, event: Select.Changed) -> None:
+        if event.value != actions.ADD:
+            return
+        select = event.select
+        role = select.id.removeprefix("role-")
+        select.value = actions.configured_choice(load_config(), role)
+
+        def added(names: list[str]) -> None:
+            if names:
+                self.notify("Asking opencode for their models…")
+                self.refresh_models(role, names)
+
+        self.app.push_screen(AddProvider(), added)
+
+    @work(thread=True)
+    def refresh_models(self, role: str, names: list[str]) -> None:
+        available = actions.available_models(refresh=True)
+        self.app.call_from_thread(self.show_models, role, names, available)
+
+    def show_models(self, role: str, names: list[str], available: dict[str, list[str]]) -> None:
+        """Every role's list with the new models in it, and the role you added them for on one."""
+        self.available = self.app.available = available
+        config = load_config()
+        for select in self.query(".role Select").results(Select):
+            name = select.id.removeprefix("role-")
+            kept, configured = select.value, actions.configured_choice(config, name)
+            offered = actions.choices(name, config, available)
+            select.set_options([(actions.choice_label(c, configured), c) for c in offered])
+            select.value = kept if kept in offered else configured
+        model = first_model(available, names)
+        if model:
+            self.query_one(f"#role-{role}", Select).value = ("opencode", model)
+        else:
+            self.notify(
+                f"opencode lists no models for {', '.join(names)}; check the name.", severity="warning"
+            )
 
     def key_ctrl_s(self) -> None:
         self.query_one("#create", Button).press()
@@ -762,7 +850,8 @@ class Vivibox(App):
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
-    Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor { align: center middle; }
+    Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
+    AddProvider { align: center middle; }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),
@@ -827,6 +916,22 @@ class Vivibox(App):
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)
         self.load_models()
+
+    @work(thread=True)
+    def models_then_choose(self, task: Task, role: str) -> None:
+        """After adding a provider: its models, then the list to put the role on one of them."""
+        self.available = actions.available_models(refresh=True)
+        config = load_config()
+
+        def choose() -> None:
+            offered = actions.choices(role, config, self.available)
+            configured = actions.configured_choice(config, role)
+            self.push_screen(
+                ChooseModel(role, offered, configured, self.current_choice(task, role, config)),
+                lambda choice: self.set_choice(task, role, choice, config),
+            )
+
+        self.call_from_thread(choose)
 
     @work(thread=True)
     def load_models(self) -> None:
@@ -1388,7 +1493,18 @@ class Vivibox(App):
     def set_choice(self, task: Task, role: str, choice: actions.Choice | None, config) -> None:
         if choice is None:
             return
+        if choice == actions.ADD:
+
+            def added(names: list[str]) -> None:
+                if names:
+                    self.notify("Asking opencode for their models…")
+                    self.models_then_choose(task, role)
+
+            self.push_screen(AddProvider(), added)
+            return
         harness, model = choice
+        if not model and harness != manual.NAME:
+            return  # "no model yet" is where the role is, not a model to put it on
         if choice == actions.configured_choice(config, role):
             task.set_role(role)  # back to config.toml, and following it when it changes
         else:

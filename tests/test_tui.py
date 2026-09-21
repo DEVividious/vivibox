@@ -620,6 +620,7 @@ def test_m_puts_one_role_on_another_model_for_this_task_only(env):
             (OC, "m"),
             (OC, "deepseek/deepseek-v4-flash"),
             (OC, "deepseek/deepseek-v4-pro"),
+            actions.ADD,
         ]
         await pilot.press("down", "down", "enter")
         await pilot.pause()
@@ -860,3 +861,87 @@ def test_sending_work_back_can_add_criteria(env):
     run(scenario)
     assert task.read_state().state is State.IMPLEMENT
     assert gate.missing_criteria(task)[-2:] == ["works before a load", "keeps the zoom"]
+
+
+def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env, monkeypatch, tmp_path):
+    """The company case: you plan in your own chat, and the writer runs on your employer's model,
+    defined in an opencode.json you already use. Brought over from the list of models itself."""
+    from vivibox import keys, providers
+
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
+    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+    monkeypatch.setenv("ACME_KEY", "acme-secret")
+    source = tmp_path / "opencode.json"
+    source.write_text(
+        '{"provider": {"acme": {"npm": "@ai-sdk/openai-compatible",'
+        ' "options": {"baseURL": "https://ai.acme.example/v1", "apiKey": "{env:ACME_KEY}"},'
+        ' "models": {"coder": {}, "chat": {}}}}}'
+    )
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix login")
+        writer = app.screen.query_one("#role-writer", Select)
+        writer.value = actions.ADD
+        await pilot.pause()
+        assert isinstance(app.screen, tui.AddProvider)
+        app.screen.query_one("#source", Input).value = str(source)
+        app.screen.query_one("#import").press()
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert isinstance(app.screen, tui.NewTask)
+        writer = app.screen.query_one("#role-writer", Select)
+        assert writer.value == (OC, "acme/coder"), "on the first model of the provider just added"
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    run(scenario)
+    assert keys.get_key("acme") == "acme-secret"
+    assert providers.models()["acme"] == ["acme/coder", "acme/chat"]
+    st = find_task(load_config().tasks_dir, "demo-1").read_state()
+    assert st.models == {"writer": "acme/coder"}
+
+
+def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
+    from vivibox import keys
+
+    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [f"{p}/big", f"{p}/small"])
+    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        app.screen.query_one("#role-writer", Select).value = actions.ADD
+        await pilot.pause()
+        app.screen.query_one("#provider", Input).value = "openai"
+        app.screen.query_one("#key", Input).value = "sk-openai"
+        app.screen.query_one("#add").press()
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.screen.query_one("#role-writer", Select).value == (OC, "openai/big")
+
+    run(scenario)
+    assert keys.get_key("openai") == "sk-openai"
+
+
+def test_a_bad_import_is_said_in_the_dialog(env, tmp_path):
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        app.screen.query_one("#role-writer", Select).value = actions.ADD
+        await pilot.pause()
+        app.screen.query_one("#source", Input).value = str(tmp_path / "missing.json")
+        app.screen.query_one("#import").press()
+        await pilot.pause()
+        assert isinstance(app.screen, tui.AddProvider), "still open, to fix the path"
+        assert "cannot read" in str(app.screen.query_one("#problem", Label).render())
+
+    run(scenario)

@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from importlib.resources import files
 
-from . import repo
+from . import providers, repo
 from .pod import Pod
 from .secrets import MOUNT
 from .task import Task
@@ -38,7 +38,18 @@ def provider_of(model: str) -> str:
     return provider
 
 
-def config(model: str) -> dict:
+def provider_entry(provider: str) -> dict:
+    """A provider as a task's opencode.json names it: its definition when it is one of yours
+    (providers.json), and the key mounted in the pod unless its endpoint takes none."""
+    entry = providers.definition(provider)
+    if not providers.keyless(provider):
+        entry.setdefault("options", {})["apiKey"] = f"{{file:{MOUNT}/{provider}}}"
+    return entry
+
+
+def config(model: str, used: list[str] | tuple = ()) -> dict:
+    """used: every provider the task's roles run on; the writer's is always there."""
+    names = list(dict.fromkeys([provider_of(model), *used]))
     return {
         "$schema": "https://opencode.ai/config.json",
         "model": model,
@@ -47,12 +58,12 @@ def config(model: str) -> dict:
         # The pod is the boundary; inside it the agent may edit and run anything. Nobody is there to
         # answer a permission prompt during a headless turn, and an unanswered prompt ends the turn.
         "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow"},
-        "provider": {provider_of(model): {"options": {"apiKey": f"{{file:{MOUNT}/{provider_of(model)}}}"}}},
+        "provider": {name: provider_entry(name) for name in names},
         "instructions": [INSTRUCTIONS],
     }
 
 
-def prepare(task: Task, model: str, verify: list[str]) -> bool:
+def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple = ()) -> bool:
     """Writes the harness files seen by the agent at /task/harness. True if they changed."""
     d = task.meta / "harness"
     d.mkdir(exist_ok=True)
@@ -66,7 +77,7 @@ def prepare(task: Task, model: str, verify: list[str]) -> bool:
             verify="\n".join(f"  - `{c}`" for c in verify),
         )
     )
-    (d / "opencode.json").write_text(json.dumps(config(model), indent=2) + "\n")
+    (d / "opencode.json").write_text(json.dumps(config(model, used), indent=2) + "\n")
     return before != {p.name: p.read_text() for p in d.iterdir()}
 
 

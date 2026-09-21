@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import actions, context, gate, image, keys, manual, opencode, repo, supervisor, ui
+from . import actions, context, gate, image, keys, manual, opencode, providers, repo, supervisor, ui
 from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
@@ -399,6 +399,10 @@ def cmd_auth(args: argparse.Namespace) -> int:
         value = getpass.getpass(f"API key for {args.provider}: ") if sys.stdin.isatty() else sys.stdin.read()
         keys.set_key(args.provider, value)
         print(f"Stored {args.provider}: {keys.masked(keys.get_key(args.provider))} in {keys.store()}")
+    elif args.action == "import":
+        for p in providers.import_opencode(Path(args.provider or providers.DEFAULT_SOURCE)):
+            print(f"{p.name:20} {p.models} models, key {p.key}")
+        print(f"Kept in {providers.path()}; pick their models when you create a task, or press m.")
     elif args.action == "rm":
         if not args.provider:
             raise keys.KeyStoreError("which provider? e.g. vivibox auth rm deepseek")
@@ -546,8 +550,13 @@ def parser() -> argparse.ArgumentParser:
     plan.set_defaults(func=cmd_plan)
 
     auth = sub.add_parser("auth", help="API keys for model providers, stored by vivibox")
-    auth.add_argument("action", choices=["list", "set", "rm"])
-    auth.add_argument("provider", nargs="?", help="provider, as in <provider>/<model> in config.toml")
+    auth.add_argument("action", choices=["list", "set", "rm", "import"])
+    auth.add_argument(
+        "provider",
+        nargs="?",
+        help="provider, as in <provider>/<model> in config.toml; for import, an opencode.json"
+        f" (default: {providers.DEFAULT_SOURCE})",
+    )
     auth.set_defaults(func=cmd_auth)
 
     models = sub.add_parser("models", help="list models opencode knows for your providers")

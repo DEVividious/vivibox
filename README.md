@@ -52,16 +52,21 @@ from this checkout, editable, so it follows the checkout as you update it. When 
 
 ## Configure
 
-Run `vivibox`. The first time, it builds the agent image (a few minutes) and asks three things:
-the provider of the model that writes the code, its API key (not shown as you type), and the model,
-from the list opencode has for that provider. Planning starts in your own chat; answer `n` to have a
-model on your key plan instead. It writes `~/.config/vivibox/config.toml`, commented, for anything
-else you want to change, and opens the view.
+Run `vivibox`. The first time, it builds the agent image (a few minutes), writes a commented
+`~/.config/vivibox/config.toml` and opens the view. Planning starts in your own chat; the writer has
+no model until you create your first task. Its list of models ends with *+ add a provider, or
+import your opencode.json…*:
 
-Later, other providers' keys and their model names:
+- a provider opencode knows (deepseek, anthropic, openai, openrouter, google, …) and your key, or
+- every provider of an opencode.json you already use, such as your employer's endpoint with its
+  models. The definitions go to `~/.config/vivibox/providers.json`, and each key, whether written
+  in the file, `{env:NAME}` or `{file:path}`, to vivibox's key store.
+
+The first model you pick for a role becomes its default in config.toml. The same, from a shell:
 
 ```bash
-vivibox auth set anthropic
+vivibox auth set anthropic                                 # asks for the key
+vivibox auth import ~/.config/opencode/opencode.json
 vivibox models anthropic
 ```
 

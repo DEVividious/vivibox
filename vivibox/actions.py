@@ -697,7 +697,7 @@ def start(task_id: str, resume: bool = False) -> str:
     _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
-    secrets.prepare(task.id, provider_keys(config, task))
+    secrets.prepare(task.id, provider_keys(config, task) + providers.mcp_secrets())
     used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)

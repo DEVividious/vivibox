@@ -32,7 +32,11 @@ def source(env, tmp_path):
 
 def test_every_provider_comes_over_with_its_key(source):
     found = providers.import_opencode(source, env={"ACME_KEY": "acme-secret"})
-    assert [(p.name, p.models) for p in found] == [("acme", 3), ("local", 1), ("deepseek", 0)]
+    assert [(p.name, p.what) for p in found] == [
+        ("acme", "3 models"),
+        ("local", "1 model"),
+        ("deepseek", "opencode's provider"),
+    ]
     assert keys.get_key("acme") == "acme-secret" and keys.get_key("deepseek") == "sk-literal"
     stored = providers.path().read_text()
     assert "apiKey" not in stored and "sk-literal" not in stored, "keys stay in the key store"
@@ -142,3 +146,80 @@ def test_opencode_own_provider_brings_only_its_key(source):
     assert "deepseek" not in providers.load() and keys.get_key("deepseek") == "sk-literal"
     found = {f.name: f.own for f in providers.read_opencode(source, env={}).found}
     assert found == {"acme": True, "local": True, "deepseek": False}
+
+
+SERVERS = """{
+  "mcp": {
+    "company": {"type": "remote", "url": "https://mcp.acme.example/sse",
+                "headers": {"Authorization": "Bearer mcp-secret"}},
+    "serena": {"type": "local",
+               "command": ["uvx", "--from", "git+https://github.com/oraios/serena", "serena"],
+               "environment": {"SERENA_TOKEN": "{env:SERENA_TOKEN}"}}
+  },
+  "agent": {}
+}"""
+
+
+@pytest.fixture
+def servers(env, tmp_path):
+    path = tmp_path / "servers.json"
+    path.write_text(SERVERS)
+    return path
+
+
+def test_mcp_servers_come_over_with_their_secrets_in_the_key_store(servers):
+    reading = providers.read_opencode(servers, env={"SERENA_TOKEN": "serena-secret"})
+    assert [(f.kind, f.name, f.what) for f in reading.found] == [
+        ("mcp", "company", "remote https://mcp.acme.example/sse"),
+        ("mcp", "serena", "local uvx --from git+https://github.com/oraios/serena serena"),
+    ]
+    assert reading.left == ["agent"]
+    providers.bring_over(reading.found)
+    stored = providers.mcp_path().read_text()
+    assert "mcp-secret" not in stored and "serena-secret" not in stored
+    assert keys.get_key("mcp.company.authorization") == "Bearer mcp-secret"
+    assert keys.get_key("mcp.serena.serena_token") == "serena-secret"
+    assert providers.mcp_secrets() == ["mcp.company.authorization", "mcp.serena.serena_token"]
+
+
+def test_a_task_gets_the_mcp_servers_pointing_at_mounted_secrets(servers):
+    providers.import_opencode(servers, env={"SERENA_TOKEN": "t"})
+    mcp = opencode.config("deepseek/deepseek-v4-flash")["mcp"]
+    assert mcp["company"]["headers"] == {
+        "Authorization": "{file:/run/vivibox-secrets/mcp.company.authorization}"
+    }
+    assert mcp["serena"]["environment"] == {
+        "SERENA_TOKEN": "{file:/run/vivibox-secrets/mcp.serena.serena_token}"
+    }
+
+
+def test_what_you_have_is_told_apart_from_what_differs(servers):
+    env = {"SERENA_TOKEN": "t"}
+    assert {f.status for f in providers.read_opencode(servers, env=env).found} == {"new"}
+    providers.import_opencode(servers, env=env)
+    assert {f.status for f in providers.read_opencode(servers, env=env).found} == {"same"}
+    status = {f.name: f.status for f in providers.read_opencode(servers, env={"SERENA_TOKEN": "other"}).found}
+    assert status == {"company": "same", "serena": "replaces"}, "a changed secret is a difference too"
+
+
+def test_removing_an_mcp_server_removes_its_secrets(servers):
+    providers.import_opencode(servers, env={"SERENA_TOKEN": "t"})
+    assert providers.forget("company", providers.MCP)
+    assert "company" not in providers.load_mcp() and "mcp.company.authorization" not in keys.list_keys()
+    assert "mcp.serena.serena_token" in keys.list_keys()
+
+
+def test_a_file_with_neither_is_refused(env, tmp_path):
+    path = tmp_path / "package.json"
+    path.write_text('{"name": "x", "version": "1.0.0"}')
+    with pytest.raises(ConfigError, match="defines no providers and no MCP servers"):
+        providers.read_opencode(path, env={})
+
+
+def test_a_fresh_download_is_offered_first(env, tmp_path):
+    home = tmp_path / "home"
+    (home / "Downloads").mkdir(parents=True)
+    (home / "Downloads" / "opencode (1).json").write_text(SERVERS)
+    (home / "Downloads" / "report.json").write_text("{}")
+    found = providers.discover([], env={"HOME": str(home)})
+    assert found == [(home / "Downloads" / "opencode (1).json", 2)]

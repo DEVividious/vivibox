@@ -386,6 +386,11 @@ def cmd_approve_risky(args: argparse.Namespace) -> int:
     return 0
 
 
+def _yes(question: str) -> bool:
+    """Yes without a terminal to ask in: a script that runs the import means it."""
+    return not sys.stdin.isatty() or input(question).strip().lower() in ("y", "yes")
+
+
 def cmd_auth(args: argparse.Namespace) -> int:
     if args.action == "list":
         stored = keys.list_keys()
@@ -401,20 +406,21 @@ def cmd_auth(args: argparse.Namespace) -> int:
         print(f"Stored {args.provider}: {keys.masked(keys.get_key(args.provider))} in {keys.store()}")
     elif args.action == "import":
         reading = providers.read_opencode(Path(args.provider or providers.DEFAULT_SOURCE))
+        said = {"new": "", "replaces": "  (you have a different one)", "same": "  (same as yours, skipped)"}
         for f in reading.found:
-            what = f"{f.models} models" if f.own else "opencode's provider"
-            replaces = "  (replaces the one you have)" if f.replaces else ""
-            print(f"{f.name:20} {what}, key {f.key}{replaces}")
+            print(f"{f.kind:9} {f.name:20} {f.what}, key {f.key}{said[f.status]}")
         if reading.left:
-            print(f"Only providers come over; left in the file: {', '.join(reading.left)}.")
-        if sys.stdin.isatty() and input(f"Import these {len(reading.found)}? [y/N] ").strip().lower() not in (
-            "y",
-            "yes",
-        ):
+            print(f"Left in the file, not for vivibox: {', '.join(reading.left)}.")
+        new = [f for f in reading.found if f.status == "new"]
+        differ = [f for f in reading.found if f.status == "replaces"]
+        chosen = new if new and _yes(f"Import the {len(new)} new? [y/N] ") else []
+        if differ and _yes(f"Overwrite yours with {', '.join(f.name for f in differ)}? [y/N] "):
+            chosen += differ
+        if not chosen:
             print("Nothing imported.")
             return 1
-        providers.bring_over(reading.found)
-        print(f"Kept in {providers.path()}; pick their models when you create a task, or press m.")
+        providers.bring_over(chosen)
+        print(f"Imported {', '.join(f.name for f in chosen)}; press k in vivibox to see them.")
     elif args.action == "rm":
         if not args.provider:
             raise keys.KeyStoreError("which provider? e.g. vivibox auth rm deepseek")

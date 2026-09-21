@@ -953,23 +953,6 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
     assert keys.get_key("openai") == "sk-openai"
 
 
-def test_another_file_that_is_not_there_is_said(env, tmp_path):
-    async def scenario(app, pilot):
-        app.push_screen(tui.ImportSource([]))
-        await pilot.pause()
-        await pilot.press("enter")  # "Another file…", the only entry
-        await pilot.pause()
-        other = app.screen.query_one("#other", Input)
-        assert other.display and app.screen.focused is other
-        other.value = str(tmp_path / "missing.json")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert isinstance(app.screen, tui.ImportSource), "still open, to fix the path"
-        assert "is not a file" in str(app.screen.query_one("#problem", Label).render())
-
-    run(scenario)
-
-
 def test_d_shows_with_a_task_and_h_with_a_finished_one(env):
     new_task()
 
@@ -1014,44 +997,102 @@ def test_arrows_in_the_search_walk_the_list(env):
     run(scenario)
 
 
-def test_an_import_lists_what_it_brings_and_keeps_only_what_you_tick(env, tmp_path, monkeypatch):
-    """Nothing merged behind your back: each provider is listed with where its key comes from, one
-    that would replace yours says so, and the rest of the file is named as left behind."""
+def test_an_import_lists_what_it_brings_and_you_decide_on_what_you_have(env, tmp_path, monkeypatch):
+    """Nothing merged behind your back: providers and MCP servers in two groups, the new ones ticked,
+    one that differs from yours unticked for you to decide, one you have already not to be picked,
+    and the rest of the file named as left behind."""
     from vivibox import keys, providers
 
     keys.set_key("deepseek", "sk-mine")
     monkeypatch.setenv("ACME_KEY", "acme-secret")
-    source = tmp_path / "opencode.json"
+    source = env / "xdg" / "opencode" / "opencode.json"
+    source.parent.mkdir(parents=True)
     source.write_text(
-        '{"mcp": {"jira": {}}, "agent": {}, "provider": {'
+        '{"agent": {}, "provider": {'
         '"acme": {"options": {"baseURL": "https://ai.acme.example/v1", "apiKey": "{env:ACME_KEY}"},'
         ' "models": {"coder": {}}},'
-        '"deepseek": {"options": {"apiKey": "sk-theirs"}}}}'
+        '"deepseek": {"options": {"apiKey": "sk-theirs"}}},'
+        ' "mcp": {"company": {"type": "remote", "url": "https://mcp.acme.example"},'
+        ' "serena": {"type": "local", "command": ["uvx", "serena"]}}}'
     )
+    providers.bring_over([f for f in providers.read_opencode(source).found if f.name == "serena"])
 
     async def scenario(app, pilot):
         app.import_opencode(lambda names: None)
         await pilot.pause()
-        await pilot.press("enter")  # "Another file…"
-        await pilot.pause()
-        app.screen.query_one("#other", Input).value = str(source)
-        await pilot.press("enter")
+        await pilot.press("enter")  # the configuration found where opencode keeps it
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ChooseImport)
-        rows = [
-            str(screen.query_one("#found", SelectionList).get_option_at_index(i).prompt) for i in range(2)
-        ]
-        assert "acme  1 models, key from $ACME_KEY" in rows[0] and "replaces" not in rows[0]
-        assert "deepseek" in rows[1] and "replaces the one you have" in rows[1]
-        assert "left in the file: mcp, agent" in " ".join(str(w.render()) for w in screen.query(Label))
-        screen.query_one("#found", SelectionList).deselect(1)  # keep your own DeepSeek key
+
+        def rows(kind):
+            found = screen.query_one(f"#found-{kind}", SelectionList)
+            options = [found.get_option_at_index(i) for i in range(found.option_count)]
+            return [(str(o.prompt), o.value in found.selected, o.disabled) for o in options]
+
+        acme, deepseek = rows("provider")
+        assert "acme  1 model, key from $ACME_KEY" in acme[0] and acme[1:] == (True, False), "new: ticked"
+        assert "differs from yours: tick to overwrite" in deepseek[0] and deepseek[1:] == (False, False)
+        company, serena = rows("mcp")
+        assert "remote https://mcp.acme.example" in company[0] and company[1:] == (True, False)
+        assert "same as yours" in serena[0] and serena[1:] == (False, True), "nothing to decide"
+        assert "not for vivibox: agent" in " ".join(str(w.render()) for w in screen.query(Label))
         screen.query_one("#import").press()
         await pilot.pause()
 
     run(scenario)
-    assert keys.get_key("deepseek") == "sk-mine" and keys.get_key("acme") == "acme-secret"
-    assert list(providers.load()) == ["acme"]
+    assert keys.get_key("deepseek") == "sk-mine", "yours kept: you did not tick it"
+    assert keys.get_key("acme") == "acme-secret"
+    assert list(providers.load()) == ["acme"] and sorted(providers.load_mcp()) == ["company", "serena"]
+
+
+def test_a_file_is_judged_before_you_pick_it(env, tmp_path):
+    good = tmp_path / "opencode.json"
+    good.write_text('{"provider": {"acme": {"models": {"m": {}}}}, "mcp": {"s": {"type": "local"}}}')
+    other = tmp_path / "package.json"
+    other.write_text('{"name": "x"}')
+    broken = tmp_path / "broken.json"
+    broken.write_text('{"provider": {')
+    assert tui.judge(good) == (True, "opencode configuration: 1 provider, 1 MCP server")
+    assert tui.judge(other) == (
+        False,
+        "JSON, but not an opencode configuration with providers or MCP servers",
+    )
+    ok, said = tui.judge(broken)
+    assert not ok and said.startswith("broken: not JSON")
+
+
+def test_the_browser_shows_folders_and_json_only(tmp_path):
+    for name in ("a.json", "b.jsonc", "notes.txt", "img.png"):
+        (tmp_path / name).write_text("{}")
+    for name in ("src", ".config", "node_modules", ".git"):
+        (tmp_path / name).mkdir()
+    shown = {p.name for p in tui.JsonTree.filter_paths(None, list(tmp_path.iterdir()))}
+    assert shown == {"a.json", "b.jsonc", "src", ".config"}
+
+
+def test_browsing_picks_an_opencode_configuration_and_not_another_json(env, tmp_path, monkeypatch):
+    from textual.widgets import DirectoryTree
+
+    good = tmp_path / "opencode.json"
+    good.write_text('{"provider": {"acme": {"models": {"m": {}}}}}')
+    other = tmp_path / "package.json"
+    other.write_text('{"name": "x"}')
+    picked = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.BrowseFile(), picked.append)
+        await pilot.pause()
+        browser = app.screen
+        tree = browser.query_one("#tree", tui.JsonTree)
+        browser.picked(DirectoryTree.FileSelected(tree.root, other))
+        await pilot.pause()
+        assert app.screen is browser, "not an opencode configuration: not picked"
+        browser.picked(DirectoryTree.FileSelected(tree.root, good))
+        await pilot.pause()
+
+    run(scenario)
+    assert picked == [good]
 
 
 def test_the_project_is_a_list_even_with_one_project(env):
@@ -1076,7 +1117,7 @@ def test_k_lists_your_providers_and_removes_one(env):
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ManageProviders)
-        assert screen.rows == [("deepseek", "key sk-… (7)")]
+        assert screen.rows == [("provider", "deepseek", "key sk-… (7)")]
         screen.query_one("#remove").press()
         await pilot.pause()
         await pilot.press("enter")  # confirm

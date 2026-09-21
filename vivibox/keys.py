@@ -31,10 +31,11 @@ def _path(provider: str) -> Path:
     return store() / provider
 
 
-def set_key(provider: str, value: str) -> None:
+def set_key(provider: str, value: str, spaces: bool = False) -> None:
+    """spaces: a header value such as "Bearer <token>", kept whole; a key is one word."""
     value = value.strip()
-    if not value or any(c.isspace() for c in value):
-        raise KeyStoreError("a key is one word without spaces")
+    if not value or ("\n" in value if spaces else any(c.isspace() for c in value)):
+        raise KeyStoreError("a secret is one line" if spaces else "a key is one word without spaces")
     path = _path(provider)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(path.parent, 0o700)

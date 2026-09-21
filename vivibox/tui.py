@@ -25,6 +25,7 @@ from textual.widgets import (
     Button,
     Checkbox,
     DataTable,
+    DirectoryTree,
     Footer,
     Header,
     Input,
@@ -37,6 +38,7 @@ from textual.widgets import (
     TextArea,
 )
 from textual.widgets.option_list import Option
+from textual.widgets.selection_list import Selection
 
 from . import actions, context, gate, ide, keys, manual, providers, supervisor, ui
 from .config import ConfigError, load_config, load_project
@@ -641,9 +643,22 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
     return found
 
 
+STATUS = {
+    "replaces": "  [yellow]differs from yours: tick to overwrite[/]",
+    "same": "  [dim]same as yours[/]",
+}
+
+
+def import_label(f: providers.Found) -> str:
+    """One line per provider or server, short enough that what it says of yours stays in view."""
+    what, key = escape(ui.shorten(f.what, 48)), escape(ui.shorten(f.key, 30))
+    return f"{escape(f.name)}  {what}, key {key}{STATUS.get(f.status, '')}"
+
+
 class ChooseImport(Dialog):
-    """What an opencode.json brings: every provider, ticked, and a warning on the ones that replace
-    a provider you have. Dismisses with those you keep ticked, or [] when you leave."""
+    """What an opencode configuration brings, in two groups, providers and MCP servers. New ones are
+    ticked; one that would replace yours is not, for you to decide; one you already have is shown
+    and cannot be picked. Dismisses with those you keep ticked, or [] when you leave."""
 
     def __init__(self, source: Path, reading: providers.Reading):
         super().__init__()
@@ -651,32 +666,36 @@ class ChooseImport(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            home = str(Path.home())
-            shown = (
-                str(self.source).replace(home, "~", 1) if str(self.source).startswith(home) else self.source
-            )
-            yield Label(f"Providers in {escape(str(shown))}.")
-            yield Label("Untick the ones to leave out:")
-            rows = []
-            for i, f in enumerate(self.reading.found):
-                what = f"{f.models} models" if f.own else "opencode's provider"
-                label = f"{escape(f.name)}  {what}, key {escape(f.key)}"
-                if f.replaces:
-                    label += "  [yellow]replaces the one you have[/]"
-                rows.append((label, i, True))
-            yield SelectionList[int](*rows, id="found")
+            yield Label(f"In {escape(shown_path(self.source))}; untick what to leave out.")
+            for kind, heading in ((providers.PROVIDER, "Providers"), (providers.MCP, "MCP servers")):
+                rows = [
+                    Selection(
+                        import_label(f),
+                        i,
+                        f.status == "new",
+                        disabled=f.status == "same",
+                    )
+                    for i, f in enumerate(self.reading.found)
+                    if f.kind == kind
+                ]
+                if rows:
+                    yield Label(heading, classes="group")
+                    yield SelectionList[int](*rows, id=f"found-{kind}", classes="found")
             if self.reading.left:
-                yield Label(f"Only providers come over; left in the file: {', '.join(self.reading.left)}.")
+                yield Label(f"Left in the file, not for vivibox: {', '.join(self.reading.left)}.")
             with Horizontal(classes="buttons"):
                 yield Button("Import", variant="primary", id="import")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#found").focus()
+        self.query(".found").first().focus()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
-        ticked = self.query_one("#found", SelectionList).selected if event.button.id == "import" else []
+        ticked = []
+        if event.button.id == "import":
+            for found in self.query(".found").results(SelectionList):
+                ticked += found.selected
         self.dismiss([self.reading.found[i] for i in sorted(ticked)])
 
     def key_escape(self) -> None:
@@ -688,9 +707,92 @@ def shown_path(path: Path) -> str:
     return str(path).replace(home, "~", 1) if str(path).startswith(home + "/") else str(path)
 
 
+def judge(path: Path) -> tuple[bool, str]:
+    """Whether a file is an opencode configuration vivibox can bring something over from, said."""
+    try:
+        reading = providers.read_opencode(path)
+    except ConfigError as e:
+        text = e.args[0]
+        if "is not JSON" in text:
+            return False, "broken: not JSON" + (f" ({text.split(': ', 1)[1]})" if ": " in text else "")
+        return False, "JSON, but not an opencode configuration with providers or MCP servers"
+    parts = []
+    for kind, what in ((providers.PROVIDER, "provider"), (providers.MCP, "MCP server")):
+        if n := sum(f.kind == kind for f in reading.found):
+            parts.append(f"{n} {what}{'s' * (n != 1)}")
+    return True, "opencode configuration: " + ", ".join(parts)
+
+
+# Folders no opencode configuration lives in, and which would bury the ones that do.
+SKIPPED = {".git", "node_modules", "__pycache__", ".venv", ".cache", ".npm", ".m2", ".gradle"}
+
+
+class JsonTree(DirectoryTree):
+    """Folders and JSON files only; hidden folders dimmed, JSON files marked."""
+
+    def filter_paths(self, paths):
+        return [
+            p for p in paths
+            if (p.is_dir() and p.name not in SKIPPED) or (p.is_file() and p.suffix in (".json", ".jsonc"))
+        ]  # fmt: skip
+
+    def render_label(self, node, base_style, style):
+        label = super().render_label(node, base_style, style)
+        path = node.data.path if node.data else None
+        if path is not None and path.is_file():
+            label.stylize("bold green")
+        elif path is not None and path.name.startswith("."):
+            label.stylize("dim")
+        return label
+
+
+class BrowseFile(Dialog):
+    """Walks your folders from home for an opencode configuration. Arrows move, Enter opens a
+    folder or picks a file, Backspace goes up a folder. Dismisses with the file, or None."""
+
+    BINDINGS = [Binding("backspace", "up", "Up a folder", show=False)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Find the opencode configuration. Enter: open or pick · Backspace: up a folder")
+            yield JsonTree(Path.home(), id="tree", classes="tree")
+            yield Label("", id="verdict")
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#tree").focus()
+
+    @on(DirectoryTree.NodeHighlighted)
+    def looked_at(self, event) -> None:
+        path = event.node.data.path if event.node.data else None
+        verdict = self.query_one("#verdict", Label)
+        if path is None or not path.is_file():
+            verdict.update(escape(shown_path(path)) if path else "")
+            return
+        ok, said = judge(path)
+        verdict.update(f"[green]{escape(said)}[/]" if ok else f"[red]{escape(said)}[/]")
+
+    @on(DirectoryTree.FileSelected)
+    def picked(self, event: DirectoryTree.FileSelected) -> None:
+        if judge(event.path)[0]:
+            self.dismiss(event.path)
+
+    def action_up(self) -> None:
+        tree = self.query_one("#tree", JsonTree)
+        tree.path = Path(tree.path).parent
+
+    @on(Button.Pressed, "#cancel")
+    def cancelled(self) -> None:
+        self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 class ImportSource(Dialog):
-    """Which opencode configuration to bring providers over from: the ones found where opencode
-    reads them, or another file. Dismisses with its path, or None."""
+    """Which opencode configuration to bring over from: those found where opencode keeps one, and a
+    file just downloaded, or one you find by browsing. Dismisses with its path, or None."""
 
     def __init__(self, found: list[tuple[Path, int]]):
         super().__init__()
@@ -699,15 +801,11 @@ class ImportSource(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             if self.found:
-                yield Label("Import providers from your opencode configuration:")
+                yield Label("Import from an opencode configuration:")
             else:
-                yield Label("No opencode configuration with providers where opencode keeps one.")
-            rows = [f"{escape(shown_path(p))}  [dim]{n} provider{'s' * (n != 1)}[/]" for p, n in self.found]
-            yield OptionList(*rows, "Another file…", id="sources")
-            other = Input(placeholder="path to an opencode.json", suggester=PathSuggester(), id="other")
-            other.display = False
-            yield other
-            yield Label("", id="problem")
+                yield Label("No opencode configuration where opencode keeps one, nor one just downloaded.")
+            rows = [f"{escape(shown_path(p))}  [dim]{n} to bring over[/]" for p, n in self.found]
+            yield OptionList(*rows, "Browse…", id="sources")
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
 
@@ -718,18 +816,8 @@ class ImportSource(Dialog):
     def chosen(self, event: OptionList.OptionSelected) -> None:
         if event.option_index < len(self.found):
             self.dismiss(self.found[event.option_index][0])
-            return
-        other = self.query_one("#other", Input)
-        other.display = True
-        other.focus()
-
-    @on(Input.Submitted, "#other")
-    def typed(self, event: Input.Submitted) -> None:
-        path = Path(event.value.strip()).expanduser()
-        if path.is_file():
-            self.dismiss(path)
         else:
-            self.query_one("#problem", Label).update(f"[red]{escape(str(path))} is not a file[/]")
+            self.app.push_screen(BrowseFile(), lambda path: path and self.dismiss(path))
 
     @on(Button.Pressed, "#cancel")
     def cancelled(self) -> None:
@@ -739,11 +827,11 @@ class ImportSource(Dialog):
         self.dismiss(None)
 
 
-def provider_rows() -> list[tuple[str, str]]:
-    """Your providers, as (name, what vivibox has for it)."""
+def provider_rows() -> list[tuple[str, str, str]]:
+    """Your providers and MCP servers, as (kind, name, what vivibox has for it)."""
     stored, defined = keys.list_keys(), providers.load()
     rows = []
-    for name in sorted(set(stored) | set(defined)):
+    for name in sorted((set(stored) - set(providers.mcp_secrets())) | set(defined)):
         key = (
             f"key {stored[name]}"
             if name in stored
@@ -755,19 +843,23 @@ def provider_rows() -> list[tuple[str, str]]:
         if name in defined:
             n = len(defined[name].get("models", {}))
             said.append(f"your endpoint, {n} model{'s' * (n != 1)}")
-        rows.append((name, ", ".join(said)))
+        rows.append((providers.PROVIDER, name, ", ".join(said)))
+    for name, entry in sorted(providers.load_mcp().items()):
+        where = entry.get("url", "") if entry.get("type") == "remote" else " ".join(entry.get("command", []))
+        rows.append((providers.MCP, name, f"MCP server, {entry.get('type', 'local')} {where}"))
     return rows
 
 
 class ManageProviders(Dialog):
-    """The providers vivibox can run models of: added here, imported from opencode, or removed."""
+    """The providers vivibox can run models of, and the MCP servers every task gets: added here,
+    imported from opencode, or removed."""
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Your providers:")
+            yield Label("Your providers and MCP servers:")
             yield OptionList(id="providers", classes="catalog")
             with Horizontal(classes="buttons"):
-                yield Button("Add…", variant="primary", id="add")
+                yield Button("Add provider…", variant="primary", id="add")
                 yield Button("Import from opencode…", id="import")
                 yield Button("Remove", id="remove")
                 yield Button("Close", id="close")
@@ -781,7 +873,7 @@ class ManageProviders(Dialog):
         options = self.query_one("#providers", OptionList)
         options.clear_options()
         if self.rows:
-            options.add_options([f"{escape(n)}  [dim]{escape(said)}[/]" for n, said in self.rows])
+            options.add_options([f"{escape(n)}  [dim]{escape(said)}[/]" for _, n, said in self.rows])
             options.highlighted = 0
         else:
             options.add_option(Option("none yet: add one, or import them from opencode", disabled=True))
@@ -802,14 +894,17 @@ class ManageProviders(Dialog):
             at = self.query_one("#providers", OptionList).highlighted
             if at is None or at >= len(self.rows):
                 return
-            name = self.rows[at][0]
+            kind, name, _ = self.rows[at]
+            what = "MCP server" if kind == providers.MCP else "provider"
 
             def answered(yes: bool) -> None:
-                if yes and providers.forget(name):
+                if yes and providers.forget(name, kind):
                     self.notify(f"Removed {name}.")
                     self.changed([name])
 
-            self.app.push_screen(Confirm(f"Remove {name} and its key from vivibox?", "Remove"), answered)
+            self.app.push_screen(
+                Confirm(f"Remove the {what} {name} and its secrets from vivibox?", "Remove"), answered
+            )
         else:
             self.dismiss(None)
 
@@ -1107,6 +1202,9 @@ class Vivibox(App):
     CSS = """
     DataTable { height: 1fr; }
     .catalog { height: 8; }
+    .tree { height: 16; }
+    .found { height: auto; max-height: 8; }
+    .group { padding: 1 0 0 0; text-style: bold; }
     #empty { height: 1fr; padding: 2 4; color: $text-muted; }
     #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
     #detail.hidden { display: none; }
@@ -1125,7 +1223,7 @@ class Vivibox(App):
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
     Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
-    AddProvider, ChooseImport, ImportSource, ManageProviders { align: center middle; }
+    AddProvider, ChooseImport, ImportSource, ManageProviders, BrowseFile { align: center middle; }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),

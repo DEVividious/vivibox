@@ -195,7 +195,7 @@ def finished_detail(entry: dict) -> str:
         [
             f"### {entry['id']} · done",
             "",
-            f"*{entry['project']} · {ui.ago(entry['finished'])} · ${entry['cost']:.2f}*",
+            f"*{entry['project']} · {ui.ago(entry['finished'])} · {ui.finished_cost(entry)}*",
             "",
             entry["title"],
             "",
@@ -214,7 +214,8 @@ def detail(
     head = [
         f"### {st.id} · {ui.activity(st, max_iterations)}",
         "",
-        f"*criteria {criteria(task)} · updated {ui.ago(st.updated)} · {ui.cost(task)}*",
+        f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
+        f" · planning + implementation {ui.cost(task)}*",
         "",
     ]
     if shown := (pod if pod is not None else pod_view(st.id)).lines():
@@ -1317,7 +1318,7 @@ class Vivibox(App):
         self.panel = self.query_one("#detail")
         self.text = self.query_one("#detail-text", Markdown)
         table = self.table
-        columns = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST", "CREATED", "UPDATED", "GOAL")
+        columns = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
         keys = table.add_columns(*columns)
         self.status_column, self.demo_column = keys[1], keys[2]
         self.reload()
@@ -1479,7 +1480,7 @@ class Vivibox(App):
             )  # fmt: skip
         for entry in self.done:
             table.add_row(
-                entry["id"], "[green]  done[/]", "-", "-", f"${entry['cost']:.2f}",
+                entry["id"], "[green]  done[/]", "-", "-", ui.finished_cost(entry),
                 ui.ago(entry["created"]) if entry.get("created") else "-",
                 ui.ago(entry["finished"]), entry["title"], key=entry["id"],
             )  # fmt: skip

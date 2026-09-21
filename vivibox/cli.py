@@ -213,14 +213,14 @@ def cmd_accept(args: argparse.Namespace) -> int:
 
 def report_finished(done: actions.Finished) -> None:
     if done.conflicts:
-        print(f"{done.task_id} is done (${done.cost:.2f}), but its work conflicts with your checkout in:")
+        print(f"{done.task_id} is done ({done.cost}), but its work conflicts with your checkout in:")
         print("".join(f"  {f}\n" for f in done.conflicts), end="")
         print(f"Resolve them in your IDE and commit. The work is also on branch {done.branch}.")
     elif done.branch:
-        print(f"{done.task_id} is done (${done.cost:.2f}): branch {done.branch} in {done.source}.")
+        print(f"{done.task_id} is done ({done.cost}): branch {done.branch} in {done.source}.")
     else:
         branch = actions.current_branch(done.source)
-        print(f"{done.task_id} is done (${done.cost:.2f}). Uncommitted in {done.source} ({branch}):")
+        print(f"{done.task_id} is done ({done.cost}). Uncommitted in {done.source} ({branch}):")
         print(done.status, end="")
         offer_commit(done.source, done.message, branch)
 

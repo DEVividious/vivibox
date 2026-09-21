@@ -5,7 +5,7 @@ import pytest
 from textual.widgets import Input, Label, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, gate, tui
+from vivibox import actions, gate, tui, ui
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
@@ -225,7 +225,9 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
     task = new_task("Waiting")
     at_plan_checkpoint(task)
     actions.remember(
-        actions.Finished("demo-9", env, 0.42, "Reject expired cards"), load_project("demo"), "abc1234567"
+        actions.Finished("demo-9", env, ui.Spend(0.3, 0.12), "Reject expired cards"),
+        load_project("demo"),
+        "abc1234567",
     )
 
     async def scenario(app, pilot):
@@ -233,7 +235,7 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
         table = app.query_one("DataTable")
         assert [str(table.get_cell_at((r, 0))) for r in range(table.row_count)] == ["demo-1", "demo-9"]
         await pilot.press("down", "enter")
-        assert "Reject expired cards" in app.shown and "$0.42" in app.shown
+        assert "Reject expired cards" in app.shown and "$0.30 + $0.12" in app.shown
         assert app.check_action("remove", ()) and not app.check_action("accept", ())
         await pilot.press("x")  # forget it
         assert table.row_count == 1 and actions.history() == []
@@ -439,7 +441,7 @@ def test_an_accepted_task_leaves_its_instruction_for_the_next_one(env):
     """A record, not configuration: vivibox offers it and you say whether it still applies."""
     task = new_task("Goal")
     actions.write_instruction(task, "```bash\nnpm run dev\n```\n")
-    done = actions.Finished("demo-9", env, 0.1, "Done", demo=actions.demo_instruction(task))
+    done = actions.Finished("demo-9", env, ui.Spend(0.0, 0.1), "Done", demo=actions.demo_instruction(task))
     actions.remember(done, load_project("demo"), "abc1234567")
 
     assert "npm run dev" in actions.demo_from_history("demo")
@@ -530,10 +532,10 @@ def test_a_finished_task_keeps_when_you_asked_for_it(env):
     that says so with a dash instead of pretending."""
     task = new_task("Waiting")
     at_plan_checkpoint(task)
-    done = actions.Finished("demo-9", env, 0.42, "Reject expired cards", created=now())
+    done = actions.Finished("demo-9", env, ui.Spend(0.3, 0.12), "Reject expired cards", created=now())
     actions.remember(done, load_project("demo"), "abc1234567")
     actions.remember(
-        actions.Finished("demo-8", env, 0.1, "Older, before created was kept"),
+        actions.Finished("demo-8", env, ui.Spend(0.0, 0.1), "Older, before created was kept"),
         load_project("demo"),
         "def4567890",
     )

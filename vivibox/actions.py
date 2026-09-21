@@ -993,7 +993,8 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         "id": done.task_id,
         "project": project.name,
         "title": done.message,
-        "cost": round(done.cost, 4),
+        "cost": round(done.cost.total, 4),
+        "planning": round(done.cost.planning, 4),
         "commit": commit[:10],
         "branch": done.branch,
         "conflicts": done.conflicts,
@@ -1010,7 +1011,7 @@ def remember(done: Finished, project: Project, commit: str) -> None:
 class Finished:
     task_id: str
     source: Path
-    cost: float
+    cost: ui.Spend
     message: str
     branch: str = ""
     conflicts: list[str] = field(default_factory=list)
@@ -1034,7 +1035,7 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
         )
     commit = fetch_work(task, project)
     st = task.read_state()
-    spent = ui.cost(task).metered
+    spent = ui.cost(task)
     done = Finished(task.id, project.repo, spent, suggested_message(project.repo, st.base_commit,
                                                                             commit, st.goal))  # fmt: skip
     done.criteria = accepted_criteria(task)

@@ -54,35 +54,49 @@ def ago(ts: str, now: datetime | None = None) -> str:
     return "just now"
 
 
+# The states whose turns are planning; every other turn is implementing, fixing, or a demo.
+PLANNING_STATES = {str(State.PLAN), str(State.CHECKPOINT_PLAN)}
+
+
 @dataclass(frozen=True)
 class Spend:
-    """What a task cost, kept apart by whether it was money. A subscription turn reports a list
-    price, so adding the two would give a number that is neither a bill nor a usage figure."""
+    """What a task cost, planning and implementation apart: the stronger model plans and the
+    cheaper one writes, and the split shows whether that is where the money goes."""
 
-    metered: float = 0.0
-    listed: float = 0.0
+    planning: float = 0.0
+    implementation: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return round(self.planning + self.implementation, 6)
 
     def __bool__(self) -> bool:
-        return bool(self.metered or self.listed)
+        return bool(self.planning or self.implementation)
 
     def __str__(self) -> str:
-        if not self.listed:
-            return f"${self.metered:.2f}"
-        return f"${self.metered:.2f} + ${self.listed:.2f}*" if self.metered else f"${self.listed:.2f}*"
+        return f"${self.planning:.2f} + ${self.implementation:.2f}"
+
+
+def finished_cost(entry: dict) -> str:
+    """A finished task's cost as the list shows a live one; tasks finished before the split was
+    kept show their total."""
+    total = entry.get("cost", 0)
+    if "planning" not in entry:
+        return f"${total:.2f}"
+    return str(Spend(entry["planning"], round(total - entry["planning"], 6)))
 
 
 def cost(task: Task) -> Spend:
-    metered = listed = 0.0
+    planning = implementation = 0.0
     for event in task.events():
         if event["type"] != "turn":
             continue
         spent = event["data"].get("cost") or 0
-        # Turns recorded before roles were all metered, and said nothing either way.
-        if event["data"].get("metered", True):
-            metered += spent
+        if event["data"].get("state") in PLANNING_STATES:
+            planning += spent
         else:
-            listed += spent
-    return Spend(round(metered, 6), round(listed, 6))
+            implementation += spent
+    return Spend(round(planning, 6), round(implementation, 6))
 
 
 # What the task needs, in words, and the commands for your next step.
@@ -140,7 +154,7 @@ def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, no
     """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest."""
     states = [(task, task.read_state()) for task in tasks]
     states.sort(key=lambda ts: ORDER.index(group(ts[1])))
-    header = ("TASK", "STATUS", "CRITERIA", "COST", "CREATED", "UPDATED", "GOAL")
+    header = ("TASK", "STATUS", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
     rows = []
     for task, st in states:
         spent = cost(task)

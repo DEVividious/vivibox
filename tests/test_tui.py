@@ -829,3 +829,12 @@ def test_a_planner_you_plan_with_can_be_given_a_model_for_one_task(env, monkeypa
     assert actions.role_of(task, "planner") == Role(OC, "deepseek/deepseek-v4-pro")
     with pytest.raises(ConfigError, match="only the planner"):
         actions.create("demo", "Fix login", roles={"writer": ("manual", "")})
+
+
+def test_the_choice_config_toml_makes_is_called_the_default():
+    planning_yourself = ("manual", "")
+    assert actions.choice_label(planning_yourself, planning_yourself) == "you, in your own chat  (default)"
+    assert (
+        actions.choice_label((OC, "deepseek/deepseek-v4-pro"), planning_yourself)
+        == "deepseek/deepseek-v4-pro"
+    )

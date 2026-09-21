@@ -240,7 +240,9 @@ def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
     text = "you, in your own chat" if harness == manual.NAME else model
     if harness == claudecode.NAME:
         text += " (Claude Code)"
-    return text + ("  · config.toml" if choice == config_choice else "")
+    # config.toml's own choice. Named after the file it read "you, in your own chat · config.toml",
+    # as if the chat were in the file.
+    return text + ("  (default)" if choice == config_choice else "")
 
 
 def parse_choice(text: str) -> Choice:

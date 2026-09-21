@@ -34,8 +34,10 @@ verify list is empty, set it to the command that builds and tests this project o
 carried out, for example verify = ["npm test"]; the gate runs it on a fresh clone of your commits.
 Do not change code yet. End your turn when the draft is written."""
 
-IMPLEMENT_PROMPT = """The plan in /task/plan.md is accepted. Implement it, commit your work, and tick
-the items in /task/handoff/criteria.md as you verify them. End your turn when everything is done."""
+IMPLEMENT_PROMPT = """The plan in /task/plan.md is accepted. Implement it and commit your work. In
+/task/handoff/criteria.md, tick each item the moment you have verified it, one at a time, before you
+move on: the user watches that file to follow your progress, and ticking everything at the end leaves
+them looking at nothing for the whole turn. End your turn when everything is done."""
 
 FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md (full output in
 /task/handoff/verify.log), fix the problems, commit, and end your turn."""

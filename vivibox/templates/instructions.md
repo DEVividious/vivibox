@@ -9,7 +9,9 @@ container. The user reviews your work at checkpoints; an orchestrator verifies i
 - `/task/handoff/`: your channel to the user and the orchestrator.
   - `plan-draft.md`: while planning, write the plan here.
   - `criteria.md`: the accepted acceptance criteria. Tick an item (`- [x]`) only when it is met and you
-    verified it. Do not reword items; reworded items do not count.
+    verified it. Do not reword items; reworded items do not count. Tick each one as soon as you have
+    verified it, before you start on the next, and save the file each time: the user follows your
+    progress by this checklist while you work, and one that fills only at the end shows nothing.
   - `verify-feedback.md` and `verify.log`: why the last verification failed.
   - `comments.md`: comments from the user, newest last.
   - `question.md`: when you need a decision from the user, write the question here and end your turn.

@@ -103,7 +103,13 @@ def group(st: TaskState) -> str:
     return "Stopped" if st.paused else "Working"
 
 
+# A manual planner's checkpoint before you brought a plan: nothing to review yet.
+AWAITING_PLAN = ("plan it yourself", ["vivibox plan prompt {id}", "vivibox plan import {id}"])
+
+
 def activity(st: TaskState, max_iterations: int) -> str:
+    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
+        return AWAITING_PLAN[0]
     if st.state in WAITING:
         return WAITING[st.state][0]
     if st.state is State.DONE:
@@ -115,6 +121,8 @@ def activity(st: TaskState, max_iterations: int) -> str:
 
 
 def next_commands(st: TaskState) -> list[str]:
+    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
+        return [c.format(id=st.id) for c in AWAITING_PLAN[1]]
     if st.state in WAITING:
         return [c.format(id=st.id) for c in WAITING[st.state][1]]
     if st.paused:

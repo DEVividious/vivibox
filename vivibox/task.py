@@ -37,6 +37,8 @@ class TaskState:
     models: dict[str, str] = field(default_factory=dict)
     # Accept the agent's plan without stopping for you (vivibox new --auto).
     auto_plan: bool = False
+    # At the plan checkpoint with a manual planner: no plan yet, the task waits for one from you.
+    awaiting_plan: bool = False
 
 
 class Task:
@@ -92,6 +94,14 @@ class Task:
         st.auto_plan = auto
         self._write_state(st)
         self.event("auto_plan", enabled=auto)
+
+    def set_awaiting_plan(self, waiting: bool) -> None:
+        """Moves updated too: the state stays at the plan checkpoint either way, and a view that
+        redraws only on change would keep saying there is nothing to review."""
+        st = self.read_state()
+        st.awaiting_plan = waiting
+        st.updated = now()
+        self._write_state(st)
 
     def set_goal(self, goal: str) -> None:
         """The agent's one-line summary of its plan replaces what you typed, in lists and messages."""

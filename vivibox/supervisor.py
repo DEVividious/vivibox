@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from . import gate
+from . import gate, manual
 from .opencode import Turn
 from .plan import PlanError, parse_plan, without_notes
 from .risky import Change
@@ -150,6 +150,8 @@ class Supervisor:
     # The role that plans. None means the writer plans too, which is what a caller with one harness
     # gets; the command line always passes both, because the config always names both.
     planner: Harness | None = None
+    # Your checkout, which a manual planner's CLI prompt points at instead of the task's clone.
+    source: Path | None = None
 
     def harness_for(self, state: State) -> Harness:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -180,8 +182,8 @@ class Supervisor:
 
     # --- states -----------------------------------------------------------------------------
 
-    def _turn(self, st: TaskState, prompt: str) -> Turn | None:
-        harness = self.harness_for(st.state)
+    def _turn(self, st: TaskState, prompt: str, harness: Harness | None = None) -> Turn | None:
+        harness = harness or self.harness_for(st.state)
         was = st.sessions.get(harness.name, "")
         turn = harness.turn(prompt, session=was, title=f"{self.task.id}: {st.goal}"[:80])
         if turn.session and turn.session != was:
@@ -215,6 +217,9 @@ class Supervisor:
             self.notify(self.task.id, reason, kind=kind)
 
     def _plan(self, st: TaskState) -> None:
+        if getattr(self.planner, "manual", False):
+            self._plan_manually(st)
+            return
         if self._turn(st, next_prompt(self.task, PLAN_PROMPT)) is None:
             return
         if q := question(self.task):
@@ -242,6 +247,21 @@ class Supervisor:
                 self.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
             return
         self._checkpoint(State.CHECKPOINT_PLAN, "plan ready for review", kind="plan")
+
+    def _plan_manually(self, st: TaskState) -> None:
+        """You plan in your own chat. A chat in a browser cannot see the repository, so the writer
+        first reports on it, for cents; a new project has nothing to report."""
+        context = self.task.meta / "handoff" / manual.CONTEXT
+        known = context.exists() or manual.repository_is_empty(self.task.repo)
+        if not known and self._turn(st, manual.RECON_PROMPT, self.harness) is None:
+            return
+        manual.write_prompts(self.task, self.source or self.task.repo)
+        self.task.set_awaiting_plan(True)
+        self._checkpoint(
+            State.CHECKPOINT_PLAN,
+            f"plan it in your own chat: vivibox plan prompt {self.task.id}, "
+            f"then vivibox plan import {self.task.id}",
+        )
 
     def _implement(self, st: TaskState) -> None:
         if self._turn(st, next_prompt(self.task, IMPLEMENT_PROMPT)) is None:

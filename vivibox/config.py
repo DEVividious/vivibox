@@ -9,9 +9,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-HARNESSES = ("opencode", "claude-code")
-API_KEY, SUBSCRIPTION = "api-key", "subscription"
-AUTH = (API_KEY, SUBSCRIPTION)
+# manual: you plan in a chat of your own and vivibox takes the plan you paste (see manual.py).
+HARNESSES = ("opencode", "claude-code", "manual")
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
@@ -28,14 +27,6 @@ class ConfigError(Exception):
 class Role:
     harness: str
     model: str
-    # Which credential vivibox gives this role, for claude-code only. It does not describe how you
-    # happen to be logged in; it decides what reaches the container, so the two cannot disagree.
-    # A subscription turn reports a cost at API list prices, which is not money you spent.
-    auth: str = API_KEY
-
-    @property
-    def metered(self) -> bool:
-        return self.auth == API_KEY
 
 
 @dataclass(frozen=True)
@@ -110,18 +101,20 @@ def load_config(base: Path | None = None) -> Config:
         harness = role.get("harness")
         if harness not in HARNESSES:
             raise ConfigError(f"{path}: roles.{name}.harness must be one of {HARNESSES}")
+        # A manual role runs no model of vivibox's; its model is only a label, and optional.
+        if harness == "manual":
+            role.setdefault("model", "")
         if not isinstance(role.get("model"), str):
             raise ConfigError(f"{path}: roles.{name}.model must be a string")
-        auth = role.get("auth")
-        if harness == "claude-code":
-            if auth not in AUTH:
-                raise ConfigError(f"{path}: roles.{name}.auth must be one of {AUTH}")
-        elif auth is not None:
+        if "auth" in role:
+            # Said rather than ignored: a config that still reads auth = "subscription" would
+            # otherwise run on a key while you believe it runs on your plan.
             raise ConfigError(
-                f"{path}: roles.{name}.auth applies to claude-code only; {harness} always uses a "
-                "provider key, which is always metered"
+                f"{path}: roles.{name}.auth is gone. vivibox does not use subscription logins; "
+                "claude-code runs on an Anthropic API key (vivibox auth set anthropic). To plan "
+                'with your subscription, use harness = "manual" and plan in your own chat.'
             )
-        roles[name] = Role(harness, role["model"], auth or API_KEY)
+        roles[name] = Role(harness, role["model"])
     for needed in ("planner", "writer"):
         if needed not in roles:
             raise ConfigError(

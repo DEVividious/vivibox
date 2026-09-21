@@ -3,7 +3,7 @@
 import json
 import subprocess
 
-from vivibox.claudecode import CREDENTIALS, ClaudeCode, parse_result
+from vivibox.claudecode import ClaudeCode, parse_result
 
 # Trimmed from a real 'claude -p --output-format json' run.
 DONE = json.dumps(
@@ -74,16 +74,6 @@ def commands(pod):
     return "\n".join(pod.ran)
 
 
-def test_a_subscription_turn_cannot_be_billed_to_a_key():
-    """auth does not describe how you are logged in, it decides what reaches the container. A key
-    left in the environment would otherwise bill a turn the task list shows as costing nothing."""
-    pod = FakePod()
-    ClaudeCode(pod, "claude-opus-5", metered=False).turn("go")
-    assert "env -u ANTHROPIC_API_KEY claude " in commands(pod)
-    assert "ANTHROPIC_API_KEY=$(cat" not in commands(pod)
-    assert CREDENTIALS in commands(pod), "the login is installed where claude looks"
-
-
 def test_a_turn_is_given_its_briefing_and_the_handoff_directory():
     """Without these claude reports a finished turn having written nothing: the plan and the
     answers live outside the repository, and it will not touch a directory it was not given."""
@@ -97,12 +87,16 @@ def test_a_turn_is_given_its_briefing_and_the_handoff_directory():
     assert '--append-system-prompt "$(cat /task/harness/instructions.md)"' in ran
 
 
-def test_a_metered_turn_gets_the_key_and_no_login():
-    """The other way round: installing a login beside a key would leave which one paid unknowable."""
+def test_a_turn_runs_on_the_key_and_never_on_a_login():
+    """ADR-0014: vivibox does not carry subscription logins into containers. The key is read in the
+    container, so it appears in no argument list on the host, and the window you watch through
+    gets it too; without it claude offers to log in, into the task's volume."""
     pod = FakePod()
-    ClaudeCode(pod, "claude-opus-5", metered=True).turn("go")
-    assert "ANTHROPIC_API_KEY=$(cat" in commands(pod)
-    assert CREDENTIALS not in commands(pod)
+    harness = ClaudeCode(pod, "claude-opus-5")
+    harness.turn("go")
+    assert "ANTHROPIC_API_KEY=$(cat /run/vivibox-secrets/anthropic) claude " in commands(pod)
+    assert ".credentials.json" not in commands(pod)
+    assert "ANTHROPIC_API_KEY=$(cat" in harness.attach_command("s1")[-1]
 
 
 def test_a_turn_stopped_from_using_a_tool_is_not_a_finished_turn():

@@ -92,29 +92,14 @@ def test_a_new_project_may_have_no_verify_yet(tmp_path):
 CLAUDE = '[roles.planner]\nharness = "claude-code"\nmodel = "claude-opus-5"\n'
 
 
-def test_claude_code_must_say_which_credential_it_gets(tmp_path):
-    """Nothing in what claude reports says whether it ran on a subscription or a key: the cost comes
-    back at list prices either way. vivibox is the one that decides, so the role has to say, and
-    what it says is what reaches the container."""
-    text = 'tasks_dir = "/t"\n' + CLAUDE + '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
-    with pytest.raises(ConfigError, match="auth"):
-        load_config(write(tmp_path / "config.toml", text))
-
-    ok = text.replace(CLAUDE, CLAUDE + 'auth = "subscription"\n')
-    config = load_config(write(tmp_path / "config.toml", ok))
-    assert config.roles["planner"].auth == "subscription"
-    assert not config.roles["planner"].metered, "its cost is list price, not money you spent"
-    assert config.roles["writer"].metered, "a provider key is always real spend"
-
-
-def test_auth_is_refused_where_it_would_mean_nothing(tmp_path):
-    """opencode always runs on a provider key. Accepting auth there would let a config claim a
-    subscription for spend that is metered, and the cost column would repeat the claim."""
+def test_a_role_that_still_asks_for_a_subscription_is_refused(tmp_path):
+    """ADR-0014 took subscription logins out. Ignoring the field would run the planner on a key
+    while the config says it runs on your plan, so the config is refused with where to go instead."""
     text = (
-        'tasks_dir = "/t"\n[roles.planner]\nharness = "opencode"\nmodel = "m"\nauth = "subscription"\n'
+        'tasks_dir = "/t"\n' + CLAUDE + 'auth = "subscription"\n'
         '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
     )
-    with pytest.raises(ConfigError, match="claude-code only"):
+    with pytest.raises(ConfigError, match='harness = "manual"'):
         load_config(write(tmp_path / "config.toml", text))
 
 

@@ -18,7 +18,20 @@ from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from pathlib import Path
 
-from . import claudecode, context, gate, ide, image, opencode, repo, secrets, supervisor, toolchain, ui
+from . import (
+    claudecode,
+    context,
+    gate,
+    ide,
+    image,
+    manual,
+    opencode,
+    repo,
+    secrets,
+    supervisor,
+    toolchain,
+    ui,
+)
 from . import init as project_init
 from . import pod as pod_module
 from .config import (
@@ -152,7 +165,8 @@ def models_offered(config: Config | None = None) -> list[str]:
     opencode means a container per keypress, and nobody wants to scroll two hundred model ids."""
     seen: list[str] = []
     for role in (config or load_config()).roles.values():
-        if role.model not in seen:
+        # A manual role's model is a label for a chat of yours, not something a harness can run.
+        if role.harness != manual.NAME and role.model not in seen:
             seen.append(role.model)
     return seen
 
@@ -160,8 +174,10 @@ def models_offered(config: Config | None = None) -> list[str]:
 def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
     """The tool a role talks through. Two roles on the same harness share nothing but the pod."""
     role = role_of(task, role_name)
+    if role.harness == manual.NAME:
+        return manual.Manual()
     if role.harness == claudecode.NAME:
-        return claudecode.ClaudeCode(pod, role.model, role.metered)
+        return claudecode.ClaudeCode(pod, role.model)
     return opencode.OpenCode(pod)
 
 
@@ -171,13 +187,9 @@ def provider_keys(config: Config) -> list[str]:
     for role in config.roles.values():
         if role.harness == opencode.NAME and (p := opencode.provider_of(role.model)) not in found:
             found.append(p)
-        elif role.harness == claudecode.NAME and role.metered and "anthropic" not in found:
+        elif role.harness == claudecode.NAME and "anthropic" not in found:
             found.append("anthropic")
     return found
-
-
-def wants_claude_login(config: Config) -> bool:
-    return any(r.harness == claudecode.NAME and not r.metered for r in config.roles.values())
 
 
 # --- setting up a project ------------------------------------------------------------------------
@@ -501,7 +513,7 @@ def start(task_id: str, resume: bool = False) -> str:
     _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
-    secrets.prepare(task.id, provider_keys(config), claude_login=wants_claude_login(config))
+    secrets.prepare(task.id, provider_keys(config))
     changed = opencode.prepare(task, model, project.verify)
     pod = task_pod(task.id)
     pod.up()
@@ -584,11 +596,39 @@ def remove(task: Task, project: Project) -> Path | None:
 
 
 def accept_plan(task: Task, project: Project) -> None:
-    if task.read_state().state is not State.CHECKPOINT_PLAN:
+    st = task.read_state()
+    if st.state is not State.CHECKPOINT_PLAN:
         raise gate.GateError(f"{task.id} has no plan waiting for you")
+    if st.awaiting_plan:
+        raise gate.GateError(f"{task.id} has no plan yet; bring yours in with: vivibox plan import {task.id}")
     supervisor.accept_plan(
         task, "plan accepted", project.verify, lambda commands: save_verify(project, commands)
     )
+
+
+def plan_prompt(task: Task, cli: bool = False) -> str:
+    """The prompt for planning this task in your own chat, in a browser or in a CLI."""
+    path = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
+    if not path.exists():
+        raise gate.GateError(f"{task.id} has no plan prompt; its planner is not manual")
+    return path.read_text()
+
+
+def answer_path(task: Task) -> Path:
+    return task.meta / manual.ANSWER
+
+
+def import_plan(task: Task, answer: str | None = None) -> str:
+    """Your chat's plan becomes the task's plan, for you to accept. Without an answer, the one
+    already in the answer file: what a CLI wrote there, or what you pasted into it."""
+    if task.read_state().state is not State.CHECKPOINT_PLAN:
+        raise gate.GateError(f"{task.id} is not at its plan; a plan can be brought in only there")
+    path = answer_path(task)
+    if answer is not None:
+        path.write_text(answer)
+    if not path.exists() or not path.read_text().strip():
+        raise gate.GateError(f"no plan to bring in; paste your chat's answer into {path}")
+    return manual.import_answer(task)
 
 
 def save_verify(project: Project, commands: list[str]) -> None:
@@ -621,6 +661,12 @@ def reply(task: Task, comment: str) -> State:
     if st.state is State.APPROVAL_RISKY:
         # Rejecting risky changes sends the agent back to where it came from.
         target = State.PLAN if risky_target(task) is State.CHECKPOINT_PLAN else State.IMPLEMENT
+    elif st.state is State.CHECKPOINT_PLAN and role_of(task, "planner").harness == manual.NAME:
+        # Nobody here would read it: the planner is a chat of yours, and the comment belongs there.
+        raise gate.GateError(
+            "you plan this task in your own chat; say it there and bring the new plan back "
+            f"with: vivibox plan import {task.id}"
+        )
     elif st.state in targets:
         target = targets[st.state]
     else:

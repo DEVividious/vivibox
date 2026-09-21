@@ -8,16 +8,20 @@ tasks_dir = "/srv/vivibox"
 # Verification failures the writer may fix on its own before the task stops for you.
 max_iterations = 3
 
-# One entry per role; planner and writer are both required. harness: "opencode" or "claude-code".
+# One entry per role; planner and writer are both required.
+# harness: "opencode" or "claude-code", which run on an API key, or "manual" for the planner.
 # Planning is where a wrong decision costs the most and the fewest tokens are spent, so it is worth
 # a stronger model than the one that writes the code.
-# auth applies to claude-code only and decides what vivibox puts in the container: "api-key" bills
-# you per token, "subscription" uses your Claude login and reports a cost at list prices that is
-# not money you spent. The task list marks that cost with a star.
+#
+# manual: you plan in a chat of your own -- claude.ai, Gemini, a CLI such as claude or gemini --
+# on whatever plan you have there. vivibox gives you the prompt and takes back the plan; it never
+# touches your login, so a subscription stays your own use of it. Everything after the plan runs
+# on its own. For planning without you, give the planner an API key instead:
+#   harness = "claude-code"
+#   model = "claude-opus-5"          # vivibox auth set anthropic
 [roles.planner]
-harness = "claude-code"
-model = "claude-opus-5"
-auth = "subscription"
+harness = "manual"
+model = "Opus on claude.ai"          # a label for your task list; vivibox runs nothing here
 
 [roles.writer]
 harness = "opencode"

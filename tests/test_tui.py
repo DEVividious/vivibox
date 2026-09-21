@@ -691,3 +691,49 @@ def test_criteria_ticked_during_a_turn_show_up(env, monkeypatch):
         assert str(app.table.get_row(task.id)[3]) == "1/2", "the agent ticked one while working"
 
     run(scenario)
+
+
+def test_a_plan_from_your_own_chat_goes_in_through_the_view(env, monkeypatch):
+    """A manual planner: c puts the prompt in your clipboard, and the answer you bring back is read,
+    counted and offered for acceptance in one step. An answer that is not a plan leaves the task
+    waiting and puts the message that asks your chat to fix it in the clipboard instead."""
+    from vivibox import manual
+
+    cfg = env / "config" / "config.toml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            '[roles.planner]\nharness = "opencode"\nmodel = "m"', '[roles.planner]\nharness = "manual"'
+        )
+    )
+    task = new_task("Health")
+    task.transition(State.CHECKPOINT_PLAN)
+    task.set_awaiting_plan(True)
+    (task.meta / manual.PROMPT).write_text("the browser prompt")
+    (task.meta / manual.PROMPT_CLI).write_text("the cli prompt")
+    copied = []
+    monkeypatch.setattr(Vivibox, "to_clipboard", lambda self, text: copied.append(text) or "test")
+
+    async def scenario(app, pilot):
+        app.reload()
+        # Nothing to accept yet, and nobody a reply would reach: the keys that would say otherwise hide.
+        assert not app.check_action("accept", ()) and not app.check_action("reply", ())
+        assert app.check_action("copy_prompt", ()) and app.check_action("edit_plan", ())
+        await pilot.press("c")
+        await pilot.press("C")
+        assert copied == ["the browser prompt", "the cli prompt"]
+
+        actions.answer_path(task).write_text("Sure, which framework?")
+        app.bring_in_plan(task)
+        await pilot.pause()
+        assert task.read_state().awaiting_plan and "````markdown" in copied[-1]
+
+        plan = task.plan_path.read_text().replace(gate.PLACEHOLDER, "GET /health returns 200")
+        actions.answer_path(task).write_text(f"Final:\n\n````markdown\n{plan}````\n")
+        app.bring_in_plan(task)
+        await pilot.pause()
+        assert "2 criteria" in str(app.screen.query_one(Label).render())
+        await pilot.click("#yes")
+        await pilot.pause()
+        assert task.read_state().state is State.IMPLEMENT
+
+    run(scenario)

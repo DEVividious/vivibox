@@ -34,7 +34,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from . import actions, context, gate, ide, supervisor, ui
+from . import actions, context, gate, ide, manual, supervisor, ui
 from .config import ConfigError, load_config
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -209,7 +209,15 @@ def detail(
             "**The agent is not working on this task.** Press `s`; it goes on from where it was.",
             "",
         ]
-    if st.state in (State.PLAN, State.CHECKPOINT_PLAN):
+    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
+        body = [
+            "**Plan this task in your own chat.** `c` copies the prompt for a chat in your browser,",
+            "`C` the one for a CLI in your checkout (claude, gemini). When the plan is final, `e`",
+            "opens the answer file: paste the chat's answer there and save. A CLI writes it itself.",
+            "",
+            plan_body(read(task.plan_path)),
+        ]
+    elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
         body = [plan_body(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_FINAL:
         try:
@@ -702,6 +710,8 @@ class Vivibox(App):
         Binding("a", "accept", "Accept"),
         Binding("r", "reply", "Reply"),
         Binding("e", "edit_plan", "Edit plan"),
+        Binding("c", "copy_prompt", "Copy prompt"),
+        Binding("C", "copy_prompt_cli", "Copy CLI prompt"),
         Binding("o", "open_ide", "Open in IDE"),
         Binding("p", "approve_risky", "Approve risky"),
         Binding("w", "watch", "Watch agent"),
@@ -962,7 +972,7 @@ class Vivibox(App):
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
                         "start_task", "stop_task", "remove", "demo", "demo_stop",
-                        "models")  # fmt: skip
+                        "models", "copy_prompt", "copy_prompt_cli")  # fmt: skip
         if action not in task_actions:  # new, quit, and moving focus in dialogs
             return True
         pick = self.selected()
@@ -971,11 +981,16 @@ class Vivibox(App):
             return action == "remove" and self.finished_entry(self.selected_id()) is not None
         state, running = pick[1].state, self.agent_running(pick[1].id)
         allowed = {
-            "accept": state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL),
-            "reply": state in WAITING_ONLY,
+            # A manual planner's checkpoint before your plan is in has nothing to accept, and a
+            # reply would reach nobody: the planner is your own chat.
+            "accept": state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL) and not pick[1].awaiting_plan,
+            "reply": state in WAITING_ONLY and not pick[1].awaiting_plan,
             # Not while the agent may be writing its own draft.
             "edit_plan": state is State.CHECKPOINT_PLAN or (state is State.PLAN and not running),
             "open_ide": state is State.CHECKPOINT_FINAL,
+            # Also once a plan is in: going back to the same chat is how you change it.
+            "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
+            "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "approve_risky": state is State.APPROVAL_RISKY,
             "watch": running and bool(pick[1].sessions),
             "start_task": state is not State.DONE and not running,
@@ -1055,12 +1070,73 @@ class Vivibox(App):
 
         self.push_screen(Reply(task.id), send)
 
+    def planned_by_you(self, task: Task) -> bool:
+        return (task.meta / manual.PROMPT).exists()
+
     def action_edit_plan(self) -> None:
-        task, _ = self.selected()
+        task, st = self.selected()
+        manual_plan = st.state is State.CHECKPOINT_PLAN and self.planned_by_you(task)
+        # With a manual planner you edit your chat's answer, which is then brought in again: the
+        # plan and the answer cannot drift apart, and the chat's next answer does not undo yours.
+        path = actions.answer_path(task) if manual_plan else task.plan_path
         editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano") or "vi"
         with self.suspend():
-            subprocess.run([*editor.split(), str(task.plan_path)])
+            subprocess.run([*editor.split(), str(path)])
+        if manual_plan and path.exists() and path.read_text().strip():
+            self.bring_in_plan(task)
         self.reload()
+
+    def bring_in_plan(self, task: Task) -> None:
+        try:
+            actions.import_plan(task)
+        except PlanError as e:
+            self.to_clipboard(manual.repair_prompt(str(e)))
+            self.notify(
+                f"That is not a plan yet: {e}. A message asking your chat to fix it is in your clipboard.",
+                severity="warning",
+                timeout=15,
+            )
+            return
+        except Exception as e:
+            self.fail(e)
+            return
+        count = len(parse_plan(task.plan_path.read_text()).criteria)
+        self.reload()
+        self.push_screen(
+            Confirm(f"Plan brought in, {count} criteria. Accept it and start implementing?", "Accept"),
+            lambda yes: yes and self.action_accept(),
+        )
+
+    def to_clipboard(self, text: str) -> str:
+        """Through the desktop's own tool where there is one; the terminal's clipboard escape
+        (OSC 52) is the fallback, and not every terminal honours it."""
+        for command in (
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ):
+            if shutil.which(command[0]):
+                with contextlib.suppress(OSError, subprocess.SubprocessError):
+                    subprocess.run(
+                        command, input=text, text=True, check=True, timeout=5,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )  # fmt: skip
+                    return command[0]
+        self.copy_to_clipboard(text)
+        return "the terminal"
+
+    def action_copy_prompt(self, cli: bool = False) -> None:
+        task, _ = self.selected()
+        try:
+            where = self.to_clipboard(actions.plan_prompt(task, cli=cli))
+        except Exception as e:
+            self.fail(e)
+            return
+        file = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
+        self.notify(f"Copied the prompt ({where}); it is also in {file}.", timeout=8)
+
+    def action_copy_prompt_cli(self) -> None:
+        self.action_copy_prompt(cli=True)
 
     def action_open_ide(self) -> None:
         task_id = self.selected()[1].id

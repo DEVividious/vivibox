@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import actions, context, gate, image, keys, opencode, repo, supervisor, ui
+from . import actions, context, gate, image, keys, manual, opencode, repo, supervisor, ui
 from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
@@ -162,6 +162,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         project_verify=project.verify,
         save_verify=lambda commands: actions.save_verify(project, commands),
         planner=planner,
+        source=project.repo,
     )
     (task.meta / actions.SUPERVISOR_PID).write_text(str(os.getpid()))
     print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
@@ -218,6 +219,27 @@ def offer_commit(source: Path, message: str, branch: str) -> None:
         print(f"Committed: {actions.commit_work(source, message)}")
     except gate.GateError as e:
         print(f"Not committed: {e}")
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """For a manual planner: the prompt to take to your chat, and bringing its plan back."""
+    task, _ = actions.load(args.task)
+    if args.action == "prompt":
+        print(actions.plan_prompt(task, cli=args.cli), end="")
+        return 0
+    answer = None
+    if args.file == "-" or (args.file is None and not sys.stdin.isatty()):
+        answer = sys.stdin.read()
+    elif args.file:
+        answer = Path(args.file).expanduser().read_text()
+    try:
+        summary = actions.import_plan(task, answer)
+    except PlanError as e:
+        print(f"vivibox: that is not a plan yet: {e}", file=sys.stderr)
+        print(f"\nSay this in the same chat:\n\n{manual.repair_prompt(str(e))}", file=sys.stderr)
+        return 1
+    print(f"Plan brought in{f': {summary}' if summary else ''}. Read it, then: vivibox accept {task.id}")
+    return 0
 
 
 def cmd_reply(args: argparse.Namespace) -> int:
@@ -480,6 +502,13 @@ def parser() -> argparse.ArgumentParser:
     reply.add_argument("task", help="task id")
     reply.add_argument("comment", help="your comment")
     reply.set_defaults(func=cmd_reply)
+
+    plan = sub.add_parser("plan", help="plan in your own chat (a manual planner): the prompt, and its answer")
+    plan.add_argument("action", choices=["prompt", "import"])
+    plan.add_argument("task", help="task id")
+    plan.add_argument("file", nargs="?", help="import: the answer, '-' for stdin; default: the answer file")
+    plan.add_argument("--cli", action="store_true", help="prompt: for a CLI in your checkout, not a browser")
+    plan.set_defaults(func=cmd_plan)
 
     auth = sub.add_parser("auth", help="API keys for model providers, stored by vivibox")
     auth.add_argument("action", choices=["list", "set", "rm"])

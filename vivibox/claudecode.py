@@ -4,20 +4,17 @@
 carries the conversation on. Unlike opencode there is no server to keep alive and no port: each turn
 is one process.
 
-A subscription turn reports `total_cost_usd` at API list prices, which is not money spent. Nothing
-in the output says which credential was used, so the role's `auth` decides it instead: vivibox
-either mounts the subscription login or passes a key, never both.
+It runs on an Anthropic API key and nothing else. A subscription login is for your own use of
+Claude, and an orchestrator that copies it into containers is not that; plan with your subscription
+through the manual planner instead (ADR-0014).
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import shlex
 
-from . import keys
-from . import secrets as secrets_module
-from .opencode import HARNESS_MOUNT, INSTRUCTIONS, HarnessError, Turn
+from .opencode import HARNESS_MOUNT, INSTRUCTIONS, Turn
 from .pod import Pod
 from .secrets import MOUNT
 
@@ -26,7 +23,6 @@ NAME = "claude-code"
 # history -- to a per-task place. Sharing one directory between tasks would share the conversations,
 # and a company task's transcript has no business in a personal task's container.
 CONFIG_DIR = "/config/claude"
-CREDENTIALS = f"{CONFIG_DIR}/.credentials.json"
 
 
 def parse_result(output: str) -> Turn:
@@ -77,15 +73,11 @@ def parse_result(output: str) -> Turn:
 
 class ClaudeCode:
     name = NAME
+    metered = True
 
-    def __init__(self, pod: Pod, model: str, metered: bool = False):
+    def __init__(self, pod: Pod, model: str):
         self.pod = pod
         self.model = model
-        # api-key or subscription, and this is what makes it so. A metered turn is given the key and
-        # no login; a subscription turn is given the login and the key is unset, so a key that
-        # happened to be in the environment cannot quietly bill a turn the task list calls free.
-        self.metered = metered
-        self._ready = False
 
     def session_exists(self, session: str) -> bool:
         """Whether a conversation can still be carried on. Claude keeps them as files under HOME,
@@ -99,7 +91,6 @@ class ClaudeCode:
         )
 
     def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
-        self.ensure_ready()
         args = ["claude", "-p", "--output-format", "json", "--model", self.model]
         # The pod is the boundary, as it is for opencode: inside it the agent may edit and run
         # anything, and nobody is there to answer a prompt during a headless turn. Without this the
@@ -117,56 +108,18 @@ class ClaudeCode:
         brief = f'--append-system-prompt "$(cat {INSTRUCTIONS})"'
         rest = " ".join(shlex.quote(a) for a in args[1:])
         quoted = f"{args[0]} {brief} {rest}"
-        run = (
-            f"ANTHROPIC_API_KEY=$(cat {MOUNT}/anthropic) {quoted}"
-            if self.metered
-            else (f"env -u ANTHROPIC_API_KEY {quoted}")
-        )
+        # Read in the container, so the key is in no argument list and no process table on the host.
+        run = f"ANTHROPIC_API_KEY=$(cat {MOUNT}/anthropic) {quoted}"
         p = self.pod.exec("bash", "-c", f"printf %s {shlex.quote(prompt)} | {run}", check=False)
         turn = parse_result(p.stdout)
         if p.returncode != 0:
             # Whatever the parser made of an empty stdout, the shell's own words say more.
             turn.ok = False
             turn.error = (p.stderr.strip() or turn.error or p.stdout.strip())[-2000:]
-        self.keep_refreshed_login()
         return turn
-
-    def keep_refreshed_login(self) -> None:
-        if self.metered:
-            return
-        """Claude refreshes the access token in place. The refresh token has an expiry of its own,
-        so a copy left behind in a task that has ended would go stale; the login goes back to where
-        it came from instead, and the next task starts from a current one."""
-        got = self.pod.exec("cat", CREDENTIALS, check=False)
-        if got.returncode != 0 or not got.stdout.strip():
-            return
-        with contextlib.suppress(Exception):  # a login we cannot write back still ran this turn
-            if got.stdout != keys.get_login():
-                keys.set_login(got.stdout)
 
     def attach_command(self, session: str) -> list[str]:
         """For your tmux window: the same conversation, in the interface you would use by hand."""
-        resume = f"claude --resume {shlex.quote(session)}"
+        # The same key as the turns: without it claude would offer to log in, into the task's volume.
+        resume = f"ANTHROPIC_API_KEY=$(cat {MOUNT}/anthropic) claude --resume {shlex.quote(session)}"
         return ["docker", "exec", "-it", self.pod.agent, "bash", "-c", resume]
-
-    def ensure_ready(self) -> None:
-        """Puts the login where claude looks, once per pod. Failing here says what to do; failing on
-        the turn says only that the model refused."""
-        if self._ready:
-            return
-        if self.metered:  # a key needs no login file, and installing one would blur which is in use
-            self._ready = True
-            return
-        stored = f"{MOUNT}/{secrets_module.CLAUDE_LOGIN}"
-        install = (
-            f"mkdir -p {CONFIG_DIR} && "
-            f"if [ ! -s {CREDENTIALS} ] && [ -s {stored} ]; then "
-            f"  install -m 600 {stored} {CREDENTIALS}; fi && "
-            f"test -s {CREDENTIALS}"
-        )
-        if self.pod.exec("bash", "-c", install, check=False).returncode != 0:
-            raise HarnessError(
-                "no Claude login in this pod. Store yours with 'vivibox auth claude', or give the "
-                'role an API key instead (auth = "api-key").'
-            )
-        self._ready = True

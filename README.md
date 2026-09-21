@@ -129,7 +129,8 @@ The footer shows only the keys that do something for the selected task:
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket (the first line is its title), and optionally `--auto` or `--draft` |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question |
-| `e` | edit the plan in `$EDITOR` before accepting it |
+| `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
+| `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
 | `p` | approve changes to risky files |
 | `w` | watch or talk to the agent; Ctrl-q brings you back (Esc there interrupts the agent) |
@@ -176,6 +177,26 @@ vivibox attach myproject-1            # watch or talk to the agent (Ctrl-q leave
   question, or when risky files changed.
 - `--draft` only creates the task, to write the plan yourself or check the baseline first with
   `vivibox verify <id>`; then `vivibox start <id>`.
+
+### Planning in your own chat
+
+With `harness = "manual"` for the planner, you plan in a chat of your own: claude.ai, Gemini, or a
+CLI such as `claude` or `gemini` in your checkout, on whatever plan you have there. vivibox never
+touches that login: it gives you the prompt and takes back the plan, and everything after it runs
+on its own, on the writer's key.
+
+1. When the task starts, the writer spends one short turn describing the repository for a chat that
+   cannot see it (a new project skips this). The task then waits for you: *plan it yourself*.
+2. `c` copies the prompt for your browser, `C` the one for a CLI, which reads your checkout itself.
+   Discuss the plan there as long as you need.
+3. `e` opens the answer file: paste the chat's final answer, words around it included, and save.
+   A CLI writes the file itself, so `e` only shows you what it wrote. vivibox finds the plan, counts
+   its criteria and offers to accept it. If the answer is not a plan, the message that asks the
+   chat to fix it is in your clipboard.
+
+The same from a shell: `vivibox plan prompt <id> [--cli]` and `vivibox plan import <id> [file|-]`.
+A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
+for planning without you, give the planner an API key (`harness = "claude-code"`).
 
 ### Reviewing the work
 

@@ -17,7 +17,7 @@ import pytest
 
 from vivibox import image, toolchain
 from vivibox.config import HostService
-from vivibox.pod import FIREWALL, Pod
+from vivibox.pod import FIREWALL, SOCKET, Pod
 
 pytestmark = pytest.mark.docker
 
@@ -164,10 +164,31 @@ def test_pod_restart_keeps_images_and_firewall(env):
     pod.down()
     pod.up()
     assert pod.sidecar_docker("image", "inspect", "postgres:16-alpine", check=False).returncode == 0
+    # The agent, not only root in the sidecar: a restart once left it a socket it could not use.
+    assert agent(env, "docker info --format '{{.ServerVersion}}'", check=False).returncode == 0
     no = env["denied"]
     assert (
         agent(env, f"curl -fsS -m 5 -o /dev/null http://{pod.gateway()}:{no}/", check=False).returncode != 0
     )
+
+
+def test_a_pod_made_by_an_older_vivibox_works_after_a_restart(env, monkeypatch):
+    """The work laptop's case: a sidecar made with the old script, stopped, then started by this version."""
+    pod = env["pod"]
+    old = (
+        "dind dockerd --host=unix://{s} >/var/log/dockerd.log 2>&1 & "
+        "while [ ! -S {s} ]; do sleep 0.2; done; chmod 666 {s}; wait"
+    )
+    current = Pod.sidecar_command
+    pod.remove()
+    monkeypatch.setattr(
+        Pod, "sidecar_command", lambda self, address="": [*current(self, address)[:-1], old.format(s=SOCKET)]
+    )
+    pod.up()
+    pod.down()
+    monkeypatch.setattr(Pod, "sidecar_command", current)
+    pod.up()
+    assert agent(env, "docker info --format '{{.ServerVersion}}'", check=False).returncode == 0
 
 
 def test_demo_finds_the_port_the_project_opened(env):

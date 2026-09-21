@@ -8,6 +8,7 @@ read-only: under Sysbox, root in a nested container would otherwise write to it 
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import shlex
 import shutil
@@ -316,8 +317,12 @@ class Pod:
     def sidecar_command(self, address: str = "") -> list[str]:
         # The daemon listens only on the unix socket. 666: the socket is owned by root of the
         # Sysbox user namespace, the agent runs as your UID, and only this pair mounts the volume.
+        # The socket left by the last run goes first: the wait would find it at once, chmod it, and
+        # the daemon would then replace it with one the agent cannot use ("permission denied").
+        # The trap passes docker stop on to the daemon, which then shuts down cleanly.
         daemon = (
-            f"dind dockerd --host=unix://{SOCKET} >/var/log/dockerd.log 2>&1 & "
+            f"rm -f {SOCKET}; dind dockerd --host=unix://{SOCKET} >/var/log/dockerd.log 2>&1 & "
+            'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
             f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
         )
         # Read-only for Docker in the pod: compose and Testcontainers bind-mount files of the build.
@@ -402,6 +407,9 @@ class Pod:
         if self._state(self.sidecar) != "running":
             # The agent joins the sidecar's network namespace, which a sidecar restart replaces.
             self._run("docker", "rm", "-f", self.agent, check=False)
+            if self._state(self.sidecar) is not None and self._outdated_sidecar():
+                # docker start would run the script it was made with; its data is in volumes.
+                self._run("docker", "rm", "-f", self.sidecar, check=False)
             if self._state(self.sidecar) is None:
                 # Pinned rather than left to Docker: this address goes into your configuration files,
                 # so it has to be the same one after every restart.
@@ -416,6 +424,13 @@ class Pod:
         if self._state(self.agent) != "running":
             self._run("docker", "rm", "-f", self.agent, check=False)
             self._run(*self.agent_command())
+
+    def _outdated_sidecar(self) -> bool:
+        p = self._run("docker", "inspect", "-f", "{{json .Config.Cmd}}", self.sidecar, check=False)
+        try:
+            return p.returncode == 0 and json.loads(p.stdout)[-1] != self.sidecar_command()[-1]
+        except (ValueError, IndexError, TypeError):
+            return True
 
     def _wait_for_daemon(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout

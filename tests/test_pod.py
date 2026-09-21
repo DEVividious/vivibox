@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -14,6 +15,7 @@ class FakeDocker:
     def __init__(self, states=None):
         self.calls: list[list[str]] = []
         self.states = states or {}
+        self.cmds: dict[str, list[str]] = {}
         self.subnets = ""
         self.proc_net_tcp = ""
         self.alive = False
@@ -25,9 +27,15 @@ class FakeDocker:
         out, rc = "", 0
         if cmd[:2] == ["docker", "inspect"]:
             state = self.states.get(cmd[-1])
-            out, rc = (state or "", 0 if state else 1)
+            if state and "Config.Cmd" in cmd[3]:
+                out, rc = json.dumps(self.cmds.get(cmd[-1], [])), 0
+            else:
+                out, rc = (state or "", 0 if state else 1)
         elif cmd[:4] == ["docker", "run", "-d", "--name"]:
             self.states[cmd[4]] = "running"
+            self.cmds[cmd[4]] = cmd[cmd.index("-c") + 1 :] if "-c" in cmd else cmd[-1:]
+        elif cmd[:3] == ["docker", "rm", "-f"]:
+            self.states.pop(cmd[3], None)
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
             out = "127.0.0.1\tlocalhost\n172.20.0.1\thost.docker.internal\n"
         elif cmd[:2] == ["docker", "exec"] and "/proc/net/tcp" in cmd[-1]:
@@ -86,6 +94,8 @@ def test_sidecar_mounts_repo_read_only_and_listens_only_on_socket(pod):
     assert "--runtime=sysbox-runc" in cmd and "--privileged" not in cmd
     script = cmd[-1]
     assert "--host=unix:///run/vivibox-docker/docker.sock" in script and "tcp://" not in script
+    # After a restart the old socket is still there; chmod on it would miss the daemon's new one.
+    assert script.index("rm -f /run/vivibox-docker/docker.sock") < script.index("dockerd")
 
 
 def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):
@@ -122,9 +132,21 @@ def test_up_with_running_pod_only_reapplies_firewall(pod):
 
 def test_restarted_sidecar_gets_a_new_agent(pod):
     pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "running"}
+    pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", pod.sidecar_command()[-1]]}
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent")
     assert pod.runner.find("docker", "start", "vivibox-shop-1-dind")
+    assert not pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind"), "its script is current"
+
+
+def test_a_stopped_sidecar_made_by_an_older_vivibox_is_made_again(pod):
+    """docker start runs the script a container was made with, so a fix to it would never arrive."""
+    pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "exited"}
+    pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", "dind dockerd ...; chmod 666 ...; wait"]}
+    pod.up(timeout=1)
+    assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind")
+    assert not pod.runner.find("docker", "start", "vivibox-shop-1-dind")
+    assert pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")
 
 
 def test_up_requires_repo(tmp_path):

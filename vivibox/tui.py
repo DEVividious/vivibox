@@ -39,7 +39,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from . import actions, context, gate, ide, keys, manual, providers, supervisor, ui
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .states import State
@@ -149,6 +149,16 @@ def last_gate(task: Task) -> str:
             outcome = "passed" if event["data"].get("passed") else "failed"
             return f"Gate {outcome} at {event['ts'][11:19]}."
     return "The gate has not run yet."
+
+
+def project_repos() -> list[Path]:
+    """The folder you started in and your projects' repositories: where a project's own
+    opencode.json would be."""
+    found = [Path.cwd()]
+    for name in projects():
+        with contextlib.suppress(ConfigError, OSError):
+            found.append(load_project(name).repo)
+    return list(dict.fromkeys(found))
 
 
 def projects() -> list[str]:
@@ -649,7 +659,8 @@ class ChooseImport(Dialog):
             yield Label("Untick the ones to leave out:")
             rows = []
             for i, f in enumerate(self.reading.found):
-                label = f"{escape(f.name)}  {f.models} models, key {escape(f.key)}"
+                what = f"{f.models} models" if f.own else "opencode's provider"
+                label = f"{escape(f.name)}  {what}, key {escape(f.key)}"
                 if f.replaces:
                     label += "  [yellow]replaces the one you have[/]"
                 rows.append((label, i, True))
@@ -672,6 +683,140 @@ class ChooseImport(Dialog):
         self.dismiss([])
 
 
+def shown_path(path: Path) -> str:
+    home = str(Path.home())
+    return str(path).replace(home, "~", 1) if str(path).startswith(home + "/") else str(path)
+
+
+class ImportSource(Dialog):
+    """Which opencode configuration to bring providers over from: the ones found where opencode
+    reads them, or another file. Dismisses with its path, or None."""
+
+    def __init__(self, found: list[tuple[Path, int]]):
+        super().__init__()
+        self.found = found
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            if self.found:
+                yield Label("Import providers from your opencode configuration:")
+            else:
+                yield Label("No opencode configuration with providers where opencode keeps one.")
+            rows = [f"{escape(shown_path(p))}  [dim]{n} provider{'s' * (n != 1)}[/]" for p, n in self.found]
+            yield OptionList(*rows, "Another file…", id="sources")
+            other = Input(placeholder="path to an opencode.json", suggester=PathSuggester(), id="other")
+            other.display = False
+            yield other
+            yield Label("", id="problem")
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#sources").focus()
+
+    @on(OptionList.OptionSelected, "#sources")
+    def chosen(self, event: OptionList.OptionSelected) -> None:
+        if event.option_index < len(self.found):
+            self.dismiss(self.found[event.option_index][0])
+            return
+        other = self.query_one("#other", Input)
+        other.display = True
+        other.focus()
+
+    @on(Input.Submitted, "#other")
+    def typed(self, event: Input.Submitted) -> None:
+        path = Path(event.value.strip()).expanduser()
+        if path.is_file():
+            self.dismiss(path)
+        else:
+            self.query_one("#problem", Label).update(f"[red]{escape(str(path))} is not a file[/]")
+
+    @on(Button.Pressed, "#cancel")
+    def cancelled(self) -> None:
+        self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
+def provider_rows() -> list[tuple[str, str]]:
+    """Your providers, as (name, what vivibox has for it)."""
+    stored, defined = keys.list_keys(), providers.load()
+    rows = []
+    for name in sorted(set(stored) | set(defined)):
+        key = (
+            f"key {stored[name]}"
+            if name in stored
+            else "no key needed"
+            if providers.keyless(name)
+            else "no key"
+        )
+        said = [key]
+        if name in defined:
+            n = len(defined[name].get("models", {}))
+            said.append(f"your endpoint, {n} model{'s' * (n != 1)}")
+        rows.append((name, ", ".join(said)))
+    return rows
+
+
+class ManageProviders(Dialog):
+    """The providers vivibox can run models of: added here, imported from opencode, or removed."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Your providers:")
+            yield OptionList(id="providers", classes="catalog")
+            with Horizontal(classes="buttons"):
+                yield Button("Add…", variant="primary", id="add")
+                yield Button("Import from opencode…", id="import")
+                yield Button("Remove", id="remove")
+                yield Button("Close", id="close")
+
+    def on_mount(self) -> None:
+        self.fill()
+        self.query_one("#add").focus()
+
+    def fill(self) -> None:
+        self.rows = provider_rows()
+        options = self.query_one("#providers", OptionList)
+        options.clear_options()
+        if self.rows:
+            options.add_options([f"{escape(n)}  [dim]{escape(said)}[/]" for n, said in self.rows])
+            options.highlighted = 0
+        else:
+            options.add_option(Option("none yet: add one, or import them from opencode", disabled=True))
+        self.query_one("#remove").display = bool(self.rows)
+
+    def changed(self, names: list[str]) -> None:
+        if names:
+            self.fill()
+            self.app.refresh_models()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "add":
+            self.app.push_screen(AddProvider(self.app.catalog, importing=False), self.changed)
+        elif event.button.id == "import":
+            self.app.import_opencode(self.changed)
+        elif event.button.id == "remove":
+            at = self.query_one("#providers", OptionList).highlighted
+            if at is None or at >= len(self.rows):
+                return
+            name = self.rows[at][0]
+
+            def answered(yes: bool) -> None:
+                if yes and providers.forget(name):
+                    self.notify(f"Removed {name}.")
+                    self.changed([name])
+
+            self.app.push_screen(Confirm(f"Remove {name} and its key from vivibox?", "Remove"), answered)
+        else:
+            self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 class AddProvider(Dialog):
     """A provider opencode knows, picked from its list, with your key; or every provider of an
     opencode.json you already use, such as your employer's endpoint. Dismisses with the providers
@@ -684,10 +829,12 @@ class AddProvider(Dialog):
         Binding("right", "app.focus_next", show=False),
     ]
 
-    def __init__(self, catalog: list[tuple[str, str]] | None = None):
+    def __init__(self, catalog: list[tuple[str, str]] | None = None, importing: bool = True):
         super().__init__()
         # None while the list is still being read; [] when it cannot be, and you type the name.
         self.catalog = catalog
+        # Opened from the providers screen, which has its own import button, it does without one.
+        self.importing = importing
         self.shown: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
@@ -698,16 +845,15 @@ class AddProvider(Dialog):
             yield Input(
                 placeholder="API key for the provider picked above (not shown)", password=True, id="key"
             )
-            yield Label("or bring over every provider of an opencode.json you use, with its models and key:")
-            yield Input(str(providers.DEFAULT_SOURCE), suggester=PathSuggester(), id="source")
             yield Label("", id="problem")
             with Horizontal(classes="buttons"):
                 yield Button("Add", variant="primary", id="add")
-                yield Button("Import", id="import")
+                yield Button("Import from opencode…", id="import")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#search", Input).focus()
+        self.query_one("#import").display = self.importing
         if self.catalog is None:
             self.query_one("#catalog", OptionList).add_option(
                 Option("reading the providers opencode knows…", disabled=True)
@@ -762,26 +908,18 @@ class AddProvider(Dialog):
                 keys.set_key(name, self.query_one("#key", Input).value)
                 self.dismiss([name])
             elif event.button.id == "import":
-                source = Path(self.query_one("#source", Input).value.strip()).expanduser()
-                self.app.push_screen(ChooseImport(source, providers.read_opencode(source)), self.imported)
+                self.app.import_opencode(lambda names: names and self.dismiss(names))
             else:
                 self.dismiss([])
         except (keys.KeyStoreError, ConfigError) as e:
             self.query_one("#problem", Label).update(f"[red]{e.args[0]}[/]")
-
-    def imported(self, chosen: list[providers.Found]) -> None:
-        if not chosen:
-            return  # back to this dialog, to pick another file or add one by name
-        providers.bring_over(chosen)
-        self.notify(f"Imported {', '.join(f.name for f in chosen)}.", timeout=8)
-        self.dismiss([f.name for f in chosen])
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "search":
             self.query_one("#key", Input).focus()
         else:
-            self.query_one("#import" if event.input.id == "source" else "#add", Button).press()
+            self.query_one("#add", Button).press()
 
     def key_escape(self) -> None:
         self.dismiss([])
@@ -987,7 +1125,7 @@ class Vivibox(App):
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
     Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
-    AddProvider, ChooseImport { align: center middle; }
+    AddProvider, ChooseImport, ImportSource, ManageProviders { align: center middle; }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),
@@ -1010,6 +1148,7 @@ class Vivibox(App):
         Binding("i", "new_project", "New project"),
         Binding("P", "new_project", "New project", show=False),
         Binding("x", "remove", "Remove"),
+        Binding("k", "providers", "Providers"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -1055,6 +1194,7 @@ class Vivibox(App):
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)
+        self.call_after_refresh(self.hint_opencode)
         self.load_models()
 
     @work(thread=True)
@@ -1072,6 +1212,47 @@ class Vivibox(App):
             )
 
         self.call_from_thread(choose)
+
+    def action_providers(self) -> None:
+        self.push_screen(ManageProviders())
+
+    def import_opencode(self, done) -> None:
+        """Which opencode configuration, then which of its providers; done gets the names brought over."""
+
+        def picked(path: Path | None) -> None:
+            if path is None:
+                done([])
+                return
+            try:
+                reading = providers.read_opencode(path)
+            except ConfigError as e:
+                self.notify(e.args[0], severity="error", timeout=10)
+                done([])
+                return
+            self.push_screen(ChooseImport(path, reading), chosen)
+
+        def chosen(found: list[providers.Found]) -> None:
+            if found:
+                providers.bring_over(found)
+                self.notify(f"Imported {', '.join(f.name for f in found)}.", timeout=8)
+            done([f.name for f in found])
+
+        self.push_screen(ImportSource(providers.discover(project_repos())), picked)
+
+    @work(thread=True)
+    def refresh_models(self) -> None:
+        self.available = actions.available_models(refresh=True)
+
+    def hint_opencode(self) -> None:
+        """Someone who uses opencode has providers set up already; say they can be brought over."""
+        if keys.list_keys() or providers.load():
+            return
+        if found := providers.discover(project_repos()):
+            where = shown_path(found[0][0])
+            self.notify(
+                f"Found your opencode configuration, {where}. Press k to bring its providers over.",
+                timeout=15,
+            )
 
     @work(thread=True)
     def load_models(self) -> None:

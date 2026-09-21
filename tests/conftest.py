@@ -32,4 +32,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (cfg / "projects" / "demo.toml").write_text(f'repo = "{repo}"\nverify = ["true"]\n')
     monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))  # keys and history, never yours
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # opencode's configuration, never yours
+    monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
     return tmp_path

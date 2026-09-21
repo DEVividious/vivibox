@@ -884,7 +884,8 @@ def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env
     monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
     monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
     monkeypatch.setenv("ACME_KEY", "acme-secret")
-    source = tmp_path / "opencode.json"
+    source = tmp_path / "xdg" / "opencode" / "opencode.json"
+    source.parent.mkdir(parents=True)
     source.write_text(
         '{"provider": {"acme": {"npm": "@ai-sdk/openai-compatible",'
         ' "options": {"baseURL": "https://ai.acme.example/v1", "apiKey": "{env:ACME_KEY}"},'
@@ -900,8 +901,10 @@ def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env
         writer.value = actions.ADD
         await pilot.pause()
         assert isinstance(app.screen, tui.AddProvider)
-        app.screen.query_one("#source", Input).value = str(source)
         app.screen.query_one("#import").press()
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ImportSource)
+        await pilot.press("enter")  # the configuration found where opencode keeps it
         await pilot.pause()
         assert isinstance(app.screen, tui.ChooseImport), "you see what comes before it comes"
         assert keys.list_keys() == {}, "nothing kept yet"
@@ -950,18 +953,19 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
     assert keys.get_key("openai") == "sk-openai"
 
 
-def test_a_bad_import_is_said_in_the_dialog(env, tmp_path):
+def test_another_file_that_is_not_there_is_said(env, tmp_path):
     async def scenario(app, pilot):
-        app.available = AVAILABLE
-        await pilot.press("n")
+        app.push_screen(tui.ImportSource([]))
         await pilot.pause()
-        app.screen.query_one("#role-writer", Select).value = actions.ADD
+        await pilot.press("enter")  # "Another file…", the only entry
         await pilot.pause()
-        app.screen.query_one("#source", Input).value = str(tmp_path / "missing.json")
-        app.screen.query_one("#import").press()
+        other = app.screen.query_one("#other", Input)
+        assert other.display and app.screen.focused is other
+        other.value = str(tmp_path / "missing.json")
+        await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.AddProvider), "still open, to fix the path"
-        assert "cannot read" in str(app.screen.query_one("#problem", Label).render())
+        assert isinstance(app.screen, tui.ImportSource), "still open, to fix the path"
+        assert "is not a file" in str(app.screen.query_one("#problem", Label).render())
 
     run(scenario)
 
@@ -1026,10 +1030,12 @@ def test_an_import_lists_what_it_brings_and_keeps_only_what_you_tick(env, tmp_pa
     )
 
     async def scenario(app, pilot):
-        app.push_screen(tui.AddProvider([]))
+        app.import_opencode(lambda names: None)
         await pilot.pause()
-        app.screen.query_one("#source", Input).value = str(source)
-        app.screen.query_one("#import").press()
+        await pilot.press("enter")  # "Another file…"
+        await pilot.pause()
+        app.screen.query_one("#other", Input).value = str(source)
+        await pilot.press("enter")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ChooseImport)
@@ -1058,3 +1064,38 @@ def test_the_project_is_a_list_even_with_one_project(env):
         assert project.value == "demo" and projects() == ["demo"]
 
     run(scenario)
+
+
+def test_k_lists_your_providers_and_removes_one(env):
+    from vivibox import keys, providers
+
+    keys.set_key("deepseek", "sk-mine")
+
+    async def scenario(app, pilot):
+        await pilot.press("k")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, tui.ManageProviders)
+        assert screen.rows == [("deepseek", "key sk-… (7)")]
+        screen.query_one("#remove").press()
+        await pilot.pause()
+        await pilot.press("enter")  # confirm
+        await pilot.pause()
+        assert app.screen.rows == [] and not app.screen.query_one("#remove").display
+
+    run(scenario)
+    assert keys.list_keys() == {} and providers.load() == {}
+
+
+def test_the_view_says_your_opencode_configuration_can_be_brought_over(env, monkeypatch):
+    config = env / "xdg" / "opencode" / "opencode.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"provider": {"acme": {"options": {"baseURL": "https://x"}, "models": {"m": {}}}}}')
+    said = []
+
+    async def scenario(app, pilot):
+        monkeypatch.setattr(app, "notify", lambda text, **kw: said.append(text))
+        app.hint_opencode()
+
+    run(scenario)
+    assert any("Press k to bring its providers over" in t for t in said)

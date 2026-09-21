@@ -119,3 +119,26 @@ def test_auth_import_says_what_came(source, capsys, monkeypatch):
     assert main(["auth", "import", str(source)]) == 0
     out = capsys.readouterr().out
     assert "acme" in out and "3 models, key from $ACME_KEY" in out and "acme-secret" not in out
+
+
+def test_opencode_configurations_are_found_where_opencode_reads_them(env, tmp_path):
+    xdg = tmp_path / "xdg" / "opencode"
+    xdg.mkdir(parents=True)
+    (xdg / "opencode.jsonc").write_text('{"provider": {"a": {}, "b": {}}} // global')
+    repo = tmp_path / "repo"
+    (repo / "opencode.json").write_text('{"provider": {"c": {}}}')
+    named = tmp_path / "custom.json"
+    named.write_text('{"provider": {"d": {}}}')
+    (tmp_path / "no-providers.json").write_text('{"mcp": {}}')
+    env_vars = {"XDG_CONFIG_HOME": str(tmp_path / "xdg"), "OPENCODE_CONFIG": str(named)}
+    found = providers.discover([repo], env=env_vars)
+    assert found == [(named, 1), (xdg / "opencode.jsonc", 2), (repo / "opencode.json", 1)]
+    env_vars["OPENCODE_CONFIG"] = str(tmp_path / "no-providers.json")
+    assert (tmp_path / "no-providers.json", 0) not in providers.discover([], env=env_vars)
+
+
+def test_opencode_own_provider_brings_only_its_key(source):
+    providers.import_opencode(source, env={"ACME_KEY": "k"})
+    assert "deepseek" not in providers.load() and keys.get_key("deepseek") == "sk-literal"
+    found = {f.name: f.own for f in providers.read_opencode(source, env={}).found}
+    assert found == {"acme": True, "local": True, "deepseek": False}

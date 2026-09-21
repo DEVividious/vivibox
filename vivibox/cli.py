@@ -402,10 +402,9 @@ def cmd_auth(args: argparse.Namespace) -> int:
     elif args.action == "import":
         reading = providers.read_opencode(Path(args.provider or providers.DEFAULT_SOURCE))
         for f in reading.found:
-            print(
-                f"{f.name:20} {f.models} models, key {f.key}"
-                + ("  (replaces the one you have)" if f.replaces else "")
-            )
+            what = f"{f.models} models" if f.own else "opencode's provider"
+            replaces = "  (replaces the one you have)" if f.replaces else ""
+            print(f"{f.name:20} {what}, key {f.key}{replaces}")
         if reading.left:
             print(f"Only providers come over; left in the file: {', '.join(reading.left)}.")
         if sys.stdin.isatty() and input(f"Import these {len(reading.found)}? [y/N] ").strip().lower() not in (

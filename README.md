@@ -58,13 +58,15 @@ no model until you create your first task. Its list of models ends with *+ add a
 import your opencode.json…*:
 
 - a provider from opencode's own list, searched as you type, and your key, or
-- the providers of an opencode.json you already use, such as your employer's endpoint with its
-  models. You see each one first, with where its key comes from and whether it replaces one you
+- the providers of the opencode you already use, such as your employer's endpoint with its models:
+  vivibox lists the configurations it finds where opencode keeps them (`~/.config/opencode/`,
+  `$OPENCODE_CONFIG`, your projects' own `opencode.json`), or takes another file. You see each one first, with where its key comes from and whether it replaces one you
   have, and untick what you want to leave out; only providers come over, not MCP servers or
   agents. The definitions go to `~/.config/vivibox/providers.json`, and each key, whether written
   in the file, `{env:NAME}` or `{file:path}`, to vivibox's key store.
 
-The first model you pick for a role becomes its default in config.toml. The same, from a shell:
+`k` in the view lists your providers, to add, import or remove one, whenever you like. The first
+model you pick for a role becomes its default in config.toml. The same, from a shell:
 
 ```bash
 vivibox auth set anthropic                                 # asks for the key
@@ -129,6 +131,7 @@ The footer shows only the keys that do something for the selected task:
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
+| `k` | your providers: add one from opencode's list with a key, import them from your opencode configuration, or remove one |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |

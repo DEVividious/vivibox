@@ -91,6 +91,12 @@ class Found:
     entry: dict = field(repr=False)
     secret: str = field(default="", repr=False)
 
+    @property
+    def own(self) -> bool:
+        """Defines an endpoint or models of its own; otherwise it is opencode's provider, and
+        only its key comes over."""
+        return any(k != KEYLESS for k in self.entry)
+
 
 @dataclass(frozen=True)
 class Reading:
@@ -114,6 +120,31 @@ def _resolve(value: str, env: dict[str, str], base: Path) -> tuple[str, str]:
         return p.read_text().strip(), f"from {p}"
     except OSError:
         return "", f"{p} cannot be read"
+
+
+def opencode_candidates(repos: list[Path] = (), env: dict[str, str] | None = None) -> list[Path]:
+    """Where opencode reads its configuration: the file $OPENCODE_CONFIG names, the global one, and
+    a project's own in its repository."""
+    env = dict(os.environ) if env is None else env
+    found = [Path(os.path.expanduser(env["OPENCODE_CONFIG"]))] if env.get("OPENCODE_CONFIG") else []
+    base = Path(env.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "opencode"
+    found += [base / "opencode.json", base / "opencode.jsonc", base / "config.json"]
+    for repo in repos:
+        found += [repo / "opencode.json", repo / "opencode.jsonc", repo / ".opencode" / "opencode.json"]
+    return list(dict.fromkeys(found))
+
+
+def discover(repos: list[Path] = (), env: dict[str, str] | None = None) -> list[tuple[Path, int]]:
+    """The opencode configurations on this machine that define providers, with how many."""
+    found = []
+    for candidate in opencode_candidates(repos, env):
+        if not candidate.is_file():
+            continue
+        try:
+            found.append((candidate, len(read_opencode(candidate, env).found)))
+        except ConfigError:
+            continue  # no providers in it, or not readable: nothing to offer
+    return found
 
 
 def read_opencode(source: Path, env: dict[str, str] | None = None) -> Reading:
@@ -147,13 +178,25 @@ def read_opencode(source: Path, env: dict[str, str] | None = None) -> Reading:
     return Reading(found, left)
 
 
+def forget(name: str) -> bool:
+    """Removes a provider of yours and its key; True if there was either."""
+    stored = load()
+    had = stored.pop(name, None) is not None
+    if had:
+        path().write_text(json.dumps(stored, indent=2) + "\n")
+    return keys.remove(name) or had
+
+
 def bring_over(chosen: list[Found]) -> None:
     """Keeps the providers you chose, and their keys; a key the file did not give is left as it is."""
     stored = load()
     for f in chosen:
         if f.secret:
             keys.set_key(f.name, f.secret)
-        stored[f.name] = f.entry
+        if f.own:
+            stored[f.name] = f.entry
+        else:
+            stored.pop(f.name, None)  # opencode's own provider again, on your key
     path().parent.mkdir(parents=True, exist_ok=True)
     path().write_text(json.dumps(stored, indent=2) + "\n")
 

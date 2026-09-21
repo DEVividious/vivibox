@@ -1961,8 +1961,9 @@ class Vivibox(App):
             "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "approve_risky": state is State.APPROVAL_RISKY,
             "watch": running and bool(pick[1].sessions),
-            "start_task": state is not State.DONE and not running,
-            "stop_task": state is not State.DONE and running,
+            # Not again while one of them is under way.
+            "start_task": state is not State.DONE and not running and pick[1].id not in self.starting,
+            "stop_task": state is not State.DONE and running and pick[1].id not in self.starting,
             "remove": True,
             # Worth looking at once there is something to look at. Running it again while it
             # runs is a restart, which is what you want after the agent has changed something.
@@ -2204,9 +2205,9 @@ class Vivibox(App):
             return
         self.run_demo(task.id, ask=True)
 
-    def demo_busy(self, task_id: str, doing: str) -> None:
-        """What the demo is doing, in the task's status, with the spinner a working agent has; ""
-        when it is done, one way or the other."""
+    def busy_with(self, task_id: str, doing: str) -> None:
+        """What a slow step (the demo, starting or stopping the task) is doing, in the task's
+        status, with the spinner a working agent has; "" when it is done, one way or the other."""
         if doing:
             self.starting[task_id] = doing
         else:
@@ -2216,11 +2217,11 @@ class Vivibox(App):
     @work(thread=True)
     def run_demo(self, task_id: str, ask: bool = False, use: str = "", reply: str = "") -> None:
         doing = "working out how to run it" if ask or reply else "starting the demo"
-        self.call_from_thread(self.demo_busy, task_id, doing)
+        self.call_from_thread(self.busy_with, task_id, doing)
         try:
             self.demo_outcome(task_id, ask, use, reply)
         finally:
-            self.call_from_thread(self.demo_busy, task_id, "")
+            self.call_from_thread(self.busy_with, task_id, "")
 
     def demo_outcome(self, task_id: str, ask: bool, use: str, reply: str) -> None:
         try:
@@ -2331,7 +2332,6 @@ class Vivibox(App):
 
     def action_start_task(self) -> None:
         task, _ = self.selected()
-        self.notify(f"Starting {task.id}…")
         self.start(task.id, resume=any(e["type"] == "started" for e in task.events()))
 
     def action_stop_task(self) -> None:
@@ -2343,21 +2343,24 @@ class Vivibox(App):
 
     @work(thread=True)
     def start(self, task_id: str, resume: bool = False) -> None:
+        self.call_from_thread(self.busy_with, task_id, "starting…")
         try:
             model = actions.start(task_id, resume=resume)
             self.call_from_thread(self.notify, f"{task_id} started ({model}).")
         except Exception as e:
             self.call_from_thread(self.fail, e)
-        self.call_from_thread(self.reload)
+        self.call_from_thread(self.busy_with, task_id, "")
 
     @work(thread=True)
     def stop(self, task_id: str) -> None:
+        # Taking the pod down takes a while; without this the row looked as if nothing happened.
+        self.call_from_thread(self.busy_with, task_id, "stopping…")
         try:
             actions.stop(actions.load(task_id)[0])
             self.call_from_thread(self.notify, f"{task_id} stopped.")
         except Exception as e:
             self.call_from_thread(self.fail, e)
-        self.call_from_thread(self.reload)
+        self.call_from_thread(self.busy_with, task_id, "")
 
     def action_new(self, preselect: str = "") -> None:
         if not projects():

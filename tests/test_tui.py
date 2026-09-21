@@ -1287,6 +1287,46 @@ def test_starting_the_demo_shows_in_the_status_like_a_working_agent(env, monkeyp
     run(scenario)
 
 
+def test_stopping_and_starting_show_in_the_status_until_done(env, monkeypatch):
+    """Taking a pod down or up takes a while; the row says what is going on, with the spinner."""
+    import threading
+
+    task = new_task()
+    release = threading.Event()
+
+    def slow_stop(t):
+        release.wait(5)
+        t.set_paused(True)
+
+    def slow_start(task_id, resume=False):
+        release.wait(5)
+        return "m"
+
+    monkeypatch.setattr(actions, "stop", slow_stop)
+    monkeypatch.setattr(actions, "start", slow_start)
+
+    async def scenario(app, pilot):
+        for step, doing, after in ((app.stop, "stopping…", "stopped"), (app.start, "starting…", None)):
+            release.clear()
+            worker = step(task.id)
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if task.id in app.starting:
+                    break
+            cell = str(app.table.get_cell(task.id, app.status_column))
+            assert doing in cell and app.busy(task.read_state()), "shown as at work"
+            assert not app.check_action("start_task", ()) and not app.check_action("stop_task", ())
+            release.set()
+            await worker.wait()
+            await pilot.pause()
+            cell = str(app.table.get_cell(task.id, app.status_column))
+            assert task.id not in app.starting and doing not in cell
+            if after:
+                assert after in cell
+
+    run(scenario)
+
+
 def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch):
     task = new_task("Try the other approach")
     task.event("turn", state="plan", cost=0.2, tokens=1)

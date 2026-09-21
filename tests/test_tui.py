@@ -1240,3 +1240,44 @@ def test_starting_the_demo_shows_in_the_status_like_a_working_agent(env, monkeyp
         assert "starting the demo" not in str(app.table.get_cell(task.id, app.status_column))
 
     run(scenario)
+
+
+def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch):
+    task = new_task("Try the other approach")
+    task.event("turn", state="plan", cost=0.2, tokens=1)
+    task.event("turn", state="implement", cost=0.05, tokens=1)
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {"remove": lambda self: None})())
+    actions.remove(task, load_project("demo"))
+    assert not task.root.exists()
+    entry = actions.history()[0]
+    assert (entry["id"], entry["title"], entry["deleted"]) == ("demo-1", "Try the other approach", "plan")
+    assert ui.finished_cost(entry) == "$0.20 + $0.05"
+    assert actions.used_numbers(load_project("demo")) == 1, "its number is not given to the next task"
+    assert actions.demo_from_history("demo") == ""
+
+    async def scenario(app, pilot):
+        await pilot.pause()
+        assert "deleted" in str(app.table.get_cell("demo-1", app.status_column))
+        await pilot.press("d")
+        await pilot.pause()
+        assert "### demo-1 · deleted" in app.shown and "its files and its work went with it" in app.shown
+
+    run(scenario)
+
+
+def test_the_view_starts_over_when_the_last_row_goes(env, monkeypatch):
+    task = new_task()
+
+    async def scenario(app, pilot):
+        await pilot.press("d")
+        await pilot.pause()
+        assert not app.panel.has_class("hidden")
+        import shutil
+
+        shutil.rmtree(task.root)
+        app.reload()
+        await pilot.pause()
+        assert app.panel.has_class("hidden") and not app.check_action("details", ())
+        assert app.query_one("#empty").display
+
+    run(scenario)

@@ -176,8 +176,27 @@ def read(path) -> str:
         return ""
 
 
+def deleted_detail(entry: dict) -> str:
+    """A task you deleted: what it was for and how far it got; nothing of it is left."""
+    return "\n".join(
+        [
+            f"### {entry['id']} · deleted",
+            "",
+            f"*{entry['project']} · {ui.ago(entry['finished'])} · {ui.finished_cost(entry)}*",
+            "",
+            entry["title"],
+            "",
+            f"Deleted at {entry['deleted']}; its files and its work went with it.",
+            "",
+            "Press `x` to forget it, `h` to hide finished tasks.",
+        ]
+    )
+
+
 def finished_detail(entry: dict) -> str:
-    """A task you accepted: what it left in your repository."""
+    """A task you accepted: what it left in your repository; or one you deleted."""
+    if entry.get("deleted"):
+        return deleted_detail(entry)
     if entry["conflicts"]:
         where = f"with conflicts in {', '.join(entry['conflicts'])}, also on `{entry['branch']}`"
     elif entry["branch"]:
@@ -1483,13 +1502,17 @@ class Vivibox(App):
             )  # fmt: skip
         for entry in self.done:
             table.add_row(
-                entry["id"], "[green]  done[/]", "-", "-", ui.finished_cost(entry),
+                entry["id"], "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
+                "-", "-", ui.finished_cost(entry),
                 ui.ago(entry["created"]) if entry.get("created") else "-",
                 ui.ago(entry["finished"]), entry["title"], key=entry["id"],
             )  # fmt: skip
         ids = [st.id for _, st in pairs] + [e["id"] for e in self.done]
         empty = self.query_one("#empty", Static)
         table.display, empty.display = bool(ids), not ids
+        if not ids:
+            # Nothing left to show details of: the view is back to how it starts.
+            self.panel.add_class("hidden")
         empty.update("" if ids else NO_TASKS if projects() else NO_PROJECTS)
         if selected in ids:
             table.move_cursor(row=ids.index(selected))

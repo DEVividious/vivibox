@@ -540,7 +540,7 @@ def write_instruction(task: Task, text: str) -> Path:
 def demo_from_history(project_name: str) -> str:
     """How the last task you accepted in this project was run. A record, never run on its own."""
     for entry in history(limit=50):
-        if entry["project"] == project_name and entry.get("demo"):
+        if entry["project"] == project_name and entry.get("demo") and not entry.get("deleted"):
             return entry["demo"]
     return ""
 
@@ -620,12 +620,16 @@ def title_of(description: str) -> str:
 
 
 def used_numbers(project: Project) -> int:
-    """The highest task number of this project with a branch or review ref in your repository: a new
-    task must not reuse it, or its work would overwrite that branch."""
+    """The highest task number of this project with a branch or review ref in your repository, or in
+    the history: a new task must not reuse it, or its work would overwrite that branch."""
     refs = repo.git("for-each-ref", "--format=%(refname)", "refs/heads/vivibox/", "refs/vivibox/",
                     cwd=project.repo, check=False).stdout  # fmt: skip
     pattern = re.compile(rf"/{re.escape(project.name)}-(\d+)$")
-    return max((int(m.group(1)) for line in refs.split() if (m := pattern.search(line))), default=0)
+    found = [int(m.group(1)) for line in refs.split() if (m := pattern.search(line))]
+    # A task you removed is in the history under its number; a new one taking it would be two there.
+    found += [int(m.group(1)) for e in history(limit=100_000)
+              if (m := re.fullmatch(rf"{re.escape(project.name)}-(\d+)", e["id"]))]  # fmt: skip
+    return max(found, default=0)
 
 
 def create(
@@ -765,10 +769,13 @@ def stop(task: Task) -> None:
         task.set_paused(True)
 
 
-def remove(task: Task, project: Project) -> Path | None:
-    """Everything of the task; a branch from accepting it stays in your repository.
+def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
+    """Everything of the task; a branch from accepting it stays in your repository. A task you
+    remove is kept in the history as deleted; one you accepted is there as done already.
     Returns the review copy it removed, if there was one."""
     stop_supervisor(task)
+    if not accepted:
+        remember_removed(task, project)
     task_pod(task.id).remove()
     secrets.remove(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)
@@ -986,6 +993,27 @@ def accepted_criteria(task: Task) -> list[str]:
         return []
 
 
+def remember_removed(task: Task, project: Project) -> None:
+    """A task you removed, kept in the list's history like one you accepted: what it was for, what
+    it cost and how far it got. Its files and its work are gone."""
+    st = task.read_state()
+    spent = ui.cost(task)
+    entry = {
+        "id": task.id,
+        "project": project.name,
+        "title": st.goal,
+        "cost": round(spent.total, 4),
+        "planning": round(spent.planning, 4),
+        "created": st.created,
+        "finished": now(),
+        "deleted": str(st.state),
+    }
+    path = history_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def remember(done: Finished, project: Project, commit: str) -> None:
     path = history_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1051,7 +1079,7 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
             done.status = repo.git("status", "--short", "--untracked-files=no", cwd=project.repo).stdout
     task.transition(State.DONE, reason="accepted")
     remember(done, project, commit)
-    remove(task, project)
+    remove(task, project, accepted=True)
     return done
 
 

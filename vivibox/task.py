@@ -160,7 +160,9 @@ class Task:
         check_transition(st.state, target)
         previous = st.state
         st.state, st.updated = target, now()
-        if target is State.IMPLEMENT and previous in (State.VERIFY, State.CHECKPOINT_BLOCKED):
+        # A failed gate uses up an attempt. Coming back from you does not: your reply has just
+        # given the agent a fresh budget (reset_iterations), and counting here made it start at 2.
+        if target is State.IMPLEMENT and previous is State.VERIFY:
             st.iteration += 1
         self._write_state(st)
         self.event("state", previous=str(previous), current=str(target), **data)

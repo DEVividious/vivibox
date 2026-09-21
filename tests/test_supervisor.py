@@ -139,6 +139,24 @@ def test_failed_gate_sends_feedback_then_blocks_after_limit(task):
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
 
 
+def test_your_reply_to_a_blocked_task_gives_the_agent_a_whole_new_budget(task):
+    from vivibox import actions, ui
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    sup, _ = make(task, FakeHarness(task), results=[gate_result(False)] * 3)
+    for _ in range(4):  # implement, fail, implement, fail at the limit of 2
+        sup.step()
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    actions.reply(task, "Docker works again; switch the integration tests back on")
+    st = task.read_state()
+    assert (st.state, st.iteration) == (State.IMPLEMENT, 1), "attempt 1, not 2, after your reply"
+    assert "attempt" not in ui.activity(st, 2)
+    sup.step()  # implement
+    sup.step()  # verify fails: the first of the new two
+    assert task.read_state().state is State.IMPLEMENT and task.read_state().iteration == 2
+
+
 def test_passing_gate_reaches_final_checkpoint(task):
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         task.transition(s)

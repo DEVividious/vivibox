@@ -322,6 +322,7 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
         shown = str(app.query_one("#empty").render())
         assert "No projects yet" in shown and "Press i" in shown and not app.table.display
         assert not app.check_action("new", ()), "n is hidden with no project"
+        assert not app.check_action("details", ()) and not app.check_action("toggle_done", ()), "nor d and h"
         await pilot.press("n")
         await pilot.pause()
         assert not isinstance(app.screen, tui.NewTask)
@@ -954,5 +955,22 @@ def test_a_bad_import_is_said_in_the_dialog(env, tmp_path):
         await pilot.pause()
         assert isinstance(app.screen, tui.AddProvider), "still open, to fix the path"
         assert "cannot read" in str(app.screen.query_one("#problem", Label).render())
+
+    run(scenario)
+
+
+def test_d_shows_with_a_task_and_h_with_a_finished_one(env):
+    new_task()
+
+    async def scenario(app, pilot):
+        await pilot.pause()
+        assert app.check_action("details", ())
+        assert not app.check_action("toggle_done", ()), "nothing finished yet"
+        actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+        actions.history_path().write_text(
+            '{"id": "demo-9", "title": "Old", "cost": 0, "finished": "2026-09-01T00:00:00+00:00"}\n'
+        )
+        app.reload()
+        assert app.check_action("toggle_done", ())
 
     run(scenario)

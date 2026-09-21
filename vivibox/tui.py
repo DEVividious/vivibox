@@ -895,6 +895,7 @@ class Vivibox(App):
         self.pairs: list[tuple[Task, TaskState]] = []
         self.done: list[dict] = []
         self.show_done = True
+        self.has_done = False
         self.frame = 0
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
         self.running: set[str] = set()
@@ -994,7 +995,15 @@ class Vivibox(App):
         )
         pods = tuple(sorted((k, v.state, len(v.reachable)) for k, v in self.pods.items()))
         # With no project the panel says how to add one, and n is hidden until there is one.
-        return tasks, pods, self.show_done, self.selected_id(), len(self.done), bool(projects())
+        return (
+            tasks,
+            pods,
+            self.show_done,
+            self.selected_id(),
+            len(self.done),
+            bool(projects()),
+            self.has_done,
+        )
 
     def reload(self) -> None:
         """Re-reads every task; the only place that does, so key checks stay cheap."""
@@ -1004,6 +1013,9 @@ class Vivibox(App):
         self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
         live = {st.id for _, st in pairs}
         self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
+        # A stat, not a read: whether h has any finished task to show.
+        kept = actions.history_path()
+        self.has_done = kept.is_file() and kept.stat().st_size > 0
         now = self.snapshot()
         if now == self.drawn:
             self.look_at_pods([st.id for _, st in pairs])
@@ -1163,6 +1175,10 @@ class Vivibox(App):
                         "models", "copy_prompt", "copy_prompt_cli")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
+        if action == "details":  # nothing to show details of; an open panel can still be closed
+            return bool(self.pairs or self.done) or (self.is_mounted and not self.panel.has_class("hidden"))
+        if action == "toggle_done":
+            return self.has_done
         if action not in task_actions:  # quit, and moving focus in dialogs
             return True
         pick = self.selected()

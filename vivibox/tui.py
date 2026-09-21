@@ -188,7 +188,7 @@ def deleted_detail(entry: dict) -> str:
             "",
             f"Deleted at {entry['deleted']}; its files and its work went with it.",
             "",
-            "Press `x` to forget it, `h` to hide finished tasks.",
+            "Press `x` to delete it from the history, `h` to hide finished tasks.",
         ]
     )
 
@@ -221,7 +221,7 @@ def finished_detail(entry: dict) -> str:
             f"Its work is {where}, from commit `{entry['commit']}`.",
             "",
             *delivered,
-            "Press `x` to forget it, `h` to hide finished tasks.",
+            "Press `x` to delete it from the history, `h` to hide finished tasks.",
         ]
     )
 
@@ -362,6 +362,37 @@ class Confirm(Dialog):
             with Horizontal(classes="buttons"):
                 yield Button(self.yes, variant="error", id="yes")
                 yield Button("Cancel", id="no")
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
+
+    def key_escape(self) -> None:
+        self.dismiss(False)
+
+
+class DeleteTask(Dialog):
+    """Deleting a task, or a finished one's line in the history: what goes, what stays. Cancel has
+    the focus, so an Enter pressed out of habit deletes nothing."""
+
+    def __init__(self, title: str, about: str, goes: str, stays: str, warning: str = ""):
+        super().__init__()
+        self.title_text, self.about, self.goes, self.stays, self.warning = title, about, goes, stays, warning
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"[b]{escape(self.title_text)}[/]")
+            yield Label(escape(self.about), classes="wrap")
+            if self.warning:
+                yield Label(f"[yellow]{escape(self.warning)}[/]", classes="wrap")
+            yield Label(f"[red]Deleted:[/] {escape(self.goes)}", classes="wrap")
+            yield Label(f"[green]Kept:[/] {escape(self.stays)}", classes="wrap")
+            with Horizontal(classes="buttons"):
+                yield Button("Delete", variant="error", id="yes")
+                yield Button("Cancel", id="no")
+
+    def on_mount(self) -> None:
+        self.query_one("#no").focus()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -1274,7 +1305,7 @@ class Vivibox(App):
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
-    Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
+    Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
     AddProvider, ChooseImport, ImportSource, ManageProviders, BrowseFile { align: center middle; }
     """
     BINDINGS = [
@@ -1297,7 +1328,7 @@ class Vivibox(App):
         Binding("n", "new", "New task"),
         Binding("i", "new_project", "New project"),
         Binding("P", "new_project", "New project", show=False),
-        Binding("x", "remove", "Remove"),
+        Binding("x", "remove", "Delete"),
         Binding("k", "providers", "Providers"),
         Binding("q", "quit", "Quit"),
     ]
@@ -2133,21 +2164,45 @@ class Vivibox(App):
 
     def action_remove(self) -> None:
         if entry := self.finished_entry(self.selected_id()):
-            actions.forget(entry["id"])
-            self.reload()
+            kind = "deleted" if entry.get("deleted") else "done"
+            dialog = DeleteTask(
+                f"Delete {entry['id']} from the history?",
+                f"{entry['title']} ({kind}, {ui.finished_cost(entry)})",
+                "its line in this list.",
+                "everything else: "
+                + ("nothing of it was left anyway." if kind == "deleted" else "its work in your repository."),
+            )
+
+            def forget(yes: bool) -> None:
+                if yes:
+                    actions.forget(entry["id"])
+                    self.reload()
+
+            self.push_screen(dialog, forget)
             return
         task, st = self.selected()
-        self.push_screen(
-            Confirm(f"Remove {task.id} ({st.state}) and all its work, without accepting it?", "Remove"),
-            lambda yes: yes and self.remove_task(task.id),
+        running = self.agent_running(task.id)
+        met = criteria(task)
+        about_task = [ui.activity(st, self.config.max_iterations)]
+        about_task += [f"criteria {met}"] if met != "-" else []
+        about_task.append(str(ui.cost(task)))
+        dialog = DeleteTask(
+            f"Delete {task.id}?",
+            f"{st.goal} ({', '.join(about_task)})",
+            "its clone with every commit the agent made, its plan, its pod and anything running in it, "
+            "and its review copy. It is not accepted: none of its work reaches your repository.",
+            "a line in the history, with what it was for, what it cost and how far it got. "
+            "Your repository is untouched.",
+            warning="The agent is working on it now; it is stopped first." if running else "",
         )
+        self.push_screen(dialog, lambda yes: self.remove_task(task.id) if yes else None)
 
     @work(thread=True)
     def remove_task(self, task_id: str) -> None:
         try:
             task, project = actions.load(task_id)
             actions.remove(task, project)
-            self.call_from_thread(self.notify, f"Removed {task_id}.")
+            self.call_from_thread(self.notify, f"Deleted {task_id}.")
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.reload)

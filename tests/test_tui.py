@@ -237,7 +237,11 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
         await pilot.press("down", "enter")
         assert "Reject expired cards" in app.shown and "$0.30 + $0.12" in app.shown
         assert app.check_action("remove", ()) and not app.check_action("accept", ())
-        await pilot.press("x")  # forget it
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.DeleteTask) and app.screen.focused.id == "no", "Cancel first"
+        await pilot.press("left", "enter")  # Delete
+        await pilot.pause()
         assert table.row_count == 1 and actions.history() == []
         await pilot.press("h")
         assert table.row_count == 1, "hiding finished tasks leaves the live ones"
@@ -1281,3 +1285,30 @@ def test_the_view_starts_over_when_the_last_row_goes(env, monkeypatch):
         assert app.query_one("#empty").display
 
     run(scenario)
+
+
+def test_deleting_a_task_says_what_goes_and_what_stays_and_cancel_comes_first(env, monkeypatch):
+    task = new_task("Try the other approach")
+    task.event("turn", state="plan", cost=0.2, tokens=1)
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {"remove": lambda self: None})())
+
+    async def scenario(app, pilot):
+        await pilot.press("x")
+        await pilot.pause()
+        dialog = app.screen
+        assert isinstance(dialog, tui.DeleteTask)
+        said = " ".join(str(w.render()) for w in dialog.query(Label))
+        assert "Delete demo-1?" in said and "Try the other approach" in said and "$0.20 + $0.00" in said
+        assert "Deleted:" in said and "none of its work reaches your repository" in said
+        assert "Kept:" in said and "a line in the history" in said
+        await pilot.press("enter")  # Cancel has the focus: Enter out of habit deletes nothing
+        await pilot.pause()
+        assert task.root.exists()
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("left", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    run(scenario)
+    assert not task.root.exists() and actions.history()[0]["deleted"] == "plan"

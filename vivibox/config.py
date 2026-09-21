@@ -75,7 +75,7 @@ def _read_toml(path: Path) -> dict:
         with path.open("rb") as f:
             return tomllib.load(f)
     except FileNotFoundError:
-        raise ConfigError(f"Missing {path} (see templates/ for an example)") from None
+        raise ConfigError(f"Missing {path}; run vivibox to set it up") from None
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from None
 

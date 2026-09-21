@@ -70,7 +70,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     target = actions.setup_project(where, name, found.verify, found.java, create=args.git)
     print(f"Wrote {target}. Start a task with n in 'vivibox'.")
     if not (config_dir() / "config.toml").exists():
-        print(f"There is no {config_dir() / 'config.toml'} yet; see templates/config.example.toml.")
+        print(f"There is no {config_dir() / 'config.toml'} yet; run vivibox to set it up.")
     return 0
 
 
@@ -573,9 +573,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command is None:
-            from . import tui  # the view's library loads only when you use it
+            from . import firstrun, tui  # the view's library loads only when you use it
 
             ensure_image()
+            firstrun.ensure_config()
             return tui.run()
         return args.func(args)
     except (

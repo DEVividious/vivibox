@@ -1,4 +1,4 @@
-# Copy to ~/.config/vivibox/config.toml and adjust.
+# ~/.config/vivibox/config.toml. vivibox writes it on its first run, from your answers; edit it freely.
 # Keep endpoints, model names and anything employer-specific in this file, never in the repo.
 
 # Absolute path, outside $HOME, mounted nosuid,nodev (host/setup.sh prepares it).

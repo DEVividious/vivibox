@@ -315,21 +315,21 @@ class FakeImage:
         return 0
 
 
-def test_the_view_builds_the_image_it_needs_first(monkeypatch, capsys):
+def test_the_view_builds_the_image_it_needs_first(env, monkeypatch, capsys):
     fake = FakeImage(monkeypatch, built=False)
     assert fake.main([]) == 0
     assert fake.builds == 1 and fake.opened
     assert "Building the agent image vivibox-agent:abc" in capsys.readouterr().out
 
 
-def test_the_view_opens_at_once_with_the_image_built(monkeypatch, capsys):
+def test_the_view_opens_at_once_with_the_image_built(env, monkeypatch, capsys):
     fake = FakeImage(monkeypatch, built=True)
     assert fake.main([]) == 0
     assert fake.builds == 0 and fake.opened
     assert capsys.readouterr().out == ""
 
 
-def test_the_view_does_not_open_on_an_image_that_fails_its_checks(monkeypatch, capsys):
+def test_the_view_does_not_open_on_an_image_that_fails_its_checks(env, monkeypatch, capsys):
     fake = FakeImage(monkeypatch, built=False, failing=("java",))
     assert fake.main([]) == 1
     assert not fake.opened

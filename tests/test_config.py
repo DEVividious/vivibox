@@ -49,8 +49,8 @@ def test_rejects_invalid_config(tmp_path, text):
         load_config(write(tmp_path / "config.toml", text))
 
 
-def test_missing_config_points_to_templates(tmp_path):
-    with pytest.raises(ConfigError, match="templates"):
+def test_missing_config_says_how_to_set_it_up(tmp_path):
+    with pytest.raises(ConfigError, match="run vivibox to set it up"):
         load_config(tmp_path)
 
 

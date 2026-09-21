@@ -39,8 +39,7 @@ planned.
 ```bash
 host/setup.sh            # once, asks before each change: Sysbox, tmux, /srv/vivibox, uv, vivibox
 host/setup.sh --check    # confirms nothing is missing
-vivibox image build
-vivibox image check
+vivibox                  # the first time: builds the agent image, then asks for a key and a model
 ```
 
 `host/setup.sh` moves Docker's default networks off `172.17.0.0/16` (Docker restarts) to the first
@@ -53,13 +52,17 @@ from this checkout, editable, so it follows the checkout as you update it. When 
 
 ## Configure
 
-Once per machine, the settings and the API key of your model provider:
+Run `vivibox`. The first time, it builds the agent image (a few minutes) and asks three things:
+the provider of the model that writes the code, its API key (not shown as you type), and the model,
+from the list opencode has for that provider. Planning starts in your own chat; answer `n` to have a
+model on your key plan instead. It writes `~/.config/vivibox/config.toml`, commented, for anything
+else you want to change, and opens the view.
+
+Later, other providers' keys and their model names:
 
 ```bash
-mkdir -p ~/.config/vivibox
-cp templates/config.example.toml ~/.config/vivibox/config.toml   # tasks directory and model
-vivibox auth set deepseek          # the provider of the model in config.toml
-vivibox models deepseek            # model names to put in config.toml
+vivibox auth set anthropic
+vivibox models anthropic
 ```
 
 Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable only by you.

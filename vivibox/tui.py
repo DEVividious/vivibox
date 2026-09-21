@@ -215,6 +215,14 @@ def detail(
             "`C` the one for a CLI in your checkout (claude, gemini). When the plan is final, `e`",
             "opens the answer file: paste the chat's answer there and save. A CLI writes it itself.",
             "",
+            # What leaves your machine with the browser prompt, written by an agent: worth a look
+            # before it goes to another provider. The CLI prompt carries none of it.
+            "#### What the browser prompt tells the chat about the repository",
+            "",
+            read(handoff / manual.CONTEXT) or "Nothing: this is a new project.",
+            "",
+            "#### The plan to fill in",
+            "",
             plan_body(read(task.plan_path)),
         ]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):

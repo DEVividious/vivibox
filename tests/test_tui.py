@@ -737,3 +737,18 @@ def test_a_plan_from_your_own_chat_goes_in_through_the_view(env, monkeypatch):
         assert task.read_state().state is State.IMPLEMENT
 
     run(scenario)
+
+
+def test_the_panel_shows_what_the_browser_prompt_sends_about_the_repository(env):
+    """An agent wrote it and it goes to another provider with the prompt, so you see it before
+    you copy, not after."""
+    from vivibox import manual
+
+    task = new_task("Health")
+    task.transition(State.CHECKPOINT_PLAN)
+    task.set_awaiting_plan(True)
+    shown = detail(task, task.read_state(), 3, running=True, pod=tui.PodView())
+    assert "Nothing: this is a new project." in shown
+    (task.meta / "handoff" / manual.CONTEXT).write_text("Express 4, tests with vitest.\n")
+    shown = detail(task, task.read_state(), 3, running=True, pod=tui.PodView())
+    assert "Express 4, tests with vitest." in shown and "Health" in shown

@@ -714,6 +714,8 @@ class Vivibox(App):
         super().__init__()
         self.config = load_config()
         self.shown = ""
+        # What the table was last drawn from; a refresh that matches it does no work.
+        self.drawn: tuple = ()
         self.pairs: list[tuple[Task, TaskState]] = []
         self.done: list[dict] = []
         self.show_done = True
@@ -768,13 +770,34 @@ class Vivibox(App):
 
     # --- data ---
 
+    def snapshot(self) -> tuple:
+        """What the view shows, cheaply. Rebuilding the table and the panel costs Textual several
+        hundred retained objects, and a refresh that finds nothing changed used to pay it anyway:
+        a session left open overnight reached 5 GB and a quarter of a core with the tasks idle."""
+        tasks = tuple(
+            (st.id, str(st.state), st.iteration, st.paused, st.updated, st.id in self.running)
+            for _, st in self.pairs
+        )
+        pods = tuple(sorted((k, v.state, len(v.reachable)) for k, v in self.pods.items()))
+        return tasks, pods, self.show_done, self.selected_id(), len(self.done)
+
     def reload(self) -> None:
         """Re-reads every task; the only place that does, so key checks stay cheap."""
-        table = self.table
         selected = self.selected_id()
         pairs = [(t, t.read_state()) for t in list_tasks(self.config.tasks_dir)]
         self.pairs = pairs = sorted(pairs, key=lambda p: ui.ORDER.index(ui.group(p[1])))
         self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
+        live = {st.id for _, st in pairs}
+        self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
+        now = self.snapshot()
+        if now == self.drawn:
+            self.look_at_pods([st.id for _, st in pairs])
+            return
+        self.drawn = now
+        self.fill_table(pairs, selected)
+
+    def fill_table(self, pairs: list, selected: str | None) -> None:
+        table = self.table
         table.clear()
         for task, st in pairs:
             spent = ui.cost(task)
@@ -783,8 +806,6 @@ class Vivibox(App):
                 str(spent) if spent else "-",
                 ui.ago(st.created), ui.ago(st.updated), st.goal, key=st.id,
             )  # fmt: skip
-        live = {st.id for _, st in pairs}
-        self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
         for entry in self.done:
             table.add_row(
                 entry["id"], "[green]  done[/]", "-", "-", f"${entry['cost']:.2f}",

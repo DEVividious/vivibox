@@ -52,27 +52,40 @@ def _split_header(text: str) -> tuple[str, str]:
     raise PlanError("The plan header is not closed with a '+++' line")
 
 
+def checkboxes(text: str) -> list[Criterion]:
+    """Every '- [ ]' item in a markdown text, wrapped lines joined back on.
+
+    The plan is written by an agent and the checklist is edited by one, so both come back
+    reformatted. Reading one with wrapped lines joined and the other without compares a whole
+    criterion against its first clause.
+    """
+    found: list[Criterion] = []
+    open_item = False
+    for line in text.splitlines():
+        if m := CHECKBOX.match(line):
+            found.append(Criterion(m.group(2).strip(), m.group(1) != " "))
+            open_item = True
+        elif open_item and line.startswith((" ", "\t")) and line.strip():
+            last = found[-1]
+            found[-1] = Criterion(f"{last.text} {line.strip()}", last.done)
+        else:
+            open_item = False
+    return found
+
+
 def _criteria(body: str) -> list[Criterion]:
     """The heading counts at any level. The template mixes '# Goal' with '## Acceptance criteria',
     and an agent that tidies them to one level would otherwise leave a plan whose criteria are all
     there and none of which are found."""
-    criteria, inside, open_item = [], False, False
+    section: list[str] = []
+    inside = False
     for line in body.splitlines():
         if m := HEADING.match(line):
-            inside, open_item = m.group(1).casefold() == CRITERIA_HEADING.casefold(), False
+            inside = m.group(1).casefold() == CRITERIA_HEADING.casefold()
             continue
-        if inside and (m := CHECKBOX.match(line)):
-            criteria.append(Criterion(m.group(2).strip(), m.group(1) != " "))
-            open_item = True
-            continue
-        # A long criterion wraps. Without this the tail is dropped and the agent ticks a criterion
-        # that asks less than the plan does, which is worse than one it cannot find at all.
-        if open_item and line.startswith((" ", "\t")) and line.strip():
-            last = criteria[-1]
-            criteria[-1] = Criterion(f"{last.text} {line.strip()}", last.done)
-            continue
-        open_item = False
-    return criteria
+        if inside:
+            section.append(line)
+    return checkboxes("\n".join(section))
 
 
 COMMENT = re.compile(r"<!--.*?-->\s*", re.DOTALL)

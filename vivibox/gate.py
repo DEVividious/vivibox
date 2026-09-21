@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import repo, toolchain
-from .plan import CHECKBOX, Plan, parse_plan
+from .plan import Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
 from .states import State
@@ -69,9 +69,7 @@ def missing_criteria(task: Task) -> list[str]:
     reported = task.meta / "handoff" / CRITERIA_FILE
     ticked = set()
     if reported.exists():
-        for line in reported.read_text().splitlines():
-            if (m := CHECKBOX.match(line)) and m.group(1) != " ":
-                ticked.add(m.group(2).strip())
+        ticked = {c.text for c in checkboxes(reported.read_text()) if c.done}
     return [c for c in required if c not in ticked]
 
 

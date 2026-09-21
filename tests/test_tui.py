@@ -638,3 +638,32 @@ def test_the_first_choice_hands_the_role_back_to_the_config(env):
 
     run(scenario)
     assert task.read_state().models == {}
+
+
+def test_the_view_rebuilds_itself_only_when_something_moved(env, monkeypatch):
+    """Refreshing every two seconds rebuilt the table and the panel whether or not anything had
+    changed. Textual keeps several hundred objects per rebuild, so a session left open overnight
+    reached 5 GB and a quarter of a core while the tasks sat still."""
+    task = new_task("Waiting")
+    at_plan_checkpoint(task)
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {})
+    built = []
+    real = tui.Vivibox.fill_table
+    monkeypatch.setattr(tui.Vivibox, "fill_table", lambda self, *a: built.append(1) or real(self, *a))
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        built.clear()
+        for _ in range(20):
+            app.reload()
+            await pilot.pause()
+        assert built == [], "nothing moved, so nothing is redrawn"
+
+        task.transition(State.IMPLEMENT)
+        app.reload()
+        await pilot.pause()
+        assert len(built) == 1, "a task that moved is drawn again"
+        assert "review the plan" not in str(app.table.get_row(task.id)[1]), "the row followed it"
+
+    run(scenario)

@@ -219,3 +219,25 @@ def test_a_plan_must_say_how_to_test_a_project_that_has_no_command(task):
     text = task.plan_path.read_text().replace("+++\n", '+++\nverify = ["npm test"]\n', 1)
     task.plan_path.write_text(text)
     assert gate.accept_plan(task).verify == ["npm test"]
+
+
+def test_a_criterion_the_agent_wrapped_still_counts_as_ticked(tmp_path):
+    """The checklist is the agent's file and it reformats it, so a long criterion comes back
+    wrapped. The plan side joins wrapped lines; reading only the first line here compared a whole
+    criterion against its opening clause and called it missing, while the agent had ticked every
+    one of them and the tests passed."""
+    long_one = (
+        "Every test added was seen failing on its own assertion, not on a missing module, "
+        "before the change that makes it pass, with the compared values recorded in red.md"
+    )
+    plan = PLAN.replace("- [ ] error path is tested", f"- [ ] {long_one}")
+    t = create_task(tmp_path / "tasks", "demo", "goal", plan)
+    gate.accept_plan(t, ["true"])
+    (t.meta / "handoff" / gate.CRITERIA_FILE).write_text(
+        "# Acceptance criteria\n\n"
+        "- [x] endpoint returns 200\n"
+        "- [x] Every test added was seen failing on its own assertion, not on a missing module,\n"
+        "      before the change that makes it pass, with the compared values recorded in\n"
+        "      red.md\n"
+    )
+    assert gate.missing_criteria(t) == [], gate.missing_criteria(t)

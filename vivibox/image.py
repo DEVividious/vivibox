@@ -58,7 +58,26 @@ def build(pull: bool = False, force: bool = False) -> tuple[str, bool]:
     if exists(ref) and not force:
         return ref, False
     subprocess.run(build_command(ref, uid, gid, pull), check=True)
+    remove_old(ref)
     return ref, True
+
+
+def remove_old(current: str, runner: Runner = run) -> list[str]:
+    """Removes the agent images older versions of vivibox built, about 2 GB each. One a container
+    still uses stays: a task's pod made before an update runs on it until the pod is made again.
+    Returns what was removed."""
+    listed = runner(["docker", "image", "ls", REPOSITORY, "--format", "{{.Repository}}:{{.Tag}}"])
+    used = runner(["docker", "ps", "-a", "--format", "{{.Image}}"])
+    if listed.returncode != 0 or used.returncode != 0:
+        return []
+    in_use = set(used.stdout.split())
+    removed = []
+    for ref in listed.stdout.split():
+        if ref == current or ref in in_use or ref.endswith(":<none>"):
+            continue
+        if runner(["docker", "image", "rm", ref]).returncode == 0:
+            removed.append(ref)
+    return removed
 
 
 @dataclass(frozen=True)

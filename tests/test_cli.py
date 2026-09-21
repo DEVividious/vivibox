@@ -297,7 +297,10 @@ class FakeImage:
         self.built = built
         self.builds = 0
         self.opened = False
+        self.cleaned: list[str] = []
         monkeypatch.setattr(image, "image_ref", lambda: "vivibox-agent:abc")
+        # Never the real one: it would remove the agent images on the machine running the tests.
+        monkeypatch.setattr(image, "remove_old", lambda ref: self.cleaned.append(ref) or [])
         monkeypatch.setattr(image, "exists", lambda ref: self.built)
         monkeypatch.setattr(image, "build", self.build)
         checks = [(image.Check(name, "", ""), name not in failing, "") for name in ("node", "java")]
@@ -327,6 +330,7 @@ def test_the_view_opens_at_once_with_the_image_built(env, monkeypatch, capsys):
     assert fake.main([]) == 0
     assert fake.builds == 0 and fake.opened
     assert capsys.readouterr().out == ""
+    assert fake.cleaned == ["vivibox-agent:abc"], "older images go, the current one is kept"
 
 
 def test_the_view_does_not_open_on_an_image_that_fails_its_checks(env, monkeypatch, capsys):

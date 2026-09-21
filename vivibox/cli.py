@@ -100,6 +100,8 @@ def ensure_image() -> None:
     definition changed, which an update of vivibox can do."""
     ref = image.image_ref()
     if image.exists(ref):
+        # Also frees the images that the last pods on them held until now.
+        image.remove_old(ref)
         return
     print(f"Building the agent image {ref}; the first time takes a few minutes.", flush=True)
     image.build()

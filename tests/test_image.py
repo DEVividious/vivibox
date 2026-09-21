@@ -49,3 +49,44 @@ def test_built_image_passes_checks():
     failed = [(c.name, out) for c, ok, out in image.run_checks(ref) if not ok]
     assert not failed, failed
     assert os.getuid() != 0
+
+
+class FakeDocker:
+    def __init__(self, images, containers, refuse=()):
+        self.images, self.containers, self.refuse = images, containers, set(refuse)
+        self.removed = []
+
+    def __call__(self, cmd):
+        out, rc = "", 0
+        if cmd[:3] == ["docker", "image", "ls"]:
+            out = "\n".join(self.images) + "\n"
+        elif cmd[:3] == ["docker", "ps", "-a"]:
+            out = "\n".join(self.containers) + "\n"
+        elif cmd[:3] == ["docker", "image", "rm"]:
+            rc = 1 if cmd[3] in self.refuse else 0
+            if not rc:
+                self.removed.append(cmd[3])
+        return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+
+
+def test_older_agent_images_go_and_the_current_and_used_ones_stay():
+    docker = FakeDocker(
+        images=["vivibox-agent:new", "vivibox-agent:old1", "vivibox-agent:used", "vivibox-agent:old2",
+                "vivibox-agent:<none>"],
+        containers=["docker:29.8.1-dind", "vivibox-agent:used"],
+        refuse=["vivibox-agent:old2"],
+    )  # fmt: skip
+    removed = image.remove_old("vivibox-agent:new", runner=docker)
+    assert docker.removed == ["vivibox-agent:old1"], "not the current one, nor one a pod runs on"
+    assert removed == ["vivibox-agent:old1"], "one Docker refused is not reported as removed"
+
+
+def test_nothing_is_removed_when_docker_cannot_say_what_is_in_use():
+    class Down(FakeDocker):
+        def __call__(self, cmd):
+            if cmd[:3] == ["docker", "ps", "-a"]:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="daemon down")
+            return super().__call__(cmd)
+
+    docker = Down(images=["vivibox-agent:new", "vivibox-agent:old"], containers=[])
+    assert image.remove_old("vivibox-agent:new", runner=docker) == [] and docker.removed == []

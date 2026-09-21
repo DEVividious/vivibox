@@ -49,6 +49,13 @@ FORMAT = """When I say the plan is final, {deliver} It starts with a line
 sections of the plan above as markdown headings, with each acceptance criterion as a "- [ ]" line
 that can be checked. Keep the first criterion as it is. The comments in the plan are guidance for
 you; leave them out."""
+# Who reads the plan. Without it a planning chat asked what UI it was talking to.
+READER = """How the plan is used: I paste it into vivibox, a tool that runs coding agents. An agent then
+carries it out alone, in an isolated container with a copy of the repository: it writes the code and
+tests, commits, and ticks off the acceptance criteria. vivibox then builds and tests the commits on a
+fresh clone and checks every criterion is ticked, and I review the result. Nobody can ask you or me
+anything on the way, so the plan must say everything, and each criterion must be checkable."""
+
 # What a planning chat asked about in the first real run, and cannot know: vivibox decides these.
 DECIDED = """Already decided, not for the plan: the agent keeps red.md and its checklist of criteria in
 its own handoff folder, and the task's kind and mode are set. The gate builds and tests the project
@@ -108,6 +115,8 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
         "Plan a software task with me. You cannot see the repository; what an agent found in it is",
         "below. Ask me what you need, discuss the approach, and do not write code.",
         "",
+        READER,
+        "",
     ]
     if attached:
         web += ["I will attach these files the goal refers to:", *(f"- {p}" for p in attached), ""]
@@ -123,6 +132,8 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
         f"Plan a software task with me. The repository is {source}; read it, and do not change",
         "anything in it or anywhere else except the one file named below. Ask me what you need,",
         "discuss the approach, and do not write code.",
+        "",
+        READER,
         "",
         "# The plan to fill in",
         "",

@@ -21,7 +21,13 @@ from .task import Task, find_task, list_tasks
 
 def cmd_new(args: argparse.Namespace) -> int:
     description = sys.stdin.read() if args.goal == "-" else args.goal
-    task = actions.create(args.project, description, auto=args.auto, kind=args.kind)
+    models = {}
+    for pair in args.model:
+        role, sep, model = pair.partition("=")
+        if not sep or not model.strip():
+            raise ConfigError(f"--model {pair}: expected role=model, e.g. writer=deepseek/deepseek-v4-pro")
+        models[role.strip()] = model.strip()
+    task = actions.create(args.project, description, auto=args.auto, kind=args.kind, models=models)
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     print(f"Plan: {task.plan_path}")
     if args.draft:
@@ -437,6 +443,13 @@ def parser() -> argparse.ArgumentParser:
     )
     new.add_argument(
         "--auto", action="store_true", help="accept the agent's plan without stopping; you review the work"
+    )
+    new.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        metavar="ROLE=MODEL",
+        help="run a role on another model for this task, e.g. writer=deepseek/deepseek-v4-pro",
     )
     new.set_defaults(func=cmd_new)
 

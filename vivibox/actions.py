@@ -160,13 +160,13 @@ def role_of(task: Task | None, role_name: str, config: Config | None = None) -> 
     return replace(role, model=chosen) if chosen else role
 
 
-def models_offered(config: Config | None = None) -> list[str]:
+def models_offered(config: Config | None = None, harness: str = "") -> list[str]:
     """What a role can be put on without asking a provider: the models your own roles name. Asking
     opencode means a container per keypress, and nobody wants to scroll two hundred model ids."""
     seen: list[str] = []
     for role in (config or load_config()).roles.values():
         # A manual role's model is a label for a chat of yours, not something a harness can run.
-        if role.harness != manual.NAME and role.model not in seen:
+        if role.harness != manual.NAME and role.model not in seen and harness in ("", role.harness):
             seen.append(role.model)
     return seen
 
@@ -181,10 +181,11 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
     return opencode.OpenCode(pod)
 
 
-def provider_keys(config: Config) -> list[str]:
-    """Every metered provider a role needs. One role's key is not enough once roles can differ."""
+def provider_keys(config: Config, task: Task | None = None) -> list[str]:
+    """Every metered provider a role needs, on the models this task runs them on: a task moved to
+    another provider's model needs that provider's key, not the one config.toml's model uses."""
     found = []
-    for role in config.roles.values():
+    for role in (role_of(task, name, config) for name in config.roles):
         if role.harness == opencode.NAME and (p := opencode.provider_of(role.model)) not in found:
             found.append(p)
         elif role.harness == claudecode.NAME and "anthropic" not in found:
@@ -473,11 +474,25 @@ def used_numbers(project: Project) -> int:
 
 
 def create(
-    project_name: str, description: str, auto: bool = False, kind: str = "feature", cwd: Path | None = None
+    project_name: str,
+    description: str,
+    auto: bool = False,
+    kind: str = "feature",
+    cwd: Path | None = None,
+    models: dict[str, str] | None = None,
 ) -> Task:
     """description: one line, or a whole ticket; it all goes into the plan the agent starts from.
-    @path mentions in it are copied into the task (relative ones from cwd)."""
+    @path mentions in it are copied into the task (relative ones from cwd). models: a model for a
+    role, for this task only, as m would set it; the same as config.toml's is no choice at all."""
     config = load_config()
+    chosen = {}
+    for role, model in (models or {}).items():
+        if role not in config.roles:
+            raise ConfigError(f"no role '{role}' in config.toml; there are {', '.join(sorted(config.roles))}")
+        if config.roles[role].harness == manual.NAME:
+            raise ConfigError(f"the {role} is you, in your own chat; there is no model to choose for it")
+        if model.strip() and model.strip() != config.roles[role].model:
+            chosen[role] = model.strip()
     project = load_project(project_name)
     if not project.repo.is_dir():
         raise ConfigError(f"{project.repo} is gone; project {project_name} has nothing to work on")
@@ -499,6 +514,8 @@ def create(
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     task.set_base_commit(base)
+    for role, model in chosen.items():
+        task.set_model(role, model)
     if auto:
         task.set_auto_plan(True)
     # The risky files as they are in your repository are the starting approval.
@@ -513,7 +530,7 @@ def start(task_id: str, resume: bool = False) -> str:
     _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
-    secrets.prepare(task.id, provider_keys(config))
+    secrets.prepare(task.id, provider_keys(config, task))
     changed = opencode.prepare(task, model, project.verify)
     pod = task_pod(task.id)
     pod.up()

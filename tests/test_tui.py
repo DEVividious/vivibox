@@ -1,12 +1,13 @@
 import asyncio
 import subprocess
 
+import pytest
 from textual.widgets import Input, Label
 from textual.widgets._footer import FooterKey
 
 from vivibox import actions, gate, tui
 from vivibox.cli import main
-from vivibox.config import load_config, load_project
+from vivibox.config import ConfigError, load_config, load_project
 from vivibox.pod import Listener
 from vivibox.states import State
 from vivibox.task import find_task, now
@@ -752,3 +753,47 @@ def test_the_panel_shows_what_the_browser_prompt_sends_about_the_repository(env)
     (task.meta / "handoff" / manual.CONTEXT).write_text("Express 4, tests with vitest.\n")
     shown = detail(task, task.read_state(), 3, running=True, pod=tui.PodView())
     assert "Express 4, tests with vitest." in shown and "Health" in shown
+
+
+def test_a_new_task_can_run_a_role_on_another_model(env, monkeypatch):
+    """Chosen when the task is made, not only with m afterwards and from the next start: the
+    first turn is the one that most often decides which model a task deserves. A field left at
+    config.toml's model is no choice, so the task keeps following config.toml."""
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix login")
+        writer = app.screen.query_one("#model-writer", Input)
+        assert writer.value == "m", "config.toml's model, ready to keep or change"
+        writer.value = "deepseek/deepseek-v4-pro"
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    run(scenario)
+    assert find_task(load_config().tasks_dir, "demo-1").read_state().models == {
+        "writer": "deepseek/deepseek-v4-pro"
+    }
+
+
+def test_a_manual_planner_has_no_model_to_choose(env):
+    cfg = env / "config" / "config.toml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            '[roles.planner]\nharness = "opencode"\nmodel = "m"', '[roles.planner]\nharness = "manual"'
+        )
+    )
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert not app.screen.query("#model-planner") and app.screen.query("#model-writer")
+        assert "you, in your own chat" in " ".join(
+            str(label.render()) for label in app.screen.query(".role Label")
+        )
+
+    run(scenario)
+    with pytest.raises(ConfigError, match="own chat"):
+        actions.create("demo", "Fix login", models={"planner": "claude-opus-5"})

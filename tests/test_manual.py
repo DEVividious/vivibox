@@ -3,7 +3,7 @@ from importlib.resources import files
 import pytest
 
 from vivibox import actions, gate, manual, supervisor, ui
-from vivibox.config import load_project
+from vivibox.config import load_config, load_project
 from vivibox.opencode import HarnessError, Turn
 from vivibox.plan import PlanError, parse_plan
 from vivibox.states import State
@@ -229,4 +229,26 @@ def test_the_chat_is_asked_for_a_command_only_when_the_project_has_none(task, tm
     web, _ = manual.prompts(task, tmp_path, ["npm ci", "npm test"])
     assert "Verify:" not in web and "`npm ci && npm test`" in web and "red.md" in web
     assert "+++" not in web, "the header is vivibox's; the chat is not asked for it"
+    # It asked what UI it was talking to: the prompt says who reads the plan and that nobody can ask.
+    assert "carries it out alone" in web and "carries it out alone" in cli
     assert web.index("# What is in the repository") < web.index("# When the plan is final"), "asked last"
+
+
+def test_a_task_on_another_providers_model_gets_that_providers_key(env):
+    """The keys came from config.toml alone, so a task moved to another provider's model started
+    without the key it needed."""
+    cfg = env / "config" / "config.toml"
+    cfg.write_text(cfg.read_text().replace('model = "m"', 'model = "deepseek/deepseek-v4-flash"'))
+    t = actions.create("demo", "Fix login", models={"writer": "anthropic/claude-sonnet-5"})
+    assert actions.provider_keys(load_config(), t) == ["deepseek", "anthropic"]
+    assert actions.provider_keys(load_config()) == ["deepseek"]
+
+
+def test_the_command_line_chooses_a_model_too(env, capsys):
+    from vivibox.cli import main
+
+    assert main(["new", "demo", "Fix login", "--draft", "--model", "writer=deepseek/deepseek-v4-pro"]) == 0
+    tasks = load_config().tasks_dir
+    assert actions.load("demo-1")[0].read_state().models == {"writer": "deepseek/deepseek-v4-pro"}
+    assert main(["new", "demo", "Fix login", "--draft", "--model", "writer"]) == 1
+    assert "role=model" in capsys.readouterr().err and tasks.is_dir()

@@ -126,7 +126,7 @@ The footer shows only the keys that do something for the selected task:
 | `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
-| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket (the first line is its title), and optionally `--auto` or `--draft` |
+| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket (the first line is its title), optionally `--auto` or `--draft`, and the model each role runs on, config.toml's unless you type another |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
@@ -157,6 +157,7 @@ Everything the view does is also a command, for scripts or when you prefer a she
 vivibox new myproject "Add unit tests for OrderValidator"
 vivibox new myproject - < ticket.md   # a longer description; its first line is the title
 vivibox new myproject --kind bug "Expired cards pass validation, see @~/tickets/PAY-123.md"
+vivibox new myproject --model writer=deepseek/deepseek-v4-pro "Port the importer to streams"
 vivibox accept myproject-1            # the work lands in your checkout; commit it with the suggested message?
 vivibox accept myproject-1 --branch   # or put it on branch vivibox/myproject-1, e.g. for a pull request
 vivibox status                        # all tasks, the ones waiting for you first

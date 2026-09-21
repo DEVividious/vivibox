@@ -19,7 +19,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.suggester import Suggester
+from textual.suggester import Suggester, SuggestFromList
 from textual.widgets import (
     Button,
     Checkbox,
@@ -604,6 +604,19 @@ class NewTask(Dialog):
             yield suggestions
             yield Checkbox("Accept the agent's plan without stopping (--auto)", id="auto")
             yield Checkbox("Only create it, to write the plan myself (--draft)", id="draft")
+            # Each role on config.toml's model unless you type another; m changes it later.
+            config = load_config()
+            for name in sorted(config.roles):
+                role = config.roles[name]
+                with Horizontal(classes="role"):
+                    yield Label(name.capitalize(), classes="role-name")
+                    if role.harness == manual.NAME:
+                        yield Label(
+                            f"you, in your own chat ({role.model})" if role.model else "you, in your own chat"
+                        )
+                        continue
+                    offered = actions.models_offered(config, role.harness)
+                    yield Input(role.model, suggester=SuggestFromList(offered), id=f"model-{name}")
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
                 yield Button("Set up another project…", id="project-setup")
@@ -621,6 +634,9 @@ class NewTask(Dialog):
                 "kind": self.query_one("#kind", Select).value,
                 "auto": self.query_one("#auto", Checkbox).value,
                 "draft": self.query_one("#draft", Checkbox).value,
+                "models": {
+                    i.id.removeprefix("model-"): i.value for i in self.query(".role Input").results(Input)
+                },
             }
         )
 
@@ -704,12 +720,16 @@ class Vivibox(App):
     .dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
               padding: 1 2; }
     .dialog TextArea { height: 8; }
-    .dialog TextArea.description { height: 16; }
+    .dialog TextArea.description { height: 10; }
     #suggestions { max-height: 8; border: none; background: $boost; }
     #editors { max-height: 12; margin: 1 0; }
     .buttons { height: auto; margin-top: 1; }
     .buttons Button { margin-right: 2; }
     .files { color: $text-muted; margin: 1 0; }
+    .role { height: auto; }
+    .role > Label { padding: 1 0; }
+    .role > .role-name { width: 10; }
+    .role > Input { width: 1fr; }
     Confirm, Reply, NewTask, NewProject, CommitWork, ChooseEditor { align: center middle; }
     """
     BINDINGS = [
@@ -1294,6 +1314,8 @@ class Vivibox(App):
             rows = [
                 (name, actions.role_of(task, name, config).model, name in chosen)
                 for name in sorted(config.roles)
+                # A manual role is you in your own chat: there is no model of vivibox's to change.
+                if config.roles[name].harness != manual.NAME
             ]
         except (ConfigError, OSError) as e:
             self.fail(e)
@@ -1303,7 +1325,9 @@ class Vivibox(App):
             if not role:
                 return
             self.push_screen(
-                ChooseModel(role, config.roles[role].model, actions.models_offered(config)),
+                ChooseModel(
+                    role, config.roles[role].model, actions.models_offered(config, config.roles[role].harness)
+                ),
                 lambda model: self.set_model(task, role, model),
             )
 
@@ -1404,7 +1428,9 @@ class Vivibox(App):
     @work(thread=True)
     def create(self, form: dict) -> None:
         try:
-            task = actions.create(form["project"], form["goal"], auto=form["auto"], kind=form["kind"])
+            task = actions.create(
+                form["project"], form["goal"], auto=form["auto"], kind=form["kind"], models=form.get("models")
+            )
             self.call_from_thread(self.reload)
             if form["draft"]:
                 self.call_from_thread(

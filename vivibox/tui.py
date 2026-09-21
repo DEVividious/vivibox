@@ -803,11 +803,9 @@ class NewTask(Dialog):
         names = projects()
         chosen = self.preselect if self.preselect in names else names[0]
         with Vertical(classes="dialog"):
-            if len(names) == 1:
-                yield Label(f"New task in {chosen}")
-            else:
-                yield Label("Project")
-                yield Select([(n, n) for n in names], value=chosen, allow_blank=False, id="project")
+            # A list even with one project in it: the dialog looks the same however many you have.
+            yield Label("Project")
+            yield Select([(n, n) for n in names], value=chosen, allow_blank=False, id="project")
             yield Select(
                 [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
                  ("Other: refactoring, tests, upkeep", "other")],
@@ -843,7 +841,7 @@ class NewTask(Dialog):
             return
         self.dismiss(
             {
-                "project": self.query_one("#project", Select).value if len(projects()) > 1 else projects()[0],
+                "project": self.query_one("#project", Select).value,
                 "goal": self.query_one("#goal", TextArea).text.strip(),
                 "kind": self.query_one("#kind", Select).value,
                 "auto": self.query_one("#auto", Checkbox).value,
@@ -855,7 +853,7 @@ class NewTask(Dialog):
         )
 
     def on_mount(self) -> None:
-        self.for_project(self.query_one("#project", Select).value if len(projects()) > 1 else projects()[0])
+        self.for_project(str(self.query_one("#project", Select).value))
         self.query_one("#goal", TextArea).focus()
 
     @on(Select.Changed, "#project")

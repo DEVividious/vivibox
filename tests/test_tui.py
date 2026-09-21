@@ -1046,3 +1046,15 @@ def test_an_import_lists_what_it_brings_and_keeps_only_what_you_tick(env, tmp_pa
     run(scenario)
     assert keys.get_key("deepseek") == "sk-mine" and keys.get_key("acme") == "acme-secret"
     assert list(providers.load()) == ["acme"]
+
+
+def test_the_project_is_a_list_even_with_one_project(env):
+    """The same dialog with one project as with five."""
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        project = app.screen.query_one("#project", Select)
+        assert project.value == "demo" and projects() == ["demo"]
+
+    run(scenario)

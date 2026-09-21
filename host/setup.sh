@@ -20,9 +20,11 @@ HELPER=/usr/local/libexec/vivibox-netns
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
 PACKAGES=(tmux jq libnotify-bin curl)
-# Docker inside Sysbox containers uses its default 172.17.0.0/16; the host daemon must not.
-BIP=172.20.0.1/16
-POOL=172.25.0.0/16
+# Ranges for the host daemon's own networks: the bridge first, then the pool it cuts networks
+# from. The first two that nothing on this machine routes (a VPN, a LAN, a Docker network) are
+# taken; VIVIBOX_DOCKER_RANGES="<bridge> <pool>" chooses them instead. Not 172.17.0.0/16: Docker
+# inside Sysbox containers uses it.
+DOCKER_CANDIDATES=(172.20.0.0/16 172.25.0.0/16 172.{21..24}.0.0/16 172.{26..31}.0.0/16 10.{200..209}.0.0/16)
 # Where task networks are cut from; keep in step with DEFAULT_NETWORK_POOL in vivibox/config.py.
 TASK_POOL=198.51.100.0/24
 SYSBOX_VERSION=0.7.1
@@ -31,9 +33,67 @@ SYSBOX_SHA256=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5
 
 CHECK_ONLY=false
 [[ "${1:-}" == --check ]] && CHECK_ONLY=true
-[[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 
 die() { echo "setup: $*" >&2; exit 1; }
+
+ip2int() {
+  local IFS=. a b c d
+  read -r a b c d <<<"$1"
+  echo $(((a << 24) | (b << 16) | (c << 8) | d))
+}
+
+# Whether two ranges share an address; a bare address is a /32.
+overlaps() {
+  local a=$1 b=$2 bits mask
+  [[ $a == */* ]] || a=$a/32
+  [[ $b == */* ]] || b=$b/32
+  bits=$((${a#*/} < ${b#*/} ? ${a#*/} : ${b#*/}))
+  mask=$(((0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF))
+  (($(($(ip2int "${a%/*}") & mask)) == $(($(ip2int "${b%/*}") & mask))))
+}
+
+# The destinations this machine routes, the default route aside.
+routed() {
+  ip -4 route | awk '$1 != "default" {
+    for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) { print $i; break }
+  }'
+}
+
+is_free() {
+  local net=$1 route
+  shift
+  for route in "$@"; do
+    if overlaps "$net" "$route"; then
+      echo "$net overlaps the route to $route" >&2
+      return 1
+    fi
+  done
+}
+
+# Prints "<bridge> <pool>" for the host daemon, given the routed destinations.
+pick_docker_ranges() {
+  local chosen=() net
+  if [[ -n "${VIVIBOX_DOCKER_RANGES:-}" ]]; then
+    read -r -a chosen <<<"$VIVIBOX_DOCKER_RANGES"
+    ((${#chosen[@]} == 2)) || { echo 'VIVIBOX_DOCKER_RANGES must be "<bridge> <pool>"' >&2; return 1; }
+    for net in "${chosen[@]}"; do is_free "$net" "$@" || return 1; done
+  else
+    for net in "${DOCKER_CANDIDATES[@]}"; do
+      is_free "$net" "$@" 2>/dev/null && chosen+=("$net")
+      ((${#chosen[@]} == 2)) && break
+    done
+    ((${#chosen[@]} == 2)) || {
+      echo "no two free ranges among ${DOCKER_CANDIDATES[*]}; set VIVIBOX_DOCKER_RANGES" >&2
+      return 1
+    }
+  fi
+  echo "${chosen[*]}"
+}
+
+# Sourced by the tests for the functions above.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
+[[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 ok() { printf '  ok       %s\n' "$1"; }
 
 todo=() actions=()
@@ -67,17 +127,20 @@ docker_networks_set() {
   command -v jq >/dev/null || return 1
   jq -e '(.bip // "") != "" and ((."default-address-pools" // []) | length) > 0' "$DOCKER_CFG" >/dev/null 2>&1
 }
+mapfile -t ROUTES < <(routed)
 if docker_networks_set; then
   ok "Docker networks moved off 172.17.0.0/16 ($(jq -r .bip "$DOCKER_CFG"))"
 else
-  need "Docker networks: bip $BIP, address pool $POOL in $DOCKER_CFG (restarts Docker)" do_docker_networks
+  ranges=$(pick_docker_ranges "${ROUTES[@]}") || die "no range for Docker's networks"
+  read -r bridge POOL <<<"$ranges"
+  # The bridge is given as its gateway, the range's first address.
+  BIP="${bridge%.*}.1/${bridge#*/}"
+  need "Docker networks: bridge $bridge, address pool $POOL in $DOCKER_CFG (restarts Docker)" do_docker_networks
 fi
 
 # A task's address must not be one your machine already routes somewhere else (a VPN, a LAN).
-if ip -4 route | awk '{print $1}' | grep -q "^${TASK_POOL%.*.*}\."; then
-  ip -4 route | grep "^${TASK_POOL%.*.*}\." >&2
-  die "$TASK_POOL overlaps an existing route (VPN?); set network.pool in ~/.config/vivibox/config.toml"
-fi
+is_free "$TASK_POOL" "${ROUTES[@]}" \
+  || die "set network.pool in ~/.config/vivibox/config.toml to a range nothing routes"
 ok "task network pool $TASK_POOL is free"
 
 sysbox_registered() { docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw sysbox-runc; }
@@ -125,13 +188,7 @@ do_packages() {
 }
 
 do_docker_networks() {
-  local net current updated
-  for net in 172.20.0.0/16 "$POOL"; do
-    if ip -4 route | awk '{print $1}' | grep -q "^${net%.*.*}\."; then
-      ip -4 route | grep "^${net%.*.*}\." >&2
-      die "$net overlaps an existing route (VPN?); change BIP/POOL in this script"
-    fi
-  done
+  local current updated
   if sudo test -s "$DOCKER_CFG"; then
     sudo cp -a "$DOCKER_CFG" "$DOCKER_CFG.bak-$(date +%Y%m%d-%H%M%S)"
     current=$(sudo cat "$DOCKER_CFG")

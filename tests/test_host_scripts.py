@@ -75,3 +75,55 @@ def test_helper_rejects_a_bad_pool(pool):
 def test_helper_takes_a_pool_before_the_targets():
     result = helper("apply", "vivibox-shop-1-dind", "--pool", "198.51.100.0/24", "172.20.0.1:5432")
     assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"
+
+
+def setup_fn(call: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Calls one of setup.sh's functions: sourced, the script defines them and stops."""
+    script = f'source "{HOST / "setup.sh"}"; {call}'
+    run_env = {k: v for k, v in os.environ.items() if k != "VIVIBOX_DOCKER_RANGES"}
+    return subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env={**run_env, **(env or {})}
+    )
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "shared"),
+    [
+        ("172.20.0.0/16", "172.20.5.0/24", True),
+        ("172.20.5.0/24", "172.20.0.0/16", True),
+        ("172.16.0.0/12", "172.25.0.0/16", True),
+        ("172.20.0.0/16", "172.21.0.0/16", False),
+        ("172.20.0.0/16", "172.200.0.0/16", False),
+        ("10.0.0.0/8", "10.203.0.0/16", True),
+        ("172.20.0.0/16", "172.20.9.9", True),
+        ("198.51.100.0/24", "198.51.101.0/24", False),
+    ],
+)
+def test_ranges_overlap_by_their_addresses_not_their_prefix(a, b, shared):
+    assert (setup_fn(f"overlaps {a} {b}").returncode == 0) is shared
+
+
+def test_docker_ranges_are_the_usual_ones_when_nothing_routes_them():
+    result = setup_fn("pick_docker_ranges 192.168.1.0/24 198.51.100.0/24")
+    assert result.stdout.split() == ["172.20.0.0/16", "172.25.0.0/16"]
+
+
+def test_docker_ranges_step_around_a_vpn_and_docker_networks():
+    routes = "172.20.0.0/16 172.16.0.0/14 172.24.0.0/13 10.0.0.0/8"
+    result = setup_fn(f"pick_docker_ranges {routes}")
+    assert result.stdout.split() == ["172.21.0.0/16", "172.22.0.0/16"], result.stderr
+
+
+def test_docker_ranges_are_refused_when_none_is_free():
+    result = setup_fn("pick_docker_ranges 172.16.0.0/12 10.0.0.0/8")
+    assert result.returncode == 1 and "set VIVIBOX_DOCKER_RANGES" in result.stderr
+
+
+def test_docker_ranges_can_be_chosen_and_are_still_checked():
+    chosen = {"VIVIBOX_DOCKER_RANGES": "10.77.0.0/16 10.78.0.0/16"}
+    assert setup_fn("pick_docker_ranges 172.20.0.0/16", chosen).stdout.split() == [
+        "10.77.0.0/16",
+        "10.78.0.0/16",
+    ]
+    taken = setup_fn("pick_docker_ranges 10.0.0.0/8", chosen)
+    assert taken.returncode == 1 and "10.77.0.0/16 overlaps the route to 10.0.0.0/8" in taken.stderr

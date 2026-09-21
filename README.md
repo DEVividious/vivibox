@@ -55,8 +55,9 @@ uv tool install --editable .
 Run it again after updating this checkout when `pyproject.toml` changed, so the tool gets new
 dependencies.
 
-`host/setup.sh` moves Docker's default networks off `172.17.0.0/16` (Docker restarts), installs
-Sysbox, creates `/srv/vivibox` mounted `nosuid,nodev`, and allows your user to run only the pod
+`host/setup.sh` moves Docker's default networks off `172.17.0.0/16` (Docker restarts) to the first
+ranges nothing on your machine routes, a VPN included (`VIVIBOX_DOCKER_RANGES="<bridge> <pool>"`
+chooses them instead), installs Sysbox, creates `/srv/vivibox` mounted `nosuid,nodev`, and allows your user to run only the pod
 firewall helper through sudo.
 
 ## Configure

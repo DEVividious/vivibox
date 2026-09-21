@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
-from test_tui import at_plan_checkpoint, implementing, new_task
+from test_tui import at_plan_checkpoint, implementing, new_task, rows
 
 from vivibox import actions, manual, tui, ui
 from vivibox.states import State
@@ -103,7 +103,7 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
             await pilot.pause()
             app.reload()
             for task, _ in tasks:
-                app.table.move_cursor(row=[st.id for _, st in app.pairs].index(task.id))
+                app.table.move_cursor(row=rows(app).index(task.id))
                 await pilot.pause()
                 st = task.read_state()
                 shown = tui.detail(task, st, 3, app.agent_running(st.id), app.pod)

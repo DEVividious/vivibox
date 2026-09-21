@@ -6,13 +6,17 @@ Run `vivibox` with no arguments:
 vivibox
 ```
 
-The interactive view lists your tasks, the ones waiting for you first, and refreshes on its own.
-A task is listed under what you typed until the agent has planned it; from then on under the
-one-line summary of its plan.
-The footer shows only the keys that do something for the selected task:
+The interactive view lists your projects with their tasks under them, the ones waiting for you
+first, and refreshes on its own. A task is listed under what you typed until the agent has planned
+it; from then on under the one-line summary of its plan. Enter on a project folds its tasks away
+and unfolds them again; a folded project's row still says how many wait for you. A project's row
+also says what would keep its tasks from starting, such as a variable it passes that is not set in
+this shell. The footer shows only the keys that do something for the selected row, and `?` lists
+them all:
 
 | Key | Action |
 |---|---|
+| `?` | every key, and when it applies |
 | `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start |
@@ -30,6 +34,10 @@ The footer shows only the keys that do something for the selected task:
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start or resume it |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
+
+On a project's row: `n` starts a task in it, `e` edits its file (verify commands, `pass_env`, host
+services), `o` opens its repository in your IDE, and `x` forgets it once it has no tasks; the
+repository stays.
 
 **Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write `@~/tickets/PAY-123.md` (or `@/abs/path`, `@./relative`, a folder) in
 the description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder

@@ -396,6 +396,21 @@ def broken_projects() -> dict[str, str]:
     return broken
 
 
+def project_problem(name: str) -> str:
+    """Why no task of this project could start now, in a line; "" when they could. Shown on the
+    project itself, so it is known before a task is created, not from a message that is gone
+    in seconds after one fails to start."""
+    try:
+        project = load_project(name)
+    except ConfigError as e:
+        return str(e.args[0] if e.args else e)
+    if not project.repo.expanduser().is_dir():
+        return f"{project.repo} is gone"
+    if missing := [v for v in project.pass_env if v not in os.environ]:
+        return f"{', '.join(missing)} not set in this shell"
+    return ""
+
+
 def forget_project(name: str) -> Path:
     """Removes a project's file. The repository, wherever it is, is left alone."""
     path = config_dir() / "projects" / f"{name}.toml"

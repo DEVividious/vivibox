@@ -66,9 +66,15 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   move between fields. A dialog that cannot send what it was given stays open and says why.
 - Red is for a button that stops, deletes or forgets. Such a dialog with lasting loss opens with
   Cancel focused.
-- The footer shows only keys that do something for the selected row. A key named in any text is a
-  key the footer offers at that moment: ask the same function that enables the key (`watchable`,
-  `check_action`), never repeat its condition.
+- The footer shows only keys that do something for the selected row, decisions first, then the
+  row's actions, then `n`, `?` and `q`; everything else is under `?`. At 80 columns the whole
+  footer fits. A key named in any text is a key the footer offers at that moment: ask the same
+  function that enables the key (`watchable`, `check_action`), never repeat its condition.
+- The list is projects with their tasks under them. Enter on a project folds or unfolds it, and
+  that choice is kept. A folded project's status says how many tasks wait; projects with a task
+  waiting come first, and so do those tasks within a project; the cursor starts on the first task
+  waiting. A project's own problem (a variable it passes that is not set, a repository that is
+  gone) is its status, before any task is created.
 
 ## 4. Errors
 
@@ -116,4 +122,3 @@ Rules above that the code does not meet yet. Remove a line when it is fixed.
 
 - §2: the panel still says "gate" ("Gate failed at…"), and the command is `vivibox rm`.
 - §5: only a running verification shows how long it has lasted; implementing does not.
-- §7: at 80 columns the goal column is off the screen and the footer loses keys.

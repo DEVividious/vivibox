@@ -7,6 +7,7 @@ and asks. Slow steps (starting a pod, accepting work) run in threads so the view
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.markup import escape
+from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -23,7 +25,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
-    Checkbox,
     DataTable,
     DirectoryTree,
     Footer,
@@ -41,7 +42,7 @@ from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
 from . import actions, code, context, gate, ide, keys, manual, providers, supervisor, ui
-from .config import ConfigError, load_config, load_project
+from .config import ConfigError, config_dir, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .states import State
@@ -224,6 +225,53 @@ def last_gate(task: Task) -> str:
             outcome = "passed" if event["data"].get("passed") else "failed"
             return f"Gate {outcome} at {ui.clock(event['ts'])}."
     return "The gate has not run yet."
+
+
+PROJECT_ROW = "project:"
+# The keys that decide something, first in the footer and never off it, however narrow the terminal.
+DECISION_KEYS = ("a", "r", "p", "g")
+
+
+def view_state_path() -> Path:
+    return actions.history_path().with_name("view.json")
+
+
+def load_collapsed() -> set[str]:
+    """The projects you folded away; a choice of yours, so it outlives the view."""
+    try:
+        return set(json.loads(view_state_path().read_text()).get("collapsed", []))
+    except (OSError, ValueError):
+        return set()
+
+
+def save_collapsed(names: set[str]) -> None:
+    path = view_state_path()
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"collapsed": sorted(names)}) + "\n")
+
+
+def project_detail(name: str, tasks: int, problem: str) -> str:
+    """A project as the panel shows it: where it is, how it is built and tested, and what would
+    keep its tasks from starting."""
+    path = config_dir() / "projects" / f"{name}.toml"
+    lines = [f"### {name}", ""]
+    if problem:
+        lines += [f"**{problem}.**", ""]
+    lines += [
+        "**Next:** `n` new task · `e` edit the project's file · `o` open the repository in your IDE"
+        + (" · `x` forget the project" if not tasks else ""),
+        "",
+        f"`{path}`",
+        "",
+        f"```toml\n{read(path)}\n```",
+    ]
+    return "\n".join(lines)
+
+
+def edit_in_editor(path: Path) -> None:
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano") or "vi"
+    subprocess.run([*editor.split(), str(path)])
 
 
 def project_repos() -> list[Path]:
@@ -432,7 +480,6 @@ NO_PROJECTS = """No projects yet, so your agents are sitting idle.
 
 Press i to give them one: a repository you already have, or an empty folder to start a project
 from scratch. Then n hands them a task."""
-NO_TASKS = "No tasks yet. Press n to create one."
 
 
 class Fields(VerticalScroll, can_focus=False, inherit_bindings=False):
@@ -1494,8 +1541,13 @@ class NewTask(Dialog):
                 suggestions.display = False
                 yield DescriptionArea(suggestions, Path.cwd(), id="goal", classes="description")
                 yield suggestions
-                yield Checkbox("Accept the agent's plan without stopping (--auto)", id="auto")
-                yield Checkbox("Only create it, to write the plan myself (--draft)", id="draft")
+                # One question, not two boxes that could both be ticked.
+                yield Select(
+                    [("Stop for my review of the plan", "review"),
+                     ("Accept the agent's plan without stopping (--auto)", "auto"),
+                     ("Only create the task, to write the plan myself (--draft)", "draft")],
+                    value="review", allow_blank=False, id="plan",
+                )  # fmt: skip
                 # Each role on config.toml's choice unless you pick another; m changes it later.
                 config = load_config()
                 for name in sorted(config.roles):
@@ -1523,8 +1575,8 @@ class NewTask(Dialog):
                 "project": self.query_one("#project", Select).value,
                 "goal": self.query_one("#goal", TextArea).text.strip(),
                 "kind": self.query_one("#kind", Select).value,
-                "auto": self.query_one("#auto", Checkbox).value,
-                "draft": self.query_one("#draft", Checkbox).value,
+                "auto": self.query_one("#plan", Select).value == "auto",
+                "draft": self.query_one("#plan", Select).value == "draft",
                 "roles": {
                     s.id.removeprefix("role-"): s.value for s in self.query(".role Select").results(Select)
                 },
@@ -1609,6 +1661,42 @@ class NewTask(Dialog):
         self.dismiss({})
 
 
+HELP = """[b]Your decisions[/b], on the selected task
+  a  accept the plan, or the finished work         r  reply: reject, ask, or answer the agent
+  p  approve changes to risky files                g  verify a blocked task again, without the agent
+
+[b]The selected task[/b]
+  d, Enter  show or hide its details               e  edit the plan; with a manual planner, paste it
+  o  open the review copy in your IDE              v  run the app in its pod, or stop it
+  w  watch or talk to the agent (Ctrl-q leaves)    l  read the newest log in your pager
+  s  stop the task, or start it again              m  what each role runs on, for this task
+  c, C  copy the planning prompt for a chat, or for a CLI (manual planner)
+  x  delete the task; on a finished one, its line in the history
+
+[b]The selected project[/b] (Enter folds or unfolds its tasks)
+  n  new task in it       e  edit its file        o  open its repository in your IDE
+  x  forget it, once it has no tasks
+
+[b]Anywhere[/b]
+  i  set up a project     k  providers & MCP      h  show or hide finished tasks     q  quit
+"""
+
+
+class Help(ModalScreen):
+    """Every key, and when it does something. The footer shows only what applies right now."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog help"):
+            yield Static(HELP, id="help")
+            yield Label("Esc closes.", classes="files")
+
+    def key_escape(self) -> None:
+        self.dismiss()
+
+    def key_question_mark(self) -> None:
+        self.dismiss()
+
+
 class CommitWork(Dialog):
     """After accepting: the work is staged in your checkout; commit it now, or leave it for your IDE."""
 
@@ -1663,6 +1751,8 @@ class LiveFooter(Footer):
 
 class Vivibox(App):
     TITLE = "vivibox"
+    # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     DataTable { height: 1fr; }
     .catalog { height: 8; }
@@ -1674,6 +1764,7 @@ class Vivibox(App):
     #detail.hidden { display: none; }
     .dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
               padding: 1 2; }
+    .dialog.help { width: 104; }
     .dialog TextArea { height: 8; }
     .dialog TextArea.description { height: 10; }
     .dialog TextArea.criteria { height: 6; }
@@ -1691,35 +1782,42 @@ class Vivibox(App):
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
-    Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
+    Help, Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
     AddProvider, ChooseImport, ImportSource, ManageProviders, ManageItems, Browse, NameFolder {
         align: center middle;
     }
     """
+    # In the footer's order: your decisions first, then the selected row's actions, then what
+    # works anywhere. Keys that matter less often are under ? and off the footer, which is short.
     BINDINGS = [
-        Binding("d", "details", "Details"),
-        Binding("h", "toggle_done", "Show/hide done"),
         Binding("a", "accept", "Accept"),
         Binding("r", "reply", "Reply"),
-        Binding("e", "edit_plan", "Edit plan"),
-        Binding("c", "copy_prompt", "Copy prompt"),
-        Binding("C", "copy_prompt_cli", "Copy CLI prompt"),
-        Binding("o", "open_ide", "Open in IDE"),
         Binding("p", "approve_risky", "Approve risky"),
         Binding("g", "verify_again", "Verify again"),
-        Binding("l", "show_log", "Log"),
-        Binding("w", "watch", "Watch agent"),
-        Binding("m", "models", "Model"),
+        Binding("d", "details", "Details"),
+        Binding("e", "edit_plan", "Edit plan"),
+        Binding("c", "copy_prompt", "Prompt"),
+        Binding("C", "copy_prompt_cli", "CLI prompt"),
+        Binding("o", "open_ide", "IDE"),
         Binding("v", "demo", "Run app"),
         Binding("v", "demo_stop", "Stop app"),
-        # One key, two meanings: the footer shows the one that applies to the selected task.
+        Binding("w", "watch", "Watch"),
+        Binding("l", "show_log", "Log"),
+        # One key, two meanings: the footer shows the one that applies to the selected task. At a
+        # checkpoint the agent is not working, so stopping is only taking the pod down.
         Binding("s", "start_task", "Start"),
         Binding("s", "stop_task", "Stop"),
-        Binding("n", "new", "New task"),
-        Binding("i", "new_project", "New project"),
-        Binding("P", "new_project", "New project", show=False),
+        Binding("s", "stop_pod", "Stop pod"),
+        Binding("m", "models", "Model", show=False),
         Binding("x", "remove", "Delete"),
-        Binding("k", "providers", "Providers & MCP"),
+        Binding("e", "edit_project", "Edit project"),
+        Binding("o", "open_repo", "IDE"),
+        Binding("x", "forget_project", "Forget"),
+        Binding("n", "new", "New"),
+        Binding("i", "new_project", "New project", show=False),
+        Binding("h", "toggle_done", "Show/hide done", show=False),
+        Binding("k", "providers", "Providers & MCP", show=False),
+        Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -1733,10 +1831,14 @@ class Vivibox(App):
         self.done: list[dict] = []
         self.show_done = True
         self.has_done = False
+        self.collapsed = load_collapsed()
+        # Every project by name, with why its tasks could not start; refreshed with the tasks.
+        self.problems: dict[str, str] = {}
         # Tasks whose demo is being started or worked out, and what it is doing: shown as working.
         self.starting: dict[str, str] = {}
         self.frame = 0
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
+        self.columns: tuple[str, ...] = ()  # the ones the terminal's width has room for
         self.running: set[str] = set()
         self.views: dict[str, ui.TaskView] = {}
         # The vivibox this view runs, against what is on disk: they part at git pull.
@@ -1755,7 +1857,7 @@ class Vivibox(App):
         yield Static("", id="empty")  # in the table's place while there is nothing to list
         with VerticalScroll(id="detail", classes="hidden"):
             yield Markdown("", id="detail-text")
-        yield LiveFooter()
+        yield LiveFooter(compact=True)
 
     def on_mount(self) -> None:
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
@@ -1764,10 +1866,7 @@ class Vivibox(App):
         self.table = self.query_one(DataTable)
         self.panel = self.query_one("#detail")
         self.text = self.query_one("#detail-text", Markdown)
-        table = self.table
-        columns = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
-        keys = table.add_columns(*columns)
-        self.status_column, self.demo_column = keys[1], keys[2]
+        self.set_columns()
         self.reload()
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
@@ -1906,7 +2005,8 @@ class Vivibox(App):
             self.show_done,
             self.selected_id(),
             len(self.done),
-            bool(projects()),
+            tuple(sorted(self.problems.items())),
+            tuple(sorted(self.collapsed)),
             self.has_done,
             tuple(sorted(self.starting.items())),
         )
@@ -1924,6 +2024,7 @@ class Vivibox(App):
         self.pairs = pairs = sorted(pairs, key=lambda p: self.views[p[1].id].rank)
         live = {st.id for _, st in pairs}
         self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
+        self.problems = {name: actions.project_problem(name) for name in projects()}
         # A stat, not a read: whether h has any finished task to show.
         kept = actions.history_path()
         self.has_done = kept.is_file() and kept.stat().st_size > 0
@@ -1934,32 +2035,119 @@ class Vivibox(App):
         self.drawn = now
         self.fill_table(pairs, selected)
 
+    # The columns a terminal has room for, narrowest first: task, status and goal always.
+    COLUMNS = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
+    NARROW = ("TASK", "STATUS", "GOAL")
+    MEDIUM = ("TASK", "STATUS", "CRITERIA", "UPDATED", "GOAL")
+
+    def columns_for(self, width: int) -> tuple[str, ...]:
+        return self.NARROW if width < 100 else self.MEDIUM if width < 130 else self.COLUMNS
+
+    def set_columns(self) -> None:
+        wanted = self.columns_for(self.size.width)
+        if wanted == self.columns:
+            return
+        self.columns = wanted
+        table = self.table
+        table.clear(columns=True)
+        keys = table.add_columns(*wanted)
+        by_name = dict(zip(wanted, keys, strict=True))
+        self.status_column, self.demo_column = by_name["STATUS"], by_name.get("DEMO")
+        self.drawn = ()
+
+    def on_resize(self) -> None:
+        if self.table is not None:  # a resize before the view is built has nothing to lay out
+            self.set_columns()
+            self.reload()
+
+    def project_order(self, pairs: list) -> list[str]:
+        """Projects with a task waiting for you first, then by name. A project a task belongs to
+        is listed even when its file is gone, so the task is not orphaned off the screen."""
+        ranks: dict[str, int] = {}
+        for _, st in pairs:
+            ranks[st.project] = min(ranks.get(st.project, ui.FINISHED), self.views[st.id].rank)
+        names = set(self.problems) | set(ranks) | {e.get("project", "") for e in self.done}
+        return sorted(names, key=lambda n: (ranks.get(n, ui.FINISHED), n))
+
+    def project_summary(self, name: str, tasks: list, done: int) -> str:
+        """The project row's status: what keeps its tasks from starting, else what they are doing,
+        so a collapsed project still says what waits for you."""
+        waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in tasks)
+        working = sum(self.busy(st) for _, st in tasks)
+        parts = [f"[yellow]{waiting} waiting for you[/]"] * bool(waiting)
+        parts += [f"[cyan]{working} working[/]"] * bool(working)
+        parts += [f"[grey50]{len(tasks) - waiting - working} stopped[/]"] * bool(
+            len(tasks) - waiting - working
+        )
+        parts += [f"[green]{done} done[/]"] * bool(done)
+        return " · ".join(parts) or "[grey50]no tasks · n creates one[/]"
+
     def fill_table(self, pairs: list, selected: str | None) -> None:
         table = self.table
         table.clear()
-        for task, st in pairs:
-            spent = ui.cost(task)
-            table.add_row(
-                st.id, self.status(st), self.demo_cell(st.id), criteria(task),
-                str(spent) if spent else "-",
-                ui.ago(st.created), ui.ago(st.updated), st.goal, key=st.id,
+        planned: list[tuple[dict[str, str], str]] = []
+        for name in self.project_order(pairs):
+            own = [(t, st) for t, st in pairs if st.project == name]
+            done = [e for e in self.done if e.get("project", "") == name]
+            folded = name in self.collapsed
+            problem, summary = self.problems.get(name, ""), self.project_summary(name, own, len(done))
+            # The problem is the status; otherwise the tasks say what they do, and only a folded
+            # project needs its row to say what waits, in a few characters.
+            waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in own)
+            status = (
+                f"[red]{escape(problem)}[/]" if problem
+                else f"[yellow]{waiting} waiting for you[/]" if folded and waiting
+                else ""
             )  # fmt: skip
-        for entry in self.done:
-            table.add_row(
-                entry["id"], "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
-                "-", "-", ui.finished_cost(entry),
-                ui.ago(entry["created"]) if entry.get("created") else "-",
-                ui.ago(entry["finished"]), entry["title"], key=entry["id"],
-            )  # fmt: skip
-        ids = [st.id for _, st in pairs] + [e["id"] for e in self.done]
+            planned.append((
+                {"TASK": f"[b]{'▸' if folded else '▾'} {escape(name)}[/]", "STATUS": status, "GOAL": summary},
+                PROJECT_ROW + name,
+            ))  # fmt: skip
+            if folded:
+                continue
+            for task, st in own:
+                spent = ui.cost(task)
+                planned.append((
+                    {"TASK": f"  {st.id}", "STATUS": self.status(st), "DEMO": self.demo_cell(st.id),
+                     "CRITERIA": criteria(task), "COST PLAN + IMPL": str(spent) if spent else "-",
+                     "CREATED": ui.ago(st.created), "UPDATED": ui.ago(st.updated), "GOAL": st.goal},
+                    st.id,
+                ))  # fmt: skip
+            for entry in done:
+                planned.append((
+                    {"TASK": f"  {entry['id']}",
+                     "STATUS": "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
+                     "DEMO": "-", "CRITERIA": "-", "COST PLAN + IMPL": ui.finished_cost(entry),
+                     "CREATED": ui.ago(entry["created"]) if entry.get("created") else "-",
+                     "UPDATED": ui.ago(entry["finished"]), "GOAL": entry["title"]},
+                    entry["id"],
+                ))  # fmt: skip
+        # The goal gets what the other columns leave: a goal that runs off the screen is a goal
+        # nobody reads. Its width comes from the widest thing each other column shows.
+        taken = 0
+        for name in self.columns:
+            if name != "GOAL":
+                widest = max(
+                    (Text.from_markup(cells.get(name, "")).cell_len for cells, _ in planned), default=0
+                )
+                taken += max(widest, len(name)) + 2
+        goal_width = max(self.size.width - taken - 3, 16)
+        ids = [key for _, key in planned]
+        for cells, key in planned:
+            cells = {**cells, "GOAL": ui.shorten(cells.get("GOAL", ""), goal_width)}
+            table.add_row(*(cells.get(name, "") for name in self.columns), key=key)
         empty = self.query_one("#empty", Static)
         table.display, empty.display = bool(ids), not ids
         if not ids:
             # Nothing left to show details of: the view is back to how it starts.
             self.panel.add_class("hidden")
-        empty.update("" if ids else NO_TASKS if projects() else NO_PROJECTS)
+        empty.update("" if ids else NO_PROJECTS)
         if selected in ids:
             table.move_cursor(row=ids.index(selected))
+        elif ids:
+            # The first task waiting for you; a project row is a heading, not what you came for.
+            first = next((i for i, key in enumerate(ids) if not key.startswith(PROJECT_ROW)), 0)
+            table.move_cursor(row=first)
         self.waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in pairs)
         self.working = sum(self.busy(st) for _, st in pairs)
         self.set_sub_title()
@@ -2031,6 +2219,20 @@ class Vivibox(App):
         task_id = self.selected_id()
         return next(((t, st) for t, st in self.pairs if st.id == task_id), None)
 
+    def selected_project(self) -> str:
+        """The project row under the cursor, or the project of the task under it."""
+        key = self.selected_id() or ""
+        if key.startswith(PROJECT_ROW):
+            return key.removeprefix(PROJECT_ROW)
+        if pick := self.selected():
+            return pick[1].project
+        if entry := self.finished_entry(key):
+            return entry["project"]
+        return ""
+
+    def on_project_row(self) -> bool:
+        return (self.selected_id() or "").startswith(PROJECT_ROW)
+
     def agent_running(self, task_id: str) -> bool:
         return task_id in self.running
 
@@ -2042,8 +2244,12 @@ class Vivibox(App):
             text = detail(*pick, self.config.max_iterations, self.agent_running(pick[1].id), self.pod)
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
+        elif self.on_project_row():
+            name = self.selected_project()
+            own = sum(st.project == name for _, st in self.pairs)
+            text = project_detail(name, own, self.problems.get(name, ""))
         else:
-            text = NO_TASKS if projects() else NO_PROJECTS
+            text = NO_PROJECTS
         if text != self.shown:  # redrawing resets the scroll position
             self.shown = text
             self.text.update(text)
@@ -2062,7 +2268,12 @@ class Vivibox(App):
 
     @on(DataTable.RowSelected)
     def selected_row(self) -> None:
-        self.action_details()
+        if self.on_project_row():
+            self.collapsed ^= {self.selected_project()}
+            save_collapsed(self.collapsed)
+            self.reload()
+        else:
+            self.action_details()
 
     @on(DataTable.RowHighlighted)
     def highlighted(self) -> None:
@@ -2088,6 +2299,8 @@ class Vivibox(App):
             return
         self.pods = found
         for task_id in found:
+            if self.demo_column is None:
+                break
             with contextlib.suppress(Exception):  # the row may have gone while docker was thinking
                 self.table.update_cell(task_id, self.demo_column, self.demo_cell(task_id))
         self.show_detail()
@@ -2096,12 +2309,19 @@ class Vivibox(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
-                        "start_task", "stop_task", "remove", "demo", "demo_stop",
+                        "start_task", "stop_task", "stop_pod", "remove", "demo", "demo_stop",
                         "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
+        if action in ("edit_project", "open_repo", "forget_project"):
+            if not self.on_project_row():
+                return False
+            # A project with tasks is not forgotten from under them: delete those first.
+            return action != "forget_project" or not any(
+                st.project == self.selected_project() for _, st in self.pairs
+            )
         if action == "details":  # nothing to show details of; an open panel can still be closed
-            return bool(self.pairs or self.done) or (self.is_mounted and not self.panel.has_class("hidden"))
+            return bool(projects()) or (self.is_mounted and not self.panel.has_class("hidden"))
         if action == "toggle_done":
             return self.has_done
         if action not in task_actions:  # quit, and moving focus in dialogs
@@ -2132,7 +2352,8 @@ class Vivibox(App):
             # Not again while one of them is under way. A task that stopped on a failure still has
             # its supervisor, and what it needs is a start, not a stop followed by a start.
             "start_task": state is not State.DONE and not at_work and pick[1].id not in self.starting,
-            "stop_task": state is not State.DONE and at_work and pick[1].id not in self.starting,
+            "stop_task": at_work and state not in WAITING_ONLY and pick[1].id not in self.starting,
+            "stop_pod": at_work and state in WAITING_ONLY and pick[1].id not in self.starting,
             "remove": True,
             # Worth looking at once there is something to look at. Running it again while it
             # runs is a restart, which is what you want after the agent has changed something.
@@ -2235,9 +2456,8 @@ class Vivibox(App):
         # With a manual planner you edit your chat's answer, which is then brought in again: the
         # plan and the answer cannot drift apart, and the chat's next answer does not undo yours.
         path = actions.answer_path(task) if manual_plan else task.plan_path
-        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano") or "vi"
         with self.suspend():
-            subprocess.run([*editor.split(), str(path)])
+            edit_in_editor(path)
         if manual_plan and path.exists() and path.read_text().strip():
             self.bring_in_plan(task)
         self.reload()
@@ -2544,6 +2764,17 @@ class Vivibox(App):
             lambda yes: yes and self.stop(task.id),
         )
 
+    def action_stop_pod(self) -> None:
+        """At a checkpoint nothing runs but the pod; your decision starts it again by itself."""
+        task, _ = self.selected()
+        self.push_screen(
+            Confirm(f"Take the pod of {task.id} down? Your next decision starts it again.", "Stop pod"),
+            lambda yes: yes and self.stop(task.id),
+        )
+
+    def action_help(self) -> None:
+        self.push_screen(Help())
+
     @work(thread=True)
     def start(self, task_id: str, resume: bool = False) -> None:
         self.call_from_thread(self.busy_with, task_id, "starting…")
@@ -2565,10 +2796,47 @@ class Vivibox(App):
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.busy_with, task_id, "")
 
+    def project_file(self) -> Path:
+        return config_dir() / "projects" / f"{self.selected_project()}.toml"
+
+    def action_edit_project(self) -> None:
+        with self.suspend():
+            edit_in_editor(self.project_file())
+        self.drawn = ()  # verify, pass_env, the repository: any of it may have changed
+        self.reload()
+
+    def action_open_repo(self) -> None:
+        try:
+            project = load_project(self.selected_project())
+            actions.open_in_ide(self.config, project.repo, project)
+            self.notify(f"Opening {shown_path(project.repo)}")
+        except Exception as e:
+            self.fail(e)
+
+    def action_forget_project(self) -> None:
+        name = self.selected_project()
+        dialog = DeleteTask(
+            f"Forget the project {name}?",
+            self.problems.get(name, "") or "vivibox will no longer offer it for tasks.",
+            "its project file, with its verify commands and settings.",
+            "the repository, exactly as it is.",
+        )
+
+        def forget(yes: bool) -> None:
+            if yes:
+                try:
+                    actions.forget_project(name)
+                except ConfigError as e:
+                    self.fail(e)
+                self.reload()
+
+        self.push_screen(dialog, forget)
+
     def action_new(self, preselect: str = "") -> None:
         if not projects():
             self.notify("A task needs a project first; press i to add one.")
             return
+        preselect = preselect or self.selected_project()
 
         def create(form: dict) -> None:
             if form.get("project") == NEW_PROJECT:

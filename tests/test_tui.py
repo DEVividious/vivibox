@@ -147,8 +147,8 @@ def test_new_task_dialog_takes_a_long_description(env, monkeypatch):
         await pilot.pause()
         await pilot.press(*"Fix login", "enter", *"More context")
         await pilot.press("down")
-        assert app.screen.focused.id == "auto", "down on the last line moves on"
-        await pilot.press("up")
+        assert app.screen.focused.id == "plan", "down on the last line moves on"
+        await pilot.press("shift+tab")  # up would open the list; the arrows are the list's there
         assert app.screen.focused.id == "goal"
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
@@ -236,8 +236,7 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
 
     async def scenario(app, pilot):
         app.reload()
-        table = app.query_one("DataTable")
-        assert [str(table.get_cell_at((r, 0))) for r in range(table.row_count)] == ["demo-1", "demo-9"]
+        assert rows(app) == ["demo", "demo-1", "demo-9"]
         await pilot.press("down", "enter")
         assert "Reject expired cards" in app.shown and "$0.30 + $0.12" in app.shown
         assert app.check_action("remove", ()) and not app.check_action("accept", ())
@@ -246,9 +245,9 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
         assert isinstance(app.screen, tui.DeleteTask) and app.screen.focused.id == "no", "Cancel first"
         await pilot.press("left", "enter")  # Delete
         await pilot.pause()
-        assert table.row_count == 1 and actions.history() == []
+        assert rows(app) == ["demo", "demo-1"] and actions.history() == []
         await pilot.press("h")
-        assert table.row_count == 1, "hiding finished tasks leaves the live ones"
+        assert rows(app) == ["demo", "demo-1"], "hiding finished tasks leaves the live ones"
 
     run(scenario)
 
@@ -262,7 +261,7 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
 
     async def scenario(app, pilot):
-        await pilot.press("P")  # a project of its own, from anywhere in the view
+        await pilot.press("i")  # a project of its own, from anywhere in the view
         await pilot.pause()
         assert app.screen.where == tmp_path, "where you started vivibox, until you browse elsewhere"
         app.screen.query_one("#browse").press()
@@ -348,7 +347,8 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
         )
         app.reload()
         await pilot.pause()
-        assert app.check_action("new", ()) and "No tasks yet" in str(app.query_one("#empty").render())
+        assert app.check_action("new", ()) and app.table.display
+        assert "no tasks · n creates one" in cell(app, 0, "GOAL"), "the project row says"
 
     run(scenario)
 
@@ -1267,7 +1267,7 @@ def test_a_new_task_can_be_filled_in_on_a_short_terminal(env, height):
         app.available = AVAILABLE
         await pilot.press("n")
         await pilot.pause()
-        for wid in ("#project", "#goal", "#auto", "#role-planner", "#role-writer", "#create", "#cancel"):
+        for wid in ("#project", "#goal", "#plan", "#role-planner", "#role-writer", "#create", "#cancel"):
             widget = app.screen.query_one(wid)
             widget.focus()
             await pilot.pause()
@@ -1374,7 +1374,7 @@ def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch)
     run(scenario)
 
 
-def test_the_view_starts_over_when_the_last_row_goes(env, monkeypatch):
+def test_the_view_starts_over_when_the_last_project_goes(env, monkeypatch):
     task = new_task()
 
     async def scenario(app, pilot):
@@ -1384,6 +1384,10 @@ def test_the_view_starts_over_when_the_last_row_goes(env, monkeypatch):
         import shutil
 
         shutil.rmtree(task.root)
+        app.reload()
+        await pilot.pause()
+        assert not app.panel.has_class("hidden"), "the project is still there to look at"
+        (env / "config" / "projects" / "demo.toml").unlink()
         app.reload()
         await pilot.pause()
         assert app.panel.has_class("hidden") and not app.check_action("details", ())
@@ -1694,7 +1698,7 @@ def test_a_reply_starts_a_task_nobody_is_working_on_and_leaves_a_running_one(env
     async def scenario(app, pilot):
         app.reload()
         for task in (dead, alive):
-            app.table.move_cursor(row=[st.id for _, st in app.pairs].index(task.id))
+            app.table.move_cursor(row=rows(app).index(task.id))
             await pilot.pause()
             await pilot.press("r")
             await pilot.press(*"Again")
@@ -1734,10 +1738,10 @@ def test_g_verifies_a_blocked_task_again_and_is_offered_only_there(env):
 
     async def scenario(app, pilot):
         app.reload()
-        app.table.move_cursor(row=[st.id for _, st in app.pairs].index(other.id))
+        app.table.move_cursor(row=rows(app).index(other.id))
         await pilot.pause()
         assert not app.check_action("verify_again", ()), "nothing to verify at the plan"
-        app.table.move_cursor(row=[st.id for _, st in app.pairs].index(task.id))
+        app.table.move_cursor(row=rows(app).index(task.id))
         await pilot.pause()
         assert app.check_action("verify_again", ())
         await pilot.press("g")
@@ -1835,3 +1839,311 @@ def test_the_panel_says_when_a_supervisor_runs_older_code(env, monkeypatch):
     assert "older vivibox" not in detail(task, task.read_state(), 3, running=False), "nothing runs"
     monkeypatch.setattr(code, "signature", lambda: "v1")
     assert "older vivibox" not in detail(task, task.read_state(), 3, running=True)
+
+
+# --- project rows -------------------------------------------------------------------------------
+
+
+def rows(app) -> list[str]:
+    """The list's rows by key: a project's name, or a task's id."""
+    return [str(key.value).removeprefix(tui.PROJECT_ROW) for key in app.table.rows]
+
+
+def cell(app, row: int, column: str) -> str:
+    """A cell by the column's name: which columns there are depends on the terminal's width."""
+    names = [c.label.plain for c in app.table.columns.values()]
+    return str(app.table.get_cell_at((row, names.index(column))))
+
+
+def second_project(env, name="shop"):
+    from conftest import make_repo
+
+    repo = make_repo(env / name)
+    (env / "config" / "projects" / f"{name}.toml").write_text(f'repo = "{repo}"\nverify = ["true"]\n')
+    return repo
+
+
+def test_tasks_are_listed_under_their_project_and_the_first_waiting_one_is_selected(env, monkeypatch):
+    from ux import screen_text
+
+    second_project(env)
+    working = implementing("Working on it")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id == working.id)
+    waiting = new_task("Waiting for you")
+    at_plan_checkpoint(waiting)
+    assert main(["new", "shop", "Shop task", "--draft"]) == 0
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo", waiting.id, working.id, "shop", "shop-1"], "projects, tasks under them"
+        assert app.selected_id() == waiting.id, "the cursor starts on the first task waiting for you"
+        shown = screen_text(app)
+        assert "1 waiting for you · 1 working" in shown, "the project row sums up its tasks"
+        assert "not started" in shown
+
+    run(scenario)
+
+
+def test_a_project_with_no_tasks_is_a_row_that_says_so(env):
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo"] and app.table.display
+        assert "no tasks · n creates one" in cell(app, 0, "GOAL")
+        assert app.check_action("new", ()) and app.check_action("details", ())
+        await pilot.press("d")
+        await pilot.pause()
+        assert "demo" in app.shown and "verify" in app.shown, "the project's file, in the panel"
+
+    run(scenario)
+
+
+def test_a_collapsed_project_keeps_saying_what_waits_and_stays_collapsed(env):
+    waiting = new_task("Waiting")
+    at_plan_checkpoint(waiting)
+    new_task("Other")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert rows(app) == ["demo"], "collapsed: its tasks are folded away"
+        assert "2 waiting for you" in cell(app, 0, "STATUS"), "but not out of sight"
+        assert app.sub_title.startswith("2 waiting for you")
+        app.reload()
+        assert rows(app) == ["demo"], "a refresh does not unfold it"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert rows(app) == ["demo", waiting.id, "demo-2"]
+
+    run(scenario)
+    assert tui.load_collapsed() == set()
+
+
+def test_collapsing_is_remembered_across_views(env):
+    new_task("Task")
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.pause()
+
+    run(scenario)
+
+    async def again(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo"]
+
+    run(again)
+
+
+def test_a_project_row_offers_project_actions_and_a_task_row_task_actions(env, monkeypatch):
+    task = new_task("Task")
+    at_plan_checkpoint(task)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.selected_id() == task.id
+        assert app.check_action("accept", ()) and app.check_action("edit_plan", ())
+        assert not app.check_action("edit_project", ()) and not app.check_action("forget_project", ())
+        app.table.move_cursor(row=0)
+        await pilot.pause()
+        assert app.selected_project() == "demo"
+        assert not app.check_action("accept", ()) and not app.check_action("edit_plan", ())
+        assert app.check_action("edit_project", ()) and app.check_action("new", ())
+        assert not app.check_action("forget_project", ()), "it has a task; delete that first"
+        # The editor takes the terminal over (App.suspend), which Pilot cannot do; the file is checked.
+        assert app.project_file() == env / "config" / "projects" / "demo.toml"
+
+    run(scenario)
+
+
+def test_n_on_a_project_row_starts_a_task_in_that_project(env):
+    second_project(env)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=1)
+        await pilot.pause()
+        assert app.selected_project() == "shop"
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.NewTask)
+        assert app.screen.query_one("#project", Select).value == "shop"
+
+    run(scenario)
+
+
+def test_a_project_without_tasks_can_be_forgotten_from_its_row(env):
+    second_project(env)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=1)
+        await pilot.pause()
+        assert app.check_action("forget_project", ())
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.DeleteTask)
+        await pilot.press("left", "enter")  # Cancel has the focus; left is Forget
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert projects() == ["demo"]
+        assert (env / "shop").exists(), "the repository stays"
+
+    run(scenario)
+
+
+def test_a_project_row_says_when_a_variable_it_passes_is_missing(env, monkeypatch):
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text() + 'pass_env = ["REPO_TOKEN"]\n')
+    monkeypatch.delenv("REPO_TOKEN", raising=False)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert "REPO_TOKEN not set in this shell" in cell(app, 0, "STATUS")
+        monkeypatch.setenv("REPO_TOKEN", "x")
+        app.reload()
+        assert "not set" not in cell(app, 0, "STATUS")
+
+    run(scenario)
+
+
+def test_finished_tasks_sit_under_their_project(env):
+    task = new_task("Task")
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    actions.history_path().write_text(
+        '{"id": "demo-0", "project": "demo", "title": "Old one", "cost": 0.1, "commit": "abc", "branch": "",'
+        ' "conflicts": [], "finished": "' + now() + '"}\n'
+    )
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id, "demo-0"]
+        await pilot.press("h")
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id]
+
+    run(scenario)
+
+
+# --- the footer, help, and a narrow terminal ---------------------------------------------------
+
+
+def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
+    task = blocked_on_verification()
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        shown = [str(key.key_display) for key in app.query(FooterKey)]
+        assert shown[:2] == ["r", "g"], "your decisions come first"
+        for hidden in ("i", "h", "k"):
+            assert hidden not in shown, f"{hidden} is under ? Help"
+        assert shown.index("?") == shown.index("q") - 1
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Help)
+        text = str(app.screen.query_one("#help").render())
+        for key, what in (
+            ("i", "set up a project"),
+            ("k", "Providers & MCP"),
+            ("h", "finished"),
+            ("g", "verif"),
+        ):
+            assert key in text and what.lower() in text.lower()
+
+    run(scenario)
+
+
+def test_the_project_summary_says_what_waits_but_does_not_widen_status(env):
+    waiting = new_task("Waiting")
+    at_plan_checkpoint(waiting)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert "1 waiting for you" in cell(app, 0, "GOAL") and cell(app, 0, "STATUS").strip() == ""
+        app.table.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "1 waiting for you" in cell(app, 0, "STATUS"), "collapsed: the row says it"
+
+    run(scenario)
+
+
+def test_a_narrow_terminal_shows_task_status_and_goal(env):
+    task = new_task("Reject expired cards at checkout, and log every rejection with its reason")
+
+    async def scenario(app, pilot):
+        from ux import screen_text
+
+        app.reload()
+        await pilot.pause()
+        shown = screen_text(app)
+        assert [c.label.plain for c in app.table.columns.values()] == ["TASK", "STATUS", "GOAL"]
+        assert "Reject expired cards" in shown and "not started" in shown
+        assert "…" in cell(app, 1, "GOAL"), "the goal is cut to fit, not scrolled off"
+        for key in ("a", "r", "p", "g"):
+            assert key in tui.DECISION_KEYS
+        assert task.id in shown
+
+    run(scenario, size=(80, 24))
+
+
+def test_a_wide_terminal_has_every_column(env):
+    new_task()
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert len(app.table.columns) == 8
+
+    run(scenario, size=(140, 40))
+
+
+def test_the_new_task_dialog_asks_one_question_about_the_plan(env, monkeypatch):
+    created = []
+    monkeypatch.setattr(actions, "create", lambda project, goal, **kw: created.append(kw) or new_task(goal))
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        plan = app.screen.query_one("#plan", Select)
+        assert plan.value == "review", "stopping for your review is the default"
+        assert not app.screen.query("#auto") and not app.screen.query("#draft"), "one question, not two boxes"
+        plan.value = "auto"
+        app.screen.query_one("#goal", TextArea).text = "Goal"
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert created and created[0]["auto"] is True
+
+    run(scenario)
+
+
+def test_stopping_at_a_checkpoint_is_called_stopping_the_pod(env, monkeypatch):
+    task = new_task()
+    at_plan_checkpoint(task)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.check_action("stop_pod", ()) and not app.check_action("stop_task", ())
+        assert "stop_pod" in keys(app) and "stop_task" not in keys(app)
+
+    run(scenario)

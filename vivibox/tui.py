@@ -237,6 +237,9 @@ def detail(
         f" · planning + implementation {ui.cost(task)}*",
         "",
     ]
+    said = [e for e in task.events() if e["type"] == "serena"]
+    if said and (said[-1]["data"].get("on") or providers.serena_mode() == "auto"):
+        head += [f"*Serena: {said[-1]['data']['why']}*", ""]
     if shown := (pod if pod is not None else pod_view(st.id)).lines():
         head += [*shown, ""]
     handoff = task.meta / "handoff"
@@ -702,12 +705,14 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
 STATUS = {
     "replaces": "  [yellow]differs from yours: tick to overwrite[/]",
     "same": "  [dim]same as yours[/]",
-    "builtin": "  [dim]vivibox has its own: turn it on in Manage[/]",
+    "builtin": "  comes with vivibox; set its mode in Manage",
 }
 
 
 def import_label(f: providers.Found) -> str:
     """One line per provider or server, short enough that what it says of yours stays in view."""
+    if f.status == "builtin":  # greyed whole: there is nothing here to choose
+        return f"[dim]{escape(f.name)}  {escape(ui.shorten(f.what, 40))}{STATUS['builtin']}[/]"
     what, key = escape(ui.shorten(f.what, 48)), escape(ui.shorten(f.key, 30))
     return f"{escape(f.name)}  {what}, key {key}{STATUS.get(f.status, '')}"
 
@@ -912,10 +917,19 @@ def provider_rows() -> list[tuple[str, str, str, bool]]:
         where = (
             entry.get("url", "") if entry.get("type") == "remote" else " ".join(entry.get("command", [])[:1])
         )
-        own = " (comes with vivibox)" if name in providers.BUILTIN_MCP else ""
-        said = f"MCP server, {entry.get('type', 'local')} {where}{own}"
+        if name == providers.SERENA:
+            said = f"MCP server, comes with vivibox, {SERENA_MODE_SAID[providers.serena_mode()]}"
+        else:
+            said = f"MCP server, {entry.get('type', 'local')} {where}"
         rows.append((providers.MCP, name, said, providers.enabled(providers.MCP, name)))
     return rows
+
+
+SERENA_MODE_SAID = {
+    "auto": f"auto: on for a project with {providers.SERENA_MIN_FILES}+ source files",
+    "on": "on for every task",
+    "off": "off",
+}
 
 
 def row_label(name: str, said: str, on: bool) -> str:
@@ -976,12 +990,21 @@ class ManageItems(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label("Tick what is on; Remove takes the highlighted one away with its secrets.")
-            self.rows = provider_rows()
+            yield Label("A change reaches a task the next time it starts.", classes="files")
+            self.rows = [r for r in provider_rows() if r[1] != providers.SERENA]
             yield SelectionList[int](
                 *(Selection(row_label(n, said, True), i, on) for i, (_, n, said, on) in enumerate(self.rows)),
                 id="items",
                 classes="catalog",
             )
+            with Horizontal(classes="role"):
+                yield Label("Serena", classes="role-name")
+                yield Select(
+                    [(said, mode) for mode, said in SERENA_MODE_SAID.items()],
+                    value=providers.serena_mode(),
+                    allow_blank=False,
+                    id="serena-mode",
+                )
             with Horizontal(classes="buttons"):
                 yield Button("Save", variant="primary", id="save")
                 yield Button("Remove", variant="error", id="remove")
@@ -1000,15 +1023,16 @@ class ManageItems(Dialog):
                 if (i in ticked) != on:
                     providers.set_enabled(kind, name, i in ticked)
                     changed.append(name)
+            mode = str(self.query_one("#serena-mode", Select).value)
+            if mode != providers.serena_mode():
+                providers.set_serena_mode(mode)
+                changed.append(providers.SERENA)
             self.dismiss(changed)
         elif event.button.id == "remove":
             at = items.highlighted
             if at is None or at >= len(self.rows):
                 return
             kind, name, _, _ = self.rows[at]
-            if name in providers.BUILTIN_MCP:
-                self.notify(f"{name} comes with vivibox; untick it to turn it off.", severity="warning")
-                return
             what = "MCP server" if kind == providers.MCP else "provider"
 
             def answered(yes: bool) -> None:

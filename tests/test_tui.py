@@ -1124,24 +1124,21 @@ def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ManageProviders)
-        assert [(r[1], r[3]) for r in screen.rows] == [
-            ("deepseek", True),
-            ("openai", True),
-            ("serena", False),
-        ]
+        assert [(r[1], r[3]) for r in screen.rows] == [("deepseek", True), ("openai", True), ("serena", True)]
+        assert "auto: on for a project with 100+ source files" in screen.rows[2][2]
         screen.query_one("#manage").press()
         await pilot.pause()
         manage = app.screen
         assert isinstance(manage, tui.ManageItems)
-        items = manage.query_one("#items", SelectionList)
-        items.deselect(1)  # openai off
-        items.select(2)  # vivibox's Serena on
+        assert [r[1] for r in manage.rows] == ["deepseek", "openai"], "Serena has its mode, not a tick"
+        manage.query_one("#items", SelectionList).deselect(1)  # openai off
+        manage.query_one("#serena-mode", Select).value = "off"
         manage.query_one("#save").press()
         await pilot.pause()
         assert [(r[1], r[3]) for r in app.screen.rows] == [
             ("deepseek", True),
             ("openai", False),
-            ("serena", True),
+            ("serena", False),
         ]
         app.screen.query_one("#manage").press()
         await pilot.pause()
@@ -1153,7 +1150,18 @@ def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env
 
     run(scenario)
     assert "deepseek" not in keys.list_keys() and keys.get_key("openai") == "sk-other"
-    assert not providers.enabled(providers.PROVIDER, "openai") and providers.enabled(providers.MCP, "serena")
+    assert not providers.enabled(providers.PROVIDER, "openai") and providers.serena_mode() == "off"
+
+
+def test_the_panel_says_whether_the_task_got_serena_and_why(env):
+    from vivibox import opencode
+
+    task = new_task()
+    opencode.prepare(task, "deepseek/deepseek-v4-flash", ["true"])
+    shown = detail(task, task.read_state(), 3, running=False, pod=tui.PodView())
+    assert "*Serena: off, 0 source files (fewer than 100)*" in shown
+    opencode.prepare(task, "deepseek/deepseek-v4-flash", ["true"])
+    assert sum(e["type"] == "serena" for e in task.events()) == 1, "said once, not at every start"
 
 
 def test_the_view_says_your_opencode_configuration_can_be_brought_over(env, monkeypatch):
@@ -1334,3 +1342,13 @@ def test_deleting_a_task_says_what_goes_and_what_stays_and_cancel_comes_first(en
 
     run(scenario)
     assert not task.root.exists() and actions.history()[0]["deleted"] == "plan"
+
+
+def test_an_imported_serena_is_greyed_and_says_it_comes_with_vivibox(env, tmp_path):
+    from vivibox import providers
+
+    path = tmp_path / "opencode.json"
+    path.write_text('{"mcp": {"serena": {"type": "local", "command": ["serena", "start-mcp-server"]}}}')
+    (found,) = providers.read_opencode(path, env={}).found
+    label = tui.import_label(found)
+    assert label.startswith("[dim]") and "comes with vivibox; set its mode in Manage" in label

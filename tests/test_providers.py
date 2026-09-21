@@ -223,13 +223,42 @@ def test_a_fresh_download_is_offered_first(env, tmp_path):
     assert found == [(home / "Downloads" / "opencode (1).json", 2)]
 
 
-def test_vivibox_own_serena_is_off_until_turned_on_and_runs_on_the_task_repository(env):
-    assert "serena" not in providers.task_mcp()
-    providers.set_enabled(providers.MCP, "serena", True)
-    serena = opencode.config("deepseek/deepseek-v4-flash")["mcp"]["serena"]
+def files_in(repo, n, suffix=".py", where=""):
+    folder = repo / where if where else repo
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        (folder / f"m{i}{suffix}").write_text("x = 1\n")
+    return repo
+
+
+def test_serena_on_auto_comes_to_a_big_repository_and_not_to_a_small_one(env, tmp_path):
+    assert providers.serena_mode() == "auto"
+    small = files_in(tmp_path / "small", 20)
+    big = files_in(tmp_path / "big", providers.SERENA_MIN_FILES)
+    assert providers.serena_for(small) == (False, "off, 20 source files (fewer than 100)")
+    assert providers.serena_for(big) == (True, "on, 100+ source files")
+    serena = opencode.config("deepseek/deepseek-v4-flash", repo=big)["mcp"]["serena"]
     assert serena["command"][:2] == ["serena", "start-mcp-server"] and "/task/repo" in serena["command"]
-    providers.set_enabled(providers.MCP, "serena", False)
-    assert "mcp" not in opencode.config("deepseek/deepseek-v4-flash")
+    assert "mcp" not in opencode.config("deepseek/deepseek-v4-flash", repo=small)
+
+
+def test_what_a_build_or_a_package_manager_made_is_not_counted(env, tmp_path):
+    repo = files_in(tmp_path / "app", 5, ".ts")
+    files_in(repo, 300, ".js", where="node_modules/lib")
+    files_in(repo, 300, ".js", where="dist")
+    (repo / "README.md").write_text("docs are not source\n")
+    assert providers.source_files(repo) == 5
+
+
+def test_serena_on_or_off_is_what_you_set_whatever_the_size(env, tmp_path):
+    small = files_in(tmp_path / "small", 3)
+    providers.set_serena_mode("on")
+    assert providers.serena_for(small) == (True, "on, as you set it")
+    providers.set_serena_mode("off")
+    assert providers.serena_for(files_in(tmp_path / "big", 500)) == (False, "off, as you set it")
+    assert not providers.enabled(providers.MCP, "serena")
+    with pytest.raises(ConfigError):
+        providers.set_serena_mode("sometimes")
 
 
 def test_a_server_turned_off_is_kept_but_not_given_to_tasks(servers):

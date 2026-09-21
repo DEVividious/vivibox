@@ -70,10 +70,14 @@ import your opencode.json…*:
 Every task gets the MCP servers that are on. A remote one is reached from the task's pod; a local
 one runs its command inside the pod, so it must be something the pod has (`uvx` and `npx` are at
 hand; a program installed only on your machine is not). vivibox brings Serena itself, installed in
-the agent image and set up on the task's repository; it is off until you turn it on.
+the agent image and set up on the task's repository. Its mode is auto unless you set it on or off:
+a task gets it when its repository has 100 or more source files in a language Serena reads, where
+finding symbols beats reading files; below that it would only add a language server's start and its
+tools' descriptions to every turn. The task's panel says whether it got Serena, and why.
 
 `k` in the view, *Providers & MCP*, lists what you have. From there: *Add provider…*, *Import
-opencode.json…*, and *Manage…*, where you tick what is on and remove what you no longer want. A
+opencode.json…*, and *Manage…*, where you tick what is on, set Serena's mode, and remove what you
+no longer want. A
 provider turned off offers no models; an MCP server turned off is given to no task; both keep their
 keys for when you turn them on again. The first model you pick for a role becomes its default in
 config.toml. The same, from a shell:

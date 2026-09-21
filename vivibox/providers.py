@@ -97,30 +97,84 @@ def _state() -> dict:
     return _load(state_path())
 
 
+SERENA = "serena"
+# auto: on for a repository big enough that finding symbols beats reading files; on; off.
+SERENA_MODES = ("auto", "on", "off")
+# Serena helps where grep and reading files get slow and costly; below this it only adds a language
+# server's start and its tools' descriptions to every turn. A judgement, not a measurement.
+SERENA_MIN_FILES = 100
+# Files in the languages Serena reads through a language server.
+SERENA_SOURCES = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".java", ".kt", ".go", ".rs", ".cs", ".rb", ".php",
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".swift", ".scala", ".dart", ".ex", ".exs", ".lua", ".vue",
+}  # fmt: skip
+# Folders of what a build or a package manager made, not what anyone wrote.
+NOT_SOURCES = {".git", "node_modules", "dist", "build", "target", "vendor", ".venv", "venv", "out",
+               "__pycache__", ".next", ".gradle", ".idea", "coverage", ".serena"}  # fmt: skip
+
+
 def enabled(kind: str, name: str) -> bool:
-    """Yours are on until you turn them off; vivibox's own MCP servers are off until you turn them on."""
-    state = _state()
-    if kind == MCP and name in BUILTIN_MCP:
-        return name in state.get("builtin_on", [])
-    return name not in state.get("off", {}).get(kind, [])
+    """Yours are on until you turn them off; vivibox's Serena is on unless you set it to off."""
+    if kind == MCP and name == SERENA:
+        return serena_mode() != "off"
+    return name not in _state().get("off", {}).get(kind, [])
 
 
 def set_enabled(kind: str, name: str, on: bool) -> None:
+    if kind == MCP and name == SERENA:
+        set_serena_mode("auto" if on else "off")
+        return
     state = _state()
-    if kind == MCP and name in BUILTIN_MCP:
-        names = set(state.get("builtin_on", []))
-        state["builtin_on"] = sorted(names | {name} if on else names - {name})
-    else:
-        off = state.setdefault("off", {})
-        names = set(off.get(kind, []))
-        off[kind] = sorted(names - {name} if on else names | {name})
+    off = state.setdefault("off", {})
+    names = set(off.get(kind, []))
+    off[kind] = sorted(names - {name} if on else names | {name})
     _save(state_path(), state)
 
 
-def task_mcp() -> dict[str, dict]:
-    """The MCP servers a task gets: yours that are on, and vivibox's own you turned on."""
+def serena_mode() -> str:
+    mode = _state().get("serena", "auto")
+    return mode if mode in SERENA_MODES else "auto"
+
+
+def set_serena_mode(mode: str) -> None:
+    if mode not in SERENA_MODES:
+        raise ConfigError(f"Serena's mode is one of {', '.join(SERENA_MODES)}")
+    state = _state()
+    state["serena"] = mode
+    _save(state_path(), state)
+
+
+def source_files(repo: Path, enough: int = SERENA_MIN_FILES) -> int:
+    """Source files Serena could read in a repository, counted up to enough: a walk of the files,
+    no git, as nothing runs git in a task's clone on your machine."""
+    count = 0
+    for _, dirs, names in os.walk(repo):
+        dirs[:] = [d for d in dirs if d not in NOT_SOURCES]
+        count += sum(Path(n).suffix in SERENA_SOURCES for n in names)
+        if count >= enough:
+            return count
+    return count
+
+
+def serena_for(repo: Path | None) -> tuple[bool, str]:
+    """Whether a task gets Serena, and why, in a few words for its panel."""
+    mode = serena_mode()
+    if mode != "auto":
+        return mode == "on", f"{mode}, as you set it"
+    if repo is None or not repo.is_dir():
+        return False, "auto, no repository to look at"
+    n = source_files(repo)
+    if n >= SERENA_MIN_FILES:
+        return True, f"on, {n}+ source files"
+    return False, f"off, {n} source files (fewer than {SERENA_MIN_FILES})"
+
+
+def task_mcp(repo: Path | None = None) -> dict[str, dict]:
+    """The MCP servers a task gets: yours that are on, and Serena when its mode says so for this
+    task's repository."""
     found = {name: entry for name, entry in load_mcp().items() if enabled(MCP, name)}
-    found |= {name: copy.deepcopy(entry) for name, entry in BUILTIN_MCP.items() if enabled(MCP, name)}
+    if serena_for(repo)[0]:
+        found[SERENA] = copy.deepcopy(BUILTIN_MCP[SERENA])
     return found
 
 

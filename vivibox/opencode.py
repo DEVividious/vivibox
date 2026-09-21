@@ -12,6 +12,7 @@ import json
 import time
 from dataclasses import dataclass
 from importlib.resources import files
+from pathlib import Path
 
 from . import providers, repo
 from .pod import Pod
@@ -47,7 +48,7 @@ def provider_entry(provider: str) -> dict:
     return entry
 
 
-def config(model: str, used: list[str] | tuple = ()) -> dict:
+def config(model: str, used: list[str] | tuple = (), repo: Path | None = None) -> dict:
     """used: every provider the task's roles run on; the writer's is always there."""
     names = list(dict.fromkeys([provider_of(model), *used]))
     return {
@@ -60,7 +61,7 @@ def config(model: str, used: list[str] | tuple = ()) -> dict:
         "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow"},
         "provider": {name: provider_entry(name) for name in names},
         # The MCP servers you brought over from opencode; their secrets are mounted like keys.
-        **({"mcp": servers} if (servers := providers.task_mcp()) else {}),
+        **({"mcp": servers} if (servers := providers.task_mcp(repo)) else {}),
         "instructions": [INSTRUCTIONS],
     }
 
@@ -79,7 +80,12 @@ def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple =
             verify="\n".join(f"  - `{c}`" for c in verify),
         )
     )
-    (d / "opencode.json").write_text(json.dumps(config(model, used), indent=2) + "\n")
+    (d / "opencode.json").write_text(json.dumps(config(model, used, task.repo), indent=2) + "\n")
+    # Whether Serena is in, and why, for the task's panel; said again only when it changes.
+    on, why = providers.serena_for(task.repo)
+    said = [e for e in task.events() if e["type"] == "serena"]
+    if not said or said[-1]["data"].get("why") != why:
+        task.event("serena", on=on, why=why)
     return before != {p.name: p.read_text() for p in d.iterdir()}
 
 

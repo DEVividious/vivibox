@@ -762,11 +762,18 @@ def verify_commands(task: Task, project: Project) -> list[str]:
     return parse_plan(accepted.read_text()).verify
 
 
-def reply(task: Task, comment: str) -> State:
-    """Your comment goes to the agent, and the task back to it. Returns where it goes."""
-    if not comment.strip():
+def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
+    """Your comment goes to the agent, and the task back to it. Returns where it goes. Criteria,
+    when the work has come back to you, join the accepted plan: what you found at review becomes
+    something the gate holds the work to, not only a remark the agent may act on."""
+    criteria = [c for c in criteria if c.strip()]
+    if not comment.strip() and not criteria:
         raise gate.GateError("the comment is empty")
     st = task.read_state()
+    if criteria and st.state not in (State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED):
+        raise gate.GateError(
+            "criteria are added when the work comes back to you; before that, they belong in the plan"
+        )
     handoff = task.meta / "handoff"
     targets = {
         State.CHECKPOINT_PLAN: State.PLAN,
@@ -786,6 +793,11 @@ def reply(task: Task, comment: str) -> State:
         target = targets[st.state]
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; replies are for checkpoints")
+    added = gate.add_criteria(task, criteria) if criteria else []
+    if added:
+        listed = "\n".join(f"- {c}" for c in added)
+        note = f"New acceptance criteria, added to criteria.md unticked; meet and tick them:\n\n{listed}"
+        comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
     with (handoff / "comments.md").open("a") as f:
         f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
     question = handoff / supervisor.QUESTION

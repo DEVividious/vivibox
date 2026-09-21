@@ -128,7 +128,7 @@ The footer shows only the keys that do something for the selected task:
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket (the first line is its title), optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
-| `r` | reply: reject, ask for changes, or answer the agent's question |
+| `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
@@ -172,6 +172,7 @@ vivibox attach myproject-1            # watch or talk to the agent (Ctrl-q leave
 |---|---|
 | `vivibox accept <id>` | accept the plan (edit `.task/plan.md` first if you like), or the finished work |
 | `vivibox reply <id> "comment"` | reject, ask for changes, or answer the agent's question |
+| `vivibox reply <id> "comment" --criterion "…"` | send finished or stuck work back with a new acceptance criterion (repeat for more): it joins the accepted plan, and the gate holds the work to it like the rest |
 | `vivibox risky <id>` / `vivibox approve-risky <id>` | review and approve changes to files that run code on your host |
 
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described

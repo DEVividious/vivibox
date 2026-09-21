@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import repo, toolchain
-from .plan import Plan, checkboxes, parse_plan
+from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
 from .states import State
@@ -59,6 +59,53 @@ def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
         "# Acceptance criteria\n\nTick an item only when it is met and verified.\n\n" + checklist
     )
     return plan
+
+
+def _with_criteria(text: str, items: list[str]) -> str:
+    """The plan with items added at the end of its criteria section, where a reader expects them."""
+    lines = text.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines)
+         if (m := HEADING.match(line)) and m.group(1).casefold() == CRITERIA_HEADING.casefold()),
+        None,
+    )  # fmt: skip
+    added = [f"- [ ] {item}" for item in items]
+    if start is None:
+        return "\n".join([*lines, "", f"## {CRITERIA_HEADING}", "", *added]) + "\n"
+    end = next((i for i in range(start + 1, len(lines)) if HEADING.match(lines[i])), len(lines))
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join([*lines[:end], *added, *lines[end:]]) + "\n"
+
+
+def add_criteria(task: Task, items: list[str]) -> list[str]:
+    """Criteria you add after accepting the plan, usually for something found at review. They join
+    the frozen plan the gate checks, the plan you read and the agent's checklist, unticked; the
+    gate then holds the work to them exactly as to the ones you accepted. Returns what was added."""
+    accepted = task.meta / ACCEPTED_PLAN
+    if not accepted.exists():
+        raise GateError("the plan is not accepted yet; add criteria to the plan itself")
+    have = {c.text for c in parse_plan(accepted.read_text()).criteria}
+    new: list[str] = []
+    for item in items:
+        # One line, as the gate compares them, and without a checkbox you may have typed yourself.
+        text = " ".join(re.sub(r"^\s*[-*]\s*\[[ xX]\]\s*", "", item).split())
+        if not text:
+            continue
+        if text == PLACEHOLDER or text in have or text in new:
+            raise GateError(f"already a criterion: {text}")
+        new.append(text)
+    if not new:
+        return []
+    accepted.write_text(_with_criteria(accepted.read_text(), new))
+    if task.plan_path.exists():
+        task.plan_path.write_text(_with_criteria(task.plan_path.read_text(), new))
+    checklist = task.meta / "handoff" / CRITERIA_FILE
+    current = checklist.read_text() if checklist.exists() else ""
+    checklist.write_text(current.rstrip("\n") + "\n" + "".join(f"- [ ] {t}\n" for t in new))
+    # The record that the checklist grew after you accepted it, and by what.
+    task.event("criteria_added", criteria=new)
+    return new
 
 
 def missing_criteria(task: Task) -> list[str]:

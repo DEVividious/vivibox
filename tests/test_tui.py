@@ -2,7 +2,7 @@ import asyncio
 import subprocess
 
 import pytest
-from textual.widgets import Input, Label, Select
+from textual.widgets import Input, Label, Select, TextArea
 from textual.widgets._footer import FooterKey
 
 from vivibox import actions, gate, tui
@@ -838,3 +838,25 @@ def test_the_choice_config_toml_makes_is_called_the_default():
         actions.choice_label((OC, "deepseek/deepseek-v4-pro"), planning_yourself)
         == "deepseek/deepseek-v4-pro"
     )
+
+
+def test_sending_work_back_can_add_criteria(env):
+    task = new_task("Reset view")
+    at_plan_checkpoint(task)
+    actions.accept_plan(task, load_project("demo"))
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ReplyWithCriteria)
+        app.screen.query_one("#comment", TextArea).text = "Nothing happens on a fresh page."
+        app.screen.query_one("#criteria", TextArea).text = "works before a load\n\nkeeps the zoom\n"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    run(scenario)
+    assert task.read_state().state is State.IMPLEMENT
+    assert gate.missing_criteria(task)[-2:] == ["works before a load", "keeps the zoom"]

@@ -348,6 +348,43 @@ class Reply(Dialog):
         self.dismiss(self.query_one(TextArea).text if event.button.id == "send" else "")
 
 
+class ReplyWithCriteria(Dialog):
+    """Sending finished or stuck work back: a comment, and criteria for what you found. A remark is
+    something the agent may act on; a criterion is something the gate holds the work to."""
+
+    def __init__(self, task_id: str):
+        super().__init__()
+        self.task_id = task_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"Your comment for the agent on {self.task_id} (ctrl+s sends):")
+            yield EdgeTextArea(id="comment")
+            yield Label("New acceptance criteria, one per line (optional). The gate checks them like the")
+            yield Label("ones you accepted, and the agent ticks them when they are met.")
+            yield EdgeTextArea(id="criteria", classes="criteria")
+            with Horizontal(classes="buttons"):
+                yield Button("Send", variant="primary", id="send")
+                yield Button("Cancel", id="cancel")
+
+    def answer(self) -> dict:
+        lines = self.query_one("#criteria", TextArea).text.splitlines()
+        return {
+            "comment": self.query_one("#comment", TextArea).text,
+            "criteria": [c for c in lines if c.strip()],
+        }
+
+    def key_ctrl_s(self) -> None:
+        self.dismiss(self.answer())
+
+    def key_escape(self) -> None:
+        self.dismiss({})
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.answer() if event.button.id == "send" else {})
+
+
 MENTION_AT_CURSOR = re.compile(r"(?:^|\s)@(\S*)$")
 
 
@@ -715,6 +752,7 @@ class Vivibox(App):
               padding: 1 2; }
     .dialog TextArea { height: 8; }
     .dialog TextArea.description { height: 10; }
+    .dialog TextArea.criteria { height: 6; }
     #suggestions { max-height: 8; border: none; background: $boost; }
     #editors { max-height: 12; margin: 1 0; }
     .buttons { height: auto; margin-top: 1; }
@@ -724,7 +762,7 @@ class Vivibox(App):
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
-    Confirm, Reply, NewTask, NewProject, CommitWork, ChooseEditor { align: center middle; }
+    Confirm, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor { align: center middle; }
     """
     BINDINGS = [
         Binding("d", "details", "Details"),
@@ -1090,19 +1128,23 @@ class Vivibox(App):
         self.push_screen(CommitWork(done), commit)
 
     def action_reply(self) -> None:
-        task, _ = self.selected()
+        task, st = self.selected()
 
-        def send(comment: str) -> None:
-            if not comment.strip():
+        def send(comment: str, criteria: list[str] = ()) -> None:
+            if not comment.strip() and not criteria:
                 return
             try:
-                target = actions.reply(task, comment)
-                self.notify(f"Sent; {task.id} goes back to {target}.")
+                target = actions.reply(task, comment, criteria)
+                added = f" with {len(criteria)} new criteria" if criteria else ""
+                self.notify(f"Sent{added}; {task.id} goes back to {target}.")
             except Exception as e:
                 self.fail(e)
             self.reload()
 
-        self.push_screen(Reply(task.id), send)
+        if st.state in (State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED):
+            self.push_screen(ReplyWithCriteria(task.id), lambda a: a and send(a["comment"], a["criteria"]))
+        else:
+            self.push_screen(Reply(task.id), send)
 
     def planned_by_you(self, task: Task) -> bool:
         return (task.meta / manual.PROMPT).exists()

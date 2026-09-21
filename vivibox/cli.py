@@ -251,8 +251,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 def cmd_reply(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
-    target = actions.reply(task, args.comment)
-    print(f"Sent to the agent; {task.id} goes back to {target}.")
+    target = actions.reply(task, args.comment, args.criterion)
+    added = f", with {len(args.criterion)} new criteria" if args.criterion else ""
+    print(f"Sent to the agent{added}; {task.id} goes back to {target}.")
     return 0
 
 
@@ -515,7 +516,13 @@ def parser() -> argparse.ArgumentParser:
 
     reply = sub.add_parser("reply", help="answer or reject at a checkpoint; the comment goes to the agent")
     reply.add_argument("task", help="task id")
-    reply.add_argument("comment", help="your comment")
+    reply.add_argument("comment", nargs="?", default="", help="your comment")
+    reply.add_argument(
+        "--criterion",
+        action="append",
+        default=[],
+        help="an acceptance criterion to add, when the work has come back to you; repeat for more",
+    )
     reply.set_defaults(func=cmd_reply)
 
     plan = sub.add_parser("plan", help="plan in your own chat (a manual planner): the prompt, and its answer")

@@ -140,7 +140,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)
     harness = opencode.OpenCode(pod)
-    planner = actions.harness_for("planner", pod)
+    planner = actions.harness_for("planner", pod, task)
 
     def agent_window(st) -> None:
         # Your view of the agent, ready once the harness session exists; reopened if you closed it.

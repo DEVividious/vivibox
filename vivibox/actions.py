@@ -14,14 +14,23 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from pathlib import Path
 
 from . import claudecode, context, gate, ide, image, opencode, repo, secrets, supervisor, toolchain, ui
 from . import init as project_init
 from . import pod as pod_module
-from .config import PROJECT_NAME, Config, ConfigError, Project, config_dir, load_config, load_project
+from .config import (
+    PROJECT_NAME,
+    Config,
+    ConfigError,
+    Project,
+    Role,
+    config_dir,
+    load_config,
+    load_project,
+)
 from .plan import KINDS, PlanError, parse_plan
 from .pod import Mount, Pod, PodError
 from .risky import Approvals
@@ -120,8 +129,8 @@ def attach_command(task_id: str) -> list[str]:
     return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
 
 
-def writer(config: Config) -> tuple[str, str]:
-    role = config.roles["writer"]
+def writer(config: Config, task: Task | None = None) -> tuple[str, str]:
+    role = role_of(task, "writer", config)
     if role.harness != opencode.NAME:
         raise ConfigError(
             f"the writer runs on '{role.harness}', and only opencode can write yet. "
@@ -130,9 +139,27 @@ def writer(config: Config) -> tuple[str, str]:
     return role.harness, role.model
 
 
-def harness_for(role_name: str, pod: Pod) -> object:
+def role_of(task: Task | None, role_name: str, config: Config | None = None) -> Role:
+    """A role as this task runs it: the configured one, on the model the task chose if it chose one.
+    Every reader comes through here, so an override cannot apply in one place and not another."""
+    role = (config or load_config()).roles[role_name]
+    chosen = task.read_state().models.get(role_name, "") if task else ""
+    return replace(role, model=chosen) if chosen else role
+
+
+def models_offered(config: Config | None = None) -> list[str]:
+    """What a role can be put on without asking a provider: the models your own roles name. Asking
+    opencode means a container per keypress, and nobody wants to scroll two hundred model ids."""
+    seen: list[str] = []
+    for role in (config or load_config()).roles.values():
+        if role.model not in seen:
+            seen.append(role.model)
+    return seen
+
+
+def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
     """The tool a role talks through. Two roles on the same harness share nothing but the pod."""
-    role = load_config().roles[role_name]
+    role = role_of(task, role_name)
     if role.harness == claudecode.NAME:
         return claudecode.ClaudeCode(pod, role.model, role.metered)
     return opencode.OpenCode(pod)
@@ -471,7 +498,7 @@ def start(task_id: str, resume: bool = False) -> str:
     """Starts or resumes the task's pod, agent and supervisor. Returns the model."""
     config = load_config()
     task, project = load(task_id)
-    _, model = writer(config)
+    _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
     secrets.prepare(task.id, provider_keys(config), claude_login=wants_claude_login(config))

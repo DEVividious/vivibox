@@ -592,3 +592,49 @@ def test_a_pod_answer_arriving_after_you_quit_is_dropped(env):
     asyncio.run(go())
     assert not app.screen_stack, "the app is gone; docker was still thinking"
     app.pods_answered({"demo-1": tui.PodView("198.51.100.2", [], demo=True)})
+
+
+def test_m_puts_one_role_on_another_model_for_this_task_only(env):
+    """A task going badly on a cheap model is worth finishing on a better one. The machine's
+    config.toml is the default and is left alone; the choice belongs to the task."""
+    task = new_task("Waiting")
+    at_plan_checkpoint(task)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("m")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseRole)
+        assert [r[0] for r in app.screen.rows] == ["planner", "writer"], "both roles, named"
+
+        await pilot.press("down", "enter")  # writer
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseModel)
+        typed = app.screen.query_one("#other", Input)
+        typed.focus()
+        await pilot.pause()
+        typed.value = "deepseek/deepseek-v4-reasoner"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    run(scenario)
+    assert task.read_state().models == {"writer": "deepseek/deepseek-v4-reasoner"}
+    assert load_config().roles["writer"].model == "m", "config.toml is not touched"
+
+
+def test_the_first_choice_hands_the_role_back_to_the_config(env):
+    task = new_task("Waiting")
+    at_plan_checkpoint(task)
+    task.set_model("planner", "claude-opus-5")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("m")
+        await pilot.pause()
+        assert app.screen.rows[0] == ("planner", "claude-opus-5", True), "shown as this task's own"
+        await pilot.press("enter")  # planner
+        await pilot.pause()
+        await pilot.press("enter")  # the first entry: back to config.toml
+
+    run(scenario)
+    assert task.read_state().models == {}

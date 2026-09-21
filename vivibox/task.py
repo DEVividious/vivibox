@@ -32,6 +32,9 @@ class TaskState:
     # One harness conversation each: a planner on claude-code and a writer on opencode do not share
     # a session, and handing one the other's id starts an error, not a conversation.
     sessions: dict[str, str] = field(default_factory=dict)
+    # A model this task runs a role on, instead of the one in config.toml. Empty means the config
+    # decides, which is what almost every task wants.
+    models: dict[str, str] = field(default_factory=dict)
     # Accept the agent's plan without stopping for you (vivibox new --auto).
     auto_plan: bool = False
 
@@ -67,6 +70,15 @@ class Task:
             st.sessions[harness] = session
         else:
             st.sessions.pop(harness, None)
+        self._write_state(st)
+
+    def set_model(self, role: str, model: str) -> None:
+        """This task's model for a role; empty gives the role back to config.toml."""
+        st = self.read_state()
+        if model:
+            st.models[role] = model
+        else:
+            st.models.pop(role, None)
         self._write_state(st)
 
     def set_paused(self, paused: bool) -> None:

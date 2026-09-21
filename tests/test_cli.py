@@ -259,3 +259,30 @@ def test_leaving_the_agent_view_says_nothing_to_your_scrollback(monkeypatch):
     monkeypatch.setattr(actions, "tmux_has", lambda target: True)
     actions.agent_view(task, ["echo", "hi"])
     assert calls == [actions.LEAVE_BINDING], calls
+
+
+def test_a_task_overrides_the_configured_model_everywhere_or_nowhere(env):
+    """A model chosen for one task has to reach the harness and the opencode config alike. Applying
+    in one place and not the other would run the turn on one model and bill the other."""
+    from vivibox import actions
+    from vivibox.config import load_config
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task, _ = actions.load("demo-1")
+    config = load_config()
+
+    assert actions.role_of(task, "writer", config).model == "m", "the config decides by default"
+    task.set_model("writer", "deepseek/deepseek-v4-reasoner")
+    assert actions.role_of(task, "writer", config).model == "deepseek/deepseek-v4-reasoner"
+    assert actions.writer(config, task)[1] == "deepseek/deepseek-v4-reasoner", "and start uses it"
+    assert actions.role_of(task, "planner", config).model == "m", "one role at a time"
+
+    task.set_model("writer", "")
+    assert actions.role_of(task, "writer", config).model == "m", "cleared gives it back"
+
+
+def test_the_models_offered_are_the_ones_you_configured(env):
+    """Asking a provider for its list means running a container on a keypress."""
+    from vivibox import actions
+
+    assert actions.models_offered() == ["m"], "both roles name the same model, offered once"

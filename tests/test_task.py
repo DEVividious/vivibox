@@ -95,3 +95,14 @@ def test_a_task_started_before_roles_keeps_its_conversation(tmp_path):
     data["session"] = "ses_from_before"
     path.write_text(json.dumps(data))
     assert task.read_state().sessions == {"opencode": "ses_from_before"}
+
+
+def test_a_task_can_run_a_role_on_another_model(tmp_path):
+    """A task going badly on a cheap model is worth finishing on a better one, and a throwaway one
+    is not worth the good model at all. The choice belongs to the task, not to the machine."""
+    task = create_task(tmp_path, "shop", "goal", "")
+    assert task.read_state().models == {}, "the config decides until you say otherwise"
+    task.set_model("planner", "claude-opus-5")
+    assert task.read_state().models == {"planner": "claude-opus-5"}
+    task.set_model("planner", "")
+    assert task.read_state().models == {}, "cleared, so the config decides again"

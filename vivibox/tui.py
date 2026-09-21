@@ -495,6 +495,63 @@ class ChooseEditor(ModalScreen[str]):
         self.dismiss("")
 
 
+class ChooseRole(ModalScreen[str]):
+    """Which role to put on another model for this task. Arrows pick, Enter takes, Escape leaves."""
+
+    def __init__(self, rows: list[tuple[str, str, bool]]):
+        super().__init__()
+        self.rows = rows
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Run this task's roles on:")
+            labels = [f"{name}  {model}" + ("  (this task)" if own else "") for name, model, own in self.rows]
+            yield OptionList(*labels, id="roles")
+            yield Label("A change applies the next time the task starts.")
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    @on(OptionList.OptionSelected)
+    def chose(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.rows[event.option_index][0])
+
+    def key_escape(self) -> None:
+        self.dismiss("")
+
+
+class ChooseModel(ModalScreen[str | None]):
+    """A model for one role. None leaves it alone, "" gives the role back to config.toml."""
+
+    BACK = "Use the one in config.toml"
+
+    def __init__(self, role: str, configured: str, offered: list[str]):
+        super().__init__()
+        self.role, self.configured = role, configured
+        self.offered = [m for m in offered if m != configured]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"Run {self.role} on:")
+            yield OptionList(f"{self.BACK}  ({self.configured})", *self.offered, id="models")
+            yield Input(placeholder="or a model id: provider/model", id="other")
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    @on(OptionList.OptionSelected)
+    def chose(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss("" if event.option_index == 0 else self.offered[event.option_index - 1])
+
+    @on(Input.Submitted)
+    def typed(self, event: Input.Submitted) -> None:
+        if text := event.value.strip():
+            self.dismiss(text)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 class NewTask(Dialog):
     def __init__(self, preselect: str = ""):
         super().__init__()
@@ -640,6 +697,7 @@ class Vivibox(App):
         Binding("o", "open_ide", "Open in IDE"),
         Binding("p", "approve_risky", "Approve risky"),
         Binding("w", "watch", "Watch agent"),
+        Binding("m", "models", "Model"),
         Binding("v", "demo", "Run it"),
         Binding("v", "demo_stop", "Stop it"),
         # One key, two meanings: the footer shows the one that applies to the selected task.
@@ -862,7 +920,8 @@ class Vivibox(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
-                        "start_task", "stop_task", "remove", "demo", "demo_stop")  # fmt: skip
+                        "start_task", "stop_task", "remove", "demo", "demo_stop",
+                        "models")  # fmt: skip
         if action not in task_actions:  # new, quit, and moving focus in dialogs
             return True
         pick = self.selected()
@@ -885,6 +944,9 @@ class Vivibox(App):
             # runs is a restart, which is what you want after the agent has changed something.
             "demo": state in (State.CHECKPOINT_FINAL, State.IMPLEMENT, State.VERIFY),
             "demo_stop": self.pod.demo,
+            # Worth changing while a task runs: one going badly is worth finishing on a better
+            # model, and the next start picks it up.
+            "models": state is not State.DONE,
         }
         return allowed.get(action, True)
 
@@ -1093,6 +1155,42 @@ class Vivibox(App):
             Reply(task_id, f"Working out how to run it, the agent asks:\n\n{question}\n\nYour answer"),
             lambda text: self.run_demo(task_id, reply=text) if text else None,
         )
+
+    def action_models(self) -> None:
+        """Which model each role runs on, for this task only. The machine's config.toml is the
+        default and stays untouched; a task that needs more, or less, says so here."""
+        pick = self.selected()
+        if not pick:
+            return
+        task = pick[0]
+        try:
+            config = load_config()
+            chosen = task.read_state().models
+            rows = [
+                (name, actions.role_of(task, name, config).model, name in chosen)
+                for name in sorted(config.roles)
+            ]
+        except (ConfigError, OSError) as e:
+            self.fail(e)
+            return
+
+        def role_picked(role: str) -> None:
+            if not role:
+                return
+            self.push_screen(
+                ChooseModel(role, config.roles[role].model, actions.models_offered(config)),
+                lambda model: self.set_model(task, role, model),
+            )
+
+        self.push_screen(ChooseRole(rows), role_picked)
+
+    def set_model(self, task: Task, role: str, model: str | None) -> None:
+        if model is None:
+            return
+        task.set_model(role, model)
+        where = model or f"{load_config().roles[role].model} (from config.toml)"
+        self.notify(f"{role} runs on {where} from the next start.", timeout=6)
+        self.reload()
 
     def action_watch(self) -> None:
         task, _ = self.selected()

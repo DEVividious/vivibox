@@ -136,7 +136,7 @@ The footer shows only the keys that do something for the selected task:
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
 | `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
-| `k` | your providers and MCP servers: add a provider from opencode's list with a key, import from an opencode configuration, or remove one |
+| `k` | your providers and MCP servers: add a provider from opencode's list with a key, import an opencode.json, or remove one |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |

@@ -852,7 +852,7 @@ def provider_rows() -> list[tuple[str, str, str]]:
 
 class ManageProviders(Dialog):
     """The providers vivibox can run models of, and the MCP servers every task gets: added here,
-    imported from opencode, or removed."""
+    imported from an opencode.json, or removed."""
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -860,7 +860,7 @@ class ManageProviders(Dialog):
             yield OptionList(id="providers", classes="catalog")
             with Horizontal(classes="buttons"):
                 yield Button("Add provider…", variant="primary", id="add")
-                yield Button("Import from opencode…", id="import")
+                yield Button("Import opencode.json…", id="import")
                 yield Button("Remove", id="remove")
                 yield Button("Close", id="close")
 
@@ -876,7 +876,7 @@ class ManageProviders(Dialog):
             options.add_options([f"{escape(n)}  [dim]{escape(said)}[/]" for _, n, said in self.rows])
             options.highlighted = 0
         else:
-            options.add_option(Option("none yet: add one, or import them from opencode", disabled=True))
+            options.add_option(Option("none yet: add a provider, or import an opencode.json", disabled=True))
         self.query_one("#remove").display = bool(self.rows)
 
     def changed(self, names: list[str]) -> None:
@@ -943,7 +943,7 @@ class AddProvider(Dialog):
             yield Label("", id="problem")
             with Horizontal(classes="buttons"):
                 yield Button("Add", variant="primary", id="add")
-                yield Button("Import from opencode…", id="import")
+                yield Button("Import opencode.json…", id="import")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:

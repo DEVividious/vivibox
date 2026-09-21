@@ -11,10 +11,11 @@
 #   - Docker networks moved off the ranges Docker uses inside Sysbox containers (restarts Docker);
 #   - Sysbox CE, the runtime for the per-task Docker sidecar;
 #   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev;
-#   - the egress firewall helper and a sudo rule that allows running only that helper.
+#   - the egress firewall helper and a sudo rule that allows running only that helper;
+#   - uv, in ~/.local/bin, and the vivibox command installed from this checkout.
 set -euo pipefail
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TASKS_DIR=${VIVIBOX_TASKS_DIR:-/srv/vivibox}
 HELPER=/usr/local/libexec/vivibox-netns
 SUDOERS=/etc/sudoers.d/vivibox
@@ -30,6 +31,11 @@ TASK_POOL=198.51.100.0/24
 SYSBOX_VERSION=0.7.1
 SYSBOX_DEB="sysbox-ce_${SYSBOX_VERSION}.linux_amd64.deb"
 SYSBOX_SHA256=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5
+UV_VERSION=0.11.8
+UV_TARBALL=uv-x86_64-unknown-linux-gnu.tar.gz
+UV_SHA256=56dd1b66701ecb62fe896abb919444e4b83c5e8645cca953e6ddd496ff8a0feb
+BIN=$HOME/.local/bin
+REPO=$(dirname "$HERE")
 
 CHECK_ONLY=false
 [[ "${1:-}" == --check ]] && CHECK_ONLY=true
@@ -181,6 +187,24 @@ else
   need "sudo rule in $SUDOERS: $SUDO_RULE" do_sudoers
 fi
 
+UV=$(command -v uv || echo "$BIN/uv")
+if [[ -x "$UV" ]]; then
+  ok "uv $("$UV" --version | awk '{print $2}')"
+else
+  need "uv $UV_VERSION in $BIN" do_uv
+fi
+
+# The tool's receipt names the checkout it was installed from.
+vivibox_installed() {
+  [[ -x "$UV" ]] || return 1
+  grep -qF "\"$REPO\"" "$("$UV" tool dir --color never)/vivibox/uv-receipt.toml" 2>/dev/null
+}
+if vivibox_installed; then
+  ok "vivibox command from $REPO"
+else
+  need "vivibox command in $BIN, installed from $REPO (editable: follows this checkout)" do_vivibox
+fi
+
 # --- actions ----------------------------------------------------------------------------------
 
 do_packages() {
@@ -262,6 +286,23 @@ do_sudoers() {
   rm -f "$tmp"
 }
 
+do_uv() {
+  local tmp
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/$UV_TARBALL" \
+    "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$UV_TARBALL"
+  echo "$UV_SHA256  $tmp/$UV_TARBALL" | sha256sum -c --quiet -
+  tar -xzf "$tmp/$UV_TARBALL" -C "$tmp"
+  install -d "$BIN"
+  install -m 755 "$tmp/${UV_TARBALL%.tar.gz}/uv" "$tmp/${UV_TARBALL%.tar.gz}/uvx" "$BIN/"
+  rm -rf "$tmp"
+  UV=$BIN/uv
+}
+
+do_vivibox() {
+  "$UV" tool install --force --editable "$REPO"
+}
+
 # --- apply ------------------------------------------------------------------------------------
 
 if ((${#todo[@]} == 0)); then
@@ -283,3 +324,5 @@ for action in "${actions[@]}"; do
   "$action"
 done
 echo "Done. Run '$0 --check' to confirm."
+# A fresh ~/.local/bin is on PATH only from the next login (Ubuntu's ~/.profile adds it).
+[[ ":$PATH:" == *":$BIN:"* ]] || echo "$BIN is not on your PATH yet: log out and in, or open a new login shell."

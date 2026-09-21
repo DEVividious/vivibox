@@ -613,7 +613,8 @@ def demo_stop(task_id: str) -> None:
 
 
 def title_of(description: str) -> str:
-    """The first line of a task's description names it in lists and commit suggestions."""
+    """What the list shows of a task until its plan names it in a line of its own: the start of
+    its description, whatever that is, so nothing has to be written as a title."""
     first = next((line.strip() for line in description.splitlines() if line.strip()), "")
     return ui.shorten(first.lstrip("# ").strip(), 120)
 

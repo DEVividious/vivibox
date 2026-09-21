@@ -811,9 +811,12 @@ class NewTask(Dialog):
                  ("Other: refactoring, tests, upkeep", "other")],
                 value="feature", allow_blank=False, id="kind",
             )  # fmt: skip
-            yield Label("What should the agent do? The first line is the task's title; below it, as much as")
-            yield Label("you like: the ticket, context, constraints. @~/path/file.md hands the agent a copy")
-            yield Label("of a file or folder. ctrl+s creates the task.")
+            yield Label(
+                "What should the agent do? A line, or a whole ticket with its context and constraints."
+            )
+            yield Label(
+                "@~/path/file.md hands the agent a copy of a file or folder. ctrl+s creates the task."
+            )
             suggestions = OptionList(id="suggestions")
             suggestions.display = False
             yield DescriptionArea(suggestions, Path.cwd(), id="goal", classes="description")

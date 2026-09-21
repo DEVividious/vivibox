@@ -462,7 +462,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("project", help="project name (~/.config/vivibox/projects/<name>.toml)")
     new.add_argument(
         "goal",
-        help="what the agent should do: a line, or a whole ticket (first line is the title; - reads stdin)",
+        help="what the agent should do: a line, or a whole ticket (- reads stdin)",
     )
     new.add_argument(
         "--kind",

@@ -1140,3 +1140,48 @@ def test_the_view_says_your_opencode_configuration_can_be_brought_over(env, monk
 
     run(scenario)
     assert any("Press k to bring its providers over" in t for t in said)
+
+
+def test_a_file_found_by_browsing_goes_on_to_the_import(env, tmp_path):
+    """The whole way, not the browser alone: a file picked there is the import's source. Returning
+    dismiss() from the browser's callback made Textual await it inside a message handler."""
+    from textual.widgets import DirectoryTree
+
+    good = tmp_path / "opencode.json"
+    good.write_text('{"provider": {"acme": {"models": {"m": {}}}}}')
+    chosen = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.ImportSource([]), chosen.append)
+        await pilot.pause()
+        await pilot.press("enter")  # Browse…
+        await pilot.pause()
+        browser = app.screen
+        assert isinstance(browser, tui.BrowseFile)
+        browser.post_message(DirectoryTree.FileSelected(browser.query_one("#tree", tui.JsonTree).root, good))
+        await pilot.pause()
+        await pilot.pause()
+
+    run(scenario)
+    assert chosen == [good]
+
+
+def test_the_import_from_adding_a_provider_comes_back_with_what_came(env, tmp_path, monkeypatch):
+    source = env / "xdg" / "opencode" / "opencode.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"provider": {"acme": {"models": {"m": {}}}}}')
+    added = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.AddProvider([]), added.append)
+        await pilot.pause()
+        app.screen.query_one("#import").press()
+        await pilot.pause()
+        await pilot.press("enter")  # the configuration found
+        await pilot.pause()
+        app.screen.query_one("#import").press()  # import what is ticked
+        await pilot.pause()
+        await pilot.pause()
+
+    run(scenario)
+    assert added == [["acme"]]

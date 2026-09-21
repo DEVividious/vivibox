@@ -817,7 +817,13 @@ class ImportSource(Dialog):
         if event.option_index < len(self.found):
             self.dismiss(self.found[event.option_index][0])
         else:
-            self.app.push_screen(BrowseFile(), lambda path: path and self.dismiss(path))
+            self.app.push_screen(BrowseFile(), self.browsed)
+
+    def browsed(self, path: Path | None) -> None:
+        # A statement, not a lambda returning dismiss(): Textual awaits what a callback returns,
+        # and awaiting a screen's dismiss() from its own message handler is an error.
+        if path:
+            self.dismiss(path)
 
     @on(Button.Pressed, "#cancel")
     def cancelled(self) -> None:
@@ -1003,11 +1009,15 @@ class AddProvider(Dialog):
                 keys.set_key(name, self.query_one("#key", Input).value)
                 self.dismiss([name])
             elif event.button.id == "import":
-                self.app.import_opencode(lambda names: names and self.dismiss(names))
+                self.app.import_opencode(self.imported)
             else:
                 self.dismiss([])
         except (keys.KeyStoreError, ConfigError) as e:
             self.query_one("#problem", Label).update(f"[red]{e.args[0]}[/]")
+
+    def imported(self, names: list[str]) -> None:
+        if names:  # nothing imported: back to this dialog, to add a provider by name instead
+            self.dismiss(names)
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:

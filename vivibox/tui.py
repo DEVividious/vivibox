@@ -111,6 +111,14 @@ class PodView:
         return out
 
 
+def ticked_at(task: Task) -> float:
+    """When the agent last touched its checklist. Cheap enough to ask on every refresh."""
+    try:
+        return (task.meta / "handoff" / gate.CRITERIA_FILE).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def pod_views(task_ids: list[str]) -> dict[str, PodView]:
     """What every task's pod is doing. One question for all the addresses, then one per pod that is
     up; asking each pod separately for each thing is what would make this too slow to do often."""
@@ -775,8 +783,20 @@ class Vivibox(App):
         hundred retained objects, and a refresh that finds nothing changed used to pay it anyway:
         a session left open overnight reached 5 GB and a quarter of a core with the tasks idle."""
         tasks = tuple(
-            (st.id, str(st.state), st.iteration, st.paused, st.updated, st.id in self.running)
-            for _, st in self.pairs
+            (
+                st.id,
+                str(st.state),
+                st.iteration,
+                st.paused,
+                st.updated,
+                st.id in self.running,
+                # The agent ticks criteria while it works, and st.updated only moves between
+                # states, so without this the column freezes for the whole of a long turn --
+                # exactly when watching it fill in is the only sign of progress. A stat, not a
+                # parse: the redraw does the reading.
+                ticked_at(task),
+            )
+            for task, st in self.pairs
         )
         pods = tuple(sorted((k, v.state, len(v.reachable)) for k, v in self.pods.items()))
         return tasks, pods, self.show_done, self.selected_id(), len(self.done)

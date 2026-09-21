@@ -667,3 +667,27 @@ def test_the_view_rebuilds_itself_only_when_something_moved(env, monkeypatch):
         assert "review the plan" not in str(app.table.get_row(task.id)[1]), "the row followed it"
 
     run(scenario)
+
+
+def test_criteria_ticked_during_a_turn_show_up(env, monkeypatch):
+    """The agent ticks criteria while it works, and watching them fill in is how you see a long
+    turn progressing. Skipping the redraw when the task's state has not moved froze the column for
+    the whole of an implementation, which is exactly when it has something to say."""
+    task = new_task("Waiting")
+    at_plan_checkpoint(task)
+    gate.accept_plan(task, ["true"])
+    task.transition(State.IMPLEMENT)
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {})
+    checklist = task.meta / "handoff" / gate.CRITERIA_FILE
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_row(task.id)[3]) == "0/2", "nothing ticked yet"
+
+        checklist.write_text(checklist.read_text().replace("- [ ] it works", "- [x] it works"))
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_row(task.id)[3]) == "1/2", "the agent ticked one while working"
+
+    run(scenario)

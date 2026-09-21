@@ -21,13 +21,13 @@ from .task import Task, find_task, list_tasks
 
 def cmd_new(args: argparse.Namespace) -> int:
     description = sys.stdin.read() if args.goal == "-" else args.goal
-    models = {}
+    roles = {}
     for pair in args.model:
         role, sep, model = pair.partition("=")
         if not sep or not model.strip():
             raise ConfigError(f"--model {pair}: expected role=model, e.g. writer=deepseek/deepseek-v4-pro")
-        models[role.strip()] = model.strip()
-    task = actions.create(args.project, description, auto=args.auto, kind=args.kind, models=models)
+        roles[role.strip()] = actions.parse_choice(model)
+    task = actions.create(args.project, description, auto=args.auto, kind=args.kind, roles=roles)
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     print(f"Plan: {task.plan_path}")
     if args.draft:
@@ -145,7 +145,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     config = load_config()
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)
-    harness = opencode.OpenCode(pod)
+    harness = actions.harness_for("writer", pod, task)
     planner = actions.harness_for("planner", pod, task)
 
     def agent_window(st) -> None:
@@ -449,7 +449,8 @@ def parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="ROLE=MODEL",
-        help="run a role on another model for this task, e.g. writer=deepseek/deepseek-v4-pro",
+        help="run a role on another model for this task: writer=deepseek/deepseek-v4-pro, "
+        "planner=claude-opus-5 (Claude Code), or planner=manual to plan in your own chat",
     )
     new.set_defaults(func=cmd_new)
 

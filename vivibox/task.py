@@ -35,6 +35,9 @@ class TaskState:
     # A model this task runs a role on, instead of the one in config.toml. Empty means the config
     # decides, which is what almost every task wants.
     models: dict[str, str] = field(default_factory=dict)
+    # The tool a role runs in, when the task chose another than config.toml's: a planner you
+    # normally plan with yourself can be given a model for one task, and the other way round.
+    harnesses: dict[str, str] = field(default_factory=dict)
     # Accept the agent's plan without stopping for you (vivibox new --auto).
     auto_plan: bool = False
     # At the plan checkpoint with a manual planner: no plan yet, the task waits for one from you.
@@ -72,6 +75,16 @@ class Task:
             st.sessions[harness] = session
         else:
             st.sessions.pop(harness, None)
+        self._write_state(st)
+
+    def set_role(self, role: str, harness: str = "", model: str = "") -> None:
+        """This task's harness and model for a role; both empty give the role back to config.toml."""
+        st = self.read_state()
+        for chosen, value in ((st.harnesses, harness), (st.models, model)):
+            if value:
+                chosen[role] = value
+            else:
+                chosen.pop(role, None)
         self._write_state(st)
 
     def set_model(self, role: str, model: str) -> None:

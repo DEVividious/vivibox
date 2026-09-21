@@ -2,12 +2,12 @@ import asyncio
 import subprocess
 
 import pytest
-from textual.widgets import Input, Label
+from textual.widgets import Input, Label, Select
 from textual.widgets._footer import FooterKey
 
 from vivibox import actions, gate, tui
 from vivibox.cli import main
-from vivibox.config import ConfigError, load_config, load_project
+from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
 from vivibox.states import State
 from vivibox.task import find_task, now
@@ -19,6 +19,9 @@ from vivibox.tui import (
     finished_detail,
     projects,
 )
+
+OC = "opencode"
+AVAILABLE = {"deepseek": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]}
 
 
 def new_task(goal="Goal"):
@@ -602,6 +605,7 @@ def test_m_puts_one_role_on_another_model_for_this_task_only(env):
     at_plan_checkpoint(task)
 
     async def scenario(app, pilot):
+        app.available = AVAILABLE
         app.reload()
         await pilot.press("m")
         await pilot.pause()
@@ -611,16 +615,36 @@ def test_m_puts_one_role_on_another_model_for_this_task_only(env):
         await pilot.press("down", "enter")  # writer
         await pilot.pause()
         assert isinstance(app.screen, tui.ChooseModel)
-        typed = app.screen.query_one("#other", Input)
-        typed.focus()
-        await pilot.pause()
-        typed.value = "deepseek/deepseek-v4-reasoner"
-        await pilot.press("enter")
+        # A list of what you can run, not a field to type a model id into.
+        assert app.screen.offered == [
+            (OC, "m"),
+            (OC, "deepseek/deepseek-v4-flash"),
+            (OC, "deepseek/deepseek-v4-pro"),
+        ]
+        await pilot.press("down", "down", "enter")
         await pilot.pause()
 
     run(scenario)
-    assert task.read_state().models == {"writer": "deepseek/deepseek-v4-reasoner"}
+    assert task.read_state().models == {"writer": "deepseek/deepseek-v4-pro"}
+    assert task.read_state().harnesses == {}, "same harness as config.toml, so nothing to keep"
     assert load_config().roles["writer"].model == "m", "config.toml is not touched"
+
+
+def test_m_can_hand_planning_to_you_for_one_task(env):
+    task = new_task("Waiting")
+    at_plan_checkpoint(task)
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        app.reload()
+        await pilot.press("m", "enter")  # planner
+        await pilot.pause()
+        assert app.screen.offered[1] == ("manual", "")
+        await pilot.press("down", "enter")
+        await pilot.pause()
+
+    run(scenario)
+    assert actions.role_of(task, "planner") == Role("manual", "")
 
 
 def test_the_first_choice_hands_the_role_back_to_the_config(env):
@@ -756,29 +780,31 @@ def test_the_panel_shows_what_the_browser_prompt_sends_about_the_repository(env)
 
 
 def test_a_new_task_can_run_a_role_on_another_model(env, monkeypatch):
-    """Chosen when the task is made, not only with m afterwards and from the next start: the
-    first turn is the one that most often decides which model a task deserves. A field left at
-    config.toml's model is no choice, so the task keeps following config.toml."""
+    """Chosen when the task is made, from a list of what you can run, not only with m afterwards:
+    the first turn is the one that most often decides which model a task deserves. A role left on
+    config.toml's choice keeps following config.toml."""
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
 
     async def scenario(app, pilot):
+        app.available = AVAILABLE
         await pilot.press("n")
         await pilot.pause()
         await pilot.press(*"Fix login")
-        writer = app.screen.query_one("#model-writer", Input)
-        assert writer.value == "m", "config.toml's model, ready to keep or change"
-        writer.value = "deepseek/deepseek-v4-pro"
+        writer = app.screen.query_one("#role-writer", Select)
+        assert writer.value == (OC, "m"), "config.toml's choice, ready to keep or change"
+        writer.value = (OC, "deepseek/deepseek-v4-pro")
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
         await pilot.pause()
 
     run(scenario)
-    assert find_task(load_config().tasks_dir, "demo-1").read_state().models == {
-        "writer": "deepseek/deepseek-v4-pro"
-    }
+    st = find_task(load_config().tasks_dir, "demo-1").read_state()
+    assert st.models == {"writer": "deepseek/deepseek-v4-pro"} and st.harnesses == {}
 
 
-def test_a_manual_planner_has_no_model_to_choose(env):
+def test_a_planner_you_plan_with_can_be_given_a_model_for_one_task(env, monkeypatch):
+    """The other way round too: config.toml says you plan, and this one task plans on DeepSeek."""
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
     cfg = env / "config" / "config.toml"
     cfg.write_text(
         cfg.read_text().replace(
@@ -787,13 +813,19 @@ def test_a_manual_planner_has_no_model_to_choose(env):
     )
 
     async def scenario(app, pilot):
+        app.available = AVAILABLE
         await pilot.press("n")
         await pilot.pause()
-        assert not app.screen.query("#model-planner") and app.screen.query("#model-writer")
-        assert "you, in your own chat" in " ".join(
-            str(label.render()) for label in app.screen.query(".role Label")
-        )
+        await pilot.press(*"Fix login")
+        planner = app.screen.query_one("#role-planner", Select)
+        assert planner.value == ("manual", "")
+        planner.value = (OC, "deepseek/deepseek-v4-pro")
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
 
     run(scenario)
-    with pytest.raises(ConfigError, match="own chat"):
-        actions.create("demo", "Fix login", models={"planner": "claude-opus-5"})
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert actions.role_of(task, "planner") == Role(OC, "deepseek/deepseek-v4-pro")
+    with pytest.raises(ConfigError, match="only the planner"):
+        actions.create("demo", "Fix login", roles={"writer": ("manual", "")})

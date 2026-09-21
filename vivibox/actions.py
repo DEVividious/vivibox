@@ -24,6 +24,7 @@ from . import (
     gate,
     ide,
     image,
+    keys,
     manual,
     opencode,
     repo,
@@ -156,8 +157,99 @@ def role_of(task: Task | None, role_name: str, config: Config | None = None) -> 
     """A role as this task runs it: the configured one, on the model the task chose if it chose one.
     Every reader comes through here, so an override cannot apply in one place and not another."""
     role = (config or load_config()).roles[role_name]
-    chosen = task.read_state().models.get(role_name, "") if task else ""
-    return replace(role, model=chosen) if chosen else role
+    if not task:
+        return role
+    st = task.read_state()
+    harness, model = st.harnesses.get(role_name, ""), st.models.get(role_name, "")
+    if harness:
+        return Role(harness, model)
+    return replace(role, model=model) if model else role
+
+
+# A choice for a role: the harness it runs in and the model, "" for a manual role.
+Choice = tuple[str, str]
+MODELS_CACHE_SECONDS = 24 * 3600
+
+
+def models_cache() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "vivibox" / "models.json"
+
+
+def provider_models(provider: str) -> list[str]:
+    """What opencode knows for a provider, asked in a throwaway container: a second or two."""
+    env = ["-e", f"{provider.upper().replace('-', '_').replace('.', '_')}_API_KEY=placeholder"]
+    cmd = ["docker", "run", "--rm", "--tmpfs", f"/config:uid={os.getuid()},gid={os.getgid()}", *env,
+           image.image_ref(), "opencode", "models", provider]  # fmt: skip
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+    return [line.strip() for line in p.stdout.splitlines() if line.strip().startswith(f"{provider}/")]
+
+
+def available_models(refresh: bool = False) -> dict[str, list[str]]:
+    """The models of every provider you have a key for, by provider. Kept for a day: a list that
+    changes a few times a year is not worth a container each time you open a dialog."""
+    path = models_cache()
+    try:
+        cached = json.loads(path.read_text())
+    except (OSError, ValueError):
+        cached = {}
+    found, now_ = {}, time.time()
+    for provider in keys.list_keys():
+        entry = cached.get(provider) or {}
+        if not refresh and entry.get("models") and now_ - entry.get("at", 0) < MODELS_CACHE_SECONDS:
+            found[provider] = entry["models"]
+            continue
+        try:
+            listed = provider_models(provider)
+        except (OSError, subprocess.SubprocessError):
+            listed = []
+        found[provider] = listed or entry.get("models") or []
+        if listed:
+            cached[provider] = {"at": now_, "models": listed}
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cached, indent=2) + "\n")
+    return found
+
+
+def choices(role_name: str, config: Config, available: dict[str, list[str]] | None = None) -> list[Choice]:
+    """What a role can run on: planning yourself (the planner), a model of each provider you have
+    a key for through opencode, and Anthropic's through Claude Code. config.toml's own choice
+    comes first, and is there even when the list could not be read."""
+    found: list[Choice] = [configured_choice(config, role_name)]
+    if role_name == "planner":
+        found.append((manual.NAME, ""))
+    for provider, models in (available or {}).items():
+        found += [(opencode.NAME, m) for m in models]
+        if provider == "anthropic" and role_name != "writer":  # only opencode can write yet
+            found += [(claudecode.NAME, m.split("/", 1)[1]) for m in models]
+    # The models your roles already name, for when the list could not be read.
+    found += [(r.harness, r.model) for r in config.roles.values() if r.harness == opencode.NAME]
+    if role_name == "writer":
+        found = [c for c in found if c[0] == opencode.NAME]
+    return list(dict.fromkeys(found))
+
+
+def configured_choice(config: Config, role_name: str) -> Choice:
+    role = config.roles[role_name]
+    return role.harness, role.model if role.harness != manual.NAME else ""
+
+
+def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
+    harness, model = choice
+    text = "you, in your own chat" if harness == manual.NAME else model
+    if harness == claudecode.NAME:
+        text += " (Claude Code)"
+    return text + ("  · config.toml" if choice == config_choice else "")
+
+
+def parse_choice(text: str) -> Choice:
+    """A choice as the command line takes it: manual, provider/model for opencode, or a Claude
+    model id (no provider) for Claude Code."""
+    text = text.strip()
+    if text == manual.NAME:
+        return manual.NAME, ""
+    return (opencode.NAME, text) if "/" in text else (claudecode.NAME, text)
 
 
 def models_offered(config: Config | None = None, harness: str = "") -> list[str]:
@@ -178,7 +270,7 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
         return manual.Manual()
     if role.harness == claudecode.NAME:
         return claudecode.ClaudeCode(pod, role.model)
-    return opencode.OpenCode(pod)
+    return opencode.OpenCode(pod, role.model)
 
 
 def provider_keys(config: Config, task: Task | None = None) -> list[str]:
@@ -479,20 +571,22 @@ def create(
     auto: bool = False,
     kind: str = "feature",
     cwd: Path | None = None,
-    models: dict[str, str] | None = None,
+    roles: dict[str, Choice] | None = None,
 ) -> Task:
     """description: one line, or a whole ticket; it all goes into the plan the agent starts from.
-    @path mentions in it are copied into the task (relative ones from cwd). models: a model for a
-    role, for this task only, as m would set it; the same as config.toml's is no choice at all."""
+    @path mentions in it are copied into the task (relative ones from cwd). roles: what a role runs
+    on for this task only, as m would set it; config.toml's own choice is no choice at all."""
     config = load_config()
-    chosen = {}
-    for role, model in (models or {}).items():
+    chosen: dict[str, Choice] = {}
+    for role, (harness, model) in (roles or {}).items():
         if role not in config.roles:
             raise ConfigError(f"no role '{role}' in config.toml; there are {', '.join(sorted(config.roles))}")
-        if config.roles[role].harness == manual.NAME:
-            raise ConfigError(f"the {role} is you, in your own chat; there is no model to choose for it")
-        if model.strip() and model.strip() != config.roles[role].model:
-            chosen[role] = model.strip()
+        if role != "planner" and harness == manual.NAME:
+            raise ConfigError(f"only the planner can be you, in your own chat; not the {role}")
+        if role == "writer" and harness != opencode.NAME:
+            raise ConfigError("only opencode can write yet; give the writer a provider/model")
+        if (harness, model) != configured_choice(config, role):
+            chosen[role] = (harness, model)
     project = load_project(project_name)
     if not project.repo.is_dir():
         raise ConfigError(f"{project.repo} is gone; project {project_name} has nothing to work on")
@@ -514,8 +608,10 @@ def create(
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     task.set_base_commit(base)
-    for role, model in chosen.items():
-        task.set_model(role, model)
+    for role, (harness, model) in chosen.items():
+        # The harness is kept only when it differs, so a task on another model keeps following
+        # config.toml's harness, as m has always left it.
+        task.set_role(role, harness if harness != config.roles[role].harness else "", model)
     if auto:
         task.set_auto_plan(True)
     # The risky files as they are in your repository are the starting approval.

@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -56,3 +57,19 @@ def test_attach_command_reads_password_from_file():
     cmd = opencode.OpenCode(P()).attach_command("ses_1")
     assert cmd[:4] == ["docker", "exec", "-it", "vivibox-demo-1-agent"]
     assert "$(cat /run/vivibox-secrets/server-password)" in cmd[-1] and "ses_1" in cmd[-1]
+
+
+def test_a_turn_names_its_model():
+    """The server's config holds one model, the writer's. A planner on another model planned on
+    the writer's, with nothing saying so, until the model went with every turn."""
+    ran = []
+
+    class P:
+        task_id, agent = "t1", "vivibox-t1-agent"
+
+        def exec(self, *cmd, check=True):
+            ran.append(cmd[-1])
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    opencode.OpenCode(P(), "deepseek/deepseek-v4-pro").turn("plan it")
+    assert "'--model' 'deepseek/deepseek-v4-pro'" in ran[-1]

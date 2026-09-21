@@ -104,8 +104,11 @@ class OpenCode:
     # A provider key is always billed per token.
     metered = True
 
-    def __init__(self, pod: Pod):
+    def __init__(self, pod: Pod, model: str = ""):
         self.pod = pod
+        # Sent with every turn. The server has one model in its config, the writer's, and a planner
+        # on another model would otherwise plan on the writer's without anything saying so.
+        self.model = model
 
     def _get(self, path: str) -> bool:
         probe = f'curl -fsS -o /dev/null -u "opencode:$(cat {MOUNT}/server-password)" {_quote(URL + path)}'
@@ -139,6 +142,7 @@ class OpenCode:
     def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
         self.ensure_server()
         args = ["opencode", "run", "--attach", URL, "--format", "json", "--auto"]
+        args += ["--model", self.model] if self.model else []
         args += ["--session", session] if session else ["--title", title or self.pod.task_id]
         quoted = " ".join(_quote(a) for a in [*args, prompt])
         p = self.pod.exec("bash", "-c", f"{WITH_PASSWORD} {quoted}", check=False)

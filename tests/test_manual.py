@@ -239,7 +239,7 @@ def test_a_task_on_another_providers_model_gets_that_providers_key(env):
     without the key it needed."""
     cfg = env / "config" / "config.toml"
     cfg.write_text(cfg.read_text().replace('model = "m"', 'model = "deepseek/deepseek-v4-flash"'))
-    t = actions.create("demo", "Fix login", models={"writer": "anthropic/claude-sonnet-5"})
+    t = actions.create("demo", "Fix login", roles={"writer": ("opencode", "anthropic/claude-sonnet-5")})
     assert actions.provider_keys(load_config(), t) == ["deepseek", "anthropic"]
     assert actions.provider_keys(load_config()) == ["deepseek"]
 

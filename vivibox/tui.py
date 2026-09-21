@@ -19,7 +19,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.suggester import Suggester, SuggestFromList
+from textual.suggester import Suggester
 from textual.widgets import (
     Button,
     Checkbox,
@@ -544,42 +544,40 @@ class ChooseRole(ModalScreen[str]):
         self.dismiss("")
 
 
-class ChooseModel(ModalScreen[str | None]):
-    """A model for one role. None leaves it alone, "" gives the role back to config.toml."""
+class ChooseModel(ModalScreen["actions.Choice | None"]):
+    """What one role runs on, from what you can run: planning yourself, or a model of a provider
+    you have a key for. None leaves it alone; config.toml's own choice gives the role back to it."""
 
-    BACK = "Use the one in config.toml"
-
-    def __init__(self, role: str, configured: str, offered: list[str]):
+    def __init__(self, role: str, offered: list, configured, current):
         super().__init__()
-        self.role, self.configured = role, configured
-        self.offered = [m for m in offered if m != configured]
+        self.role, self.offered, self.configured, self.current = role, offered, configured, current
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(f"Run {self.role} on:")
-            yield OptionList(f"{self.BACK}  ({self.configured})", *self.offered, id="models")
-            yield Input(placeholder="or a model id: provider/model", id="other")
+            labels = [
+                actions.choice_label(c, self.configured) + ("  ← now" if c == self.current else "")
+                for c in self.offered
+            ]
+            yield OptionList(*labels, id="models")
 
     def on_mount(self) -> None:
         self.query_one(OptionList).focus()
 
     @on(OptionList.OptionSelected)
     def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss("" if event.option_index == 0 else self.offered[event.option_index - 1])
-
-    @on(Input.Submitted)
-    def typed(self, event: Input.Submitted) -> None:
-        if text := event.value.strip():
-            self.dismiss(text)
+        self.dismiss(self.offered[event.option_index])
 
     def key_escape(self) -> None:
         self.dismiss(None)
 
 
 class NewTask(Dialog):
-    def __init__(self, preselect: str = ""):
+    def __init__(self, preselect: str = "", available: dict[str, list[str]] | None = None):
         super().__init__()
         self.preselect = preselect
+        # The models of the providers you have keys for; None while the view is still asking.
+        self.available = available
 
     def compose(self) -> ComposeResult:
         names = projects()
@@ -604,19 +602,15 @@ class NewTask(Dialog):
             yield suggestions
             yield Checkbox("Accept the agent's plan without stopping (--auto)", id="auto")
             yield Checkbox("Only create it, to write the plan myself (--draft)", id="draft")
-            # Each role on config.toml's model unless you type another; m changes it later.
+            # Each role on config.toml's choice unless you pick another; m changes it later.
             config = load_config()
             for name in sorted(config.roles):
-                role = config.roles[name]
+                offered = actions.choices(name, config, self.available)
+                configured = actions.configured_choice(config, name)
                 with Horizontal(classes="role"):
                     yield Label(name.capitalize(), classes="role-name")
-                    if role.harness == manual.NAME:
-                        yield Label(
-                            f"you, in your own chat ({role.model})" if role.model else "you, in your own chat"
-                        )
-                        continue
-                    offered = actions.models_offered(config, role.harness)
-                    yield Input(role.model, suggester=SuggestFromList(offered), id=f"model-{name}")
+                    options = [(actions.choice_label(c, configured), c) for c in offered]
+                    yield Select(options, value=configured, allow_blank=False, id=f"role-{name}")
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
                 yield Button("Set up another project…", id="project-setup")
@@ -634,8 +628,8 @@ class NewTask(Dialog):
                 "kind": self.query_one("#kind", Select).value,
                 "auto": self.query_one("#auto", Checkbox).value,
                 "draft": self.query_one("#draft", Checkbox).value,
-                "models": {
-                    i.id.removeprefix("model-"): i.value for i in self.query(".role Input").results(Input)
+                "roles": {
+                    s.id.removeprefix("role-"): s.value for s in self.query(".role Select").results(Select)
                 },
             }
         )
@@ -729,7 +723,7 @@ class Vivibox(App):
     .role { height: auto; }
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
-    .role > Input { width: 1fr; }
+    .role > Select { width: 1fr; }
     Confirm, Reply, NewTask, NewProject, CommitWork, ChooseEditor { align: center middle; }
     """
     BINDINGS = [
@@ -768,6 +762,9 @@ class Vivibox(App):
         self.frame = 0
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
         self.running: set[str] = set()
+        # The models of the providers you have keys for: asked once, in the background, and kept
+        # for a day, so a dialog never waits on a container.
+        self.available: dict[str, list[str]] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -791,6 +788,15 @@ class Vivibox(App):
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)
+        self.load_models()
+
+    @work(thread=True)
+    def load_models(self) -> None:
+        """A container per provider the first time in a day; a file read after that."""
+        try:
+            self.available = actions.available_models()
+        except Exception:  # the dialogs fall back to the models config.toml names
+            self.available = None
 
     def check_projects(self) -> None:
         """A project whose repository is gone is offered for removal; then, if none is left, set one up."""
@@ -1310,13 +1316,12 @@ class Vivibox(App):
         task = pick[0]
         try:
             config = load_config()
-            chosen = task.read_state().models
+            st = task.read_state()
             rows = [
-                (name, actions.role_of(task, name, config).model, name in chosen)
+                (name, actions.choice_label(self.current_choice(task, name, config)),
+                 name in st.models or name in st.harnesses)
                 for name in sorted(config.roles)
-                # A manual role is you in your own chat: there is no model of vivibox's to change.
-                if config.roles[name].harness != manual.NAME
-            ]
+            ]  # fmt: skip
         except (ConfigError, OSError) as e:
             self.fail(e)
             return
@@ -1324,21 +1329,29 @@ class Vivibox(App):
         def role_picked(role: str) -> None:
             if not role:
                 return
+            offered = actions.choices(role, config, self.available)
+            configured = actions.configured_choice(config, role)
             self.push_screen(
-                ChooseModel(
-                    role, config.roles[role].model, actions.models_offered(config, config.roles[role].harness)
-                ),
-                lambda model: self.set_model(task, role, model),
+                ChooseModel(role, offered, configured, self.current_choice(task, role, config)),
+                lambda choice: self.set_choice(task, role, choice, config),
             )
 
         self.push_screen(ChooseRole(rows), role_picked)
 
-    def set_model(self, task: Task, role: str, model: str | None) -> None:
-        if model is None:
+    @staticmethod
+    def current_choice(task: Task, role: str, config) -> actions.Choice:
+        r = actions.role_of(task, role, config)
+        return r.harness, r.model if r.harness != manual.NAME else ""
+
+    def set_choice(self, task: Task, role: str, choice: actions.Choice | None, config) -> None:
+        if choice is None:
             return
-        task.set_model(role, model)
-        where = model or f"{load_config().roles[role].model} (from config.toml)"
-        self.notify(f"{role} runs on {where} from the next start.", timeout=6)
+        harness, model = choice
+        if choice == actions.configured_choice(config, role):
+            task.set_role(role)  # back to config.toml, and following it when it changes
+        else:
+            task.set_role(role, harness if harness != config.roles[role].harness else "", model)
+        self.notify(f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6)
         self.reload()
 
     def action_watch(self) -> None:
@@ -1399,7 +1412,7 @@ class Vivibox(App):
             self.notify(f"Creating a task in {form['project']}…")
             self.create(form)
 
-        self.push_screen(NewTask(preselect), create)
+        self.push_screen(NewTask(preselect, self.available), create)
 
     def action_new_project(self) -> None:
         self.new_project()
@@ -1429,7 +1442,7 @@ class Vivibox(App):
     def create(self, form: dict) -> None:
         try:
             task = actions.create(
-                form["project"], form["goal"], auto=form["auto"], kind=form["kind"], models=form.get("models")
+                form["project"], form["goal"], auto=form["auto"], kind=form["kind"], roles=form.get("roles")
             )
             self.call_from_thread(self.reload)
             if form["draft"]:

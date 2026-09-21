@@ -1541,3 +1541,80 @@ def test_a_double_click_picks(env, tmp_path, monkeypatch):
 
     run(scenario)
     assert picked == [home / "work"]
+
+
+def test_the_panel_shows_times_on_your_clock(env, monkeypatch):
+    import time
+
+    task = new_task()
+    at_plan_checkpoint(task)
+    gate.accept_plan(task, load_project("demo").verify)
+    st = task.transition(State.IMPLEMENT)
+    task.event("gate", passed=False)
+    stamp = task.events()[-1]["ts"]
+    monkeypatch.setenv("TZ", "Etc/GMT-5")
+    time.tzset()
+    try:
+        assert f"Gate failed at {ui.clock(stamp)}." in detail(task, st, 3)
+        assert ui.clock(stamp) != stamp[11:19], "five hours from UTC"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_a_task_never_started_does_not_claim_it_was_interrupted(env):
+    task = new_task()
+    shown = detail(task, task.read_state(), 3, running=False)
+    assert "Not started yet" in shown and "`s` starts it" in shown
+    assert "goes on from where it was" not in shown
+    task.event("started", model="m")
+    assert "goes on from where it was" in detail(task, task.read_state(), 3, running=False)
+
+
+def test_only_a_destructive_question_has_a_red_button(env, monkeypatch):
+    task = new_task()
+    at_plan_checkpoint(task)
+    task.transition(State.IMPLEMENT)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("s")
+        assert app.screen.query_one("#yes").variant == "error", "stopping interrupts work"
+        await pilot.press("escape")
+        app.push_screen(tui.Confirm("Accept the work?", "Accept"))
+        await pilot.pause()
+        assert app.screen.query_one("#yes").variant == "primary", "accepting is not a warning"
+
+    run(scenario)
+
+
+def test_an_empty_reply_stays_open_and_says_so(env):
+    task = new_task()
+    at_plan_checkpoint(task)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("r")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Reply), "nothing was sent, so nothing closed"
+        assert any("Write a comment" in str(n.message) for n in app._notifications)
+        assert task.read_state().state is State.CHECKPOINT_PLAN
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, tui.Reply), "Escape still leaves"
+
+    run(scenario)
+
+
+def test_running_the_app_is_called_that(env):
+    labels = {b.action: b.description for b in Vivibox.BINDINGS}
+    assert labels["demo"] == "Run app" and labels["demo_stop"] == "Stop app"
+
+
+def test_a_deleted_task_in_the_history_reads_as_words():
+    entry = {"id": "demo-1", "project": "demo", "title": "Try it", "cost": 0.1, "planning": 0.0,
+             "finished": now(), "deleted": "implement"}  # fmt: skip
+    shown = finished_detail(entry)
+    assert "Deleted while implementing;" in shown and "Deleted at" not in shown

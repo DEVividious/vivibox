@@ -109,3 +109,36 @@ def test_a_log_excerpt_keeps_what_went_wrong():
     assert ui.log_excerpt("a\nb\nc", limit=2) == "b\nc", "no trouble lines: the end of the log"
     many = "\n".join(f"[ERROR] {i}" for i in range(50))
     assert "20 more such lines" in ui.log_excerpt(many, limit=30)
+
+
+def test_times_are_on_your_clock_not_in_utc(monkeypatch):
+    import time
+
+    monkeypatch.setenv("TZ", "Etc/GMT-5")  # five hours ahead of UTC, whatever the season
+    time.tzset()
+    try:
+        assert ui.clock("2026-01-01T10:00:00.000+00:00") == "15:00:00"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_a_blocked_task_says_why_and_never_sends_you_back_to_status(tmp_path):
+    task = create_task(tmp_path, "demo", "Migrate the scheduler", TEMPLATE)
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
+        task.transition(s)
+    feedback = task.meta / "handoff" / "verify-feedback.md"
+    feedback.write_text("# Verification failed\n")
+    shown = ui.task_detail(task, lambda t: "0/1", 3, 5, plain)
+    assert f"vivibox status {task.id}" not in shown, "that is the command you just ran"
+    assert f'vivibox reply {task.id} "…"' in shown
+    assert f"Why   {feedback}" in shown
+    question = task.meta / "handoff" / "question.md"
+    question.write_text("Which scheduler?\n")
+    assert f"Why   {question}" in ui.task_detail(task, lambda t: "0/1", 3, 5, plain)
+
+
+def test_a_deleted_task_says_what_it_was_doing_in_words():
+    assert ui.when_deleted("implement") == "while implementing"
+    assert ui.when_deleted("checkpoint:final") == "while it waited for you to review the work"
+    assert ui.when_deleted("something older") == ""

@@ -8,6 +8,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .states import State
 from .task import Task, TaskState
@@ -43,6 +44,12 @@ def shorten(text: str, limit: int) -> str:
     cut = text[: max(limit - 1, 0)]
     word, _, _ = cut.rpartition(" ")
     return (word if len(word) >= limit // 2 else cut).rstrip() + "…"
+
+
+def clock(ts: str) -> str:
+    """An event's time of day on your clock. Events are kept in UTC, and a time cut out of one is
+    hours away from the clock on your screen."""
+    return datetime.fromisoformat(ts).astimezone().strftime("%H:%M:%S")
 
 
 def ago(ts: str, now: datetime | None = None) -> str:
@@ -104,10 +111,30 @@ def cost(task: Task) -> Spend:
 WAITING = {
     State.CHECKPOINT_PLAN: ("review the plan", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
     State.CHECKPOINT_FINAL: ("review the work", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
-    State.CHECKPOINT_BLOCKED: ("needs your help", ["vivibox status {id}", 'vivibox reply {id} "…"']),
+    State.CHECKPOINT_BLOCKED: ("needs your help", ['vivibox reply {id} "…"', "vivibox attach {id}"]),
     State.APPROVAL_RISKY: ("approve risky files", ["vivibox risky {id}"]),
 }
 WORKING = {State.PLAN: "planning", State.IMPLEMENT: "implementing", State.VERIFY: "verifying"}
+
+
+def when_deleted(state: str) -> str:
+    """What a deleted task was doing, in the list's own words; "" for a state no longer known."""
+    try:
+        was = State(state)
+    except ValueError:
+        return ""
+    if was in WORKING:
+        return f"while {WORKING[was]}"
+    if was is State.CHECKPOINT_BLOCKED:
+        return "while it needed your help"
+    return f"while it waited for you to {WAITING[was][0]}" if was in WAITING else ""
+
+
+def why_blocked(task: Task) -> Path | None:
+    """The file that says why a blocked task needs you: the agent's question, or what the last
+    verification found."""
+    handoff = task.meta / "handoff"
+    return next((p for p in (handoff / "question.md", handoff / "verify-feedback.md") if p.exists()), None)
 
 
 def group(st: TaskState) -> str:
@@ -195,13 +222,17 @@ def task_detail(task: Task, criteria, max_iterations: int, events: int, style: S
         st.goal,
         "",
         f"{style('Plan', 'bold')}  {task.plan_path}",
+    ]
+    if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task)):
+        lines.append(f"{style('Why', 'bold')}   {why}")
+    lines += [
         f"{style('Next', 'bold')}  " + "   ".join(next_commands(st)),
         "",
         style("Recent events", "bold"),
     ]
     cols = width()
     for e in task.events()[-events:]:
-        when = datetime.fromisoformat(e["ts"]).astimezone().strftime("%H:%M:%S")
+        when = clock(e["ts"])
         data = "  ".join(f"{k}={v}" for k, v in e["data"].items() if v not in ("", None))
         kind = style(e["type"].ljust(8), "red" if e["type"] == "error" else "cyan")
         lines.append(f"  {style(when, 'dim')}  {kind}  {shorten(data, cols - 22)}")

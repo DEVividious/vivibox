@@ -161,7 +161,7 @@ def last_gate(task: Task) -> str:
     for event in reversed(task.events()):
         if event["type"] == "gate":
             outcome = "passed" if event["data"].get("passed") else "failed"
-            return f"Gate {outcome} at {event['ts'][11:19]}."
+            return f"Gate {outcome} at {ui.clock(event['ts'])}."
     return "The gate has not run yet."
 
 
@@ -190,6 +190,7 @@ def read(path) -> str:
 
 def deleted_detail(entry: dict) -> str:
     """A task you deleted: what it was for and how far it got; nothing of it is left."""
+    when = ui.when_deleted(entry["deleted"])
     return "\n".join(
         [
             f"### {entry['id']} · deleted",
@@ -198,7 +199,7 @@ def deleted_detail(entry: dict) -> str:
             "",
             entry["title"],
             "",
-            f"Deleted at {entry['deleted']}; its files and its work went with it.",
+            f"Deleted{f' {when}' if when else ''}; its files and its work went with it.",
             "",
             "Press `x` to delete it from the history, `h` to hide finished tasks.",
         ]
@@ -256,10 +257,11 @@ def detail(
         head += [*shown, ""]
     handoff = task.meta / "handoff"
     if not running and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
-        head += [
-            "**The agent is not working on this task.** Press `s`; it goes on from where it was.",
-            "",
-        ]
+        if any(e["type"] == "started" for e in task.events()):
+            said = "**The agent is not working on this task.** Press `s`; it goes on from where it was."
+        else:
+            said = "**Not started yet.** `e` opens the plan to write it yourself; `s` starts it."
+        head += [said, ""]
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         body = [
             "**Plan this task in your own chat.** `c` copies the prompt for a chat in your browser,",
@@ -333,7 +335,7 @@ def detail(
     else:
         events = task.events()[-8:]
         body = ["**Recent events**", ""] + [
-            f"- `{e['ts'][11:19]}` {e['type']} "
+            f"- `{ui.clock(e['ts'])}` {e['type']} "
             + " ".join(
                 f"{k}={v}" for k, v in e["data"].items() if k in ("current", "reason", "passed", "cost")
             )
@@ -370,15 +372,18 @@ class Dialog(ModalScreen):
 
 
 class Confirm(Dialog):
-    def __init__(self, question: str, yes: str = "Yes"):
+    """A yes or no. Red is for a yes that destroys or interrupts something; agreeing to go on is not
+    a warning."""
+
+    def __init__(self, question: str, yes: str = "Yes", destructive: bool = False):
         super().__init__()
-        self.question, self.yes = question, yes
+        self.question, self.yes, self.destructive = question, yes, destructive
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.question)
             with Horizontal(classes="buttons"):
-                yield Button(self.yes, variant="error", id="yes")
+                yield Button(self.yes, variant="error" if self.destructive else "primary", id="yes")
                 yield Button("Cancel", id="no")
 
     @on(Button.Pressed)
@@ -420,6 +425,9 @@ class DeleteTask(Dialog):
         self.dismiss(False)
 
 
+NOTHING_TO_SEND = "Write a comment first, or leave with Cancel."
+
+
 class Reply(Dialog):
     def __init__(self, task_id: str, prompt: str = ""):
         super().__init__()
@@ -434,15 +442,27 @@ class Reply(Dialog):
                 yield Button("Send", variant="primary", id="send")
                 yield Button("Cancel", id="cancel")
 
+    def send(self) -> None:
+        """An empty comment is not sent, and the dialog says so. Closing as if it had been sent
+        left you waiting for an agent nobody had told anything."""
+        text = self.query_one(TextArea).text
+        if text.strip():
+            self.dismiss(text)
+        else:
+            self.notify(NOTHING_TO_SEND, severity="warning")
+
     def key_ctrl_s(self) -> None:
-        self.dismiss(self.query_one(TextArea).text)
+        self.send()
 
     def key_escape(self) -> None:
         self.dismiss("")
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(self.query_one(TextArea).text if event.button.id == "send" else "")
+        if event.button.id == "send":
+            self.send()
+        else:
+            self.dismiss("")
 
 
 class ReplyWithCriteria(Dialog):
@@ -471,15 +491,25 @@ class ReplyWithCriteria(Dialog):
             "criteria": [c for c in lines if c.strip()],
         }
 
+    def send(self) -> None:
+        answer = self.answer()
+        if answer["comment"].strip() or answer["criteria"]:
+            self.dismiss(answer)
+        else:
+            self.notify(NOTHING_TO_SEND, severity="warning")
+
     def key_ctrl_s(self) -> None:
-        self.dismiss(self.answer())
+        self.send()
 
     def key_escape(self) -> None:
         self.dismiss({})
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(self.answer() if event.button.id == "send" else {})
+        if event.button.id == "send":
+            self.send()
+        else:
+            self.dismiss({})
 
 
 MENTION_AT_CURSOR = re.compile(r"(?:^|\s)@(\S*)$")
@@ -1221,7 +1251,10 @@ class ManageItems(Dialog):
                     self.dismiss([name])
 
             self.app.push_screen(
-                Confirm(f"Remove the {what} {name} and its secrets from vivibox?", "Remove"), answered
+                Confirm(
+                    f"Remove the {what} {name} and its secrets from vivibox?", "Remove", destructive=True
+                ),
+                answered,
             )
         else:
             self.dismiss([])
@@ -1594,8 +1627,8 @@ class Vivibox(App):
         Binding("p", "approve_risky", "Approve risky"),
         Binding("w", "watch", "Watch agent"),
         Binding("m", "models", "Model"),
-        Binding("v", "demo", "Run it"),
-        Binding("v", "demo_stop", "Stop it"),
+        Binding("v", "demo", "Run app"),
+        Binding("v", "demo_stop", "Stop app"),
         # One key, two meanings: the footer shows the one that applies to the selected task.
         Binding("s", "start_task", "Start"),
         Binding("s", "stop_task", "Stop"),
@@ -1740,7 +1773,7 @@ class Vivibox(App):
                     self.fail(e)
             self.reload()
 
-        self.push_screen(Confirm(question, "Forget"), answered)
+        self.push_screen(Confirm(question, "Forget", destructive=True), answered)
 
     # --- data ---
 
@@ -2353,7 +2386,7 @@ class Vivibox(App):
     def action_stop_task(self) -> None:
         task, _ = self.selected()
         self.push_screen(
-            Confirm(f"Stop {task.id}? Its work is kept; start it again with s.", "Stop"),
+            Confirm(f"Stop {task.id}? Its work is kept; start it again with s.", "Stop", destructive=True),
             lambda yes: yes and self.stop(task.id),
         )
 

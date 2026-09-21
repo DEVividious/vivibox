@@ -326,7 +326,7 @@ class Supervisor:
             self.task.transition(target, reason="verification failed")
         elif target is State.CHECKPOINT_BLOCKED:
             self.task.transition(target, reason="verification still failing")
-            self.notify(self.task.id, f"verification still failing after {st.iteration} iterations")
+            self.notify(self.task.id, f"verification still failing after {st.iteration} attempts")
         elif target is State.APPROVAL_RISKY:
             self.task.transition(target, reason="verification passed", then=str(State.CHECKPOINT_FINAL))
             self.notify(

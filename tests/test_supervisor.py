@@ -137,6 +137,7 @@ def test_failed_gate_sends_feedback_then_blocks_after_limit(task):
     assert harness.prompts[-1] == supervisor.FEEDBACK_PROMPT
     sup.step()  # verify: fails again at the limit
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    assert notes[-1] == "verification still failing after 2 attempts", "attempts, as the list calls them"
 
 
 def test_your_reply_to_a_blocked_task_gives_the_agent_a_whole_new_budget(task):

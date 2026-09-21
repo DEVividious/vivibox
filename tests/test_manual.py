@@ -1,9 +1,11 @@
+from importlib.resources import files
+
 import pytest
 
 from vivibox import actions, gate, manual, supervisor, ui
 from vivibox.config import load_project
 from vivibox.opencode import HarnessError, Turn
-from vivibox.plan import PlanError
+from vivibox.plan import PlanError, parse_plan
 from vivibox.states import State
 from vivibox.task import create_task
 
@@ -165,3 +167,66 @@ def test_the_command_line_takes_the_answer_a_cli_wrote(manual_env, capsys, monke
     actions.answer_path(manual_env).write_text(PLAN)
     assert main(["plan", "import", manual_env.id]) == 0
     assert f"vivibox accept {manual_env.id}" in capsys.readouterr().out
+
+
+# How Claude Code printed the plan of the first real run, and how it was copied from the terminal:
+# indented, headings without their '#', and the header described in a line of prose.
+TERMINAL = """  Summary: Add a Reset view button to the 3D preview
+
+  Context
+  - The camera starts at (90, -120, 90).
+
+  Approach
+  1. Extract the orbit maths into orbit.js.
+
+     No DOM.
+
+  Acceptance criteria
+  - [ ] after rotate then reset, the camera is back at (90, -120, 90)
+  - [ ] clicking the button calls resetView once
+
+  Out of scope
+  - Zoom
+
+  Header: kind feature, mode code-only, verify = ["npm ci && npm test"]. Plain npm test fails here.
+"""
+
+
+def test_a_plan_copied_from_a_terminal_is_read_with_the_tasks_own_header(task):
+    """The chat decides the summary, the sections and the criteria; kind, mode and the rest were
+    decided when the task was made. Asking a chat to reproduce a TOML header got it back as prose."""
+    real = (files("vivibox") / "templates" / "plan.md").read_text()
+    task.plan_path.write_text(real.replace("{{kind}}", "bug").replace("{{goal}}", "Add health endpoint"))
+    task.set_awaiting_plan(True)
+    (task.meta / manual.ANSWER).write_text(TERMINAL)
+    assert manual.import_answer(task) == "Add a Reset view button to the 3D preview"
+    plan = parse_plan(task.plan_path.read_text())
+    assert plan.kind == "bug", "the header is the task's, not rebuilt from defaults"
+    assert plan.verify == ["npm ci && npm test"]
+    assert [c.text for c in plan.criteria] == [
+        "after rotate then reset, the camera is back at (90, -120, 90)",
+        "clicking the button calls resetView once",
+    ]
+    text = task.plan_path.read_text()
+    # The goal you gave, which the chat left out, and headings where the template has them.
+    assert "# Goal\n\nAdd health endpoint" in text and "## Approach" in text and "Header:" not in text
+
+
+def test_a_verify_line_is_taken_as_the_command(task):
+    task.set_awaiting_plan(True)
+    (task.meta / manual.ANSWER).write_text(
+        "Summary: x\nVerify: `npm test`\n\n## Acceptance criteria\n\n- [ ] it works\n"
+    )
+    manual.import_answer(task)
+    assert parse_plan(task.plan_path.read_text()).verify == ["npm test"]
+
+
+def test_the_chat_is_asked_for_a_command_only_when_the_project_has_none(task, tmp_path):
+    """A planning chat asked where red.md goes and which command to use: vivibox decides both,
+    and the prompt says so rather than leaving the chat to guess or ask."""
+    web, cli = manual.prompts(task, tmp_path)
+    assert "Verify:" in web and "Verify:" in cli
+    web, _ = manual.prompts(task, tmp_path, ["npm ci", "npm test"])
+    assert "Verify:" not in web and "`npm ci && npm test`" in web and "red.md" in web
+    assert "+++" not in web, "the header is vivibox's; the chat is not asked for it"
+    assert web.index("# What is in the repository") < web.index("# When the plan is final"), "asked last"

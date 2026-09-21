@@ -255,7 +255,7 @@ class Supervisor:
         known = context.exists() or manual.repository_is_empty(self.task.repo)
         if not known and self._turn(st, manual.RECON_PROMPT, self.harness) is None:
             return
-        manual.write_prompts(self.task, self.source or self.task.repo)
+        manual.write_prompts(self.task, self.source or self.task.repo, self.project_verify)
         self.task.set_awaiting_plan(True)
         self._checkpoint(
             State.CHECKPOINT_PLAN,

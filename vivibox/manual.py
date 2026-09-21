@@ -18,11 +18,14 @@ you see when you open it is what you or your chat put there.
 
 from __future__ import annotations
 
+import json
 import re
+import textwrap
+import tomllib
 from pathlib import Path
 
 from .opencode import HarnessError, Turn
-from .plan import parse_plan, without_notes
+from .plan import HEADING, PlanError, _split_header, parse_plan, without_notes
 from .task import Task
 
 NAME = "manual"
@@ -38,16 +41,32 @@ parts the goal touches, with the code that matters quoted, each quote headed by 
 and brief; they will paste all of it into a chat. Do not change anything in the repository and do
 not plan the task. End your turn when context.md is written."""
 
-FORMAT = """When I say the plan is final, {deliver}
-Keep the header between the +++ lines, set summary to one sentence of at most 100 characters naming
-what the task does, and if verify is empty, set it to the command that builds and tests the project
-once the plan is carried out, e.g. verify = ["npm test"]. List concrete, checkable items under
-"## Acceptance criteria" as "- [ ]" lines. The comments in the template are guidance for you; drop
-them."""
+# The chat decides what the plan says; the header is vivibox's bookkeeping, and it already has it.
+# Asking a chat to reproduce a TOML header after an hour of discussion got it back as a line of
+# prose, so the chat is asked only for what it decides, and asked last, where it is still read.
+FORMAT = """When I say the plan is final, {deliver} It starts with a line
+"Summary: <one sentence of at most 100 characters naming what the task does>"{verify}, then the
+sections of the plan above as markdown headings, with each acceptance criterion as a "- [ ]" line
+that can be checked. Keep the first criterion as it is. The comments in the plan are guidance for
+you; leave them out."""
+# What a planning chat asked about in the first real run, and cannot know: vivibox decides these.
+DECIDED = """Already decided, not for the plan: the agent keeps red.md and its checklist of criteria in
+its own handoff folder, and the task's kind and mode are set. The gate builds and tests the project
+with {verify}."""
+VERIFY_LINE = (
+    ', then a line "Verify: <the command that builds and tests the project once the plan is'
+    ' carried out>", e.g. Verify: npm test'
+)
 # Four backticks: a plan quotes code in blocks of three, which would end a block of three early.
 WHOLE_PLAN = "answer with the whole plan in one code block fenced with ````markdown, nothing else in it."
 
-PLAN_BLOCK = re.compile(r"^(```+|~~~+)[^\n]*\n(\+\+\+\n.*?)^\1\s*$", re.MULTILINE | re.DOTALL)
+PLAN_BLOCK = re.compile(r"^(```+|~~~+)[^\n]*\n(.*?)^\1\s*$", re.MULTILINE | re.DOTALL)
+SUMMARY = re.compile(r"^summary\s*:\s*(.+)$", re.IGNORECASE)
+VERIFY = re.compile(r"^verify\s*[:=]\s*(.+)$", re.IGNORECASE)
+VERIFY_LIST = re.compile(r"verify\s*=\s*(\[[^\]]*\])", re.IGNORECASE)
+# A chat that describes the header in prose ("Header: kind feature, verify = [...]"): vivibox keeps
+# its own header, and takes only the verify command from the line.
+HEADER_PROSE = re.compile(r"^header\s*:", re.IGNORECASE)
 
 
 class Manual:
@@ -67,8 +86,9 @@ def repository_is_empty(repo: Path) -> bool:
 
 
 def _plan_template(task: Task, context_dir: str) -> str:
-    """The task's plan as the agent would get it, with its files named where you can find them."""
-    return task.plan_path.read_text().replace("/task/context/", f"{context_dir}/")
+    """The task's plan as the agent would get it, without the header, which is vivibox's, and with
+    its files named where you can find them."""
+    return _body(task.plan_path.read_text()).strip().replace("/task/context/", f"{context_dir}/")
 
 
 def _attachments(task: Task) -> list[Path]:
@@ -76,71 +96,155 @@ def _attachments(task: Task) -> list[Path]:
     return sorted(folder.iterdir()) if folder.is_dir() else []
 
 
-def prompts(task: Task, source: Path) -> tuple[str, str]:
+def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) -> tuple[str, str]:
     """The prompt for a browser chat and the one for a CLI in your checkout at source."""
     context = task.meta / "handoff" / CONTEXT
     found = context.read_text().strip() if context.exists() else ""
     attached = _attachments(task)
-    files = "".join(f"- {p}\n" for p in attached)
+    # A new project has no command yet, so the chat is asked for one; otherwise the project's stands.
+    verify = "" if project_verify else VERIFY_LINE
 
     web = [
         "Plan a software task with me. You cannot see the repository; what an agent found in it is",
         "below. Ask me what you need, discuss the approach, and do not write code.",
         "",
-        FORMAT.format(deliver=WHOLE_PLAN),
-        "",
     ]
     if attached:
-        web += ["I will attach these files the goal refers to:", files]
+        web += ["I will attach these files the goal refers to:", *(f"- {p}" for p in attached), ""]
     web += ["# The plan to fill in", "", _plan_template(task, "(attached)"), ""]
     web += ["# What is in the repository", "", found or "Nothing: this is a new project.", ""]
+    decided = DECIDED.format(
+        verify=f"`{' && '.join(project_verify)}`" if project_verify else "the command the plan names"
+    )
+    web += ["# When the plan is final", "", decided, "", FORMAT.format(deliver=WHOLE_PLAN, verify=verify), ""]
 
+    answer = task.meta / ANSWER
     cli = [
         f"Plan a software task with me. The repository is {source}; read it, and do not change",
         "anything in it or anywhere else except the one file named below. Ask me what you need,",
         "discuss the approach, and do not write code.",
         "",
-        FORMAT.format(deliver=f"write the whole plan to {task.meta / ANSWER} and nothing else there."),
-        "",
         "# The plan to fill in",
         "",
         _plan_template(task, str(task.meta / "context")),
+        "",
+        "# When the plan is final",
+        "",
+        decided,
+        "",
+        FORMAT.format(
+            deliver=f"write the whole plan to {answer} with your file tool, not to the screen.",
+            verify=verify,
+        ),
         "",
     ]
     return "\n".join(web), "\n".join(cli)
 
 
-def write_prompts(task: Task, source: Path) -> None:
-    web, cli = prompts(task, source)
+def write_prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) -> None:
+    web, cli = prompts(task, source, project_verify)
     (task.meta / PROMPT).write_text(web)
     (task.meta / PROMPT_CLI).write_text(cli)
 
 
 def extract(answer: str) -> str:
-    """The plan in what you pasted: the code block holding it, or the whole text when it starts
-    with the header. A chat puts words around the block, and you will paste those too."""
+    """The plan in what you pasted: the code block holding it, or the whole text. A chat puts words
+    around the block, and you will paste those too; a terminal indents what it prints."""
     text = answer.replace("\r\n", "\n")
-    if text.lstrip().startswith("+++"):
-        return text.strip() + "\n"
-    blocks = PLAN_BLOCK.findall(text)
+    blocks = [b for _, b in PLAN_BLOCK.findall(text) if "- [" in b]
     if blocks:
-        return blocks[-1][1].strip() + "\n"
-    return text.strip() + "\n"
+        text = blocks[-1]
+    return textwrap.dedent(text).strip() + "\n"
+
+
+def _body(plan_text: str) -> str:
+    try:
+        return _split_header(plan_text)[1]
+    except PlanError:
+        return plan_text
+
+
+def _plain(line: str) -> str:
+    """A line without the emphasis and heading marks a chat or a terminal adds or drops."""
+    return re.sub(r"[*_#]", "", line).strip().rstrip(":").strip()
+
+
+def _verify(value: str) -> list[str]:
+    value = value.strip().strip("`")
+    if value.startswith("["):
+        try:
+            found = tomllib.loads(f"v = {value}")["v"]
+        except tomllib.TOMLDecodeError:
+            return []
+        return [c for c in found if isinstance(c, str) and c.strip()]
+    return [value] if value else []
+
+
+def _set(header: str, key: str, value) -> str:
+    """One key of the TOML header, replaced where it is or added when the header lacks it."""
+    line = f"{key} = {json.dumps(value, ensure_ascii=False)}"
+    pattern = re.compile(rf"^{key}\s*=.*$", re.MULTILINE)
+    return pattern.sub(line, header, count=1) if pattern.search(header) else f"{header.rstrip()}\n{line}"
+
+
+def assemble(task: Task, answer: str) -> str:
+    """Your chat's plan with the task's own header: the chat gives the summary, the sections and
+    the criteria; kind, mode and the rest were decided when the task was made. A plan that brings
+    its own header is taken as it is."""
+    text = extract(answer)
+    if text.startswith("+++"):
+        return text
+    template = task.plan_path.read_text()
+    header, template_body = _split_header(template)
+    # The sections the task's template has, recognised with or without their '#'.
+    sections = {
+        _plain(m.group(1)).casefold(): m.group(0).strip()
+        for line in template_body.splitlines()
+        if (m := HEADING.match(line))
+    }
+    summary, verify, lines = "", [], []
+    for line in text.splitlines():
+        plain = _plain(line)
+        if not summary and (m := SUMMARY.match(plain)):
+            summary = m.group(1).strip().strip("`")
+        elif m := VERIFY.match(plain):
+            verify = _verify(m.group(1))
+        elif HEADER_PROSE.match(plain):
+            if m := VERIFY_LIST.search(line):
+                verify = _verify(m.group(1))
+        elif not line.startswith(("#", " ", "\t", "-")) and plain.casefold() in sections:
+            lines.append(sections[plain.casefold()])
+        else:
+            lines.append(line)
+    body = "\n".join(lines).strip()
+    # A chat tends to leave out the goal you gave it; the writer should still read it.
+    kept = re.search(r"^# Goal\s*$.*?(?=^#|\Z)", template_body, re.MULTILINE | re.DOTALL)
+    if kept and not re.search(r"^# Goal\s*$", body, re.MULTILINE):
+        body = f"{kept.group(0).strip()}\n\n{body}"
+    if summary:
+        header = _set(header, "summary", summary)
+    if verify:
+        header = _set(header, "verify", verify)
+    return f"+++\n{header.strip()}\n+++\n\n{body}\n"
 
 
 def repair_prompt(error: str) -> str:
     """For the same chat, when its answer does not read as a plan."""
     return (
         f"vivibox could not read that plan: {error}. Answer again with the whole plan in one "
-        'code block fenced with ````markdown: the header between +++ lines first, then the "## Acceptance '
-        'criteria" section with "- [ ]" items. Nothing else in the block.'
+        'code block fenced with ````markdown: a "Summary: ..." line first, then the sections as '
+        'markdown headings, with the acceptance criteria as "- [ ]" lines under "## Acceptance '
+        'criteria". Nothing else in the block.'
     )
 
 
 def import_answer(task: Task) -> str:
     """Makes your answer the task's plan. Returns its summary; PlanError says what is wrong."""
-    plan_text = without_notes(extract((task.meta / ANSWER).read_text()))
+    plan_text = without_notes(assemble(task, (task.meta / ANSWER).read_text()))
     plan = parse_plan(plan_text)
+    if not plan.criteria:
+        # With the header vivibox's own, this is what tells a plan from the chat asking a question.
+        raise PlanError('no "- [ ]" acceptance criteria under an "Acceptance criteria" heading')
     task.plan_path.write_text(plan_text)
     if plan.summary:
         task.set_goal(plan.summary)

@@ -254,16 +254,23 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
 
     fresh = tmp_path / "clicker"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui, "browse_start", lambda: tmp_path)
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
 
     async def scenario(app, pilot):
         await pilot.press("P")  # a project of its own, from anywhere in the view
         await pilot.pause()
-        assert str(app.screen.query_one("#path", Input).value) == str(tmp_path)
-        app.screen.query_one("#path", Input).value = str(fresh)
+        assert app.screen.where == tmp_path, "where you started vivibox, until you browse elsewhere"
+        app.screen.query_one("#browse").press()
         await pilot.pause()
+        assert isinstance(app.screen, tui.Browse)
+        app.screen.query_one("#new-folder").press()  # a project from scratch: no folder yet
+        await pilot.pause()
+        await pilot.press(*"clicker", "enter")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.NewProject) and app.screen.where == fresh and fresh.is_dir()
         assert app.screen.query_one("#name", Input).value == "clicker"
-        await pilot.click("#create")
+        app.screen.query_one("#create").press()
         await pilot.pause()
         assert app.screen.query_one("#goal"), "its first task follows right away"
         kind = app.screen.query_one("#kind")
@@ -1068,13 +1075,17 @@ def test_a_file_is_judged_before_you_pick_it(env, tmp_path):
     assert not ok and said.startswith("broken: not JSON")
 
 
-def test_the_browser_shows_folders_and_json_only(tmp_path):
+def test_the_browser_shows_only_what_can_be_picked(tmp_path):
     for name in ("a.json", "b.jsonc", "notes.txt", "img.png"):
         (tmp_path / name).write_text("{}")
     for name in ("src", ".config", "node_modules", ".git"):
         (tmp_path / name).mkdir()
-    shown = {p.name for p in tui.JsonTree.filter_paths(None, list(tmp_path.iterdir()))}
-    assert shown == {"a.json", "b.jsonc", "src", ".config"}
+    shown = {
+        mode: {p.name for p in tmp_path.iterdir() if tui.shows(mode, p)} for mode in ("json", "folder", "any")
+    }
+    assert shown["json"] == {"a.json", "b.jsonc", "src", ".config"}
+    assert shown["folder"] == {"src", ".config"}
+    assert shown["any"] == {"a.json", "b.jsonc", "notes.txt", "img.png", "src", ".config"}
 
 
 def test_browsing_picks_an_opencode_configuration_and_not_another_json(env, tmp_path, monkeypatch):
@@ -1087,14 +1098,14 @@ def test_browsing_picks_an_opencode_configuration_and_not_another_json(env, tmp_
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.BrowseFile(), picked.append)
+        app.push_screen(tui.Browse("json", "Find it"), picked.append)
         await pilot.pause()
         browser = app.screen
-        tree = browser.query_one("#tree", tui.JsonTree)
-        browser.picked(DirectoryTree.FileSelected(tree.root, other))
+        tree = browser.query_one("#tree", tui.PathTree)
+        browser.file_picked(DirectoryTree.FileSelected(tree.root, other))
         await pilot.pause()
         assert app.screen is browser, "not an opencode configuration: not picked"
-        browser.picked(DirectoryTree.FileSelected(tree.root, good))
+        browser.file_picked(DirectoryTree.FileSelected(tree.root, good))
         await pilot.pause()
 
     run(scenario)
@@ -1193,8 +1204,8 @@ def test_a_file_found_by_browsing_goes_on_to_the_import(env, tmp_path):
         await pilot.press("enter")  # Browse…
         await pilot.pause()
         browser = app.screen
-        assert isinstance(browser, tui.BrowseFile)
-        browser.post_message(DirectoryTree.FileSelected(browser.query_one("#tree", tui.JsonTree).root, good))
+        assert isinstance(browser, tui.Browse)
+        browser.post_message(DirectoryTree.FileSelected(browser.query_one("#tree", tui.PathTree).root, good))
         await pilot.pause()
         await pilot.pause()
 
@@ -1352,3 +1363,62 @@ def test_an_imported_serena_is_greyed_and_says_it_comes_with_vivibox(env, tmp_pa
     (found,) = providers.read_opencode(path, env={}).found
     label = tui.import_label(found)
     assert label.startswith("[dim]") and "comes with vivibox; set its mode in Manage" in label
+
+
+def test_a_folder_is_described_before_you_pick_it(env, tmp_path):
+    from vivibox.config import load_project
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    (loose / "notes.txt").write_text("x")
+    demo = load_project("demo").repo
+    assert tui.folder_verdict(empty) == (True, "an empty folder: a new project starts here")
+    assert tui.folder_verdict(loose) == (True, "a folder without git: a repository starts here")
+    assert tui.folder_verdict(demo) == (True, "already the project demo")
+
+
+def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypatch):
+    ticket = tmp_path / "ticket.md"
+    ticket.write_text("the ticket")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix it, see ")
+        dialog = app.screen
+        dialog.query_one("#attach").press()
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Browse) and app.screen.mode == "any"
+        app.screen.dismiss(ticket)
+        await pilot.pause()
+        assert dialog.query_one("#goal").text == f"Fix it, see @{ticket} "
+
+    run(scenario)
+
+
+def test_the_folder_browser_opens_with_right_and_picks_with_enter(env, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "work" / "shop").mkdir(parents=True)
+    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    picked = []
+
+    async def scenario(app, pilot):
+        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        await pilot.pause()
+        tree = app.screen.query_one("#tree", tui.PathTree)
+        await pilot.press("down")  # work
+        await pilot.pause()
+        assert tree.cursor_node.data.path == home / "work"
+        await pilot.press("right")  # open it
+        await pilot.pause()
+        await pilot.pause()
+        assert tree.cursor_node.is_expanded
+        await pilot.press("down", "enter")  # shop
+        await pilot.pause()
+
+    run(scenario)
+    assert picked == [home / "work" / "shop"]

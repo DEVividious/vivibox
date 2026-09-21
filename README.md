@@ -90,8 +90,8 @@ vivibox models anthropic
 
 Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable only by you.
 
-Once per repository you want agents to work on: press `n` in the view and pick
-*+ set up a project…*, or from a shell inside it:
+Once per repository you want agents to work on: press `i` in the view, and browse to its folder
+(or make a new one there, for a project from scratch), or from a shell inside it:
 
 ```bash
 cd ~/projects/myproject
@@ -143,7 +143,7 @@ The footer shows only the keys that do something for the selected task:
 |---|---|
 | `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` | show or hide the tasks you have accepted, listed below the live ones |
-| `i` | set up a project: a repository vivibox does not know yet, or an empty folder where one should start |
+| `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `k` | providers & MCP: add a provider from opencode's list with a key, import an opencode.json, or manage what is on and remove what is not wanted |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
@@ -155,9 +155,9 @@ The footer shows only the keys that do something for the selected task:
 | `w` | watch or talk to the agent; Ctrl-q brings you back (Esc there interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start or resume it |
-| `x` | remove a task without accepting it |
+| `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
 
-**Files as context.** Write `@~/tickets/PAY-123.md` (or `@/abs/path`, `@./relative`, a folder) in
+**Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write `@~/tickets/PAY-123.md` (or `@/abs/path`, `@./relative`, a folder) in
 the description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder
 opens its contents), relative to where you started `vivibox`. vivibox copies the file into the task; the agent reads the copy, read-only, under
 `/task/context/`, and never sees the rest of your disk. `@notes/x.md` without a leading `./` counts

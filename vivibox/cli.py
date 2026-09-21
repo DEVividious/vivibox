@@ -79,13 +79,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     style = ui.Style(ui.use_color())
     if args.task:
         task = find_task(config.tasks_dir, args.task)
-        print(ui.task_detail(task, _criteria, config.max_iterations, args.events, style), end="")
+        running = actions.supervisor_running(task)
+        print(ui.task_detail(task, _criteria, config.max_iterations, args.events, style, running), end="")
         return 0
     tasks = list_tasks(config.tasks_dir)
     if not tasks:
         print("No tasks. Create one with 'vivibox new <project> \"<goal>\"'.")
         return 0
-    print(ui.task_list(tasks, _criteria, config.max_iterations, style), end="")
+    shown = ui.task_list(tasks, _criteria, config.max_iterations, style, running=actions.supervisor_running)
+    print(shown, end="")
     return 0
 
 
@@ -123,6 +125,12 @@ def cmd_image_check(args: argparse.Namespace) -> int:
             print("      " + out.replace("\n", "\n      "))
     print(f"\n{ref}: {failed} failed" if failed else f"\n{ref}: all checks passed")
     return 1 if failed else 0
+
+
+def carry_on(task: Task) -> None:
+    """Your decision was "go on": with nobody working on the task, that means starting it."""
+    if model := actions.carry_on(task):
+        print(f"Started {task.id} ({model}): nobody was working on it.")
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -205,6 +213,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
     if st.state is State.CHECKPOINT_PLAN:
         actions.accept_plan(task, project)
         print(f"Plan accepted; {task.id} moves on to implementation.")
+        carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
         done = actions.finish(task, project, branch_only=args.branch)
         report_finished(done)
@@ -268,7 +277,8 @@ def cmd_reply(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
     target = actions.reply(task, args.comment, args.criterion)
     added = f", with {len(args.criterion)} new criteria" if args.criterion else ""
-    print(f"Sent to the agent{added}; {task.id} goes back to {target}.")
+    print(f"Sent to the agent{added}; {task.id} goes back to {ui.WORKING[target]}.")
+    carry_on(task)
     return 0
 
 
@@ -385,6 +395,7 @@ def cmd_approve_risky(args: argparse.Namespace) -> int:
     print(f"Approved {count} change(s) to risky files.")
     if review:
         print(f"Ready for your review in {review}")
+    carry_on(task)
     return 0
 
 

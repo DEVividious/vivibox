@@ -1,3 +1,5 @@
+import pytest
+
 from vivibox.cli import main
 
 
@@ -8,7 +10,7 @@ def test_new_and_status(env, capsys):
     assert main(["status"]) == 0
     out = capsys.readouterr().out
     # 0/2: the placeholder criterion, plus the standing one about seeing each test fail first.
-    assert "demo-1" in out and "plan" in out and "0/2" in out and "Add health endpoint" in out
+    assert "demo-1" in out and "not started" in out and "0/2" in out and "Add health endpoint" in out
 
     assert main(["status", "demo-1"]) == 0
     assert "created" in capsys.readouterr().out
@@ -340,9 +342,8 @@ def test_the_view_does_not_open_on_an_image_that_fails_its_checks(env, monkeypat
     assert "fails its checks (java); see: vivibox image check" in capsys.readouterr().err
 
 
+@pytest.mark.real_start
 def test_a_task_does_not_start_without_the_variables_its_project_passes(env, monkeypatch, tmp_path):
-    import pytest
-
     from vivibox import actions, image
     from vivibox.pod import Pod, PodError
 
@@ -355,3 +356,67 @@ def test_a_task_does_not_start_without_the_variables_its_project_passes(env, mon
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     with pytest.raises(PodError, match="REPO_TOKEN not set.*pass_env"):
         actions.start("demo-1")
+    # The reason stays with the task: a toast that is gone in ten seconds left the row saying
+    # "not started" with nothing to say why.
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+    from vivibox.tui import detail
+
+    task = find_task(load_config().tasks_dir, "demo-1")
+    shown = detail(task, task.read_state(), 3, running=False)
+    assert "could not start" in shown.lower() and "REPO_TOKEN not set" in shown
+    assert main(["status", "demo-1"]) == 0
+
+
+def test_a_decision_starts_a_task_nobody_is_working_on(env, capsys):
+    from vivibox import actions, gate
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    task.transition(State.CHECKPOINT_PLAN)
+    task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works"))
+    capsys.readouterr()
+    assert main(["accept", "demo-1"]) == 0
+    assert actions.started == ["demo-1"], "no supervisor was running, e.g. after a reboot"
+    out = capsys.readouterr().out
+    assert "Plan accepted" in out and "Started demo-1" in out
+
+
+def test_a_decision_leaves_a_running_task_to_its_supervisor(env, capsys, monkeypatch):
+    from vivibox import actions, gate
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    task.transition(State.CHECKPOINT_PLAN)
+    task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works"))
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    assert main(["accept", "demo-1"]) == 0
+    assert actions.started == []
+
+
+def test_status_calls_a_task_what_the_view_calls_it(env, capsys):
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    capsys.readouterr()
+    assert main(["status"]) == 0
+    assert "not started" in capsys.readouterr().out, "not 'planning': nobody is"
+    task = find_task(load_config().tasks_dir, "demo-1")
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    task.event("started", model="m")
+    task.set_paused(True, problem="agent turn failed: 429 Too Many Requests")
+    assert main(["status"]) == 0
+    assert "agent turn failed" in capsys.readouterr().out
+    assert main(["status", "demo-1"]) == 0
+    out = capsys.readouterr().out
+    assert "agent turn failed" in out and "429 Too Many Requests" in out
+    assert "vivibox resume demo-1" in out

@@ -178,24 +178,69 @@ COLORS = {"Waiting for you": "yellow", "Working": "cyan", "Stopped": "dim", "Don
 ORDER = list(COLORS)
 
 
-def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, now=None) -> str:
+@dataclass(frozen=True)
+class TaskView:
+    """What a task is doing and what it needs, worked out once: the list, the details panel and
+    the command line all show this, so they cannot call one task three different things."""
+
+    status: str
+    group: str
+    # Where it sorts: your decisions first, then what failed, then what is not running, then the rest.
+    rank: int
+    # The reason behind a status that says something went wrong, in the failing tool's words.
+    problem: str = ""
+    commands: tuple[str, ...] = ()
+
+
+WAITS, WORKS, STOPPED, DONE = ORDER
+# Within "Waiting for you": a decision of yours, something that failed, something nobody is running.
+DECISION, FAILED, IDLE, AT_WORK, PARKED, FINISHED = range(6)
+
+
+def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskView:
+    """running: whether the task's supervisor is alive. Whatever will not move without you waits
+    for you; "Stopped" is only what you stopped yourself."""
+    if st.state is State.DONE:
+        return TaskView("done", DONE, FINISHED, commands=(f"vivibox rm {st.id}",))
+    if st.state in WAITING:
+        status = activity(st, max_iterations)
+        if st.state is State.CHECKPOINT_BLOCKED:
+            asks = (task.meta / "handoff" / "question.md").exists()
+            status = "agent asks" if asks else f"verification failed {st.iteration}×"
+        return TaskView(status, WAITS, DECISION, commands=tuple(next_commands(st)))
+    if st.problem:
+        what, _, why = st.problem.partition(": ")
+        return TaskView(what, WAITS, FAILED, why, (f"vivibox resume {st.id}",))
+    if st.paused:
+        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox resume {st.id}",))
+    if not running:
+        if any(e["type"] == "started" for e in task.events()):
+            return TaskView("not running", WAITS, IDLE, commands=(f"vivibox resume {st.id}",))
+        return TaskView("not started", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
+    return TaskView(activity(st, max_iterations), WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
+
+
+def task_list(
+    tasks: list[Task], criteria, max_iterations: int, style: Style, now=None, running=lambda task: True
+) -> str:
     """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest."""
     states = [(task, task.read_state()) for task in tasks]
-    states.sort(key=lambda ts: ORDER.index(group(ts[1])))
+    seen = [(task, st, view(task, st, running(task), max_iterations)) for task, st in states]
+    seen.sort(key=lambda found: found[2].rank)
     header = ("TASK", "STATUS", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
     rows = []
-    for task, st in states:
+    for task, st, shown in seen:
         spent = cost(task)
         rows.append(
             (
                 st.id,
-                activity(st, max_iterations) if group(st) != "Stopped" else "stopped",
+                shown.status,
                 criteria(task),
                 str(spent) if spent else "-",
                 ago(st.created, now),
                 ago(st.updated, now),
                 st.goal,
-                COLORS[group(st)],
+                COLORS[shown.group],
             )
         )
     widths = [max(len(r[i]) for r in [header, *rows]) for i in range(6)]
@@ -209,14 +254,16 @@ def task_list(tasks: list[Task], criteria, max_iterations: int, style: Style, no
     return "\n".join(lines) + "\n"
 
 
-def task_detail(task: Task, criteria, max_iterations: int, events: int, style: Style) -> str:
+def task_detail(
+    task: Task, criteria, max_iterations: int, events: int, style: Style, running: bool = True
+) -> str:
     st = task.read_state()
-    name = group(st)
+    shown = view(task, st, running, max_iterations)
     meta = [f"{criteria(task)} criteria", ago(st.updated)]
     if spent := cost(task):
         meta.append(str(spent))
     lines = [
-        f"{style(st.id, 'bold')}  {style(activity(st, max_iterations), COLORS[name])}"
+        f"{style(st.id, 'bold')}  {style(shown.status, COLORS[shown.group])}"
         f"  {style(' · '.join(meta), 'dim')}",
         "",
         st.goal,
@@ -225,8 +272,10 @@ def task_detail(task: Task, criteria, max_iterations: int, events: int, style: S
     ]
     if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task)):
         lines.append(f"{style('Why', 'bold')}   {why}")
+    if shown.problem:
+        lines.append(f"{style('Why', 'bold')}   {style(shown.problem, 'red')}")
     lines += [
-        f"{style('Next', 'bold')}  " + "   ".join(next_commands(st)),
+        f"{style('Next', 'bold')}  " + "   ".join(shown.commands),
         "",
         style("Recent events", "bold"),
     ]

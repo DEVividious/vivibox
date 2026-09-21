@@ -27,7 +27,9 @@ AVAILABLE = {"deepseek": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pr
 def new_task(goal="Goal"):
     assert main(["new", "demo", goal, "--draft"]) == 0
     tasks = load_config().tasks_dir
-    return find_task(tasks, sorted(p.name for p in tasks.iterdir() if p.name.startswith("demo-"))[-1])
+    # By number: sorted by name, demo-10 comes before demo-9.
+    newest = max(int(p.name.removeprefix("demo-")) for p in tasks.iterdir() if p.name.startswith("demo-"))
+    return find_task(tasks, f"demo-{newest}")
 
 
 def at_plan_checkpoint(task):
@@ -45,15 +47,17 @@ def run(scenario, size=(140, 40)):
     asyncio.run(go())
 
 
-def test_lists_tasks_waiting_for_you_first(env):
-    new_task("Still planning")
+def test_lists_tasks_waiting_for_you_first(env, monkeypatch):
+    planning = new_task("Still planning")
+    planning.event("started", model="m")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id == planning.id)
     waiting = new_task("Waiting")
     at_plan_checkpoint(waiting)
 
     async def scenario(app, pilot):
         app.reload()
         assert app.selected_id() == waiting.id, "the task waiting for you is on top"
-        assert app.sub_title == "1 waiting for you"
+        assert app.sub_title == "1 waiting for you · 1 working"
         assert app.check_action("accept", ()) and app.check_action("reply", ())
         assert not app.check_action("open_ide", ()), "keys that do nothing here stay hidden"
         await pilot.press("down")
@@ -1618,3 +1622,94 @@ def test_a_deleted_task_in_the_history_reads_as_words():
              "finished": now(), "deleted": "implement"}  # fmt: skip
     shown = finished_detail(entry)
     assert "Deleted while implementing;" in shown and "Deleted at" not in shown
+
+
+def implementing(goal="Goal"):
+    task = new_task(goal)
+    at_plan_checkpoint(task)
+    gate.accept_plan(task, load_project("demo").verify)
+    task.transition(State.IMPLEMENT)
+    task.event("started", model="m")
+    return task
+
+
+def test_a_failed_task_looks_failed_and_s_starts_it_again(env, monkeypatch):
+    from ux import screen_text
+
+    stopped = implementing("Stopped by me")
+    stopped.set_paused(True)
+    failed = implementing("Rate limited")
+    failed.set_paused(True, problem="agent turn failed: 429 Too Many Requests")
+    # The supervisor outlives its own error, which is what used to put Stop in the footer.
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id == failed.id)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.selected_id() == failed.id, "it needs you, so it is on top"
+        assert app.sub_title == "1 waiting for you"
+        shown = screen_text(app)
+        assert "agent turn failed" in shown and "stopped" in shown, "two rows, two different words"
+        assert app.check_action("start_task", ()) and not app.check_action("stop_task", ())
+        await pilot.press("d")
+        await pilot.pause()
+        shown = screen_text(app)
+        assert "429 Too Many Requests" in shown and "Press s to try again" in shown
+        await pilot.press("s")
+        await app.workers.wait_for_complete()
+        assert actions.started == [failed.id]
+
+    run(scenario)
+
+
+def test_the_panel_calls_a_task_what_the_list_calls_it(env):
+    task = implementing()
+    task.set_paused(True)
+    assert detail(task, task.read_state(), 3, running=False).startswith(f"### {task.id} · stopped")
+    draft = new_task()
+    assert detail(draft, draft.read_state(), 3, running=False).startswith(f"### {draft.id} · not started")
+
+
+def test_accepting_a_plan_starts_a_task_nobody_is_working_on(env):
+    task = new_task()
+    at_plan_checkpoint(task)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert task.read_state().state is State.IMPLEMENT
+        assert actions.started == [task.id], "after a reboot no supervisor is left to carry on"
+
+    run(scenario)
+
+
+def test_a_reply_starts_a_task_nobody_is_working_on_and_leaves_a_running_one(env, monkeypatch):
+    dead, alive = new_task("Dead"), new_task("Alive")
+    for task in (dead, alive):
+        at_plan_checkpoint(task)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id == alive.id)
+
+    async def scenario(app, pilot):
+        app.reload()
+        for task in (dead, alive):
+            app.table.move_cursor(row=[st.id for _, st in app.pairs].index(task.id))
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.press(*"Again")
+            await pilot.press("ctrl+s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert actions.started == [dead.id]
+
+    run(scenario)
+
+
+def test_w_is_only_named_when_there_is_an_agent_to_watch(env):
+    task = implementing()
+    st = task.read_state()
+    assert "`w`" not in detail(task, st, 3, running=True), "no session yet: the footer has no w"
+    task.set_session("opencode", "ses_1")
+    assert "Look at the agent with `w`" in detail(task, task.read_state(), 3, running=True)
+    assert "`w`" not in detail(task, task.read_state(), 3, running=False)

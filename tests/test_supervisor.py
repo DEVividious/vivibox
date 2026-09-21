@@ -301,3 +301,34 @@ def test_a_session_that_could_not_be_made_leaves_the_turn_to_make_its_own(task):
     sup.step()
     assert task.read_state().sessions == {"opencode": "ses_1"}
     assert any(e["type"] == "session_not_started" for e in task.events())
+
+
+def test_a_failed_turn_leaves_its_reason_with_the_task(task):
+    class Broken(FakeHarness):
+        def turn(self, prompt, session="", title=""):
+            return Turn("", False, 0, 0, "", "429 Too Many Requests")
+
+    sup, _ = make(task, Broken(task))
+    sup.step()
+    assert task.read_state().problem == "agent turn failed: 429 Too Many Requests"
+    task.set_paused(False)
+    assert task.read_state().problem == "", "starting again is the end of it"
+
+
+def test_an_error_in_the_supervisor_leaves_its_reason_with_the_task(task):
+    class Explodes(FakeHarness):
+        def turn(self, prompt, session="", title=""):
+            raise RuntimeError("network vivibox-demo-1 not found")
+
+    class Enough(Exception):
+        pass
+
+    def leave(st):
+        raise Enough
+
+    sup, notes = make(task, Explodes(task))
+    with pytest.raises(Enough):
+        sup.run(poll=0, on_step=leave)
+    st = task.read_state()
+    assert st.paused and st.problem == "stopped on an error: network vivibox-demo-1 not found"
+    assert "network vivibox-demo-1 not found" in notes[-1]

@@ -697,7 +697,33 @@ def create(
 
 
 def start(task_id: str, resume: bool = False) -> str:
-    """Starts or resumes the task's pod, agent and supervisor. Returns the model."""
+    """Starts or resumes the task's pod, agent and supervisor. Returns the model. A start that
+    fails leaves its reason with the task: the message you get once is gone in seconds, and the row
+    would go on saying "not started" with nothing to say why."""
+    task, _ = load(task_id)
+    try:
+        return _start(task_id, resume)
+    except Exception as e:
+        task.set_problem(f"could not start: {e.args[0] if e.args else e}")
+        raise
+
+
+def needs_start(task: Task) -> bool:
+    """True when the task has work to do and nobody to do it: stopped, failed, or its supervisor
+    gone, as after a reboot."""
+    st = task.read_state()
+    working = st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY)
+    return working and (st.paused or not supervisor_running(task))
+
+
+def carry_on(task: Task) -> str:
+    """After a decision of yours: the task goes on, started here when nobody is working on it.
+    A decision means "go on", and saying the task moves on while nothing runs was a lie. Returns
+    the model when it had to be started, "" when its supervisor carries on by itself."""
+    return start(task.id, resume=True) if needs_start(task) else ""
+
+
+def _start(task_id: str, resume: bool = False) -> str:
     config = load_config()
     task, project = load(task_id)
     pod = task_pod(task.id)
@@ -733,6 +759,7 @@ def start(task_id: str, resume: bool = False) -> str:
         supervisor.set_next_prompt(task, supervisor.RESUME_PROMPT)
     if st.paused:
         task.set_paused(False)
+    task.set_problem("")  # whatever kept it from starting before did not this time
     start_supervisor(task)
     task.event("started", model=model)
     return model

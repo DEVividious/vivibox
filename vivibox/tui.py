@@ -239,12 +239,20 @@ def finished_detail(entry: dict) -> str:
     )
 
 
+def watchable(st: TaskState, running: bool) -> bool:
+    """Whether w has an agent to show: only opencode has a window to attach to, and only while
+    the task is at work. The footer and every hint that names w ask here."""
+    return running and not st.paused and bool(st.sessions.get(actions.opencode.NAME))
+
+
 def detail(
     task: Task, st: TaskState, max_iterations: int, running: bool = True, pod: PodView | None = None
 ) -> str:
     """What you need to decide on this task, as markdown."""
+    seen = ui.view(task, st, running, max_iterations)
+    watch = " Look at the agent with `w`." if watchable(st, running) else ""
     head = [
-        f"### {st.id} · {ui.activity(st, max_iterations)}",
+        f"### {st.id} · {seen.status}",
         "",
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
         f" · planning + implementation {ui.cost(task)}*",
@@ -256,12 +264,23 @@ def detail(
     if shown := (pod if pod is not None else pod_view(st.id)).lines():
         head += [*shown, ""]
     handoff = task.meta / "handoff"
-    if not running and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
-        if any(e["type"] == "started" for e in task.events()):
-            said = "**The agent is not working on this task.** Press `s`; it goes on from where it was."
-        else:
-            said = "**Not started yet.** `e` opens the plan to write it yourself; `s` starts it."
-        head += [said, ""]
+    if seen.problem:
+        # What happened, why in the failing tool's own words, what to do.
+        head += [
+            f"**{seen.status.capitalize()}.**",
+            "",
+            f"```\n{seen.problem}\n```",
+            "",
+            "Press `s` to try again; the task goes on from where it was.",
+            "",
+        ]
+    elif seen.status == "not started":
+        head += ["**Not started yet.** `e` opens the plan to write it yourself; `s` starts it.", ""]
+    elif seen.group != "Working" and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
+        head += [
+            "**The agent is not working on this task.** Press `s`; it goes on from where it was.",
+            "",
+        ]
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         body = [
             "**Plan this task in your own chat.** `c` copies the prompt for a chat in your browser,",
@@ -317,7 +336,7 @@ def detail(
                 read(handoff / "verify-feedback.md"),
                 "",
                 *build_said(handoff / "verify.log"),
-                "Help with `r`, or look at the agent with `w`.",
+                "Help with `r`." + watch,
             ]  # fmt: skip
         )
     elif items := checklist(task):
@@ -328,7 +347,7 @@ def detail(
             "",
             *items,
             "",
-            f"{last_gate(task)} Look at the agent with `w`.",
+            f"{last_gate(task)}{watch}",
         ]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
             body += ["", read(handoff / "verify-feedback.md"), "", *build_said(handoff / "verify.log")]
@@ -1655,6 +1674,7 @@ class Vivibox(App):
         self.frame = 0
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
         self.running: set[str] = set()
+        self.views: dict[str, ui.TaskView] = {}
         # The models of the providers you have keys for: asked once, in the background, and kept
         # for a day, so a dialog never waits on a container.
         self.available: dict[str, list[str]] | None = None
@@ -1787,6 +1807,7 @@ class Vivibox(App):
                 str(st.state),
                 st.iteration,
                 st.paused,
+                st.problem,
                 st.updated,
                 st.id in self.running,
                 # The agent ticks criteria while it works, and st.updated only moves between
@@ -1814,8 +1835,12 @@ class Vivibox(App):
         """Re-reads every task; the only place that does, so key checks stay cheap."""
         selected = self.selected_id()
         pairs = [(t, t.read_state()) for t in list_tasks(self.config.tasks_dir)]
-        self.pairs = pairs = sorted(pairs, key=lambda p: ui.ORDER.index(ui.group(p[1])))
         self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
+        # Worked out once per refresh; the list, the panel and the keys all read it from here.
+        self.views = {
+            st.id: ui.view(task, st, st.id in self.running, self.config.max_iterations) for task, st in pairs
+        }
+        self.pairs = pairs = sorted(pairs, key=lambda p: self.views[p[1].id].rank)
         live = {st.id for _, st in pairs}
         self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
         # A stat, not a read: whether h has any finished task to show.
@@ -1854,7 +1879,7 @@ class Vivibox(App):
         empty.update("" if ids else NO_TASKS if projects() else NO_PROJECTS)
         if selected in ids:
             table.move_cursor(row=ids.index(selected))
-        self.waiting = sum(st.state in WAITING_ONLY for _, st in pairs)
+        self.waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in pairs)
         self.working = sum(self.busy(st) for _, st in pairs)
         self.set_sub_title()
         self.show_detail()
@@ -1886,14 +1911,20 @@ class Vivibox(App):
 
     def busy(self, st: TaskState) -> bool:
         """The agent or the gate is at work and nothing is needed from you, or the demo is starting."""
-        return (ui.group(st) == "Working" and self.agent_running(st.id)) or st.id in self.starting
+        return self.seen(st).group == "Working" or st.id in self.starting
+
+    def seen(self, st: TaskState) -> ui.TaskView:
+        """The task as the last refresh saw it; worked out now for one that refresh has not met."""
+        found = self.views.get(st.id)
+        if found is None:
+            task = next(t for t, s in self.pairs if s.id == st.id)
+            found = ui.view(task, st, self.agent_running(st.id), self.config.max_iterations)
+        return found
 
     def status(self, st: TaskState) -> str:
-        group = ui.group(st)
-        color = {"yellow": "yellow", "cyan": "cyan", "dim": "grey50", "green": "green"}[ui.COLORS[group]]
-        text = "stopped" if group == "Stopped" else ui.activity(st, self.config.max_iterations)
-        if group == "Working" and not self.agent_running(st.id):
-            text = "not started" if st.state is State.PLAN else "not running"  # s starts it
+        seen = self.seen(st)
+        color = {"yellow": "yellow", "cyan": "cyan", "dim": "grey50", "green": "green"}[ui.COLORS[seen.group]]
+        text = seen.status
         if doing := self.starting.get(st.id):
             color, text = "cyan", doing
         mark = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else " "
@@ -1997,6 +2028,7 @@ class Vivibox(App):
             # A finished task is history: you can only look at it or forget it.
             return action == "remove" and self.finished_entry(self.selected_id()) is not None
         state, running = pick[1].state, self.agent_running(pick[1].id)
+        at_work = running and not pick[1].paused
         allowed = {
             # A manual planner's checkpoint before your plan is in has nothing to accept, and a
             # reply would reach nobody: the planner is your own chat.
@@ -2009,10 +2041,11 @@ class Vivibox(App):
             "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "approve_risky": state is State.APPROVAL_RISKY,
-            "watch": running and bool(pick[1].sessions),
-            # Not again while one of them is under way.
-            "start_task": state is not State.DONE and not running and pick[1].id not in self.starting,
-            "stop_task": state is not State.DONE and running and pick[1].id not in self.starting,
+            "watch": watchable(pick[1], running),
+            # Not again while one of them is under way. A task that stopped on a failure still has
+            # its supervisor, and what it needs is a start, not a stop followed by a start.
+            "start_task": state is not State.DONE and not at_work and pick[1].id not in self.starting,
+            "stop_task": state is not State.DONE and at_work and pick[1].id not in self.starting,
             "remove": True,
             # Worth looking at once there is something to look at. Running it again while it
             # runs is a restart, which is what you want after the agent has changed something.
@@ -2034,9 +2067,10 @@ class Vivibox(App):
         if st.state is State.CHECKPOINT_PLAN:
             try:
                 actions.accept_plan(task, actions.load(task.id)[1])
-                self.notify(f"Plan accepted; {task.id} moves on to implementation.")
             except Exception as e:
                 self.fail(e)
+            else:
+                self.go_on(task, "Plan accepted")
             self.reload()
         else:
             self.push_screen(
@@ -2080,17 +2114,30 @@ class Vivibox(App):
             if not comment.strip() and not criteria:
                 return
             try:
-                target = actions.reply(task, comment, criteria)
-                added = f" with {len(criteria)} new criteria" if criteria else ""
-                self.notify(f"Sent{added}; {task.id} goes back to {target}.")
+                actions.reply(task, comment, criteria)
             except Exception as e:
                 self.fail(e)
+            else:
+                added = f" with {len(criteria)} new criteria" if criteria else ""
+                self.go_on(task, f"Sent{added}")
             self.reload()
 
         if st.state in (State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED):
             self.push_screen(ReplyWithCriteria(task.id), lambda a: a and send(a["comment"], a["criteria"]))
         else:
             self.push_screen(Reply(task.id), send)
+
+    def go_on(self, task: Task, done: str = "") -> None:
+        """After a decision of yours the task goes on. With nobody working on it (after a reboot,
+        or once you stopped it) that takes a start, and saying "moves on" without one was a lie."""
+        st = task.read_state()
+        starts = actions.needs_start(task)
+        if done and starts:
+            self.notify(f"{done}; starting {task.id}, nobody was working on it.")
+        elif done:
+            self.notify(f"{done}; {task.id} is {ui.WORKING.get(st.state, 'waiting for you')} now.")
+        if starts:
+            self.start(task.id, resume=True)
 
     def planned_by_you(self, task: Task) -> bool:
         return (task.meta / manual.PROMPT).exists()
@@ -2211,6 +2258,8 @@ class Vivibox(App):
                 )
             except Exception as e:
                 self.fail(e)
+            else:
+                self.go_on(task)
             self.reload()
 
         self.push_screen(Confirm(f"Approve the risky files of {task.id} as shown?", "Approve"), approve)
@@ -2493,7 +2542,7 @@ class Vivibox(App):
         task, st = self.selected()
         running = self.agent_running(task.id)
         met = criteria(task)
-        about_task = [ui.activity(st, self.config.max_iterations)]
+        about_task = [self.seen(st).status]
         about_task += [f"criteria {met}"] if met != "-" else []
         about_task.append(str(ui.cost(task)))
         dialog = DeleteTask(

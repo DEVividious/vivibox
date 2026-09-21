@@ -35,3 +35,17 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # opencode's configuration, never yours
     monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_real_start(request, monkeypatch):
+    """A decision now starts a task nobody is working on, and starting means Docker. Tests get a
+    stand-in that records the call in vivibox.actions.started; one marked real_start gets the real
+    thing."""
+    from vivibox import actions
+
+    if "real_start" in request.keywords:
+        return
+    started: list[str] = []
+    monkeypatch.setattr(actions, "started", started, raising=False)
+    monkeypatch.setattr(actions, "start", lambda task_id, resume=False: started.append(task_id) or "m")

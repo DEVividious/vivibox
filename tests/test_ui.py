@@ -142,3 +142,59 @@ def test_a_deleted_task_says_what_it_was_doing_in_words():
     assert ui.when_deleted("implement") == "while implementing"
     assert ui.when_deleted("checkpoint:final") == "while it waited for you to review the work"
     assert ui.when_deleted("something older") == ""
+
+
+def started(tmp_path, *states):
+    task = create_task(tmp_path, "demo", "Goal", TEMPLATE)
+    for s in states:
+        task.transition(s)
+    task.event("started", model="m")
+    return task
+
+
+def seen(task, running):
+    return ui.view(task, task.read_state(), running, 3)
+
+
+def test_a_task_that_will_not_move_without_you_waits_for_you(tmp_path):
+    draft = create_task(tmp_path, "demo", "Goal", TEMPLATE)
+    assert (seen(draft, False).status, seen(draft, False).group) == ("not started", "Waiting for you")
+    assert seen(draft, False).commands == (f"vivibox start {draft.id}",)
+
+    dead = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT)
+    assert (seen(dead, False).status, seen(dead, False).group) == ("not running", "Waiting for you")
+    assert (seen(dead, True).status, seen(dead, True).group) == ("implementing", "Working")
+
+    failed = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT)
+    failed.set_paused(True, problem="agent turn failed: 429 Too Many Requests")
+    for running in (True, False):  # the supervisor outlives its own error
+        v = seen(failed, running)
+        assert (v.status, v.group, v.problem) == (
+            "agent turn failed",
+            "Waiting for you",
+            "429 Too Many Requests",
+        )
+
+    yours = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT)
+    yours.set_paused(True)
+    assert (seen(yours, False).status, seen(yours, False).group) == ("stopped", "Stopped")
+
+
+def test_blocked_says_which_of_its_two_reasons(tmp_path):
+    task = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_BLOCKED)
+    assert seen(task, True).status == "verification failed 2×"
+    (task.meta / "handoff" / "question.md").write_text("Which scheduler?\n")
+    assert seen(task, True).status == "agent asks"
+
+
+def test_decisions_come_first_then_failures_then_the_rest(tmp_path):
+    working = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT)
+    failed = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT)
+    failed.set_paused(True, problem="could not start: REPO_TOKEN not set")
+    decision = started(tmp_path, State.CHECKPOINT_PLAN)
+    out = ui.task_list([working, failed, decision], lambda t: "0/1", 3, plain, running=lambda t: True)
+    rows = [line.split()[0] for line in out.splitlines()[1:]]
+    assert rows == [decision.id, failed.id, working.id]
+    assert "could not start" in out

@@ -184,7 +184,7 @@ class Supervisor:
             try:
                 progressed = self.step()
             except Exception as e:  # keep the task inspectable instead of dying silently
-                self.task.set_paused(True)
+                self.task.set_paused(True, problem=f"stopped on an error: {e}")
                 self.task.event("error", message=str(e)[:2000])
                 self.notify(self.task.id, f"stopped on an error, see 'vivibox status {self.task.id}': {e}")
                 progressed = False
@@ -220,7 +220,7 @@ class Supervisor:
             error=turn.error[:500],
         )
         if not turn.ok:
-            self.task.set_paused(True)
+            self.task.set_paused(True, problem=f"agent turn failed: {turn.error or turn.text}")
             self.notify(self.task.id, f"agent turn failed, task paused: {turn.error[:200]}")
             return None
         clear_next_prompt(self.task)

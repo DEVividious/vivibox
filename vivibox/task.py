@@ -14,6 +14,10 @@ from .states import State, check_transition
 TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
 
 
+# A reason is for reading in the view; the whole of a build's output belongs in its log.
+MAX_PROBLEM = 2000
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
@@ -42,6 +46,9 @@ class TaskState:
     auto_plan: bool = False
     # At the plan checkpoint with a manual planner: no plan yet, the task waits for one from you.
     awaiting_plan: bool = False
+    # Why the task is not moving, when that was not your doing: "<what happened>: <the reason in
+    # the failing tool's words>". Kept until the task starts again, so the view can go on saying it.
+    problem: str = ""
 
 
 class Task:
@@ -96,11 +103,23 @@ class Task:
             st.models.pop(role, None)
         self._write_state(st)
 
-    def set_paused(self, paused: bool) -> None:
+    def set_paused(self, paused: bool, problem: str = "") -> None:
+        """problem: why, when it was not you who stopped it. Starting again is the end of it."""
         st = self.read_state()
-        st.paused = paused
+        st.paused, st.problem = paused, problem[:MAX_PROBLEM] if paused else ""
         self._write_state(st)
-        self.event("paused" if paused else "resumed")
+        self.event("paused" if paused else "resumed", **({"problem": st.problem} if st.problem else {}))
+
+    def set_problem(self, problem: str) -> None:
+        """Why a task that is not paused is not moving either, such as one that could not start;
+        empty once it has."""
+        st = self.read_state()
+        if st.problem == problem[:MAX_PROBLEM]:
+            return
+        st.problem = problem[:MAX_PROBLEM]
+        self._write_state(st)
+        if problem:
+            self.event("error", message=st.problem)
 
     def set_auto_plan(self, auto: bool) -> None:
         st = self.read_state()

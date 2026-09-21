@@ -1,7 +1,7 @@
 # UX guidelines
 
 Read this before changing anything a person sees: `vivibox/tui.py`, `vivibox/ui.py`,
-`vivibox/cli.py`, notification texts, the README. The rules can be checked, and
+`vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.
 
@@ -23,7 +23,7 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | Thing | Word | Not |
 |---|---|---|
 | unit of work | task | job, run |
-| checks after implementation | verification | verify; "gate" only in code and the README's design notes |
+| checks after implementation | verification | verify; "gate" only in code and docs/security.md |
 | one round of implementing and verifying | attempt | iteration |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
 | removing a task | delete | rm, remove |

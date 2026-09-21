@@ -24,6 +24,10 @@ your user to run only the pod firewall helper through sudo. As you, without sudo
 from this checkout, editable, so it follows the checkout as you update it. When an update changes
 `pyproject.toml`, run `uv tool install --force --editable .` for the new dependencies.
 
+A running view keeps the code it started with, and so does every task's supervisor. After an
+update the view's title says *vivibox changed on disk: quit and start it again*, and the details of
+a task whose supervisor is older say so too; stop and start that task (`s`) when it suits you.
+
 Next: [configuring providers and projects](configure.md), then [a task](tasks.md).
 
 ---

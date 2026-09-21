@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,7 +40,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
-from . import actions, context, gate, ide, keys, manual, providers, supervisor, ui
+from . import actions, code, context, gate, ide, keys, manual, providers, supervisor, ui
 from .config import ConfigError, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -47,6 +48,10 @@ from .states import State
 from .task import Task, TaskState, list_tasks
 
 REFRESH_SECONDS = 2.0
+# How often the view looks whether vivibox changed on disk: a git pull, not a keystroke.
+CODE_CHECK_SECONDS = 10.0
+CODE_CHANGED = "vivibox changed on disk: quit and start it again"
+OLDER_SUPERVISOR = "runs an older vivibox; stop and start it (`s`) when it suits you"
 SPIN_SECONDS = 0.1
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 PROTECTED_BRANCHES = ("main", "master")
@@ -316,6 +321,8 @@ def detail(
         f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
         "",
     ]
+    if running and code.older_supervisor(task.meta):
+        head += [f"*This task's supervisor {OLDER_SUPERVISOR}.*", ""]
     said = [e for e in task.events() if e["type"] == "serena"]
     if said and (said[-1]["data"].get("on") or providers.serena_mode() == "auto"):
         head += [f"*Serena: {said[-1]['data']['why']}*", ""]
@@ -1732,6 +1739,10 @@ class Vivibox(App):
         self.table: DataTable = None  # type: ignore[assignment]  # set when the view mounts
         self.running: set[str] = set()
         self.views: dict[str, ui.TaskView] = {}
+        # The vivibox this view runs, against what is on disk: they part at git pull.
+        self.code_started = code.signature()
+        self.code_changed = False
+        self.code_checked = 0.0
         # The models of the providers you have keys for: asked once, in the background, and kept
         # for a day, so a dialog never waits on a container.
         self.available: dict[str, list[str]] | None = None
@@ -1833,6 +1844,18 @@ class Vivibox(App):
         except Exception:  # the dialog reads it itself, or you type the name
             self.catalog = None
 
+    def check_code(self) -> None:
+        """Whether vivibox on disk is still the one running. Said once, and kept in the title."""
+        if self.code_changed or time.monotonic() - self.code_checked < CODE_CHECK_SECONDS:
+            return
+        self.code_checked = time.monotonic()
+        with contextlib.suppress(AttributeError):  # a test may have replaced the cached function
+            code.signature.cache_clear()
+        if code.signature() != self.code_started:
+            self.code_changed = True
+            self.notify(CODE_CHANGED.capitalize() + ".", severity="warning", timeout=15)
+            self.drawn = ()  # the title and the panels' older-supervisor notes changed
+
     def check_projects(self) -> None:
         """A project whose repository is gone is offered for removal. With none left, the view says
         how to add one rather than open a dialog you did not ask for."""
@@ -1890,6 +1913,7 @@ class Vivibox(App):
 
     def reload(self) -> None:
         """Re-reads every task; the only place that does, so key checks stay cheap."""
+        self.check_code()
         selected = self.selected_id()
         pairs = [(t, t.read_state()) for t in list_tasks(self.config.tasks_dir)]
         self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
@@ -1959,6 +1983,8 @@ class Vivibox(App):
         parts = [f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you"]
         if self.working:
             parts.append(f"{self.working} working")
+        if self.code_changed:
+            parts.append(CODE_CHANGED)
         self.sub_title = " · ".join(parts)
 
     @property

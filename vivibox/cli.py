@@ -194,7 +194,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         session_started=agent_window,
         source=project.repo,
     )
-    (task.meta / actions.SUPERVISOR_PID).write_text(str(os.getpid()))
+    actions.supervising(task)
     print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
     agent_window(task.read_state())  # a resumed task already has its session
     sup.run(on_step=agent_window)

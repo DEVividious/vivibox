@@ -1799,3 +1799,39 @@ def test_l_is_offered_only_when_there_is_a_log(env):
         assert app.check_action("show_log", ())
 
     run(scenario)
+
+
+def test_the_view_says_when_vivibox_changed_on_disk(env, monkeypatch):
+    from vivibox import code
+
+    task = new_task()
+    now = ["v1"]
+    monkeypatch.setattr(code, "signature", lambda: now[0])
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert "changed on disk" not in app.sub_title
+        now[0] = "v2"
+        app.code_checked = 0.0  # the view looks every ten seconds; the test does not wait
+        app.reload()
+        await pilot.pause()
+        assert "vivibox changed on disk: quit and start it again" in app.sub_title
+        assert sum("changed on disk" in str(n.message) for n in app._notifications) == 1
+        app.reload()
+        assert sum("changed on disk" in str(n.message) for n in app._notifications) == 1, "said once"
+
+    run(scenario)
+    assert task.root.exists()
+
+
+def test_the_panel_says_when_a_supervisor_runs_older_code(env, monkeypatch):
+    from vivibox import code
+
+    task = implementing()
+    (task.meta / code.RECORD).write_text("v1\n")
+    monkeypatch.setattr(code, "signature", lambda: "v2")
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "runs an older vivibox" in shown and "`s`" in shown
+    assert "older vivibox" not in detail(task, task.read_state(), 3, running=False), "nothing runs"
+    monkeypatch.setattr(code, "signature", lambda: "v1")
+    assert "older vivibox" not in detail(task, task.read_state(), 3, running=True)

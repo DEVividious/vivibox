@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import (
     claudecode,
+    code,
     context,
     firstrun,
     gate,
@@ -763,6 +764,13 @@ def _start(task_id: str, resume: bool = False) -> str:
     start_supervisor(task)
     task.event("started", model=model)
     return model
+
+
+def supervising(task: Task) -> None:
+    """Called by the supervisor itself: its pid, and the vivibox it runs, so the view can tell
+    when an update on disk has left it behind."""
+    (task.meta / SUPERVISOR_PID).write_text(str(os.getpid()))
+    code.record(task.meta)
 
 
 def supervisor_running(task: Task) -> bool:

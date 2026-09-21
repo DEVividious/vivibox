@@ -452,3 +452,17 @@ def test_a_blocked_task_offers_verify_again_next(env, capsys):
     capsys.readouterr()
     assert main(["status", "demo-1"]) == 0
     assert "vivibox verify-again demo-1" in capsys.readouterr().out
+
+
+def test_a_supervisor_leaves_its_pid_and_its_code_with_the_task(env):
+    import os
+
+    from vivibox import actions, code
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    actions.supervising(task)
+    assert (task.meta / actions.SUPERVISOR_PID).read_text() == str(os.getpid())
+    assert (task.meta / code.RECORD).read_text().strip() == code.signature()

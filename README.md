@@ -15,8 +15,8 @@ checks, you review and accept. Everything else runs on its own.
 
 ## Install
 
-Ubuntu 24.04 with Docker Engine, and an API key for a model provider that
-[opencode](https://opencode.ai) supports.
+Linux with Docker Engine (tested on Ubuntu 24.04), and a model: an API key for any provider in
+[opencode](https://opencode.ai)'s list, or an `opencode.json` you already have.
 
 ```bash
 git clone https://github.com/DEVividious/vivibox.git && cd vivibox
@@ -25,6 +25,10 @@ vivibox            # builds the agent image, asks for a key and a model, opens t
 ```
 
 Details, and what `setup.sh` changes on your machine: [docs/install.md](docs/install.md).
+
+**Bring your own models.** Import an `opencode.json` and every provider, model and MCP server in
+it is set up for the agents: your employer's endpoint with its custom models, a local model, the
+MCP servers you already use. Keys go to vivibox's own key store, never into config files.
 
 ## A task
 

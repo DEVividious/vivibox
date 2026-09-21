@@ -1,7 +1,8 @@
 # Installing vivibox
 
-Ubuntu 24.04 (other recent Linux distributions should work) with Docker Engine, your user in the
-`docker` group, and an API key for a model provider that opencode supports.
+Linux with Docker Engine and your user in the `docker` group; tested on Ubuntu 24.04, and other
+recent distributions with a kernel Sysbox supports should work. A model: an API key for a provider
+from opencode's list, or an `opencode.json` with your own providers, which vivibox imports.
 
 ```bash
 git clone https://github.com/DEVividious/vivibox.git && cd vivibox

@@ -1,3 +1,5 @@
+import os
+import time
 from importlib.resources import files
 
 import pytest
@@ -252,3 +254,58 @@ def test_the_command_line_chooses_a_model_too(env, capsys):
     assert actions.load("demo-1")[0].read_state().models == {"writer": "deepseek/deepseek-v4-pro"}
     assert main(["new", "demo", "Fix login", "--draft", "--model", "writer"]) == 1
     assert "role=model" in capsys.readouterr().err and tasks.is_dir()
+
+
+def waiting_for_you(task, tmp_path):
+    """A task at its plan checkpoint, prompt written a minute ago."""
+    task.repo.mkdir(parents=True, exist_ok=True)
+    sup, notes = make(task, Writer(task), tmp_path)
+    sup.step()
+    past = time.time() - 60
+    os.utime(task.meta / manual.PROMPT, (past, past))
+    return sup, notes
+
+
+def answer(task, text, age):
+    path = task.meta / manual.ANSWER
+    path.write_text(text)
+    when = time.time() - age
+    os.utime(path, (when, when))
+
+
+def test_a_plan_a_cli_writes_moves_the_task_on_by_itself(task, tmp_path):
+    """The CLI writes the answer file, and nothing told vivibox: the view sat at "plan it
+    yourself" with the plan already there, until you happened to press e."""
+    sup, notes = waiting_for_you(task, tmp_path)
+    answer(task, PLAN, age=5)
+    assert not sup.step(), "still your turn: the plan is yours to accept"
+    st = task.read_state()
+    assert not st.awaiting_plan and st.goal == "Add a health endpoint"
+    assert notes[-1] == "your plan is in, 1 criteria; review and accept it"
+
+
+def test_an_answer_older_than_the_prompt_is_not_taken(task, tmp_path):
+    """One left from an earlier round must not stand in for the plan you are writing now."""
+    sup, notes = waiting_for_you(task, tmp_path)
+    answer(task, PLAN, age=120)
+    sup.step()
+    assert task.read_state().awaiting_plan and len(notes) == 1
+
+
+def test_a_file_still_being_written_is_left_alone(task, tmp_path):
+    sup, _ = waiting_for_you(task, tmp_path)
+    answer(task, PLAN, age=0)
+    sup.step()
+    assert task.read_state().awaiting_plan
+    answer(task, PLAN, age=5)
+    sup.step()
+    assert not task.read_state().awaiting_plan
+
+
+def test_an_answer_that_is_not_a_plan_is_reported_once(task, tmp_path):
+    sup, notes = waiting_for_you(task, tmp_path)
+    answer(task, "Let me look at the viewer first.", age=5)
+    sup.step()
+    sup.step()
+    assert task.read_state().awaiting_plan
+    assert sum("not readable yet" in n for n in notes) == 1

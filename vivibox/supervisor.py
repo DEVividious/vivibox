@@ -152,6 +152,8 @@ class Supervisor:
     planner: Harness | None = None
     # Your checkout, which a manual planner's CLI prompt points at instead of the task's clone.
     source: Path | None = None
+    # The answer file as last tried, so an answer that is not a plan is reported once, not every poll.
+    answer_seen: float = 0.0
 
     def harness_for(self, state: State) -> Harness:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -161,6 +163,9 @@ class Supervisor:
     def step(self) -> bool:
         """Does one unit of work. False when there is nothing to do until you act."""
         st = self.task.read_state()
+        if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
+            self._watch_answer()
+            return False
         if st.paused or st.state is State.DONE or waits_for_user(st.state):
             return False
         handlers = {State.PLAN: self._plan, State.IMPLEMENT: self._implement, State.VERIFY: self._verify}
@@ -262,6 +267,30 @@ class Supervisor:
             f"plan it in your own chat: vivibox plan prompt {self.task.id}, "
             f"then vivibox plan import {self.task.id}",
         )
+
+    def _watch_answer(self) -> None:
+        """A CLI you plan with writes its answer to the file itself, and nothing else would tell
+        vivibox it is there: you would press e only to find the plan waiting. Only an answer newer
+        than the prompt counts, so one left from an earlier round is not taken for the new one, and
+        only one that has stopped changing, so a file still being written is not read half-done."""
+        answer, prompt = self.task.meta / manual.ANSWER, self.task.meta / manual.PROMPT
+        try:
+            written, asked = answer.stat().st_mtime, prompt.stat().st_mtime
+        except OSError:
+            return
+        if written <= asked or written == self.answer_seen or time.time() - written < 1:
+            return
+        self.answer_seen = written
+        try:
+            manual.import_answer(self.task)
+        except (OSError, PlanError) as e:
+            self.task.event("plan_unreadable", error=str(e)[:500])
+            self.notify(
+                self.task.id, f"the plan in {answer.name} is not readable yet ({e}); press e to see it"
+            )
+            return
+        count = len(parse_plan(self.task.plan_path.read_text()).criteria)
+        self.notify(self.task.id, f"your plan is in, {count} criteria; review and accept it", kind="plan")
 
     def _implement(self, st: TaskState) -> None:
         if self._turn(st, next_prompt(self.task, IMPLEMENT_PROMPT)) is None:

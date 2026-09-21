@@ -254,3 +254,44 @@ def test_the_log_hides_the_values_of_passed_variables(task):
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     log = result.log.read_text()
     assert "s3cr3t-token" not in log and "token=*** 401" in log
+
+
+@pytest.mark.parametrize(
+    "path,text",
+    [
+        ("src/test/java/ShopIT.java", '@Disabled("needs Docker")'),
+        ("src/test/java/ShopTest.java", "    @Ignore"),
+        ("pom.xml", "<skipITs>true</skipITs>"),
+        (".mvn/maven.config", "-DskipITs"),
+        ("app.test.js", "it.skip('pays out', () => {"),
+        ("app.test.js", "describe.only('shop', () => {"),
+        ("test_shop.py", "@pytest.mark.skip(reason='flaky')"),
+        ("shop_test.go", '\tt.Skip("later")'),
+    ],
+)
+def test_a_switched_off_test_fails_the_gate(task, path, text):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    (task.repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (task.repo / path).write_text(f"{text}\n")
+    commit(task.repo, "Add a test")
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert not result.passed and result.switched_off == [f"{path}:1: {text.strip()}"]
+    gate.write_feedback(task, result)
+    feedback = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert "Test switched off" in feedback and "question.md" in feedback, "ask instead"
+
+
+@pytest.mark.parametrize(
+    "path,text",
+    [
+        ("README.md", "Run with -DskipITs to leave out the slow tests."),
+        ("pom.xml", "<skipITs>false</skipITs>"),
+        (".mvn/maven.config", "-DskipITs=false"),
+        ("src/Main.java", "boolean skipped = item.skip(1);"),
+    ],
+)
+def test_what_does_not_switch_a_test_off_passes(task, path, text):
+    (task.repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (task.repo / path).write_text(f"{text}\n")
+    assert gate.switched_off_tests(task.repo, task.read_state().base_commit) == []

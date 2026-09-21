@@ -6,8 +6,9 @@
 2. Every acceptance criterion of the plan you accepted is ticked in the agent's handoff/criteria.md.
    The criteria come from the accepted plan, so the agent cannot reword them.
 3. New commits follow the commit rules: one short line, no co-author or AI signature.
-   Added lines contain no invisible characters: zero-width, bidirectional controls ("Trojan Source")
-   or Unicode tag characters, which hide text from you in a diff but not from a model.
+   Added lines switch no test off (@Disabled, skipITs, it.skip and the like): one that does not run
+   checks nothing. They contain no invisible characters either: zero-width, bidirectional controls
+   ("Trojan Source") or Unicode tag characters, which hide text from you in a diff but not from a model.
 4. Risky files unchanged since your last approval; changes need approval, not another iteration.
 """
 
@@ -140,19 +141,26 @@ def _hidden_in(path: str, number: int, line: str) -> list[str]:
     return [f"{path}:{number} U+{ord(ch):04X}" for ch in dict.fromkeys(HIDDEN.findall(line))]
 
 
-def hidden_characters(repo_dir: Path, base: str) -> list[str]:
-    """Invisible characters in lines added since base, committed or not, and in new untracked files."""
+def added_lines(repo_dir: Path, base: str):
+    """(path, line number, text) of each line added since base, committed or not."""
     diff = repo.git("-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", base,
                     cwd=repo_dir).stdout  # fmt: skip
-    found, path, number = [], "", 0
+    path, number = "", 0
     for line in diff.splitlines():
         if line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else ""
         elif line.startswith("@@"):
             number = int(re.match(r"@@ -\S+ \+(\d+)", line).group(1))
         elif line.startswith("+") and path:
-            found += _hidden_in(path, number, line[1:])
+            yield path, number, line[1:]
             number += 1
+
+
+def hidden_characters(repo_dir: Path, base: str) -> list[str]:
+    """Invisible characters in lines added since base, committed or not, and in new untracked files."""
+    found = []
+    for path, number, text in added_lines(repo_dir, base):
+        found += _hidden_in(path, number, text)
     untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
     for rel in filter(None, untracked.split("\0")):
         try:
@@ -162,6 +170,28 @@ def hidden_characters(repo_dir: Path, base: str) -> list[str]:
         for number, line in enumerate(text.splitlines(), start=1):
             found += _hidden_in(rel, number, line)
     return found
+
+
+# Ways to switch a test off. An agent whose tests would not run once disabled them and reported
+# the task done; a test that does not run checks nothing, so the gate does not count it as passing.
+SWITCHED_OFF = re.compile(
+    r"@Disabled\b|@Ignore\b"  # JUnit
+    r"|<(skipTests|skipITs|maven\.test\.skip)>\s*true"  # Maven, in a pom
+    r"|-D(skipTests|skipITs|maven\.test\.skip)\b(?!=false)"  # Maven, on a command line or in .mvn/
+    r"|\b(it|test|describe|context)\.(skip|only)\s*\(|\bx(it|test|describe)\s*\("  # Jest, Mocha, Vitest
+    r"|@pytest\.mark\.skip\b|@unittest\.skip\b|\bpytest\.skip\s*\("  # Python
+    r"|\bt\.Skip(Now|f)?\s*\("  # Go
+)
+PROSE = (".md", ".txt", ".rst", ".adoc")
+
+
+def switched_off_tests(repo_dir: Path, base: str) -> list[str]:
+    """Added lines that switch a test off, as path:line: text."""
+    return [
+        f"{path}:{number}: {text.strip()[:120]}"
+        for path, number, text in added_lines(repo_dir, base)
+        if not path.endswith(PROSE) and SWITCHED_OFF.search(text)
+    ]
 
 
 @dataclass
@@ -178,6 +208,7 @@ class GateResult:
     missing_criteria: list[str] = field(default_factory=list)
     commit_problems: list[str] = field(default_factory=list)
     hidden_characters: list[str] = field(default_factory=list)
+    switched_off: list[str] = field(default_factory=list)
     uncommitted: list[str] = field(default_factory=list)
     risky: list[Change] = field(default_factory=list)
 
@@ -189,6 +220,7 @@ class GateResult:
             and not self.missing_criteria
             and not self.commit_problems
             and not self.hidden_characters
+            and not self.switched_off
             and not self.uncommitted
         )
 
@@ -199,6 +231,7 @@ class GateResult:
             "missing_criteria": len(self.missing_criteria),
             "commit_problems": len(self.commit_problems),
             "hidden_characters": len(self.hidden_characters),
+            "switched_off_tests": len(self.switched_off),
             "uncommitted": len(self.uncommitted),
             "risky_changes": [c.path for c in self.risky],
             "log": self.log.name,
@@ -247,6 +280,7 @@ def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], 
     result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
     result.commit_problems = commit_problems(task.repo, st.base_commit)
     result.hidden_characters = hidden_characters(task.repo, st.base_commit)
+    result.switched_off = switched_off_tests(task.repo, st.base_commit)
     result.uncommitted = uncommitted(task.repo)
     result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
     task.event("gate", iteration=st.iteration, **result.summary())
@@ -268,6 +302,13 @@ def feedback(result: GateResult) -> str:
     parts += [f"- Criterion not ticked: {c}" for c in result.missing_criteria]
     parts += [f"- Commit rule: {p}" for p in result.commit_problems]
     parts += [f"- Invisible character, remove it: {h}" for h in result.hidden_characters]
+    parts += [f"- Test switched off, switch it on again: {t}" for t in result.switched_off]
+    if result.switched_off:
+        parts.append(
+            "  A test that does not run checks nothing. If something outside the code keeps it from"
+            " running here (Docker, network, credentials, a service), write that to"
+            " /task/handoff/question.md with the error and end your turn."
+        )
     parts += [f"- Not committed (verification uses your commits only): {f}" for f in result.uncommitted]
     return "\n".join(parts) + "\n"
 

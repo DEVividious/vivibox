@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -205,3 +206,24 @@ def task_detail(task: Task, criteria, max_iterations: int, events: int, style: S
         kind = style(e["type"].ljust(8), "red" if e["type"] == "error" else "cyan")
         lines.append(f"  {style(when, 'dim')}  {kind}  {shorten(data, cols - 22)}")
     return "\n".join(lines) + "\n"
+
+
+# Lines of a build log that say what went wrong, in the usual tools' words.
+TROUBLE = re.compile(
+    r"\[ERROR\]|BUILD FAILURE|FAILED|FAILURE|Tests run:.*(Failures: [1-9]|Errors: [1-9])"
+    r"|Exception\b|\berror\b|Error:|permission denied|not found|\bfail(ed|s)?\b",
+    re.IGNORECASE,
+)
+
+
+def log_excerpt(text: str, limit: int = 30) -> str:
+    """What a failed build said, short enough to read in the view: its trouble lines, or its end
+    when none of them looks like trouble. The whole log is a file away."""
+    lines = [line.rstrip() for line in text.splitlines()]
+    trouble = list(dict.fromkeys(line for line in lines if TROUBLE.search(line)))
+    if not trouble:
+        return "\n".join(lines[-limit:]).strip()
+    shown = trouble[:limit]
+    if len(trouble) > limit:
+        shown.append(f"… {len(trouble) - limit} more such lines in the full log")
+    return "\n".join(shown)

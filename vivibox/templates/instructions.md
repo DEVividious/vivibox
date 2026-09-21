@@ -41,6 +41,11 @@ container. The user reviews your work at checkpoints; an orchestrator verifies i
   `mise use <tool>@<version>` writes a `mise.toml` the gate reads too. That file is a build file, so
   the plan has to call for it and the user approves it like any other.
 - Never add invisible Unicode characters (zero-width, bidirectional controls, tag characters).
+- Never skip or switch off a test to get the build through: no `@Disabled`, `skipITs`, `it.skip`,
+  excluded test classes or skipping flags, for your own tests or ones that were there. A test that
+  does not run checks nothing, and the gate fails a change that switches one off. If a test cannot
+  run here because of something outside the code (Docker, network, credentials, a service), write
+  that to `/task/handoff/question.md` with the error and end your turn; the user decides.
 - Docker, docker compose and Testcontainers work here; published ports appear on localhost.
 - When you end your turn, the orchestrator runs verification itself:
 {verify}

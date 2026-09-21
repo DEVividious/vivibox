@@ -361,6 +361,26 @@ def test_criteria_are_ticked_off_in_view_while_the_agent_works(env):
     assert "\u2611 it works" in detail(task, st, 3), "the agent reports it met"
 
 
+def test_a_failed_gate_shows_what_the_build_said(env):
+    task = new_task()
+    at_plan_checkpoint(task)
+    gate.accept_plan(task, load_project("demo").verify)
+    st = task.transition(State.IMPLEMENT)
+    handoff = task.meta / "handoff"
+    (handoff / "verify-feedback.md").write_text("# Verification failed\n- Command failed: `mvn -B verify`\n")
+    (handoff / "verify.log").write_text(
+        "[INFO] Scanning\n[ERROR] ShopIT: permission denied\n[INFO] BUILD FAILURE\n"
+    )
+    task.event("gate", passed=True)
+    assert "What the build said" not in detail(task, st, 3), "not after a gate that passed"
+    task.event("gate", passed=False)
+    shown = detail(task, st, 3)
+    assert "Command failed" in shown and "[ERROR] ShopIT: permission denied" in shown
+    assert f"Full log: `{handoff / 'verify.log'}`" in shown, "a path on your machine, not in the pod"
+    st = task.transition(State.CHECKPOINT_BLOCKED)
+    assert "[ERROR] ShopIT: permission denied" in detail(task, st, 3), "and when it keeps failing"
+
+
 def test_a_finished_task_shows_what_it_was_accepted_for():
     entry = {
         "id": "demo-1",

@@ -143,6 +143,19 @@ def pod_view(task_id: str) -> PodView:
     return pod_views([task_id])[task_id]
 
 
+def build_said(log: Path) -> list[str]:
+    """The lines of the last verification's log that say what failed, and where the rest is."""
+    text = read(log)
+    if not text:
+        return []
+    return ["#### What the build said", "", f"```\n{ui.log_excerpt(text)}\n```", "", f"Full log: `{log}`", ""]
+
+
+def gate_failed(task: Task) -> bool:
+    gates = [e for e in task.events() if e["type"] == "gate"]
+    return bool(gates) and not gates[-1]["data"].get("passed")
+
+
 def last_gate(task: Task) -> str:
     """How the last gate run went, so a checklist that has not moved still shows whether work has."""
     for event in reversed(task.events()):
@@ -301,6 +314,7 @@ def detail(
                 "",
                 read(handoff / "verify-feedback.md"),
                 "",
+                *build_said(handoff / "verify.log"),
                 "Help with `r`, or look at the agent with `w`.",
             ]  # fmt: skip
         )
@@ -314,6 +328,8 @@ def detail(
             "",
             f"{last_gate(task)} Look at the agent with `w`.",
         ]
+        if gate_failed(task):  # what the agent is fixing now, in the build's own words
+            body += ["", read(handoff / "verify-feedback.md"), "", *build_said(handoff / "verify.log")]
     else:
         events = task.events()[-8:]
         body = ["**Recent events**", ""] + [

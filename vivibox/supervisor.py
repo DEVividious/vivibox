@@ -40,7 +40,9 @@ move on: the user watches that file to follow your progress, and ticking everyth
 them looking at nothing for the whole turn. End your turn when everything is done."""
 
 FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md (full output in
-/task/handoff/verify.log), fix the problems, commit, and end your turn."""
+/task/handoff/verify.log), fix the problems, commit, and end your turn. Do not skip or switch off
+tests to get past it: if something outside the code keeps them from running (Docker, network,
+credentials, a service), write that to /task/handoff/question.md with the error and end your turn."""
 
 COMMENT_PROMPT = """The user commented on your work. Read the newest entry in /task/handoff/comments.md,
 act on it, and end your turn."""

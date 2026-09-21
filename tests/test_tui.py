@@ -927,11 +927,14 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
+        app.catalog = CATALOG
         await pilot.press("n")
         await pilot.pause()
         app.screen.query_one("#role-writer", Select).value = actions.ADD
         await pilot.pause()
-        app.screen.query_one("#provider", Input).value = "openai"
+        await pilot.press(*"open")  # the search field has the focus
+        await pilot.pause()
+        assert app.screen.picked() == "openai", "the first match, picked as you type"
         app.screen.query_one("#key", Input).value = "sk-openai"
         app.screen.query_one("#add").press()
         await pilot.pause()
@@ -972,5 +975,32 @@ def test_d_shows_with_a_task_and_h_with_a_finished_one(env):
         )
         app.reload()
         assert app.check_action("toggle_done", ())
+
+    run(scenario)
+
+
+CATALOG = [("anthropic", "Anthropic"), ("openai", "OpenAI"), ("deepseek", "DeepSeek"), ("azure", "Azure")]
+
+
+def test_providers_are_found_by_name_or_id_and_a_typed_name_is_offered_too():
+    assert [pid for pid, _ in tui.find_providers(CATALOG, "")] == ["anthropic", "openai", "deepseek", "azure"]
+    assert [pid for pid, _ in tui.find_providers(CATALOG, "SEEK")] == ["deepseek", "seek"]
+    assert [pid for pid, _ in tui.find_providers(CATALOG, "deepseek")] == ["deepseek"], (
+        "no second of the same"
+    )
+    assert tui.find_providers([], "acme") == [("acme", "use “acme” as the provider's name")]
+
+
+def test_arrows_in_the_search_walk_the_list(env):
+    async def scenario(app, pilot):
+        app.push_screen(tui.AddProvider(CATALOG))
+        await pilot.pause()
+        assert app.screen.picked() == "anthropic"
+        await pilot.press("down", "down")
+        assert app.screen.picked() == "deepseek"
+        await pilot.press("up")
+        assert app.screen.picked() == "openai"
+        await pilot.press("enter")
+        assert app.screen.focused is app.screen.query_one("#key"), "Enter goes on to the key"
 
     run(scenario)

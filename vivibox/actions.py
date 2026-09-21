@@ -180,6 +180,50 @@ def models_cache() -> Path:
     return Path(base) / "vivibox" / "models.json"
 
 
+# The providers most people come for, first; the rest follow by name.
+POPULAR = ("anthropic", "openai", "google", "deepseek", "openrouter", "mistral", "xai", "groq")
+
+
+def fetch_provider_catalog() -> list[tuple[str, str]]:
+    """Every provider opencode knows, as (id, name): opencode fetches the list from models.dev
+    when it first lists models, and keeps it where a throwaway container can print it."""
+    cmd = ["docker", "run", "--rm", "--tmpfs", f"/config:uid={os.getuid()},gid={os.getgid()}",
+           image.image_ref(), "sh", "-c",
+           "opencode models >/dev/null 2>&1; cat /config/.cache/opencode/models.json"]  # fmt: skip
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+    try:
+        data = json.loads(p.stdout)
+    except ValueError:
+        return []
+    found = [(pid, str(d.get("name") or pid)) for pid, d in data.items() if isinstance(d, dict)]
+    return sorted(
+        found,
+        key=lambda f: (f[0] not in POPULAR, POPULAR.index(f[0]) if f[0] in POPULAR else 0, f[1].casefold()),
+    )
+
+
+def provider_catalog(refresh: bool = False) -> list[tuple[str, str]]:
+    """The providers to pick from when adding one; kept for a day, and the last list kept when
+    opencode cannot reach models.dev. Empty when it never could: then you type the name."""
+    path = models_cache().with_name("providers.json")
+    try:
+        cached = json.loads(path.read_text())
+    except (OSError, ValueError):
+        cached = {}
+    if not refresh and cached.get("providers") and time.time() - cached.get("at", 0) < MODELS_CACHE_SECONDS:
+        return [tuple(p) for p in cached["providers"]]
+    try:
+        found = fetch_provider_catalog()
+    except (OSError, subprocess.SubprocessError):
+        found = []
+    if not found:
+        return [tuple(p) for p in cached.get("providers", [])]
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.time(), "providers": found}) + "\n")
+    return found
+
+
 def provider_models(provider: str) -> list[str]:
     """What opencode knows for a provider, asked in a throwaway container: a second or two."""
     env = ["-e", f"{provider.upper().replace('-', '_').replace('.', '_')}_API_KEY=placeholder"]

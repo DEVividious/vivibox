@@ -14,6 +14,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rich.markup import escape
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -34,6 +35,7 @@ from textual.widgets import (
     Static,
     TextArea,
 )
+from textual.widgets.option_list import Option
 
 from . import actions, context, gate, ide, keys, manual, providers, supervisor, ui
 from .config import ConfigError, load_config
@@ -617,15 +619,43 @@ class ChooseModel(ModalScreen["actions.Choice | None"]):
         self.dismiss(None)
 
 
+def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str, str]]:
+    """The providers whose name or id holds what you typed, as (id, label). What you typed is
+    offered as a name of its own too, for a provider the list lacks or a list that could not be read."""
+    text = typed.strip().casefold()
+    found = [(pid, f"{escape(name)}  [dim]{escape(pid)}[/]") for pid, name in catalog
+             if text in pid.casefold() or text in name.casefold()]  # fmt: skip
+    if text and text not in {pid for pid, _ in found}:
+        found.append((text, f"use “{escape(text)}” as the provider's name"))
+    return found
+
+
 class AddProvider(Dialog):
-    """A provider opencode knows, with your key, or every provider of an opencode.json you already
-    use, such as your employer's endpoint. Dismisses with the providers added, or [] when you leave."""
+    """A provider opencode knows, picked from its list, with your key; or every provider of an
+    opencode.json you already use, such as your employer's endpoint. Dismisses with the providers
+    added, or [] when you leave."""
+
+    BINDINGS = [
+        Binding("up", "move(-1)", show=False),
+        Binding("down", "move(1)", show=False),
+        Binding("left", "app.focus_previous", show=False),
+        Binding("right", "app.focus_next", show=False),
+    ]
+
+    def __init__(self, catalog: list[tuple[str, str]] | None = None):
+        super().__init__()
+        # None while the list is still being read; [] when it cannot be, and you type the name.
+        self.catalog = catalog
+        self.shown: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Add a provider opencode knows (deepseek, anthropic, openai, openrouter, google, …)")
-            yield Input(placeholder="provider", id="provider")
-            yield Input(placeholder="API key (not shown)", password=True, id="key")
+            yield Label("Add a provider: type to search the ones opencode knows, arrows to pick")
+            yield Input(placeholder="search, e.g. deep", id="search")
+            yield OptionList(id="catalog", classes="catalog")
+            yield Input(
+                placeholder="API key for the provider picked above (not shown)", password=True, id="key"
+            )
             yield Label("or bring over every provider of an opencode.json you use, with its models and key:")
             yield Input(str(providers.DEFAULT_SOURCE), suggester=PathSuggester(), id="source")
             yield Label("", id="problem")
@@ -635,13 +665,58 @@ class AddProvider(Dialog):
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#provider", Input).focus()
+        self.query_one("#search", Input).focus()
+        if self.catalog is None:
+            self.query_one("#catalog", OptionList).add_option(
+                Option("reading the providers opencode knows…", disabled=True)
+            )
+            self.read_catalog()
+        else:
+            self.show()
+
+    @work(thread=True)
+    def read_catalog(self) -> None:
+        found = actions.provider_catalog()
+        self.app.call_from_thread(self.loaded, found)
+
+    def loaded(self, found: list[tuple[str, str]]) -> None:
+        self.catalog = self.app.catalog = found
+        self.show()
+
+    @on(Input.Changed, "#search")
+    def show(self) -> None:
+        if self.catalog is None:
+            return
+        self.shown = find_providers(self.catalog, self.query_one("#search", Input).value)
+        options = self.query_one("#catalog", OptionList)
+        options.clear_options()
+        options.add_options([label for _, label in self.shown])
+        if self.shown:
+            options.highlighted = 0
+
+    def picked(self) -> str:
+        at = self.query_one("#catalog", OptionList).highlighted
+        return self.shown[at][0] if at is not None and at < len(self.shown) else ""
+
+    def action_move(self, step: int) -> None:
+        """In the search field the arrows walk the list; elsewhere they move between fields."""
+        if self.focused is self.query_one("#search"):
+            options = self.query_one("#catalog", OptionList)
+            options.action_cursor_down() if step > 0 else options.action_cursor_up()
+        else:
+            self.app.action_focus_next() if step > 0 else self.app.action_focus_previous()
+
+    @on(OptionList.OptionSelected, "#catalog")
+    def chosen(self) -> None:
+        self.query_one("#key", Input).focus()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
         try:
             if event.button.id == "add":
-                name = self.query_one("#provider", Input).value.strip().lower()
+                name = self.picked()
+                if not name:
+                    raise ConfigError("pick a provider from the list, or type its name")
                 keys.set_key(name, self.query_one("#key", Input).value)
                 self.dismiss([name])
             elif event.button.id == "import":
@@ -656,7 +731,10 @@ class AddProvider(Dialog):
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:
-        self.query_one("#import" if event.input.id == "source" else "#add", Button).press()
+        if event.input.id == "search":
+            self.query_one("#key", Input).focus()
+        else:
+            self.query_one("#import" if event.input.id == "source" else "#add", Button).press()
 
     def key_escape(self) -> None:
         self.dismiss([])
@@ -754,7 +832,7 @@ class NewTask(Dialog):
                 self.notify("Asking opencode for their models…")
                 self.refresh_models(role, names)
 
-        self.app.push_screen(AddProvider(), added)
+        self.app.push_screen(AddProvider(self.app.catalog), added)
 
     @work(thread=True)
     def refresh_models(self, role: str, names: list[str]) -> None:
@@ -842,6 +920,7 @@ class Vivibox(App):
     TITLE = "vivibox"
     CSS = """
     DataTable { height: 1fr; }
+    .catalog { height: 8; }
     #empty { height: 1fr; padding: 2 4; color: $text-muted; }
     #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
     #detail.hidden { display: none; }
@@ -902,6 +981,8 @@ class Vivibox(App):
         # The models of the providers you have keys for: asked once, in the background, and kept
         # for a day, so a dialog never waits on a container.
         self.available: dict[str, list[str]] | None = None
+        # The providers opencode knows, for adding one; read with the models, None until then.
+        self.catalog: list[tuple[str, str]] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -951,6 +1032,10 @@ class Vivibox(App):
             self.available = actions.available_models()
         except Exception:  # the dialogs fall back to the models config.toml names
             self.available = None
+        try:
+            self.catalog = actions.provider_catalog()
+        except Exception:  # the dialog reads it itself, or you type the name
+            self.catalog = None
 
     def check_projects(self) -> None:
         """A project whose repository is gone is offered for removal. With none left, the view says
@@ -1529,7 +1614,7 @@ class Vivibox(App):
                     self.notify("Asking opencode for their models…")
                     self.models_then_choose(task, role)
 
-            self.push_screen(AddProvider(), added)
+            self.push_screen(AddProvider(self.catalog), added)
             return
         harness, model = choice
         if not model and harness != manual.NAME:

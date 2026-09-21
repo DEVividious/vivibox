@@ -73,3 +73,19 @@ def test_a_turn_names_its_model():
 
     opencode.OpenCode(P(), "deepseek/deepseek-v4-pro").turn("plan it")
     assert "'--model' 'deepseek/deepseek-v4-pro'" in ran[-1]
+
+
+def test_a_session_is_made_before_the_turn():
+    ran = []
+
+    class P:
+        task_id, agent = "t1", "vivibox-t1-agent"
+
+        def exec(self, *cmd, check=True):
+            ran.append(cmd[-1])
+            out = '{"id":"ses_new","title":"t1: goal"}' if "-X POST" in cmd[-1] else ""
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    assert opencode.OpenCode(P()).start_session("t1: goal") == "ses_new"
+    post = next(c for c in ran if "-X POST" in c)
+    assert '"title": "t1: goal"' in post and post.endswith("/session'")

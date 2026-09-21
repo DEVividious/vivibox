@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import gate, manual
-from .opencode import Turn
+from .opencode import HarnessError, Turn
 from .plan import PlanError, parse_plan, without_notes
 from .risky import Change
 from .states import State, waits_for_user
@@ -154,6 +154,9 @@ class Supervisor:
     source: Path | None = None
     # The answer file as last tried, so an answer that is not a plan is reported once, not every poll.
     answer_seen: float = 0.0
+    # Called once a turn's session is known and recorded, before the turn runs: your view of the
+    # agent opens then, not when the turn you wanted to watch is already over.
+    session_started: Callable[[TaskState], None] = lambda st: None
 
     def harness_for(self, state: State) -> Harness:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -190,7 +193,16 @@ class Supervisor:
     def _turn(self, st: TaskState, prompt: str, harness: Harness | None = None) -> Turn | None:
         harness = harness or self.harness_for(st.state)
         was = st.sessions.get(harness.name, "")
-        turn = harness.turn(prompt, session=was, title=f"{self.task.id}: {st.goal}"[:80])
+        title = f"{self.task.id}: {st.goal}"[:80]
+        if not was and hasattr(harness, "start_session"):
+            try:
+                was = harness.start_session(title)
+            except HarnessError as e:  # the turn makes its own, as before; only watching waits
+                self.task.event("session_not_started", error=str(e)[:500])
+            else:
+                self.task.set_session(harness.name, was)
+                self.session_started(self.task.read_state())
+        turn = harness.turn(prompt, session=was, title=title)
         if turn.session and turn.session != was:
             self.task.set_session(harness.name, turn.session)
         self.task.event(

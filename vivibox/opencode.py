@@ -135,6 +135,25 @@ class OpenCode:
     def session_exists(self, session: str) -> bool:
         return self._get(f"/session/{session}")
 
+    def start_session(self, title: str) -> str:
+        """A new conversation, made before the turn that fills it. `opencode run` reports the one it
+        makes only when the turn is over, so for the whole first turn -- the one worth watching --
+        vivibox had no session to show you and said the agent was not working."""
+        self.ensure_server()
+        body = json.dumps({"title": title})
+        post = (
+            f'curl -fsS -u "opencode:$(cat {MOUNT}/server-password)" -X POST '
+            f"-H 'content-type: application/json' -d {_quote(body)} {_quote(URL + '/session')}"
+        )
+        p = self.pod.exec("bash", "-c", post, check=False)
+        try:
+            session = json.loads(p.stdout).get("id") or ""
+        except (json.JSONDecodeError, AttributeError):
+            session = ""
+        if p.returncode != 0 or not session:
+            raise HarnessError(f"opencode made no session: {(p.stderr or p.stdout).strip()[-500:]}")
+        return session
+
     def restart_server(self) -> None:
         self.pod.exec("pkill", "-f", "opencode serve", check=False)
         self.ensure_server()

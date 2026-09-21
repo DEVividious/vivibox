@@ -240,3 +240,45 @@ def test_the_plans_summary_becomes_the_task_title(task):
     sup, _ = make(task, FakeHarness(task, [write]))
     sup.step()
     assert task.read_state().goal == "Reject expired cards in the validator"
+
+
+class StartsSessions(FakeHarness):
+    """A harness that can make its session before the turn, as opencode's server can."""
+
+    def __init__(self, task, actions=()):
+        super().__init__(task, actions)
+        self.seen_during_turn = None
+
+    def start_session(self, title):
+        self.title = title
+        return "ses_early"
+
+    def turn(self, prompt, session="", title=""):
+        self.seen_during_turn = (session, self.task.read_state().sessions)
+        return super().turn(prompt, session, title)
+
+
+def test_the_first_turn_can_be_watched_while_it_runs(task):
+    """The session used to be known only when the turn returned, so for the whole first turn --
+    the one you most want to see -- watching said the agent was not working, and your window of
+    the agent opened only once there was nothing left to watch."""
+    harness = StartsSessions(task, [write_draft])
+    opened = []
+    sup, _ = make(task, harness)
+    sup.session_started = lambda st: opened.append(dict(st.sessions))
+    sup.step()
+    assert harness.seen_during_turn == ("ses_early", {"opencode": "ses_early"}), "recorded before it ran"
+    assert opened == [{"opencode": "ses_early"}]
+    assert harness.title == "demo-1: Add health endpoint"
+
+
+def test_a_session_that_could_not_be_made_leaves_the_turn_to_make_its_own(task):
+    class Refuses(FakeHarness):
+        def start_session(self, title):
+            raise supervisor.HarnessError("server down")
+
+    harness = Refuses(task, [write_draft])
+    sup, _ = make(task, harness)
+    sup.step()
+    assert task.read_state().sessions == {"opencode": "ses_1"}
+    assert any(e["type"] == "session_not_started" for e in task.events())

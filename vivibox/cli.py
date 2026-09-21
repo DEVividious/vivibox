@@ -168,6 +168,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         project_verify=project.verify,
         save_verify=lambda commands: actions.save_verify(project, commands),
         planner=planner,
+        session_started=agent_window,
         source=project.repo,
     )
     (task.meta / actions.SUPERVISOR_PID).write_text(str(os.getpid()))

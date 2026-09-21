@@ -323,6 +323,11 @@ uv run pytest                  # unit tests, no Docker needed
 uv run pytest -m docker        # isolation, pod and git protection checks on real containers
 ```
 
+What a person sees follows [docs/ux-guidelines.md](docs/ux-guidelines.md): one word per thing, a
+status that never claims work nobody is doing, errors that stay with their task. Read it before
+changing the view, the command line's output or a message; `tests/test_ux_rules.py` checks the rules
+that can be checked.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

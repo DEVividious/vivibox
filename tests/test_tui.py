@@ -148,8 +148,8 @@ def test_new_task_dialog_takes_a_long_description(env, monkeypatch):
         await pilot.pause()
         await pilot.press(*"Fix login", "enter", *"More context")
         await pilot.press("down")
-        assert app.screen.focused.id == "plan", "down on the last line moves on"
-        await pilot.press("shift+tab")  # up would open the list; the arrows are the list's there
+        assert app.screen.focused.id == "attach", "down on the last line moves on"
+        await pilot.press("up")
         assert app.screen.focused.id == "goal"
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
@@ -277,7 +277,7 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
         app.screen.query_one("#create").press()
         await pilot.pause()
         assert app.screen.query_one("#goal"), "its first task follows right away"
-        kind = app.screen.query_one("#kind")
+        kind = app.screen.query_one("#kind-row")
         assert not kind.display, "an empty project has nothing that could work wrong"
 
     run(scenario)
@@ -303,7 +303,7 @@ def test_a_folder_that_is_already_a_project_leads_to_a_task(env, tmp_path, monke
         await pilot.click("#create")
         await pilot.pause()
         assert app.screen.query_one("#goal"), "a task in that project, not another project"
-        assert app.screen.query_one("#kind").display, "a project with code can have bugs in it"
+        assert app.screen.query_one("#kind-row").display, "a project with code can have bugs in it"
 
     run(scenario)
 
@@ -1304,6 +1304,100 @@ def test_a_new_task_can_be_filled_in_on_a_short_terminal(env, height):
         assert not buttons.overlaps(writer), "nothing hidden behind the buttons"
 
     run(scenario, size=(100, height))
+
+
+def with_code(name: str) -> None:
+    """A file committed in the project, so it is not empty and the kind of task is asked."""
+    repo = load_project(name).repo
+    (repo / "app.py").write_text("print('hi')\n")
+    for args in (["add", "app.py"], ["commit", "-qm", "Add app"]):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("size", [(146, 38), (100, 30), (80, 24)])
+def test_the_new_task_dialog_shows_every_field_at_once(env, size):
+    """A form (§4): labels on the left, every field on the screen without scrolling, the dialog no
+    wider than the terminal. On a short terminal the description gives way, down to one line."""
+    from ux import screen_text
+
+    second_project(env)
+    with_code("demo")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        dialog = app.screen
+        assert dialog.query_one(tui.Fields).max_scroll_y == 0, "nothing to scroll: every field is in view"
+        assert dialog.query_one(".dialog").region.width <= size[0], "the dialog fits the terminal"
+        shown = screen_text(app)
+        for word in ("Project", "Kind", "Task", "Attach…", "@path", "Plan", "Planner", "Writer", "Create",
+                     "Cancel", "ctrl+s"):  # fmt: skip
+            assert word in shown, f"{word} not on the screen at {size}"
+        assert dialog.query_one("#goal").region.height >= 3, "room for at least a line of the description"
+
+    run(scenario, size=size)
+
+
+def test_attach_stands_with_the_description_and_create_is_the_only_primary_button(env):
+    """Attach fills the description, so it stands under it, in the task's group, not among the
+    lists; the buttons that close the dialog are Create and Cancel, and Create alone is primary."""
+    from textual.widgets import Button
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        dialog = app.screen
+        task = dialog.query_one("#task")
+        goal, attach = task.query_one("#goal"), task.query_one("#attach")
+        assert attach.region.y >= goal.region.y + goal.region.height, "Attach is under the description"
+        assert {s.id for s in task.query(Select)} == {"project", "kind"}, "planning's lists are elsewhere"
+        assert [b.id for b in dialog.query(Button) if b.variant == "primary"] == ["create"]
+        assert [b.id for b in dialog.query(".buttons Button")] == ["create", "cancel"]
+
+    run(scenario)
+
+
+def test_the_project_list_ends_with_setting_up_another_project(env):
+    """Like "+ add a provider…" in the lists of models: what is not on the list is set up from it."""
+    from ux import screen_text
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        project = app.screen.query_one("#project", Select)
+        project.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "+ set up another project…" in screen_text(app)
+        project.value = tui.NEW_PROJECT
+        await pilot.pause()
+        assert isinstance(app.screen, NewProject)
+
+    run(scenario)
+
+
+def test_tab_walks_the_new_task_form_from_the_description_down(env):
+    """The description first, as the project comes from the selected row; then down the form, and
+    round to the project and the kind."""
+    expected = ["goal", "attach", "plan", "role-planner", "role-writer", "create", "cancel",
+                "project", "kind", "goal"]  # fmt: skip
+    with_code("demo")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        order = []
+        for _ in expected:
+            order.append(app.focused.id)
+            await pilot.press("tab")
+            await pilot.pause()
+        assert order == expected
+
+    run(scenario)
 
 
 def test_starting_the_demo_shows_in_the_status_like_a_working_agent(env, monkeypatch):

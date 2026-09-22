@@ -134,3 +134,11 @@ def test_help_fits_in_eighty_columns_without_wrapping():
     and a wrapped line can read as something else ("no agent, for you to work in")."""
     for line in tui.HELP.splitlines():
         assert len(line) <= 78, f"{len(line)} columns: {line!r}"
+
+
+def test_a_dialog_has_at_most_one_primary_button():
+    """One primary button per dialog (§4), checked in the source: a class at a time."""
+    source = Path(tui.__file__).read_text()
+    for chunk in source.split("\nclass ")[1:]:
+        name = chunk.split("(")[0].split(":")[0]
+        assert chunk.count('"primary"') <= 1, f"{name} has more than one primary button"

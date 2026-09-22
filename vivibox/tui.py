@@ -819,7 +819,7 @@ class DescriptionArea(TextArea):
         self.suggest()
 
 
-NEW_PROJECT = "+ set up a project…"
+NEW_PROJECT = "+ set up another project…"
 
 
 class NewProject(Dialog):
@@ -1616,6 +1616,10 @@ def first_model(available: dict[str, list[str]] | None, added: list[str]) -> str
 
 
 class NewTask(Dialog):
+    """A form: labels on the left, one field per row, the description and the closing buttons
+    the only boxes. Every field is on the screen at once; a short terminal shrinks the
+    description before anything scrolls."""
+
     def __init__(self, preselect: str = "", available: dict[str, list[str]] | None = None):
         super().__init__()
         self.preselect = preselect
@@ -1625,49 +1629,65 @@ class NewTask(Dialog):
     def compose(self) -> ComposeResult:
         names = projects()
         chosen = self.preselect if self.preselect in names else names[0]
-        with Vertical(classes="dialog"):
-            # The fields scroll on a short terminal; the buttons below them stay in view.
+        with Vertical(classes="dialog form"):
             with Fields(classes="fields"):
-                # A list even with one project in it: the dialog looks the same however many you have.
-                yield Label("Project")
-                yield Select([(n, n) for n in names], value=chosen, allow_blank=False, id="project")
-                yield Select(
-                    [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
-                     ("Other: refactoring, tests, upkeep", "other")],
-                    value="feature", allow_blank=False, id="kind",
-                )  # fmt: skip
-                with Horizontal(classes="role"):
-                    yield Label(
-                        "What should the agent do? A line, or a whole ticket with its context and"
-                        " constraints. Attach, or @path, hands the agent a copy of a file or folder."
-                        " ctrl+s creates it.",
-                        classes="wrap",
-                    )
-                    yield Button("Attach…", id="attach")
-                suggestions = OptionList(id="suggestions")
-                suggestions.display = False
-                yield DescriptionArea(suggestions, Path.cwd(), id="goal", classes="description")
-                yield suggestions
-                # One question, not two boxes that could both be ticked.
-                yield Select(
-                    [("Stop for my review of the plan", "review"),
-                     ("Accept the agent's plan without stopping (--auto)", "auto"),
-                     ("Only create the task, to write the plan myself (--draft)", "draft")],
-                    value="review", allow_blank=False, id="plan",
-                )  # fmt: skip
-                # Each role on config.toml's choice unless you pick another; m changes it later.
-                config = load_config()
-                for name in sorted(config.roles):
-                    offered = actions.choices(name, config, self.available)
-                    configured = actions.configured_choice(config, name)
-                    with Horizontal(classes="role"):
-                        yield Label(name.capitalize(), classes="role-name")
-                        options = [(actions.choice_label(c, configured), c) for c in offered]
-                        yield Select(options, value=configured, allow_blank=False, id=f"role-{name}")
+                with Vertical(id="task", classes="section"):
+                    # A list even with one project in it: the dialog looks the same however many
+                    # you have. What is not on it is set up from it, like a provider from a model list.
+                    with Horizontal(classes="row"):
+                        yield Label("Project", classes="key")
+                        yield Select(
+                            [*((n, n) for n in names), (NEW_PROJECT, NEW_PROJECT)],
+                            value=chosen, allow_blank=False, compact=True, id="project",
+                        )  # fmt: skip
+                    with Horizontal(classes="row", id="kind-row"):
+                        yield Label("Kind", classes="key")
+                        yield Select(
+                            [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
+                             ("Other: refactoring, tests, upkeep", "other")],
+                            value="feature", allow_blank=False, compact=True, id="kind",
+                        )  # fmt: skip
+                    suggestions = OptionList(id="suggestions")
+                    suggestions.display = False
+                    with Horizontal(classes="row", id="task-row"):
+                        yield Label("Task", classes="key")
+                        yield DescriptionArea(
+                            suggestions, Path.cwd(), id="goal", classes="description",
+                            placeholder="What should the agent do? A line, or a whole ticket with its"
+                            " context and constraints.",
+                        )  # fmt: skip
+                    yield suggestions
+                    # Attach fills the description, so it stands under it, not among the lists.
+                    with Horizontal(classes="row"):
+                        yield Label("", classes="key")
+                        yield Button("Attach…", compact=True, id="attach")
+                        yield Label("or @path, for a copy of a file or folder.", classes="hint")
+                with Vertical(id="planning", classes="section"):
+                    # One question, not two boxes that could both be ticked.
+                    with Horizontal(classes="row"):
+                        yield Label("Plan", classes="key")
+                        yield Select(
+                            [("Stop for my review of the plan", "review"),
+                             ("Accept the agent's plan without stopping (--auto)", "auto"),
+                             ("Only create the task, to write the plan myself (--draft)", "draft")],
+                            value="review", allow_blank=False, compact=True, id="plan",
+                        )  # fmt: skip
+                    # Each role on config.toml's choice unless you pick another; m changes it later.
+                    config = load_config()
+                    for name in sorted(config.roles):
+                        offered = actions.choices(name, config, self.available)
+                        configured = actions.configured_choice(config, name)
+                        with Horizontal(classes="row"):
+                            yield Label(name.capitalize(), classes="key")
+                            options = [(actions.choice_label(c, configured), c) for c in offered]
+                            yield Select(
+                                options, value=configured, allow_blank=False, compact=True,
+                                id=f"role-{name}", classes="model",
+                            )  # fmt: skip
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
-                yield Button("Set up another project…", id="project-setup")
                 yield Button("Cancel", id="cancel")
+                yield Label("ctrl+s creates the task", classes="hint keys")
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -1675,7 +1695,7 @@ class NewTask(Dialog):
             self.app.push_screen(Browse(ANY, "Attach a file or a folder for the agent"), self.attach)
             return
         if event.button.id != "create":
-            self.dismiss({"project": NEW_PROJECT} if event.button.id == "project-setup" else {})
+            self.dismiss({})
             return
         self.dismiss(
             {
@@ -1684,9 +1704,7 @@ class NewTask(Dialog):
                 "kind": self.query_one("#kind", Select).value,
                 "auto": self.query_one("#plan", Select).value == "auto",
                 "draft": self.query_one("#plan", Select).value == "draft",
-                "roles": {
-                    s.id.removeprefix("role-"): s.value for s in self.query(".role Select").results(Select)
-                },
+                "roles": {s.id.removeprefix("role-"): s.value for s in self.query(".model").results(Select)},
             }
         )
 
@@ -1701,20 +1719,26 @@ class NewTask(Dialog):
         self.call_after_refresh(self.fit)
 
     def fit(self) -> None:
-        """The fields as tall as they are, or as the screen allows, when a short terminal would push
-        the buttons off it; then they scroll, and the buttons stay in view."""
+        """The description as tall as the screen leaves after the other rows, a line at least, so
+        the whole form stays in view and the description scrolls inside itself."""
         fields = self.query_one(Fields)
+        goal = self.query_one("#goal", TextArea)
         room = int(self.size.height * 0.9) - self.CHROME
         fields.styles.max_height = max(5, room)
-        self.query_one("#goal", TextArea).focus()
+        others = fields.virtual_size.height - self.query_one("#task-row").outer_size.height
+        goal.styles.height = max(3, min(12, room - others))
+        goal.focus()
 
     @on(Select.Changed, "#project")
     def switched(self, event: Select.Changed) -> None:
+        if event.value == NEW_PROJECT:
+            self.dismiss({"project": NEW_PROJECT})
+            return
         self.for_project(str(event.value))
 
     def for_project(self, name: str) -> None:
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
-        self.query_one("#kind", Select).display = not actions.empty_project(name)
+        self.query_one("#kind-row").display = not actions.empty_project(name)
         with contextlib.suppress(ConfigError):
             self.query_one("#goal", DescriptionArea).repo = load_project(name).repo
 
@@ -1725,7 +1749,7 @@ class NewTask(Dialog):
             goal.insert(f"@{shown_path(path)} ")
         goal.focus()
 
-    @on(Select.Changed, ".role Select")
+    @on(Select.Changed, ".model")
     def role_changed(self, event: Select.Changed) -> None:
         if event.value != actions.ADD:
             return
@@ -1749,7 +1773,7 @@ class NewTask(Dialog):
         """Every role's list with the new models in it, and the role you added them for on one."""
         self.available = self.app.available = available
         config = load_config()
-        for select in self.query(".role Select").results(Select):
+        for select in self.query(".model").results(Select):
             name = select.id.removeprefix("role-")
             kept, configured = select.value, actions.configured_choice(config, name)
             offered = actions.choices(name, config, available)
@@ -1903,6 +1927,21 @@ class Vivibox(App):
     .role > Label { padding: 1 0; }
     .role > .role-name { width: 10; }
     .role > Select { width: 1fr; }
+    /* A form: a column of labels, one field per row, only the description and the buttons boxed. */
+    .dialog.form { max-width: 100%; }
+    .form .section { height: auto; margin-top: 1; }
+    .form #task { margin-top: 0; }
+    .form .row { height: auto; }
+    .form .key { width: 10; color: $text-muted; }
+    .form .hint { width: 1fr; color: $text-muted; }
+    .form .row > Select, .form .row > TextArea { width: 1fr; }
+    .form .row > Button { margin: 0 2 0 0; min-width: 9; }
+    .form .buttons > .keys { width: auto; padding: 1 0; }
+    .form Select > SelectCurrent { background: $boost; }
+    /* Focus is one signal: the focused control's text as the cursor block, as on a button. */
+    .form Select:focus > SelectCurrent > Static#label {
+        color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;
+    }
     Help, Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
     AddProvider, ChooseImport, ImportSource, ManageProviders, ManageItems, Browse, NameFolder {
         align: center middle;

@@ -81,7 +81,20 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   waiting. A project's own problem (a variable it passes that is not set, a repository that is
   gone) is its status, before any task is created.
 
-## 4. Errors
+## 4. Dialogs
+
+- A dialog is a form: a column of one-word labels on the left, one field per row. A list or a
+  checkbox is one row with no frame; the only boxes are a multi-line text and the buttons that
+  close the dialog. Related fields form a group, and a blank row separates groups.
+- A button that helps fill a field stands in that field's row, compact, or is the last entry of
+  that field's list ("+ add a provider…", "+ set up another project…"). The closing row holds one
+  primary button, then Cancel, then the key that presses the primary button.
+- Focus is one signal: the focused control's text is drawn as the cursor block; a text box shows
+  it by its frame.
+- A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
+  text gives way first, down to one line, before anything scrolls.
+
+## 5. Errors
 
 Every error has three parts, in this order:
 
@@ -93,25 +106,25 @@ An error belongs to its task. It is written to the task (`Task.set_paused(True, 
 `Task.set_problem`) as `"<what happened>: <why>"` and shown at the top of the panel until the task
 starts again. A toast may repeat it; a toast alone is not enough, because it is gone in seconds.
 
-## 5. Work in progress
+## 6. Work in progress
 
 - Anything slower than half a second shows a verb and the spinner in the task's status
   (`busy_with`), and its key is off until it ends.
 - A state that can last minutes shows how long it has lasted.
 
-## 6. The next step is always visible
+## 7. The next step is always visible
 
 - The panel's first line after the header is `Next:` with the keys that move the task on
   (`tui.next_steps`), before any log or diff. The body explains; it does not repeat the keys.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 
-## 7. Narrow and crowded
+## 8. Narrow and crowded
 
 - At 80×24 the list shows task, status and goal, and the footer shows every decision key.
 - With fifteen tasks, the ones waiting for the person are on the first screen.
 
-## 8. Testing UX
+## 9. Testing UX
 
 - Test what the person sees. Run the view with Textual's Pilot and assert on rendered text with
   `tests/ux.py: screen_text(app)`, or on `tui.detail()` and the command's output; not on widget
@@ -123,4 +136,8 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 
 ## Known gaps
 
-Rules above that the code does not meet yet. Remove a line when it is fixed. None at the moment.
+Rules above that the code does not meet yet. Remove a line when it is fixed.
+
+- §4: only the new task dialog is a form. The other dialogs (`NewProject`, `AddProvider`,
+  `ManageItems`, `Browse`, the replies) still frame every field and keep helper buttons among the
+  closing ones.

@@ -625,10 +625,23 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
     return text, _read(handoff / DEMO_QUESTION)
 
 
+def demo_allowed(st: TaskState) -> bool:
+    """Whether the project may be run in the task's pod now: in a box, or once the work is back with
+    you. While the agent implements or the gate verifies, the pod and its working tree are theirs:
+    a second build on the same tree, or a server on a port their tests want, would get in the way.
+    The view's v and the demo command ask here."""
+    return bool(st.box) or st.state in (State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED)
+
+
 def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> Demo:
     """Runs the project in the task's pod and watches for it to listen. Nothing here moves the task
     between states: working out how to run something must not be able to stop the work."""
     task, project = load(task_id)
+    if not demo_allowed(task.read_state()):
+        raise gate.GateError(
+            f"could not run the app: the agent is at work in the pod of {task_id}; "
+            "run it once the work is back with you"
+        )
     pod = task_pod(task_id)
     pod.up()
     commands, source = demo_commands(project, task)

@@ -2524,9 +2524,9 @@ class Vivibox(App):
             "stop_task": at_work and state not in WAITING_ONLY and pick[1].id not in self.starting,
             "stop_pod": at_work and state in WAITING_ONLY and pick[1].id not in self.starting,
             "remove": True,
-            # Worth looking at once there is something to look at. Running it again while it
-            # runs is a restart, which is what you want after the agent has changed something.
-            "demo": state in (State.CHECKPOINT_FINAL, State.IMPLEMENT, State.VERIFY),
+            # Once the work is back with you, not while the agent builds in the same tree. Running
+            # it again while it runs is a restart, which is what you want after a change.
+            "demo": actions.demo_allowed(pick[1]),
             "demo_stop": self.pod.demo,
         }
         return allowed.get(action, True)

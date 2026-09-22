@@ -32,6 +32,8 @@ CACHES = {
     "npm": "/cache/npm",
     "mise": "/cache/mise",
     "corepack": "/cache/corepack",
+    # Maven's build cache extension puts its cache beside the local repository, /cache/m2.
+    "build-cache": "/cache/build-cache",
 }
 HOST_GATEWAY = "host.docker.internal"
 # Running the project for you to look at: its process group, its output, both inside the pod.

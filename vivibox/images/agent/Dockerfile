@@ -61,7 +61,7 @@ RUN mkdir -p /etc/mise \
 # -o: tolerate an ID that already exists in the base image.
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \
- && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack \
+ && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack /cache/build-cache \
  && chown -R agent:agent /config /cache
 
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.

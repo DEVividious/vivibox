@@ -108,7 +108,8 @@ def checks(uid: int, gid: int) -> list[Check]:
         ),
         Check(
             "caches are writable",
-            "for d in m2 gradle npm mise corepack; do touch /cache/$d/.w || exit 1; done; echo ok",
+            "cd /cache && for d in m2 gradle npm mise corepack build-cache; do touch $d/.w || exit 1; done;"
+            " echo ok",
             "ok",
         ),
         Check("Gradle uses the shared cache", "echo $GRADLE_USER_HOME", "/cache/gradle"),

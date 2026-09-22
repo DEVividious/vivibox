@@ -99,6 +99,14 @@ def test_sidecar_mounts_repo_read_only_and_listens_only_on_socket(pod):
     assert "DOCKER_MIN_API_VERSION=1.24 dind dockerd" in script, "older Testcontainers still finds Docker"
 
 
+def test_mavens_build_cache_has_a_volume_of_its_own(pod):
+    """The Maven build cache extension keeps its cache beside the local repository, /cache/build-cache.
+    Only the volumes are writable in the pod, so without one of its own every module logged a
+    read-only file system and the build ran without the cache, slowly."""
+    for command in (pod.agent_command(), pod.gate_command()):
+        assert "vivibox-cache-build-cache:/cache/build-cache" in command
+
+
 def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):
     pod.agent_mounts.append(
         Mount("/srv/vivibox/shop-1/repo/.git/config", "/srv/vivibox/shop-1/repo/.git/config", True)

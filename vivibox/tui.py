@@ -1775,7 +1775,7 @@ HELP = """[b]Your decisions[/b], on the selected task
 
 [b]The selected project[/b] (Enter folds or unfolds its tasks)
   n     new task in it
-  b     open a box: its pod with your keys and tools, and no agent, for you to work in
+  b     open a box: its pod for you to work in by hand, opencode included
   e     edit its file
   o     open its repository in your IDE
   x     forget it, once it has no tasks

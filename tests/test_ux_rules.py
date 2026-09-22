@@ -127,3 +127,10 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
                     assert offered, f"{st.goal}: the panel names `{key}`, the footer does not offer it"
 
     asyncio.run(go())
+
+
+def test_help_fits_in_eighty_columns_without_wrapping():
+    """The help is one column so it never wraps (§3); a line longer than the modal wraps after all,
+    and a wrapped line can read as something else ("no agent, for you to work in")."""
+    for line in tui.HELP.splitlines():
+        assert len(line) <= 78, f"{len(line)} columns: {line!r}"

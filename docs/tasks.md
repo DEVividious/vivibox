@@ -35,7 +35,7 @@ them all:
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
-| `b` | on a project's row: open a box, the project's pod for you to work in, with no agent; in a box, `w` is a shell and `a` closes it for review |
+| `b` | on a project's row: open a box, the project's pod for you to work in by hand, with your keys, the tools and opencode to run yourself, and no agent of its own; in a box, `w` is a shell and `a` closes it for review |
 
 On a project's row: `n` starts a task in it, `e` edits its file (verify commands, `pass_env`, host
 services), `o` opens its repository in your IDE, and `x` forgets it once it has no tasks; the

@@ -95,7 +95,9 @@ waits for you without spending one of the agent's attempts: fix it and press `g`
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a
   question, or when risky files changed.
 - `--draft` only creates the task, to write the plan yourself or check the baseline first with
-  `vivibox verify <id>`; then `vivibox start <id>`.
+  `vivibox verify <id>`; then `vivibox start <id>`. A plan you finished (the placeholder criterion
+  replaced) goes straight to your review when the task starts, whoever the planner is; one with
+  the placeholder still in it goes to the planner as its starting point.
 
 ### Planning in your own chat
 

@@ -8,7 +8,10 @@ from vivibox.risky import Change
 from vivibox.states import State
 from vivibox.task import create_task
 
-TEMPLATE = '+++\nmode = "code-only"\n+++\n\n# Goal\n\n{{goal}}\n\n## Acceptance criteria\n\n- [ ] x\n'
+TEMPLATE = (
+    '+++\nmode = "code-only"\n+++\n\n# Goal\n\n{{goal}}\n\n## Acceptance criteria\n\n'
+    f"- [ ] {gate.PLACEHOLDER}\n"
+)
 DRAFT = (
     '+++\nmode = "code-only"\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] health endpoint returns 200\n'
 )
@@ -68,6 +71,54 @@ def test_plan_turn_copies_draft_and_stops_at_checkpoint(task):
     assert "health endpoint returns 200" in task.plan_path.read_text()
     assert harness.prompts[0].endswith(supervisor.PLAN_PROMPT) and notes == ["plan ready for review"]
     assert not sup.step(), "waits for you at a checkpoint"
+
+
+YOUR_PLAN = (
+    '+++\nmode = "code-only"\nsummary = "Add a health endpoint"\n+++\n\n# Goal\n\nHealth.\n\n'
+    "## Acceptance criteria\n\n- [ ] GET /health returns 200\n"
+)
+
+
+def test_a_plan_you_finished_yourself_goes_straight_to_review(task):
+    """--draft, then the plan written under e: starting the task asks nobody to write it again."""
+    task.plan_path.write_text(YOUR_PLAN)
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness)
+    assert sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_PLAN and st.goal == "Add a health endpoint"
+    assert harness.prompts == [] and notes == ["your plan is ready for review"]
+    assert "GET /health returns 200" in task.plan_path.read_text()
+
+
+def test_a_plan_you_finished_yourself_needs_no_chat_when_you_are_the_planner(task):
+    from vivibox import manual
+
+    task.plan_path.write_text(YOUR_PLAN)
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness)
+    sup.planner = manual.Manual()
+    assert sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_PLAN and not st.awaiting_plan, "yours to accept, not to plan again"
+    assert harness.prompts == [], "no turn spent describing the repository for a chat"
+    assert notes == ["your plan is ready for review"]
+
+
+def test_a_plan_with_the_placeholder_left_in_goes_to_the_planner(task):
+    harness = FakeHarness(task, [write_draft])
+    sup, notes = make(task, harness)
+    assert sup.step()
+    assert len(harness.prompts) == 1 and notes == ["plan ready for review"]
+
+
+def test_after_your_reply_the_planner_revises_even_a_finished_plan(task):
+    task.plan_path.write_text(YOUR_PLAN)
+    supervisor.set_next_prompt(task, supervisor.PLAN_COMMENT_PROMPT)
+    harness = FakeHarness(task, [write_draft])
+    sup, _ = make(task, harness)
+    assert sup.step()
+    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(supervisor.PLAN_COMMENT_PROMPT)
 
 
 def test_a_plan_you_review_has_no_notes_left_for_the_agent(task):

@@ -12,7 +12,8 @@ from vivibox.states import State
 from vivibox.task import create_task
 
 TEMPLATE = (
-    '+++\nmode = "code-only"\nverify = []\n+++\n\n# Goal\n\n{{goal}}\n\n## Acceptance criteria\n\n- [ ] x\n'
+    '+++\nmode = "code-only"\nverify = []\n+++\n\n# Goal\n\n{{goal}}\n\n## Acceptance criteria\n\n'
+    f"- [ ] {gate.PLACEHOLDER}\n"
 )
 PLAN = (
     '+++\nmode = "code-only"\nsummary = "Add a health endpoint"\nverify = ["npm test"]\n+++\n\n'

@@ -18,7 +18,7 @@ from typing import Protocol
 
 from . import brief, gate, manual
 from .opencode import HarnessError, Turn
-from .plan import PlanError, parse_plan, without_notes
+from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
 from .states import State, waits_for_user
 from .task import Task, TaskState
@@ -277,6 +277,9 @@ class Supervisor:
             self.notify(self.task.id, reason, kind=kind)
 
     def _plan(self, st: TaskState) -> None:
+        if (plan := self._your_plan(st)) is not None:
+            self._plan_ready(st, plan, yours=True)
+            return
         if getattr(self.planner, "manual", False):
             self._plan_manually(st)
             return
@@ -303,6 +306,24 @@ class Supervisor:
         draft = self.task.meta / "handoff" / "plan-draft.md"
         # Without the template's notes: from here the plan is yours to read, not a form to fill.
         self.task.plan_path.write_text(without_notes(draft.read_text()))
+        self._plan_ready(st, plan)
+
+    def _your_plan(self, st: TaskState) -> Plan | None:
+        """The plan as you left it, when it is finished (--draft, then e) and this is the task's first
+        planning: acceptance would take it as it is, so no planner, yours or an agent, is asked to
+        write it again. A plan still carrying the template's placeholder is a starting point for the
+        planner. After your reply, or a stop mid-planning, the next prompt is set, and the planner
+        goes on."""
+        if (self.task.meta / NEXT_PROMPT).exists() or (self.task.meta / "handoff" / "plan-draft.md").exists():
+            return None
+        try:
+            plan = parse_plan(self.task.plan_path.read_text())
+            gate.check_plan(plan, self.project_verify)
+        except (OSError, PlanError, gate.GateError):
+            return None
+        return plan
+
+    def _plan_ready(self, st: TaskState, plan: Plan, yours: bool = False) -> None:
         if plan.summary:
             self.task.set_goal(plan.summary)
         if st.auto_plan and not self.risky_changes():
@@ -314,7 +335,11 @@ class Supervisor:
             except gate.GateError as e:
                 self.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
             return
-        self._checkpoint(State.CHECKPOINT_PLAN, "plan ready for review", kind="plan")
+        self._checkpoint(
+            State.CHECKPOINT_PLAN,
+            "your plan is ready for review" if yours else "plan ready for review",
+            kind="plan",
+        )
 
     def _read_draft(self):
         """The draft as a plan, or what keeps it from being one: unreadable, or one acceptance

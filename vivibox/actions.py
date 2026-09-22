@@ -1248,7 +1248,7 @@ def remember(done: Finished, project: Project, commit: str) -> None:
     entry = {
         "id": done.task_id,
         "project": project.name,
-        "title": done.message,
+        "title": done.message or f"Box in {project.name}",
         "cost": round(done.cost.total, 4),
         "planning": round(done.cost.planning, 4),
         "commit": commit[:10],
@@ -1292,8 +1292,9 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
     commit = fetch_work(task, project)
     st = task.read_state()
     spent = ui.cost(task)
-    done = Finished(task.id, project.repo, spent, suggested_message(project.repo, st.base_commit,
-                                                                            commit, st.goal))  # fmt: skip
+    # A box's "Work in the box" is not a message for your history: that one is yours to write.
+    message = "" if st.box else suggested_message(project.repo, st.base_commit, commit, st.goal)
+    done = Finished(task.id, project.repo, spent, message)
     done.criteria = accepted_criteria(task)
     done.created = st.created
     done.demo = demo_instruction(task)

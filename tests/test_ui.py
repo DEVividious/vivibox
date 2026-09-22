@@ -25,6 +25,18 @@ def test_lasting_is_a_duration_not_a_moment():
     assert ui.lasting(at(hours=2), now) == "for 2 h"
 
 
+def test_the_panel_says_how_long_implementing_has_taken(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    task = create_task(tmp_path, "demo", "Goal", TEMPLATE)
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    st = task.read_state()
+    st.updated = (datetime.now(UTC) - timedelta(minutes=7)).isoformat(timespec="milliseconds")
+    task._write_state(st)
+    assert ui.lasting(task.read_state().updated) == "for 7 min"
+
+
 def test_shorten():
     assert ui.shorten("short", 10) == "short"
     assert ui.shorten("a long goal text", 8) == "a long…"

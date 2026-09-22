@@ -360,7 +360,7 @@ def test_criteria_are_ticked_off_in_view_while_the_agent_works(env):
     gate.accept_plan(task, load_project("demo").verify)
     st = task.transition(State.IMPLEMENT)
     assert "\u2610 it works" in detail(task, st, 3), "an open criterion"
-    assert "gate has not run yet" in detail(task, st, 3).lower()
+    assert "no verification yet" in detail(task, st, 3).lower()
     reported = task.meta / "handoff" / gate.CRITERIA_FILE
     reported.write_text(reported.read_text().replace("- [ ]", "- [x]"))
     assert "\u2611 it works" in detail(task, st, 3), "the agent reports it met"
@@ -1564,7 +1564,7 @@ def test_the_panel_shows_times_on_your_clock(env, monkeypatch):
     monkeypatch.setenv("TZ", "Etc/GMT-5")
     time.tzset()
     try:
-        assert f"Gate failed at {ui.clock(stamp)}." in detail(task, st, 3)
+        assert f"Verification failed at {ui.clock(stamp)}." in detail(task, st, 3)
         assert ui.clock(stamp) != stamp[11:19], "five hours from UTC"
     finally:
         monkeypatch.undo()
@@ -1773,7 +1773,7 @@ def test_a_running_verification_is_shown_as_running(env, monkeypatch):
     )
     shown = detail(task, task.read_state(), 3, running=True)
     assert "**Verification running**" in shown and "`mvn -B verify`" in shown
-    assert "[INFO] Compiling 12 files" in shown and "The gate has not run yet" not in shown
+    assert "[INFO] Compiling 12 files" in shown and "No verification yet" not in shown
     assert f"`{log}`" in shown, "where the whole log is"
 
 
@@ -2425,3 +2425,14 @@ def test_a_on_an_open_box_closes_it_for_review(box_env, monkeypatch):
         assert app.check_action("show_diff", ()) and app.check_action("accept", ())
 
     run(scenario)
+
+
+def test_the_panel_says_how_long_the_agent_has_been_implementing(env):
+    from datetime import UTC, datetime, timedelta
+
+    task = implementing()
+    st = task.read_state()
+    st.updated = (datetime.now(UTC) - timedelta(minutes=7)).isoformat(timespec="milliseconds")
+    task._write_state(st)
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "**Implementing** for 7 min" in shown

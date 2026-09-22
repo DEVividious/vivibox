@@ -254,9 +254,16 @@ def report_finished(done: actions.Finished) -> None:
 
 def offer_commit(source: Path, message: str, branch: str) -> None:
     if not sys.stdin.isatty():
-        print(f'Commit it when you like, e.g.: git -C {source} commit -m "{message}"')
+        example = f' -m "{message}"' if message else ""
+        print(f"Commit it when you like, e.g.: git -C {source} commit{example}")
         return
-    answer = input(f'Commit to {branch} as "{message}"? [Y]es, [e]dit the message, [n]o: ').strip().lower()
+    if message:
+        answer = (
+            input(f'Commit to {branch} as "{message}"? [Y]es, [e]dit the message, [n]o: ').strip().lower()
+        )
+    else:  # a box: the message is yours to write
+        answer = input(f"Commit to {branch}? [Y]es, with a message you type, [n]o: ").strip().lower()
+        answer = "e" if answer in ("", "y", "yes") else answer
     if answer in ("e", "edit"):
         message = input("Message: ")
     elif answer not in ("", "y", "yes"):

@@ -283,8 +283,8 @@ def last_gate(task: Task) -> str:
     for event in reversed(task.events()):
         if event["type"] == "gate":
             outcome = "passed" if event["data"].get("passed") else "failed"
-            return f"Gate {outcome} at {ui.clock(event['ts'])}."
-    return "The gate has not run yet."
+            return f"Verification {outcome} at {ui.clock(event['ts'])}."
+    return "No verification yet."
 
 
 PROJECT_ROW = "project:"
@@ -535,7 +535,11 @@ def detail(
     elif items := checklist(task):
         # What the task is still short of. The agent ticks these itself and the gate only checks
         # that none is left open, so a tick is what the agent claims, not something vivibox saw.
+        doing = ""
+        if st.state is State.IMPLEMENT and seen.group == "Working" and (lasting := ui.lasting(st.updated)):
+            doing = f"**Implementing** {lasting}."
         body = [
+            *([doing, ""] if doing else []),
             "**Acceptance criteria**, as the agent reports them:",
             "",
             *items,

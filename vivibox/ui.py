@@ -225,6 +225,10 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
         return TaskView(
             "box open", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}", f"vivibox accept {st.id}")
         )
+    if st.box and st.state in WAITING:
+        # Nobody in a box to reply to; its work is yours to accept or to delete.
+        commands = tuple(c for c in next_commands(st) if "reply" not in c)
+        return TaskView(activity(st, max_iterations), WAITS, DECISION, commands=commands)
     if st.state in WAITING:
         status = activity(st, max_iterations)
         if st.state is State.CHECKPOINT_BLOCKED:
@@ -306,7 +310,7 @@ def task_detail(
 ) -> str:
     st = task.read_state()
     shown = view(task, st, running, max_iterations)
-    meta = [f"{criteria(task)} criteria", ago(st.updated)]
+    meta = [ago(st.updated)] if st.box else [f"{criteria(task)} criteria", ago(st.updated)]
     if spent := cost(task):
         meta.append(str(spent))
     lines = [
@@ -315,7 +319,7 @@ def task_detail(
         "",
         st.goal,
         "",
-        f"{style('Plan', 'bold')}  {task.plan_path}",
+        *([] if st.box else [f"{style('Plan', 'bold')}  {task.plan_path}"]),
     ]
     if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task)):
         lines.append(f"{style('Why', 'bold')}   {why}")

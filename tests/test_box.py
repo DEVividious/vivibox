@@ -80,7 +80,29 @@ def test_a_closed_box_is_accepted_like_a_task(env, capsys, monkeypatch):
     assert main(["accept", task.id]) == 0
     source = load_project("demo").repo
     assert (source / "idea.md").read_text() == "my work\n" and not task.root.exists()
-    assert actions.history()[0]["title"] == "Work in the box"
+    assert actions.history()[0]["title"] == "Box in demo"
+    assert "Commit it when you like, e.g.: git -C" in capsys.readouterr().out
+    assert '-m "Work in the box"' not in capsys.readouterr().out, "the message is yours to write"
+
+
+def test_a_box_is_described_without_a_plan_or_criteria(env, capsys):
+    task = actions.open_box("demo")
+    assert main(["status", task.id]) == 0
+    out = capsys.readouterr().out
+    assert "criteria" not in out and "Plan " not in out
+    (task.repo / "idea.md").write_text("x\n")
+    actions.close_box(task, load_project("demo"))
+    assert main(["status", task.id]) == 0
+    out = capsys.readouterr().out
+    assert f"vivibox accept {task.id}" in out and "reply" not in out, "nobody in a box to reply to"
+
+
+def test_accepting_a_box_offers_no_commit_message_to_keep(env, monkeypatch):
+    task = actions.open_box("demo")
+    (task.repo / "idea.md").write_text("my work\n")
+    actions.close_box(task, load_project("demo"))
+    done = actions.finish(task, load_project("demo"))
+    assert done.message == "", "'Work in the box' is not a message for your history"
 
 
 def test_a_box_without_changes_closes_into_nothing_to_review(env):

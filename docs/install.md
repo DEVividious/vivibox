@@ -29,6 +29,20 @@ A running view keeps the code it started with, and so does every task's supervis
 update the view's title says *vivibox changed on disk: quit and start it again*, and the details of
 a task whose supervisor is older say so too; stop and start that task (`s`) when it suits you.
 
+## Removing vivibox
+
+```
+host/uninstall.sh            # lists what is there, removes it after confirmation
+host/uninstall.sh --check    # only lists
+```
+
+It undoes `setup.sh` step by step: every task's pod (containers, networks, volumes, the agent
+image), the `vivibox` command, the sudo rule and the firewall helper, the bind mount and its
+`/etc/fstab` line, Sysbox, and the Docker network ranges (`/etc/docker/daemon.json` goes back to the
+copy `setup.sh` kept, or loses only those two keys; Docker restarts). Then it asks, one by one,
+before deleting anything of yours: the tasks directory, `~/.config/vivibox` and the stored API keys.
+The packages and uv stay, as they are not vivibox's.
+
 Next: [configuring providers and projects](configure.md), then [a task](tasks.md).
 
 ---

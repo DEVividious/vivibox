@@ -21,6 +21,7 @@ Linux with Docker Engine (tested on Ubuntu 24.04), and a model: an API key for a
 ```bash
 git clone https://github.com/DEVividious/vivibox.git && cd vivibox
 host/setup.sh      # asks before each change: Sysbox, /srv/vivibox, uv, the vivibox command
+host/uninstall.sh  # the way back, when you want it gone
 vivibox            # builds the agent image, asks for a key and a model, opens the view
 ```
 

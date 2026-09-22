@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,9 +17,24 @@ def helper(*args: str) -> subprocess.CompletedProcess:
 def test_scripts_pass_shellcheck():
     shellcheck = shutil.which("shellcheck")
     assert shellcheck, "run 'uv sync' to install shellcheck-py"
-    scripts = [HOST / "setup.sh", HELPER]
+    scripts = [HOST / "setup.sh", HOST / "uninstall.sh", HELPER]
     result = subprocess.run([shellcheck, "-x", *map(str, scripts)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize("script", ["setup.sh", "uninstall.sh"])
+def test_host_scripts_take_only_check(script):
+    result = subprocess.run(["bash", str(HOST / script), "--undo"], capture_output=True, text=True)
+    assert result.returncode == 2 and "usage" in result.stderr
+
+
+def test_uninstall_undoes_every_step_setup_makes():
+    """setup.sh's steps and uninstall.sh's removals are two lists kept by hand; a step added to
+    one without the other would leave something behind. Packages and uv stay on purpose."""
+    setup, uninstall = (HOST / "setup.sh").read_text(), (HOST / "uninstall.sh").read_text()
+    steps = set(re.findall(r"^do_(\w+)\(\)", setup, re.MULTILINE)) - {"packages", "uv"}
+    undone = set(re.findall(r"^do_(\w+)\(\)", uninstall, re.MULTILINE))
+    assert steps <= undone, f"setup steps without a removal: {sorted(steps - undone)}"
 
 
 @pytest.mark.parametrize(

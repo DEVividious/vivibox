@@ -117,15 +117,31 @@ def leave_key() -> None:
     tmux(*LEAVE_BINDING)
 
 
+# The command a task's tmux session shows, kept in the session's environment: the planner's
+# conversation and the writer's are two, and a window opened during planning must not go on
+# showing the planner once the writer is at work.
+SHOWS = "VIVIBOX_SHOWS"
+
+
+def shown(session: str) -> str:
+    out = tmux("show-environment", "-t", session, SHOWS).stdout or ""
+    return out.partition("=")[2].strip() if out.startswith(f"{SHOWS}=") else ""
+
+
 def agent_view(task: Task, command: list[str]) -> None:
-    """A tmux session showing the agent, opened when missing; closing it never touches the agent."""
+    """A tmux session showing the agent, opened when missing or when it shows another conversation;
+    closing it never touches the agent."""
     session = tmux_session(task.id)
+    wanted = shlex.join(command)
     if tmux_has(session):
-        # The keys live on the server, which outlives any one session, so a server still running
-        # from before carries an older binding. Setting it again is cheap.
-        leave_key()
-        return
-    tmux("new-session", "-d", "-s", session, "-n", "agent", shlex.join(command), check=True)
+        if shown(session) == wanted:
+            # The keys live on the server, which outlives any one session, so a server still
+            # running from before carries an older binding. Setting it again is cheap.
+            leave_key()
+            return
+        tmux("kill-session", "-t", session)
+    tmux("new-session", "-d", "-s", session, "-n", "agent", wanted, check=True)
+    tmux("set-environment", "-t", session, SHOWS, wanted)
     for option in (
         LEAVE_BINDING,
         ["set-option", "-g", "status-right", " Ctrl-q: back to vivibox "],

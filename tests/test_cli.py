@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from vivibox.cli import main
@@ -299,6 +301,57 @@ def test_the_agent_view_follows_the_agent_from_the_planner_to_the_writer(monkeyp
     created = next(c for c in calls if c[0] == "new-session")
     assert created[-1] == actions.shlex.join(writer)
     assert ["set-environment", "-t", "vivibox-demo-1", actions.SHOWS, actions.shlex.join(writer)] in calls
+
+
+def test_w_shows_the_verification_while_it_runs_and_the_agent_otherwise(env, monkeypatch):
+    """Pressing w during a verification landed in the writer's last conversation, where nothing
+    was happening: the verification is not an agent's turn. Its log is what there is to see."""
+    from test_tui import implementing
+
+    from vivibox import actions
+    from vivibox.pod import PodError
+    from vivibox.states import State
+
+    task = implementing()
+    task.set_session("writer", "ses_writer")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    monkeypatch.setattr(actions, "tmux_has", lambda target: False)
+    calls = fake_tmux(monkeypatch, shows="")
+    task.transition(State.VERIFY)
+    with pytest.raises(PodError, match="try again in a moment"):
+        actions.attach_command(task.id)
+    log = task.meta / "log" / "verify-1-120000.log"
+    log.write_text("# fresh clone of commit abc\n\n$ npm test\n")
+    assert actions.attach_command(task.id)[-2:] == ["-t", f"vivibox-{task.id}"]
+    created = next(c for c in calls if c[0] == "new-session")
+    assert created[-1] == actions.shlex.join([*actions.VERIFICATION_VIEW, str(log)])
+    calls.clear()
+    task.transition(State.IMPLEMENT)
+    actions.attach_command(task.id)
+    created = next(c for c in calls if c[0] == "new-session")
+    assert "opencode attach" in created[-1] and "ses_writer" in created[-1], "back to the agent"
+
+
+def test_an_old_log_is_not_the_verification_under_way(env):
+    """Verified again after a failure: until the gate opens this verification's log, w has the
+    log of the failed one to show, which is not what is happening now."""
+    from test_tui import implementing
+
+    from vivibox import actions
+    from vivibox.states import State
+
+    task = implementing()
+    task.transition(State.VERIFY)
+    old = task.meta / "log" / "verify-1-120000.log"
+    old.write_text("$ npm test\n[exit 1]\n")
+    stale = old.stat().st_mtime - 60
+    os.utime(old, (stale, stale))
+    task.transition(State.CHECKPOINT_BLOCKED)
+    task.transition(State.VERIFY)
+    assert actions.verification_log(task) is None
+    new = task.meta / "log" / "verify-1-120100.log"
+    new.write_text("# fresh clone of commit abc\n")
+    assert actions.verification_log(task) == new
 
 
 def test_a_task_overrides_the_configured_model_everywhere_or_nowhere(env):

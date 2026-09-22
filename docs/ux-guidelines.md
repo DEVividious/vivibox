@@ -61,7 +61,7 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 ## 3. Keys
 
 - A key is a verb and the selected row is its object: `e` edits, `x` deletes, `o` opens in the
-  IDE, `n` makes a new task, `b` opens a box in a project, `w` watches an agent or enters a box. A letter has one verb; a pair of opposites may share one (`s` for
+  IDE, `n` makes a new task, `b` opens a box in a project, `w` watches an agent, or the verification while it runs, or enters a box. A letter has one verb; a pair of opposites may share one (`s` for
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
   agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.

@@ -202,6 +202,25 @@ def test_the_gate_sees_the_daemon_and_localhost_like_the_agent(env):
         pod.gate_down()
 
 
+def test_the_gate_hands_a_commands_output_over_as_it_is_printed(env):
+    """A verification's log is watched while it runs, so a line the command prints must reach the
+    log then, not when the command is over."""
+    import time
+
+    pod = env["pod"]
+    pod.gate_up()
+    try:
+        got: list[tuple[float, str]] = []
+        code = pod.gate_stream(
+            "bash", "-c", "for i in 1 2 3; do echo $i; sleep 0.5; done; echo err >&2; exit 3",
+            sink=lambda line: got.append((time.monotonic(), line)),
+        )  # fmt: skip
+        assert code == 3 and [line for _, line in got] == ["1\n", "2\n", "3\n", "err\n"]
+        assert got[-1][0] - got[0][0] >= 0.9, "the first line came while the command still ran"
+    finally:
+        pod.gate_down()
+
+
 def test_the_gate_runs_the_maven_build_with_testcontainers(env):
     """What the agent's build did, done again where the gate does it: a fresh clone, an empty home."""
     pod = env["pod"]

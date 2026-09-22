@@ -268,8 +268,9 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
             return "`g` verify again, once you have fixed it · `r` tell the agent" + watch
         return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
     if st.state is State.VERIFY:
-        log = newest_log(task)
-        return "wait for the verification" + (" · `l` read its log so far" if log else "")
+        look = " · `w` look at it as it runs" if watchable(task, st, running) else ""
+        log = " · `l` read its log so far" if newest_log(task) else ""
+        return "wait for the verification" + look + log
     return "wait" + watch + " · `s` stop"
 
 
@@ -418,9 +419,14 @@ def finished_detail(entry: dict) -> str:
 
 
 def watchable(task: Task, st: TaskState, running: bool) -> bool:
-    """Whether w has an agent to show: only opencode has a window to attach to, and only while
-    the task is at work. The footer and every hint that names w ask here."""
-    return running and not st.paused and bool(actions.watchable_session(task, st))
+    """Whether w has something to show, and only while the task is at work: the verification's
+    log once the gate has opened it, else the agent, which only opencode has a window for. The
+    footer and every hint that names w ask here."""
+    if not running or st.paused:
+        return False
+    if st.state is State.VERIFY:
+        return actions.verification_log(task, st) is not None
+    return bool(actions.watchable_session(task, st))
 
 
 def detail(
@@ -1771,7 +1777,8 @@ HELP = """[b]Your decisions[/b], on the selected task
   c, C  copy the planning prompt for a chat, or for a CLI
   o     open the review copy in your IDE
   v     run the app in its pod, or stop it
-  w     watch or talk to the agent (Ctrl-q leaves); in a box, a shell in it
+  w     watch or talk to the agent; while verifying, its log (Ctrl-q leaves);
+        in a box, a shell in it
   l     read the newest log in your pager
   s     stop the task, or start it again
   m     what each role runs on, for this task

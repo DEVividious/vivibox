@@ -63,6 +63,12 @@ class FakePod:
         rc = 1 if cmd[-1] in self.fail else 0
         return subprocess.CompletedProcess(cmd, rc, stdout=f"output of {cmd[-1]}\n{self.output}", stderr="")
 
+    def gate_stream(self, *cmd, sink, workdir="", timeout=None):
+        p = self.gate_exec(*cmd, check=False, timeout=timeout)
+        for line in p.stdout.splitlines(keepends=True):
+            sink(line)
+        return p.returncode
+
 
 def tick(task, *items):
     path = task.meta / "handoff" / gate.CRITERIA_FILE
@@ -445,12 +451,13 @@ def test_a_failing_test_is_a_failure_of_the_code(task):
 class SlowPod(FakePod):
     """A command that never ends: the runner gives up at the time limit."""
 
-    def gate_exec(self, *cmd, check=True, timeout=None):
-        assert self.up
-        self.commands.append(cmd[-1])
+    def gate_stream(self, *cmd, sink, workdir="", timeout=None):
         if cmd[-1] == "npm test" and timeout:
-            raise subprocess.TimeoutExpired(cmd, timeout, output="[INFO] waiting for Docker…\n")
-        return super().gate_exec(*cmd, check=check)
+            assert self.up
+            self.commands.append(cmd[-1])
+            sink("[INFO] waiting for Docker…\n")
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        return super().gate_stream(*cmd, sink=sink, workdir=workdir, timeout=timeout)
 
 
 def test_a_command_that_does_not_finish_in_time_is_a_failure_of_the_environment(task):
@@ -461,6 +468,51 @@ def test_a_command_that_does_not_finish_in_time_is_a_failure_of_the_environment(
     assert "waiting for Docker" in log and "[timeout after 5 s]" in log, (
         "what it said so far, then why it stopped"
     )
+
+
+class WatchedPod(FakePod):
+    """Reads the log the way w does: while the command runs, not once it is over."""
+
+    def __init__(self, task):
+        super().__init__()
+        self.task = task
+        self.seen_at_gate_up = None
+        self.seen_mid_command = ""
+
+    def log(self):
+        logs = list((self.task.meta / "log").glob("verify-*.log"))
+        return logs[0].read_text() if logs else None
+
+    def gate_up(self):
+        self.seen_at_gate_up = self.log()
+        super().gate_up()
+
+    def gate_stream(self, *cmd, sink, workdir="", timeout=None):
+        assert self.up
+        self.commands.append(cmd[-1])
+        sink("[INFO] Compiling 12 files\n")
+        self.seen_mid_command = self.log()
+        sink("[INFO] BUILD SUCCESS\n")
+        return 0
+
+
+def test_the_log_is_written_while_the_command_runs(task):
+    """What there is to look at during a verification is its log, so a line the build printed
+    is in the log before the build is over, not once the command has returned."""
+    gate.accept_plan(task, ["true"])
+    pod = WatchedPod(task)
+    result = gate.run_gate(task, pod, ["mvn -B verify"], [])
+    assert pod.seen_mid_command.endswith("$ mvn -B verify\n[INFO] Compiling 12 files\n"), pod.seen_mid_command
+    assert result.log.read_text().endswith("[INFO] Compiling 12 files\n[INFO] BUILD SUCCESS\n[exit 0]\n\n")
+
+
+def test_the_log_is_there_before_the_gate_container_comes_up(task):
+    """Preparing the fresh clone is the first thing that takes time; a log that only appears
+    after it would leave nothing to look at for as long."""
+    gate.accept_plan(task, ["true"])
+    pod = WatchedPod(task)
+    gate.run_gate(task, pod, ["true"], [])
+    assert pod.seen_at_gate_up is not None and pod.seen_at_gate_up.startswith("# fresh clone of commit ")
 
 
 def test_a_failure_of_the_environment_is_not_reused(task):

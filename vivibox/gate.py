@@ -489,44 +489,58 @@ def run_gate(
 def _build(
     task: Task, pod: Pod, commands: list[str], java: str, head: str, result: GateResult, timeout: float = 0
 ) -> None:
-    pod.gate_up()
-    try:
-        toolchain.install_declared(pod, gate=True)
-        toolchain.ensure(pod, java, gate=True)
-        with result.log.open("w") as out:
-            out.write(f"# fresh clone of commit {head}\n\n")
+    values = pod.passed_values()
+    # Written as it goes, from before the container comes up: the log is what there is to look
+    # at while the verification runs, and preparing the clone is the first thing that takes time.
+    with result.log.open("w") as out:
+        out.write(f"# fresh clone of commit {head}\n\n")
+        out.flush()
+        pod.gate_up()
+        try:
+            toolchain.install_declared(pod, gate=True)
+            toolchain.ensure(pod, java, gate=True)
             for command in commands:
                 out.write(f"$ {command}\n")
                 out.flush()
                 started = time.monotonic()
-                try:
-                    p = pod.gate_exec("bash", "-c", command, check=False, timeout=timeout or None)
-                except subprocess.TimeoutExpired as e:
-                    output = masked(_text(e.stdout) + _text(e.stderr), pod.passed_values())
-                    output += f"\n[timeout after {timeout:g} s]"
-                    ok, code = False, "timeout"
+                said, code = _stream(pod, command, out, values, timeout)
+                if code == "timeout":
+                    said.append(f"\n[timeout after {timeout:g} s]")
+                    out.write(said[-1] + "\n")
+                    ok = False
                     result.environment = f"`{command}` did not finish in {timeout:g} s (verify_timeout)"
                 else:
-                    output = masked(p.stdout + p.stderr, pod.passed_values())
-                    ok, code = p.returncode == 0, p.returncode
+                    ok = code == 0
                     if not ok:
-                        result.environment = environment_problem(output)
-                out.write(output + f"\n[exit {code}]\n\n")
+                        result.environment = environment_problem("".join(said))
+                    if said and not said[-1].endswith("\n"):
+                        out.write("\n")
+                out.write(f"[exit {code}]\n\n")
+                out.flush()
+                took = round(time.monotonic() - started, 1)
                 result.commands.append(
-                    CommandResult(
-                        command, ok, round(time.monotonic() - started, 1), "" if ok else log_excerpt(output)
-                    )
+                    CommandResult(command, ok, took, "" if ok else log_excerpt("".join(said)))
                 )
                 if not ok:
                     break
-    finally:
-        pod.gate_down()
+        finally:
+            pod.gate_down()
 
 
-def _text(value) -> str:
-    if value is None:
-        return ""
-    return value.decode(errors="replace") if isinstance(value, bytes) else str(value)
+def _stream(pod: Pod, command: str, out, values: list[str], timeout: float) -> tuple[list[str], int | str]:
+    """One command, its output into the log as it comes: the lines it said, masked, and its exit
+    code, or "timeout" when it ran out of time."""
+    said: list[str] = []
+
+    def line(text: str) -> None:
+        said.append(masked(text, values))
+        out.write(said[-1])
+        out.flush()
+
+    try:
+        return said, pod.gate_stream("bash", "-c", command, sink=line, timeout=timeout or None)
+    except subprocess.TimeoutExpired:
+        return said, "timeout"
 
 
 def next_state(result: GateResult, iteration: int, max_iterations: int) -> State:

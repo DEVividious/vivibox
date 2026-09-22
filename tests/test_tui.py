@@ -1950,6 +1950,28 @@ def test_the_next_step_comes_first_in_the_panel(env):
     assert lines[2].index("`g`") < shown.index("What the build said")
 
 
+def test_w_looks_at_the_verification_once_its_log_is_there(env, monkeypatch):
+    """Not at the agent: nothing happens in its conversation while the gate builds."""
+    task = implementing()
+    task.set_session("writer", "ses_1")
+    task.transition(State.VERIFY)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "`w`" not in shown and "wait for the verification" in shown, "no log yet: nothing to look at"
+    (task.meta / "log" / "verify-1-120000.log").write_text("# fresh clone of commit abc\n")
+    shown = detail(task, task.read_state(), 3, running=True)
+    next_line = next(line for line in shown.splitlines() if line.startswith("**Next:**"))
+    assert "`w` look at it as it runs" in next_line and "`l`" in next_line
+    assert "Look at the agent" not in shown
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.check_action("watch", ())
+
+    run(scenario)
+
+
 def test_a_running_verification_is_shown_as_running(env, monkeypatch):
     task = implementing()
     task.transition(State.VERIFY)

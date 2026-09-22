@@ -14,6 +14,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -162,6 +163,8 @@ class Pod:
     # Addresses task networks are cut from; see config.Config.network_pool.
     network_pool: str = DEFAULT_NETWORK_POOL
     runner: Runner = run
+    # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
+    popen: Callable[..., subprocess.Popen] = subprocess.Popen
 
     @property
     def sidecar(self) -> str:
@@ -476,6 +479,30 @@ class Pod:
         return self._run(
             "docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd, check=check, timeout=timeout
         )
+
+    def gate_stream(
+        self, *cmd: str, sink: Callable[[str], None], workdir: str = "", timeout: float | None = None
+    ) -> int:
+        """gate_exec with the output handed to sink line by line as the command writes it, errors
+        among the rest in their order, so a log written from it moves while the command runs.
+        Returns the exit code. timeout: raises subprocess.TimeoutExpired; the command inside goes
+        down with the container."""
+        p = self.popen(
+            ["docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )  # fmt: skip
+        # Read on a thread of its own: a command silent past its time limit would otherwise hold
+        # the reader, and a waiter that did not read would let a full pipe hold the command.
+        reader = threading.Thread(target=lambda: [sink(line) for line in p.stdout], daemon=True)
+        reader.start()
+        try:
+            p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            reader.join()
+            raise
+        reader.join()
+        return p.returncode
 
     def gate_down(self) -> None:
         self._run("docker", "rm", "-f", self.gate, check=False)

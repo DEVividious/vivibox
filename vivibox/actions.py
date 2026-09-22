@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
@@ -161,16 +162,44 @@ def watchable_session(task: Task, st: TaskState | None = None) -> str:
     return ""
 
 
+def verification_log(task: Task, st: TaskState | None = None) -> Path | None:
+    """The log of the verification under way: the newest written since the task started
+    verifying. None before the gate has opened it, and when the task is not verifying."""
+    st = st or task.read_state()
+    if st.state is not State.VERIFY:
+        return None
+    # A second's slack: the log is opened right after the transition, and mtimes are coarse.
+    since = datetime.fromisoformat(st.updated).timestamp() - 1
+    logs = [p for p in (task.meta / "log").glob("verify-*.log") if p.stat().st_mtime >= since]
+    return max(logs, key=lambda p: p.stat().st_mtime, default=None)
+
+
+VERIFICATION_VIEW = ["tail", "-n", "+1", "-F"]
+
+
+def view_command(task: Task, st: TaskState) -> list[str]:
+    """What w shows: the verification's log while it runs, else the agent's opencode window."""
+    if not supervisor_running(task):
+        raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
+    if st.state is State.VERIFY:
+        log = verification_log(task, st)
+        if log is None:
+            raise PodError(
+                f"{task.id}: the verification is starting and has no log yet; try again in a moment"
+            )
+        return [*VERIFICATION_VIEW, str(log)]
+    session = watchable_session(task, st)
+    if not session:
+        raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
+    return opencode.OpenCode(task_pod(task.id)).attach_command(session)
+
+
 def attach_command(task_id: str) -> list[str]:
     task, _ = load(task_id)
     st = task.read_state()
     if st.box:
         return box_shell_command(task_id)
-    if not tmux_has(tmux_session(task_id)):
-        watchable = watchable_session(task, st)
-        if not watchable or not supervisor_running(task):
-            raise PodError(f"{task_id}: the agent is not working now; nothing to watch")
-        agent_view(task, opencode.OpenCode(task_pod(task_id)).attach_command(watchable))
+    agent_view(task, view_command(task, st))
     return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
 
 

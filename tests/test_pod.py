@@ -191,6 +191,49 @@ def test_gate_container_sees_only_committed_work(pod, tmp_path):
     assert pod.runner.find("docker", "rm", "-f", pod.gate)
 
 
+class FakeProcess:
+    """A Popen that prints its lines and ends with a code, or never ends."""
+
+    def __init__(self, lines, returncode=0, hangs=False):
+        self.stdout = iter(lines)
+        self.returncode = returncode
+        self.hangs = hangs
+        self.killed = False
+
+    def wait(self, timeout=None):
+        if self.hangs and not self.killed:
+            raise subprocess.TimeoutExpired("docker", timeout)
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+
+
+def test_a_gate_command_streams_its_lines_and_returns_its_code(pod):
+    started = []
+
+    def popen(cmd, **kw):
+        started.append((list(cmd), kw))
+        return FakeProcess(["[INFO] Scanning\n", "[ERROR] boom\n"], returncode=1)
+
+    pod.popen = popen
+    got = []
+    assert pod.gate_stream("bash", "-c", "mvn -B verify", sink=got.append) == 1
+    assert got == ["[INFO] Scanning\n", "[ERROR] boom\n"]
+    cmd, kw = started[0]
+    assert cmd == ["docker", "exec", "-w", pod.gate_src, pod.gate, "bash", "-c", "mvn -B verify"]
+    assert kw["stderr"] is subprocess.STDOUT, "errors in their place among the rest, as in a terminal"
+
+
+def test_a_gate_command_past_its_time_limit_is_killed_and_reported(pod):
+    process = FakeProcess(["[INFO] waiting for Docker…\n"], hangs=True)
+    pod.popen = lambda cmd, **kw: process
+    got = []
+    with pytest.raises(subprocess.TimeoutExpired):
+        pod.gate_stream("bash", "-c", "npm test", sink=got.append, timeout=5)
+    assert process.killed and got == ["[INFO] waiting for Docker…\n"], "what it said so far reached the log"
+
+
 def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
     """A build that passes for the agent must find the same daemon in the gate: the socket mounted
     at the same place, and the same DOCKER_HOST, TESTCONTAINERS_* and passed variables. What differs

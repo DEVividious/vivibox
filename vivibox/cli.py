@@ -618,7 +618,7 @@ def parser() -> argparse.ArgumentParser:
         ("start", cmd_start, "start the task, or a stopped one again from where it was"),
         ("resume", cmd_start, "the same as start"),
         ("stop", cmd_stop, "stop the task, keeping its work"),
-        ("attach", cmd_attach, "watch or talk to the agent; Ctrl-q leaves"),
+        ("attach", cmd_attach, "watch or talk to the agent, or the verification as it runs; Ctrl-q leaves"),
         ("supervise", cmd_supervise, "(run by start, in the background) drive the task through its states"),
     ):
         p_ = sub.add_parser(name, help=text)

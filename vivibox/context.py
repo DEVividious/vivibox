@@ -137,14 +137,62 @@ def attach(description: str, found: Mentions, folder: Path, clone: Path | None =
     return description
 
 
-def complete(partial: str, cwd: Path, limit: int = 40, repo: Path | None = None) -> list[str]:
+def complete(
+    partial: str, cwd: Path, limit: int = 40, repo: Path | None = None, paths: list[str] | None = None
+) -> list[str]:
     """Paths that complete what follows an @, like a shell: 'src/ma' -> ['src/main/']. From where
-    you are and, for a path that is not explicit, from the project's root too. Directories end
-    with '/'; hidden entries show only once you type the dot."""
+    you are and, for a path that is not explicit, from the project's root too; then, like Claude
+    Code, any path in the project's tree that contains what you typed: 'OrderSer' or 'orders/OrderSer'
+    -> ['src/main/java/com/acme/orders/OrderService.java']. Directories end with '/'; hidden entries
+    show only once you type the dot. `paths` is the project's tree, from `project_paths`, when the
+    caller keeps it instead of listing it on every keystroke."""
     found = _complete(partial, cwd)
     if repo and not partial.startswith(EXPLICIT):
         found = list(dict.fromkeys(found + _complete(partial, repo)))
+        if partial:
+            tree = project_paths(repo) if paths is None else paths
+            found = list(dict.fromkeys(found + _search(partial, tree)))
     return found[:limit]
+
+
+def project_paths(repo: Path) -> list[str]:
+    """Every file git knows or would add in the project, and every folder on the way to one, relative
+    to its root; folders end with '/'. What git ignores (build output, caches) is not part of the
+    project. Nothing for a folder that is no repository."""
+    try:
+        p = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=repo, capture_output=True, text=True,
+        )  # fmt: skip
+    except OSError:
+        return []
+    if p.returncode != 0:
+        return []
+    paths: set[str] = set()
+    for rel in filter(None, p.stdout.split("\0")):
+        paths.add(rel)
+        parts = rel.split("/")
+        paths.update("/".join(parts[:n]) + "/" for n in range(1, len(parts)))
+    return sorted(paths)
+
+
+def _search(partial: str, paths: list[str]) -> list[str]:
+    """The paths that contain what was typed, the best first: a name that starts with its last piece,
+    then a name that contains it, then a match elsewhere in the path; within those, the shortest path."""
+    query = partial.lower()
+    last = query.rstrip("/").rpartition("/")[2]
+    hidden_asked = any(part.startswith(".") for part in query.split("/"))
+    ranked = []
+    for path in paths:
+        low = path.lower()
+        if query not in low:
+            continue
+        if not hidden_asked and any(part.startswith(".") for part in path.split("/")):
+            continue
+        name = low.rstrip("/").rpartition("/")[2]
+        rank = 0 if name.startswith(last) else 1 if last in name else 2
+        ranked.append((rank, low.count("/"), low, path))
+    return [path for _, _, _, path in sorted(ranked)]
 
 
 def _complete(partial: str, cwd: Path) -> list[str]:

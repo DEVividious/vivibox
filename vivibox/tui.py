@@ -750,15 +750,26 @@ class EdgeTextArea(TextArea):
 
 
 class DescriptionArea(TextArea):
-    """A text area that suggests paths after '@', like Claude Code: arrows pick, Tab or Enter take one,
-    Escape closes the list."""
+    """A text area that suggests paths after '@', like Claude Code: a folder's entries, or any path in
+    the project that contains what you typed; arrows pick, Tab or Enter take one, Escape closes the
+    list."""
 
     def __init__(self, suggestions: OptionList, cwd: Path, **kwargs):
         super().__init__(**kwargs)
         self.suggestions, self.cwd = suggestions, cwd
-        # The selected project's repository: its files are suggested too, and they are the ones
-        # the agent has in its clone.
-        self.repo: Path | None = None
+        self._repo: Path | None = None
+        self.paths: list[str] = []
+
+    @property
+    def repo(self) -> Path | None:
+        """The selected project's repository: its files are suggested too, and they are the ones
+        the agent has in its clone. Its tree is listed once here, not on every keystroke."""
+        return self._repo
+
+    @repo.setter
+    def repo(self, path: Path | None) -> None:
+        self._repo = path
+        self.paths = context.project_paths(path) if path else []
 
     def mention(self) -> str | None:
         row, col = self.cursor_location
@@ -767,7 +778,11 @@ class DescriptionArea(TextArea):
 
     def suggest(self) -> None:
         partial = self.mention()
-        found = context.complete(partial, self.cwd, repo=self.repo) if partial is not None else []
+        found = (
+            context.complete(partial, self.cwd, repo=self.repo, paths=self.paths)
+            if partial is not None
+            else []
+        )
         self.suggestions.set_options(found)
         self.suggestions.display = bool(found)
         if found:

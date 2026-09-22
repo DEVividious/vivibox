@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from vivibox import actions, context
@@ -57,6 +59,45 @@ def test_completion_lists_matching_paths(tmp_path):
     assert context.complete("", tmp_path) == ["~/", "src/"], "no hidden files until you type the dot"
     assert context.complete(".e", tmp_path) == [".env"]
     assert context.complete("nothing/here", tmp_path) == []
+
+
+def test_completion_searches_the_projects_tree_by_a_piece_of_the_path(env, tmp_path):
+    repo = env / "repo"
+    orders = repo / "src" / "main" / "java" / "com" / "acme" / "orders"
+    orders.mkdir(parents=True)
+    (orders / "OrderService.java").write_text("")
+    (orders / "OrderRepository.java").write_text("")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "orders.md").write_text("")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "Add"], cwd=repo, check=True)
+    (orders / "OrderDto.java").write_text("")  # not committed yet: still yours to point at
+    (repo / ".gitignore").write_text("build/\n")
+    (repo / "build").mkdir()
+    (repo / "build" / "OrderGen.java").write_text("")  # ignored: not part of the project
+    (repo / ".github").mkdir()
+    (repo / ".github" / "order.yml").write_text("")
+    service = "src/main/java/com/acme/orders/OrderService.java"
+    assert context.complete("OrderSer", tmp_path, repo=repo) == [service]
+    assert context.complete("orders/OrderSer", tmp_path, repo=repo) == [service], "a piece of the path"
+    assert context.complete("order", tmp_path, repo=repo) == [
+        "docs/orders.md",
+        "src/main/java/com/acme/orders/",
+        "src/main/java/com/acme/orders/OrderDto.java",
+        "src/main/java/com/acme/orders/OrderRepository.java",
+        service,
+    ], "names that start with it first, the shortest path first, and no ignored files"
+    assert context.complete("java/com", tmp_path, repo=repo)[0] == "src/main/java/com/"
+    assert context.complete("./Order", tmp_path, repo=repo) == [], "an explicit path is where it says"
+    assert context.complete(".github/or", tmp_path, repo=repo) == [".github/order.yml"]
+    assert "src/main/java/com/acme/orders/" in context.complete("orders", tmp_path, repo=repo)
+
+
+def test_completion_without_a_repository_only_completes_folders(tmp_path):
+    (tmp_path / "plain" / "src").mkdir(parents=True)
+    (tmp_path / "plain" / "src" / "Main.java").write_text("")
+    assert context.complete("Main", tmp_path, repo=tmp_path / "plain") == []
+    assert context.complete("Main", tmp_path, repo=tmp_path / "gone") == []
 
 
 def test_task_numbers_skip_branches_in_your_repository(env):

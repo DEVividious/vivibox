@@ -44,7 +44,9 @@ repository stays.
 **Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write
 `@src/Order.java` or `@~/tickets/PAY-123.md` (also `@/abs/path`, `@./relative`, a folder) in the
 description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder
-opens its contents), from the project's repository and from where you started `vivibox`. A file
+opens its contents), from the project's repository and from where you started `vivibox`. A piece
+of a path is enough: `@OrderSer` or `@orders/OrderSer` finds `src/main/java/com/acme/orders/OrderService.java`
+anywhere in the project, files git ignores left out. A file
 of the project is the same file in the agent's clone, the one it edits, so the description points
 there; if your copy has uncommitted changes the task says so, since the clone is of a commit, and a
 file that is not committed at all is copied instead. Any other file vivibox copies into the task;

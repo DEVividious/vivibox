@@ -2180,6 +2180,27 @@ def test_at_suggests_the_projects_files_and_the_view_notes_uncommitted_ones(env,
     assert "uncommitted changes" in detail(task, task.read_state(), 3, running=False), "kept with the task"
 
 
+def test_at_finds_a_file_deep_in_the_projects_tree(env, tmp_path, monkeypatch):
+    orders = env / "repo" / "src" / "main" / "java" / "com" / "acme" / "orders"
+    orders.mkdir(parents=True)
+    (orders / "OrderService.java").write_text("class OrderService {}\n")
+    subprocess.run(["git", "add", "."], cwd=env / "repo", check=True)
+    subprocess.run(["git", "commit", "-qm", "Add"], cwd=env / "repo", check=True)
+    monkeypatch.chdir(tmp_path)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix @OrderSer")
+        suggestions = app.screen.query_one("#suggestions")
+        assert suggestions.display
+        assert suggestions.get_option_at_index(0).prompt == "src/main/java/com/acme/orders/OrderService.java"
+        await pilot.press("enter")
+        assert app.screen.query_one("#goal").text == "Fix @src/main/java/com/acme/orders/OrderService.java "
+
+    run(scenario)
+
+
 # --- reviewing: the diff, the plan, the archive --------------------------------------------------
 
 

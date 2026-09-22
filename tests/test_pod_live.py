@@ -62,8 +62,18 @@ def env():
     marker = secrets.token_hex(8)
     index = repo / "www" / "index.html"
     index.write_text(index.read_text().replace("__MARKER__", marker))
+    # A repository with a commit: the gate verifies a fresh clone of it, never the working tree.
+    git = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Pod Check")
+    git("config", "user.email", "podcheck@example.com")
+    git("add", ".")
+    git("commit", "-q", "-m", "Fixture project")
     ref, _ = image.build()
-    pod = Pod(task_id, repo, ref, [HostService("host.docker.internal", allowed.server_address[1])])
+    pod = Pod(
+        task_id, repo, ref, [HostService("host.docker.internal", allowed.server_address[1])],
+        gate_dir=tasks_dir / task_id / "gate",
+    )  # fmt: skip
     try:
         pod.up()
         yield {
@@ -82,6 +92,11 @@ def env():
 
 def agent(env, script: str, check: bool = True) -> subprocess.CompletedProcess:
     return env["pod"].exec("bash", "-c", script, check=check)
+
+
+def gate(env, script: str, check: bool = True) -> subprocess.CompletedProcess:
+    """In the gate container, in its fresh clone; gate_up() first."""
+    return env["pod"].gate_exec("bash", "-c", script, check=check)
 
 
 def test_agent_is_unprivileged(env):
@@ -163,6 +178,56 @@ def test_maven_build_with_testcontainers(env):
     assert result.returncode == 0, result.stdout[-3000:]
     assert "Tests run: 1, Failures: 0, Errors: 0" in result.stdout
     assert agent(env, "ls /cache/m2/org/testcontainers").stdout.strip(), "the shared Maven cache is used"
+
+
+# --- the gate: the same pod, a fresh container, only committed work -------------------------
+
+
+def test_the_gate_sees_the_daemon_and_localhost_like_the_agent(env):
+    """The work laptop's case: Testcontainers passed for the agent and the gate could not reach Docker. The
+    gate container gets the same socket and the same variables, so a container it starts is on
+    localhost for it, as it is for the agent."""
+    pod = env["pod"]
+    pod.gate_up()
+    try:
+        assert gate(env, "docker info --format '{{.ServerVersion}}'", check=False).returncode == 0
+        gate(env, "docker run -d --rm --name gatecheck -p 18080:80 nginx:alpine")
+        try:
+            got = gate(env, "for i in $(seq 20); do curl -fsS -o /dev/null http://localhost:18080/ && exit 0;"
+                       " sleep 0.5; done; exit 1", check=False)  # fmt: skip
+            assert got.returncode == 0, "a port published in the pod's daemon is on the gate's localhost"
+        finally:
+            gate(env, "docker rm -f gatecheck", check=False)
+    finally:
+        pod.gate_down()
+
+
+def test_the_gate_runs_the_maven_build_with_testcontainers(env):
+    """What the agent's build did, done again where the gate does it: a fresh clone, an empty home."""
+    pod = env["pod"]
+    pod.gate_up()
+    try:
+        result = gate(env, "mvn -B -f app/pom.xml verify", check=False)
+        assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-1000:]
+        assert "Tests run: 1, Failures: 0, Errors: 0" in result.stdout
+    finally:
+        pod.gate_down()
+
+
+def test_the_gate_verifies_committed_work_only(env):
+    pod = env["pod"]
+    (pod.repo / "uncommitted.txt").write_text("not in any commit\n")
+    try:
+        pod.gate_up()
+        try:
+            assert gate(env, "test -e app/pom.xml", check=False).returncode == 0, "the commit is there"
+            assert gate(env, "test -e uncommitted.txt", check=False).returncode != 0, (
+                "the working tree is not what is verified"
+            )
+        finally:
+            pod.gate_down()
+    finally:
+        (pod.repo / "uncommitted.txt").unlink()
 
 
 def test_pod_restart_keeps_images_and_firewall(env):

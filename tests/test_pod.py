@@ -6,7 +6,7 @@ import pytest
 
 from vivibox import toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
-from vivibox.pod import Listener, Mount, Pod, PodError
+from vivibox.pod import SOCKET_DIR, Listener, Mount, Pod, PodError
 
 
 class FakeDocker:
@@ -189,6 +189,21 @@ def test_gate_container_sees_only_committed_work(pod, tmp_path):
     assert clone and clone[0][-2:] == [str(pod.repo), f"{pod.gate_dir}/src"]
     pod.gate_down()
     assert pod.runner.find("docker", "rm", "-f", pod.gate)
+
+
+def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
+    """A build that passes for the agent must find the same daemon in the gate: the socket mounted
+    at the same place, and the same DOCKER_HOST, TESTCONTAINERS_* and passed variables. What differs
+    on purpose is the home directory, which the agent could have filled."""
+    pod.gate_dir = tmp_path / "gate"
+    pod.agent_env = {"OPENCODE_CONFIG": "/config/opencode.json"}
+    pod.passed_env = ["ACME_KEY"]
+    agent, gate = pod.agent_command(), pod.gate_command()
+    env = lambda cmd: {cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-e"}  # noqa: E731
+    assert env(gate) == env(agent), "the gate's environment drifted from the agent's"
+    assert any(e.startswith("DOCKER_HOST=unix://") for e in env(gate))
+    socket = [m for m in agent if m.endswith(f":{SOCKET_DIR}")]
+    assert socket and socket[0] in gate, "the daemon's socket, from the same volume"
 
 
 def test_each_task_gets_its_own_range_avoiding_what_docker_already_uses(pod):

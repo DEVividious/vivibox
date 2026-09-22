@@ -248,8 +248,7 @@ def test_leaving_the_agent_view_says_nothing_to_your_scrollback(monkeypatch):
 
     from vivibox import actions
 
-    calls: list[list[str]] = []
-    monkeypatch.setattr(actions, "tmux", lambda *a, **kw: calls.append(list(a)))
+    calls = fake_tmux(monkeypatch, shows="echo hi")
     task = SimpleNamespace(id="demo-1")
 
     monkeypatch.setattr(actions, "tmux_has", lambda target: False)
@@ -262,7 +261,44 @@ def test_leaving_the_agent_view_says_nothing_to_your_scrollback(monkeypatch):
     calls.clear()
     monkeypatch.setattr(actions, "tmux_has", lambda target: True)
     actions.agent_view(task, ["echo", "hi"])
-    assert calls == [actions.LEAVE_BINDING], calls
+    assert [c for c in calls if c[0] != "show-environment"] == [actions.LEAVE_BINDING], calls
+
+
+def fake_tmux(monkeypatch, shows: str) -> list[list[str]]:
+    """Records tmux calls; the session, when asked, says it shows `shows`."""
+    import subprocess
+
+    from vivibox import actions
+
+    calls: list[list[str]] = []
+
+    def tmux(*a, **kw):
+        calls.append(list(a))
+        out = f"{actions.SHOWS}={shows}\n" if a[0] == "show-environment" else ""
+        return subprocess.CompletedProcess(list(a), 0, out, "")
+
+    monkeypatch.setattr(actions, "tmux", tmux)
+    return calls
+
+
+def test_the_agent_view_follows_the_agent_from_the_planner_to_the_writer(monkeypatch):
+    """The planner's conversation and the writer's are two. A window opened while the planner
+    worked would otherwise go on showing it for the whole task: w in implementation showed the
+    plan being written, not the code."""
+    from types import SimpleNamespace
+
+    from vivibox import actions
+
+    planner = ["opencode", "attach", "--session", "ses_planner"]
+    writer = ["opencode", "attach", "--session", "ses_writer"]
+    calls = fake_tmux(monkeypatch, shows=actions.shlex.join(planner))
+    monkeypatch.setattr(actions, "tmux_has", lambda target: True)
+    actions.agent_view(SimpleNamespace(id="demo-1"), writer)
+    kinds = [c[0] for c in calls]
+    assert kinds.index("kill-session") < kinds.index("new-session"), "the planner's window makes way"
+    created = next(c for c in calls if c[0] == "new-session")
+    assert created[-1] == actions.shlex.join(writer)
+    assert ["set-environment", "-t", "vivibox-demo-1", actions.SHOWS, actions.shlex.join(writer)] in calls
 
 
 def test_a_task_overrides_the_configured_model_everywhere_or_nowhere(env):

@@ -31,7 +31,7 @@ them all:
 | `p` | approve changes to risky files |
 | `g` | a task blocked on a failed verification: run the verification again without the agent, for when the cause was outside the code (a token expired, Docker, a service) |
 | `l` | read the newest verification log, or the supervisor's, in your pager |
-| `w` | watch or talk to the agent; Ctrl-q brings you back (Esc there interrupts the agent) |
+| `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on; Ctrl-q brings you back (Esc there interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |

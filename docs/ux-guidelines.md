@@ -85,7 +85,9 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 
 - A dialog is a form: a column of one-word labels on the left, one field per row. A list or a
   checkbox is one row with no frame; the only boxes are a multi-line text and the buttons that
-  close the dialog. Related fields form a group, and a blank row separates groups.
+  close the dialog. Related fields form a group, and a blank row separates groups; the lists of
+  a group stand a blank row apart too. On a short terminal the rows between them go before the
+  multi-line text shrinks below three lines.
 - A button that helps fill a field stands in that field's row, compact, or is the last entry of
   that field's list ("+ set up another project…"). The closing row holds one
   primary button, then Cancel, then the key that presses the primary button.

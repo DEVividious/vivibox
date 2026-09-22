@@ -1635,7 +1635,7 @@ class NewTask(Dialog):
                             [*((n, n) for n in names), (NEW_PROJECT, NEW_PROJECT)],
                             value=chosen, allow_blank=False, compact=True, id="project",
                         )  # fmt: skip
-                    with Horizontal(classes="row", id="kind-row"):
+                    with Horizontal(classes="row gap", id="kind-row"):
                         yield Label("Kind", classes="key")
                         yield Select(
                             [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
@@ -1672,7 +1672,7 @@ class NewTask(Dialog):
                     for name in sorted(config.roles):
                         offered = actions.choices(name, config, self.available)
                         configured = actions.configured_choice(config, name)
-                        with Horizontal(classes="row"):
+                        with Horizontal(classes="row gap"):
                             yield Label(name.capitalize(), classes="key")
                             options = [(actions.choice_label(c, configured), c) for c in offered]
                             yield Select(
@@ -1715,13 +1715,21 @@ class NewTask(Dialog):
 
     def fit(self) -> None:
         """The description as tall as the screen leaves after the other rows, a line at least, so
-        the whole form stays in view and the description scrolls inside itself."""
+        the whole form stays in view and the description scrolls inside itself. The blank rows
+        between the lists of a group go first, before the description would shrink below three
+        lines."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
+        dialog = self.query_one(".dialog")
         room = int(self.size.height * 0.9) - self.CHROME
         fields.styles.max_height = max(5, room)
         others = fields.virtual_size.height - self.query_one("#task-row").outer_size.height
-        goal.styles.height = max(3, min(12, room - others))
+        gaps = len([row for row in self.query(".row.gap") if row.display])
+        if not dialog.has_class("tight"):
+            others -= gaps  # the rows without their gaps, whichever way they are drawn now
+        tight = room - others - gaps < 3
+        dialog.set_class(tight, "tight")
+        goal.styles.height = max(3, min(12, room - others - (0 if tight else gaps)))
         goal.focus()
 
     @on(Select.Changed, "#project")
@@ -1889,6 +1897,9 @@ class Vivibox(App):
     .form .section { height: auto; margin-top: 1; }
     .form #task { margin-top: 0; }
     .form .row { height: auto; }
+    /* Lists of a group a row apart, unless the terminal is short (fit() decides). */
+    .form .row.gap { margin-top: 1; }
+    .form.tight .row.gap { margin-top: 0; }
     .form .key { width: 10; color: $text-muted; }
     .form .hint { width: 1fr; color: $text-muted; }
     .form .row > Select, .form .row > TextArea { width: 1fr; }

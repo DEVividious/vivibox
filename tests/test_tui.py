@@ -1388,6 +1388,26 @@ def test_the_new_task_dialog_shows_every_field_at_once(env, size):
     run(scenario, size=size)
 
 
+@pytest.mark.parametrize(("size", "apart"), [((146, 38), 2), ((100, 30), 2), ((80, 24), 1)])
+def test_lists_in_a_group_stand_a_row_apart_unless_the_terminal_is_short(env, size, apart):
+    """A blank row between the lists of a group keeps them from reading as one block (§4). On a
+    short terminal the rows between them go before the description shrinks below three lines."""
+    with_code("demo")  # the kind is asked too: the whole form, as on a project with code
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        dialog = app.screen
+        planner, writer = dialog.query_one("#role-planner").region, dialog.query_one("#role-writer").region
+        assert writer.y - planner.y == apart, f"Planner at {planner.y}, Writer at {writer.y}"
+        assert dialog.query_one(tui.Fields).max_scroll_y == 0, "still nothing to scroll"
+        assert dialog.query_one("#goal").region.height >= 3
+
+    run(scenario, size=size)
+
+
 def test_attach_stands_with_the_description_and_create_is_the_only_primary_button(env):
     """Attach fills the description, so it stands under it, in the task's group, not among the
     lists; the buttons that close the dialog are Create and Cancel, and Create alone is primary."""

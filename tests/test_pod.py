@@ -27,6 +27,7 @@ class FakeDocker:
         self.alive = False
         self.started = True  # the demo tests turn this off first
         self.route = ""  # what `ip route get` says; nothing, and the host is taken for Ethernet
+        self.links = ""  # what `ip -o link` says
 
     def __call__(self, cmd):
         cmd = list(cmd)
@@ -57,6 +58,8 @@ class FakeDocker:
             pass
         elif cmd[:3] == ["ip", "-o", "route"]:
             out = self.route
+        elif cmd[:3] == ["ip", "-o", "link"]:
+            out = self.links
         elif cmd[:3] == ["docker", "network", "ls"]:
             out = "net1\n" if self.subnets else ""
         elif cmd[:3] == ["docker", "network", "inspect"]:
@@ -143,29 +146,43 @@ def test_up_creates_sidecar_then_firewall_then_agent(pod):
     ]  # fmt: skip
 
 
-def test_a_tunnel_smaller_than_ethernet_clamps_the_pods_mss(pod, tmp_path, monkeypatch):
+WIFI = (
+    "3: wlp0s20f3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DORMANT"
+    " group default qlen 1000\\    link/ether f0:b6:1e:3a:62:72 brd ff:ff:ff:ff:ff:ff"
+)
+WARP = (
+    "9: CloudflareWARP: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1280 qdisc fq_codel state UNKNOWN"
+    " mode DEFAULT group default qlen 500\\    link/none "
+)
+TUN_DOWN = (
+    "7: tun0: <POINTOPOINT,MULTICAST,NOARP> mtu 1400 qdisc noop state DOWN mode DEFAULT group default"
+    " qlen 500\\    link/none "
+)
+VETH = (
+    "12: veth1a2b3c4@if11: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master docker0 state UP"
+    " mode DEFAULT group default \\    link/ether 02:42:ac:14:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 0"
+)
+ROUTE_WIFI = "1.1.1.1 via 192.168.50.1 dev wlp0s20f3 src 192.168.50.219 uid 1000 \\    cache \n"
+
+
+def test_a_tunnel_smaller_than_ethernet_clamps_the_pods_mss(pod):
     """The work laptop's case, third round: behind Cloudflare WARP (MTU 1280) the pod's daemon fetched an
     image's manifest and then got 0 of a layer's 115 MB: "unexpected EOF". The pod's interfaces
-    have 1500 and offer an MSS the tunnel cannot carry; the firewall clamps it to the uplink's."""
-    from vivibox import pod as pod_module
-
-    (tmp_path / "CloudflareWARP").mkdir()
-    (tmp_path / "CloudflareWARP" / "mtu").write_text("1280\n")
-    monkeypatch.setattr(pod_module, "SYS_NET", tmp_path)
-    pod.runner.route = "1.1.1.1 via 100.96.0.1 dev CloudflareWARP src 100.96.0.2 uid 1000 \n    cache \n"
+    have 1500 and offer an MSS the tunnel cannot carry; the firewall clamps it to the tunnel's.
+    WARP steers traffic through rules of its own, so `ip route get` still names the Wi-Fi: a
+    tunnel that is up counts whatever the route says."""
+    pod.runner.route = ROUTE_WIFI
+    pod.runner.links = "\n".join([WIFI, WARP, VETH]) + "\n"
     pod.up()
     firewall = pod.runner.find("sudo")[0]
     assert firewall[firewall.index("--mtu") + 1] == "1280"
     assert firewall.index("--mtu") < firewall.index("172.20.0.1:5432"), "options before the targets"
 
 
-def test_an_ethernet_uplink_needs_no_clamping(pod, tmp_path, monkeypatch):
-    from vivibox import pod as pod_module
-
-    (tmp_path / "wlan0").mkdir()
-    (tmp_path / "wlan0" / "mtu").write_text("1500\n")
-    monkeypatch.setattr(pod_module, "SYS_NET", tmp_path)
-    pod.runner.route = "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.2 uid 1000 \n    cache \n"
+def test_an_ethernet_uplink_needs_no_clamping(pod):
+    """A tunnel that is down does not count either."""
+    pod.runner.route = ROUTE_WIFI
+    pod.runner.links = "\n".join([WIFI, TUN_DOWN, VETH]) + "\n"
     pod.up()
     assert "--mtu" not in pod.runner.find("sudo")[0]
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -27,7 +28,6 @@ SOCKET_DIR = "/run/vivibox-docker"
 SOCKET = f"{SOCKET_DIR}/docker.sock"
 FIREWALL = "/usr/local/libexec/vivibox-netns"
 ETHERNET_MTU = 1500
-SYS_NET = Path("/sys/class/net")
 # Shared between tasks (N2): the dependency caches are safe to share, the task's Docker data is not.
 CACHES = {
     "m2": "/cache/m2",
@@ -152,18 +152,28 @@ class Mount:
         return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
 
 
+LINK = re.compile(r"^\d+: ([^:@]+)(?:@\S+)?: <([^>]*)> mtu (\d+) .*?\blink/(\w+)")
+
+
 def uplink_mtu(runner: Runner = run) -> int:
-    """The MTU of the interface the host reaches the internet through. A VPN tunnel has less than
+    """The MTU the host's traffic to the internet is bound by. A VPN tunnel has less than
     Ethernet's 1500 (Cloudflare WARP: 1280), and a pod, whose own interfaces have 1500, cannot
-    tell: its large downloads through the tunnel stall. 1500 when there is no way to know."""
+    tell: its large downloads through the tunnel stall. The route's interface counts, and so
+    does every tunnel that is up: WARP steers traffic through rules and a table of its own, and
+    `ip route get` still names the Wi-Fi. 1500 when there is no way to know."""
+    links = {}
+    p = runner(["ip", "-o", "link"])
+    for line in p.stdout.splitlines() if p.returncode == 0 else []:
+        if m := LINK.match(line):
+            links[m.group(1)] = (set(m.group(2).split(",")), int(m.group(3)), m.group(4))
+    mtus = [
+        mtu for flags, mtu, kind in links.values() if kind in ("none", "ppp") and {"UP", "LOWER_UP"} <= flags
+    ]
     p = runner(["ip", "-o", "route", "get", "1.1.1.1"])
     words = p.stdout.split()
-    if p.returncode != 0 or "dev" not in words[:-1]:
-        return ETHERNET_MTU
-    try:
-        return int((SYS_NET / words[words.index("dev") + 1] / "mtu").read_text())
-    except (OSError, ValueError):
-        return ETHERNET_MTU
+    if p.returncode == 0 and "dev" in words[:-1] and words[words.index("dev") + 1] in links:
+        mtus.append(links[words[words.index("dev") + 1]][1])
+    return min(mtus, default=ETHERNET_MTU)
 
 
 def binds(command: list[str]) -> list[str]:

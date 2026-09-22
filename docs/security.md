@@ -29,7 +29,10 @@ under [Sysbox](https://github.com/nestybox/sysbox). The agent container runs as 
 capability dropped, `no-new-privileges` and a read-only root filesystem; it writes only to the task's
 clone, its home and `/tmp`. The Docker socket lives in a volume the two share and never on your host.
 A firewall in the pod's network namespace blocks your host and every private network, except the
-services you list per project; DNS and the internet are open.
+services you list per project; DNS and the internet are open. The pod trusts the certificate
+authorities your host trusts: the host's CA bundle is mounted read-only over the sidecar's, the
+agent's and the gate's, so a registry or a proxy behind a corporate authority works in the pod as
+it does on your host.
 
 The task's clone is a real `git clone`, so your repository's `.git` never enters the pod. In the
 clone, `.git/config` and `.git/hooks/` are read-only for the agent, and the project's own hooks reach

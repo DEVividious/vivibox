@@ -426,6 +426,8 @@ def test_a_log_excerpt_keeps_what_went_wrong():
         "curl: (6) Could not resolve host: artifacts.example.com",
         "The security token included in the request is expired",
         "No space left on device",
+        "testcontainers cannot pull confluentinc/cp-kafka:7.6.1: Docker reports tls: failed to verify"
+        " certificate: x509: certificate signed by unknown authority",
     ],
 )
 def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):

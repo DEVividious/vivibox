@@ -164,6 +164,7 @@ ENVIRONMENT = re.compile(
     r"|status code: (401|403|407)|\b(401 Unauthorized|403 Forbidden|407 Proxy)\b"
     r"|token.{0,40}(expired|invalid)|(expired|invalid).{0,40}token|credentials? (not found|expired|invalid)"
     r"|SSL certificate problem|unable to get local issuer certificate"
+    r"|certificate signed by unknown authority|tls: failed to verify certificate|\bx509: "
     r"|No space left on device|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
     r"|Temporary failure in name resolution|network is unreachable",
     re.IGNORECASE,

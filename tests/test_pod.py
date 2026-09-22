@@ -249,6 +249,21 @@ def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
     assert socket and socket[0] in gate, "the daemon's socket, from the same volume"
 
 
+def test_the_pod_trusts_the_authorities_the_host_trusts(pod, tmp_path, monkeypatch):
+    """The work laptop's case: the host pulls an image the pod's daemon could not, "x509: certificate signed
+    by unknown authority". The authority was in the host's trust store and in no container's."""
+    from vivibox import pod as pod_module
+
+    bundle = tmp_path / "ca-certificates.crt"
+    bundle.write_text("-----BEGIN CERTIFICATE-----\n")
+    monkeypatch.setattr(pod_module, "HOST_CA_BUNDLE", bundle)
+    pod.gate_dir = tmp_path / "gate"
+    for cmd in (pod.sidecar_command(), pod.agent_command(), pod.gate_command()):
+        assert f"{bundle}:/etc/ssl/certs/ca-certificates.crt:ro" in cmd, cmd[:5]
+    monkeypatch.setattr(pod_module, "HOST_CA_BUNDLE", tmp_path / "none")
+    assert not any("ca-certificates.crt" in arg for arg in pod.sidecar_command()), "no bundle, no mount"
+
+
 def test_each_task_gets_its_own_range_avoiding_what_docker_already_uses(pod):
     pod.runner.subnets = "172.20.0.0/16 198.51.100.0/28 fd00::/64 198.51.100.16/28"
     assert str(pod.free_subnet()) == "198.51.100.32/28", "the lowest range nothing else holds"

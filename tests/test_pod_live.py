@@ -17,7 +17,7 @@ import pytest
 
 from vivibox import image, toolchain
 from vivibox.config import HostService
-from vivibox.pod import FIREWALL, SOCKET, Pod
+from vivibox.pod import CA_BUNDLE, FIREWALL, SOCKET, Pod
 
 pytestmark = pytest.mark.docker
 
@@ -178,6 +178,24 @@ def test_maven_build_with_testcontainers(env):
     assert result.returncode == 0, result.stdout[-3000:]
     assert "Tests run: 1, Failures: 0, Errors: 0" in result.stdout
     assert agent(env, "ls /cache/m2/org/testcontainers").stdout.strip(), "the shared Maven cache is used"
+
+
+def test_the_pod_trusts_the_authorities_the_host_trusts(env):
+    """The daemon in the sidecar, the agent and the gate see the host's CA bundle, not their own."""
+    pod = env["pod"]
+    host = subprocess.run(
+        ["sha256sum", CA_BUNDLE], capture_output=True, text=True, check=True
+    ).stdout.split()[0]
+    sidecar = subprocess.run(
+        ["docker", "exec", pod.sidecar, "sha256sum", CA_BUNDLE], capture_output=True, text=True, check=True
+    ).stdout.split()[0]
+    assert sidecar == host, "the daemon that pulls images verifies with the host's authorities"
+    assert agent(env, f"sha256sum {CA_BUNDLE}").stdout.split()[0] == host
+    pod.gate_up()
+    try:
+        assert gate(env, f"sha256sum {CA_BUNDLE}").stdout.split()[0] == host
+    finally:
+        pod.gate_down()
 
 
 # --- the gate: the same pod, a fresh container, only committed work -------------------------

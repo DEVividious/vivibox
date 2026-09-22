@@ -37,6 +37,11 @@ CACHES = {
     "build-cache": "/cache/build-cache",
 }
 HOST_GATEWAY = "host.docker.internal"
+# The host's trust store, shared with the pod: a registry or a proxy the host trusts through an
+# authority of its own (corporate TLS inspection) is trusted in the pod the same way. The daemon
+# (Go), OpenSSL and the system's tools read this file; tools with a store of their own do not.
+HOST_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
+CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 # Running the project for you to look at: its process group, its output, both inside the pod.
 DEMO_PID = "/tmp/vivibox-demo.pid"
 DEMO_LOG = "/tmp/vivibox-demo.log"
@@ -143,6 +148,11 @@ class Mount:
 
     def arg(self) -> str:
         return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
+
+
+def ca_mounts() -> list[Mount]:
+    """The host's CA bundle over the container's own, when the host has one."""
+    return [Mount(str(HOST_CA_BUNDLE), CA_BUNDLE, read_only=True)] if HOST_CA_BUNDLE.exists() else []
 
 
 @dataclass
@@ -339,6 +349,7 @@ class Pod:
         )
         # Read-only for Docker in the pod: compose and Testcontainers bind-mount files of the build.
         shared = [Mount(str(d), str(d), read_only=True) for d in (self.repo, self.gate_dir) if d]
+        shared += ca_mounts()
         return [
             "docker", "run", "-d", "--name", self.sidecar, "--runtime=sysbox-runc",
             "--label", f"vivibox.task={self.task_id}",
@@ -357,6 +368,7 @@ class Pod:
             Mount(str(self.repo), str(self.repo)),
             Mount(f"vivibox-{self.task_id}-config", "/config"),
             *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
+            *ca_mounts(),
             *self.agent_mounts,
         ]
         return [
@@ -385,6 +397,7 @@ class Pod:
             Mount(str(self.repo), str(self.repo), read_only=True),
             Mount(str(self.gate_dir), str(self.gate_dir)),
             *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
+            *ca_mounts(),
         ]
         return [
             "docker", "run", "-d", "--name", self.gate,

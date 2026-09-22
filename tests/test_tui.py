@@ -2177,3 +2177,95 @@ def test_at_suggests_the_projects_files_and_the_view_notes_uncommitted_ones(env,
     task = find_task(load_config().tasks_dir, "demo-1")
     assert f"{task.repo}/src/Order.java" in task.plan_path.read_text()
     assert "uncommitted changes" in detail(task, task.read_state(), 3, running=False), "kept with the task"
+
+
+# --- reviewing: the diff, the plan, the archive --------------------------------------------------
+
+
+def final(goal="Goal"):
+    task = implementing(goal)
+    (task.repo / "Health.java").write_text("class Health {}\n")
+    for args in (
+        ["add", "Health.java"],
+        ["-c", "user.name=A", "-c", "user.email=a@b", "commit", "-qm", "Add"],
+    ):
+        subprocess.run(["git", *args], cwd=task.repo, check=True, capture_output=True)
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL)
+    actions.prepare_review(task, load_project("demo"))
+    return task
+
+
+def test_f_shows_the_work_as_a_diff_and_is_offered_when_the_work_is_ready(env):
+    task = final()
+    other = new_task()
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index(other.id))
+        await pilot.pause()
+        assert not app.check_action("show_diff", ())
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        assert app.check_action("show_diff", ())
+        # git pages by itself and takes the terminal over (App.suspend); the command is tested.
+        base = task.read_state().base_commit
+        assert app.diff_command() == [
+            "git", "-C", str(load_project("demo").repo), "diff", f"{base}...refs/vivibox/{task.id}"
+        ]  # fmt: skip
+        assert "`f`" in tui.detail(task, task.read_state(), 3, running=True)
+
+    run(scenario)
+    command = [*tui.git_diff(task, load_project("demo")), "--stat"]
+    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    assert "Health.java" in out, command
+
+
+def test_the_plan_stays_readable_after_it_is_accepted(env):
+    task = implementing()
+    plan = task.meta / gate.ACCEPTED_PLAN
+    plan.write_text(
+        plan.read_text().replace(
+            "## Acceptance criteria", "## Approach\n\nUse a filter.\n\n## Acceptance criteria"
+        )
+    )
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "Use a filter." in shown and shown.index("Acceptance criteria") < shown.index("Use a filter.")
+
+
+def test_a_finished_task_shows_its_plan_from_the_archive(env):
+    entry = {"id": "demo-1", "project": "demo", "title": "Add health", "cost": 0.02, "commit": "abc1234567",
+             "branch": "", "conflicts": [], "criteria": ["it works"], "finished": now()}  # fmt: skip
+    kept = actions.archive_path("demo-1")
+    kept.mkdir(parents=True)
+    (kept / "plan.accepted.md").write_text(
+        '+++\nkind = "feature"\n+++\n\n# Goal\n\nAdd health\n\n## Approach\n\nA filter.\n'
+    )
+    shown = finished_detail(entry)
+    assert "A filter." in shown and str(kept) in shown
+    assert "Press `x` to delete it from the history" in shown
+
+
+def test_forgetting_a_finished_task_says_the_archive_goes_too(env):
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    actions.history_path().write_text(
+        '{"id": "demo-0", "project": "demo", "title": "Old", "cost": 0.1, "commit": "abc", "branch": "",'
+        ' "conflicts": [], "finished": "' + now() + '"}\n'
+    )
+    kept = actions.archive_path("demo-0")
+    kept.mkdir(parents=True)
+    (kept / "events.jsonl").write_text("")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=rows(app).index("demo-0"))
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.DeleteTask)
+        assert "archive" in str(app.screen.goes)
+        await pilot.press("left", "enter")
+        await pilot.pause()
+        assert not kept.exists()
+
+    run(scenario)

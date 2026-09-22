@@ -479,3 +479,33 @@ def test_new_says_when_a_mentioned_file_is_not_what_the_agent_will_see(env, caps
     assert main(["new", "demo", "Change @a.txt", "--draft"]) == 0
     out = capsys.readouterr().out
     assert "a.txt has uncommitted changes; the agent sees the committed version" in out
+
+
+def test_an_accepted_task_leaves_its_plan_and_events_in_the_archive(env, capsys, monkeypatch):
+    from vivibox import actions
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    agent_commit(task, "one.txt")
+    final_checkpoint(task)
+    assert main(["accept", "demo-1"]) == 0
+    kept = actions.archive_path("demo-1")
+    assert not task.root.exists() and kept.is_dir()
+    assert (kept / "plan.accepted.md").exists() and (kept / "events.jsonl").exists()
+    assert (kept / "criteria.md").exists()
+    assert not (kept / "repo").exists(), "the plan and the record, not the clone"
+    assert '"type": "state"' in (kept / "events.jsonl").read_text()
+
+
+def test_a_deleted_task_is_archived_too_and_forgetting_it_removes_the_archive(env, capsys):
+    from vivibox import actions
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    assert main(["rm", "demo-1", "--yes"]) == 0
+    kept = actions.archive_path("demo-1")
+    assert (kept / "plan.md").exists() and (kept / "events.jsonl").exists()
+    actions.forget("demo-1")
+    assert not kept.exists() and actions.history() == []

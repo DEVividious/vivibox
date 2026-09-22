@@ -61,7 +61,7 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   IDE, `n` makes a new task. A letter has one verb; a pair of opposites may share one (`s` for
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
-  agent). `l` opens the newest log in the pager.
+  agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.
 - Dialogs: Esc cancels, Enter submits a one-line field, Ctrl+S submits a multi-line one, arrows
   move between fields. A dialog that cannot send what it was given stays open and says why.
 - Red is for a button that stops, deletes or forgets. Such a dialog with lasting loss opens with

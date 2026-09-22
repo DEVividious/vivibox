@@ -180,6 +180,13 @@ def verification_running(task: Task, st: TaskState) -> list[str]:
     return lines
 
 
+def git_diff(task: Task, project) -> list[str]:
+    """The work as a diff, from the review ref in your repository: what accepting would bring.
+    git pages it itself, so this runs with the terminal handed over."""
+    base = task.read_state().base_commit
+    return ["git", "-C", str(project.repo), "diff", f"{base}...{actions.repo.review_ref(task.id)}"]
+
+
 def pager_command(path: Path) -> list[str]:
     pager = os.environ.get("PAGER") or shutil.which("less") or "more"
     return [*pager.split(), str(path)]
@@ -200,7 +207,7 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if st.state is State.CHECKPOINT_PLAN:
         return "`a` accept the plan · `r` send it back with a comment · `e` edit it"
     if st.state is State.CHECKPOINT_FINAL:
-        return "`o` open the review copy · `v` run the app · `a` accept · `r` ask for changes"
+        return "`f` the diff · `o` open the review copy · `v` run the app · `a` accept · `r` ask for changes"
     if st.state is State.APPROVAL_RISKY:
         return "`p` approve the files as shown · `r` send the agent back"
     if st.state is State.CHECKPOINT_BLOCKED:
@@ -332,6 +339,13 @@ def finished_detail(entry: dict) -> str:
         if met
         else ["*Its criteria were not recorded; it finished before vivibox kept them.*", ""]
     )
+    kept = actions.archive_path(entry["id"])
+    plan = read(kept / gate.ACCEPTED_PLAN) or read(kept / "plan.md")
+    archived = (
+        [f"Its plan and its events are kept in `{kept}`.", "", "#### The plan", "", plan_body(plan)]
+        if plan
+        else []
+    )
     return "\n".join(
         [
             f"### {entry['id']} · done",
@@ -344,6 +358,8 @@ def finished_detail(entry: dict) -> str:
             "",
             *delivered,
             "Press `x` to delete it from the history, `h` to hide finished tasks.",
+            "",
+            *archived,
         ]
     )
 
@@ -464,6 +480,7 @@ def detail(
         ]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
             body += ["", read(handoff / "verify-feedback.md"), "", *build_said(handoff / "verify.log")]
+        body += ["", "#### The plan", "", plan_body(read(task.meta / gate.ACCEPTED_PLAN))]
     else:
         events = task.events()[-8:]
         body = ["**Recent events**", ""] + [
@@ -1817,6 +1834,7 @@ class Vivibox(App):
         Binding("e", "edit_plan", "Edit plan"),
         Binding("c", "copy_prompt", "Prompt"),
         Binding("C", "copy_prompt_cli", "CLI prompt"),
+        Binding("f", "show_diff", "Diff"),
         Binding("o", "open_ide", "IDE"),
         Binding("v", "demo", "Run app"),
         Binding("v", "demo_stop", "Stop app"),
@@ -2329,7 +2347,8 @@ class Vivibox(App):
         """Only the keys that do something for the selected task show in the footer."""
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
                         "start_task", "stop_task", "stop_pod", "remove", "demo", "demo_stop",
-                        "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log")  # fmt: skip
+                        "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log",
+                        "show_diff")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
         if action in ("edit_project", "open_repo", "forget_project"):
@@ -2359,6 +2378,7 @@ class Vivibox(App):
             # Not while the agent may be writing its own draft.
             "edit_plan": state is State.CHECKPOINT_PLAN or (state is State.PLAN and not running),
             "open_ide": state is State.CHECKPOINT_FINAL,
+            "show_diff": state is State.CHECKPOINT_FINAL,
             # Also once a plan is in: going back to the same chat is how you change it.
             "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
@@ -2580,6 +2600,20 @@ class Vivibox(App):
         else:
             self.go_on(task, f"Verifying {task.id} again")
         self.reload()
+
+    def diff_command(self) -> list[str]:
+        task, _ = self.selected()
+        return git_diff(task, actions.load(task.id)[1])
+
+    def action_show_diff(self) -> None:
+        """The work as a diff, in git's own pager, before you accept it."""
+        try:
+            command = self.diff_command()
+        except Exception as e:
+            self.fail(e)
+            return
+        with self.suspend():
+            subprocess.run(command)
 
     def action_show_log(self) -> None:
         """The newest verification log, or the supervisor's, in your pager."""
@@ -2918,10 +2952,12 @@ class Vivibox(App):
     def action_remove(self) -> None:
         if entry := self.finished_entry(self.selected_id()):
             kind = "deleted" if entry.get("deleted") else "done"
+            kept = actions.archive_path(entry["id"])
             dialog = DeleteTask(
                 f"Delete {entry['id']} from the history?",
                 f"{entry['title']} ({kind}, {ui.finished_cost(entry)})",
-                "its line in this list.",
+                "its line in this list"
+                + (", and its archive (the plan, the events)." if kept.exists() else "."),
                 "everything else: "
                 + ("nothing of it was left anyway." if kind == "deleted" else "its work in your repository."),
             )

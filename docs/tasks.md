@@ -26,6 +26,7 @@ them all:
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
+| `f` | the work as a diff, in git's pager, before you accept it |
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
 | `p` | approve changes to risky files |
 | `g` | a task blocked on a failed verification: run the verification again without the agent, for when the cause was outside the code (a token expired, Docker, a service) |
@@ -119,7 +120,10 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   directory, which the agent cannot see.
 - **Ask for changes** with `vivibox reply <id> "…"`. The next round updates the copy.
 An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it
-cost, and the commit it left. The view lists those under the live tasks; `x` forgets one.
+cost, and the commit it left; and its record in `~/.local/share/vivibox/archive/<id>/`: the plan it
+was held to, its events and its criteria, a few dozen kilobytes, without the clone or the logs. A
+deleted task leaves the same. The view lists those under their projects with the plan in the
+details; `x` forgets one, archive included.
 
 - **Accept** with `vivibox accept <id>`: only now does the work reach your checkout, as
   uncommitted changes on your current branch. vivibox asks whether to commit them and suggests a

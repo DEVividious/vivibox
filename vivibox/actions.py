@@ -844,6 +844,7 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     stop_supervisor(task)
     if not accepted:
         remember_removed(task, project)
+    archive(task)
     task_pod(task.id).remove()
     secrets.remove(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)
@@ -1055,6 +1056,8 @@ def history(limit: int = 20) -> list[dict]:
 
 
 def forget(task_id: str) -> None:
+    """A finished task's line in the history, and its archive, go."""
+    shutil.rmtree(archive_path(task_id), ignore_errors=True)
     path = history_path()
     if not path.exists():
         return
@@ -1062,6 +1065,33 @@ def forget(task_id: str) -> None:
         line for line in path.read_text().splitlines() if line.strip() and json.loads(line)["id"] != task_id
     ]
     path.write_text("".join(line + "\n" for line in kept))
+
+
+def archive_path(task_id: str) -> Path:
+    return history_path().with_name("archive") / task_id
+
+
+# What is worth keeping of a task that is gone: the plan it was held to, what happened to it and
+# what it delivered, a few dozen kilobytes; not its clone, not its logs.
+ARCHIVED = (
+    "plan.md",
+    gate.ACCEPTED_PLAN,
+    "events.jsonl",
+    "handoff/" + gate.CRITERIA_FILE,
+    "handoff/" + DEMO_FILE,
+)
+
+
+def archive(task: Task) -> Path:
+    """Keeps the task's record before its directory goes, so a finished task can still show its
+    plan, and what it cost can still be traced to the gate runs that cost it."""
+    kept = archive_path(task.id)
+    kept.mkdir(parents=True, exist_ok=True)
+    for name in ARCHIVED:
+        source = task.meta / name
+        if source.is_file():
+            shutil.copy2(source, kept / source.name)
+    return kept
 
 
 def accepted_criteria(task: Task) -> list[str]:

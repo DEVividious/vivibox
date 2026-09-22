@@ -150,6 +150,11 @@ class Mount:
         return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
 
 
+def binds(command: list[str]) -> list[str]:
+    """The -v arguments of a docker run command, as Docker keeps them in HostConfig.Binds."""
+    return [command[i + 1] for i, arg in enumerate(command) if arg == "-v"]
+
+
 def ca_mounts() -> list[Mount]:
     """The host's CA bundle over the container's own, when the host has one."""
     return [Mount(str(HOST_CA_BUNDLE), CA_BUNDLE, read_only=True)] if HOST_CA_BUNDLE.exists() else []
@@ -451,10 +456,17 @@ class Pod:
             self._run(*self.agent_command())
 
     def _outdated_sidecar(self) -> bool:
-        p = self._run("docker", "inspect", "-f", "{{json .Config.Cmd}}", self.sidecar, check=False)
+        """Whether the sidecar was made with another script or other mounts than this vivibox
+        would give it: docker start keeps both, so a fix to either would never arrive."""
+        template = '{"cmd":{{json .Config.Cmd}},"binds":{{json .HostConfig.Binds}}}'
+        p = self._run("docker", "inspect", "-f", template, self.sidecar, check=False)
+        wanted = self.sidecar_command()
         try:
-            return p.returncode == 0 and json.loads(p.stdout)[-1] != self.sidecar_command()[-1]
-        except (ValueError, IndexError, TypeError):
+            made = json.loads(p.stdout)
+            return p.returncode == 0 and (
+                made["cmd"][-1] != wanted[-1] or set(made["binds"] or []) != set(binds(wanted))
+            )
+        except (ValueError, KeyError, IndexError, TypeError):
             return True
 
     def _wait_for_daemon(self, timeout: float) -> None:

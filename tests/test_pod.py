@@ -9,6 +9,11 @@ from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import SOCKET_DIR, Listener, Mount, Pod, PodError
 
 
+def binds(cmd):
+    """The -v arguments of a docker run command, the way Docker keeps them in HostConfig.Binds."""
+    return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-v"]
+
+
 class FakeDocker:
     """Records commands and answers the few queries Pod makes."""
 
@@ -16,6 +21,7 @@ class FakeDocker:
         self.calls: list[list[str]] = []
         self.states = states or {}
         self.cmds: dict[str, list[str]] = {}
+        self.binds: dict[str, list[str]] = {}
         self.subnets = ""
         self.proc_net_tcp = ""
         self.alive = False
@@ -28,12 +34,14 @@ class FakeDocker:
         if cmd[:2] == ["docker", "inspect"]:
             state = self.states.get(cmd[-1])
             if state and "Config.Cmd" in cmd[3]:
-                out, rc = json.dumps(self.cmds.get(cmd[-1], [])), 0
+                made = {"cmd": self.cmds.get(cmd[-1], []), "binds": self.binds.get(cmd[-1], [])}
+                out, rc = json.dumps(made), 0
             else:
                 out, rc = (state or "", 0 if state else 1)
         elif cmd[:4] == ["docker", "run", "-d", "--name"]:
             self.states[cmd[4]] = "running"
             self.cmds[cmd[4]] = cmd[cmd.index("-c") + 1 :] if "-c" in cmd else cmd[-1:]
+            self.binds[cmd[4]] = binds(cmd)
         elif cmd[:3] == ["docker", "rm", "-f"]:
             self.states.pop(cmd[3], None)
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
@@ -142,6 +150,7 @@ def test_up_with_running_pod_only_reapplies_firewall(pod):
 def test_restarted_sidecar_gets_a_new_agent(pod):
     pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "running"}
     pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", pod.sidecar_command()[-1]]}
+    pod.runner.binds = {"vivibox-shop-1-dind": binds(pod.sidecar_command())}
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent")
     assert pod.runner.find("docker", "start", "vivibox-shop-1-dind")
@@ -152,6 +161,19 @@ def test_a_stopped_sidecar_made_by_an_older_vivibox_is_made_again(pod):
     """docker start runs the script a container was made with, so a fix to it would never arrive."""
     pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "exited"}
     pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", "dind dockerd ...; chmod 666 ...; wait"]}
+    pod.up(timeout=1)
+    assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind")
+    assert not pod.runner.find("docker", "start", "vivibox-shop-1-dind")
+    assert pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")
+
+
+def test_a_stopped_sidecar_with_other_mounts_is_made_again(pod):
+    """The work laptop's case, second round: the CA bundle mount arrived with a pull, and the task's sidecar
+    from before it, stopped and started again, still had no bundle. Mounts are given at docker
+    run, so a sidecar with other mounts than this vivibox gives is made again."""
+    pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "exited"}
+    pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", pod.sidecar_command()[-1]]}
+    pod.runner.binds = {"vivibox-shop-1-dind": binds(pod.sidecar_command())[:-1]}
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind")
     assert not pod.runner.find("docker", "start", "vivibox-shop-1-dind")

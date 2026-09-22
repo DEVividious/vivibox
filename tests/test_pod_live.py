@@ -180,6 +180,11 @@ def test_maven_build_with_testcontainers(env):
     assert agent(env, "ls /cache/m2/org/testcontainers").stdout.strip(), "the shared Maven cache is used"
 
 
+def test_a_sidecar_just_made_is_not_outdated(env):
+    """Docker keeps the mounts as given, so what up() compares them with is what inspect returns."""
+    assert not env["pod"]._outdated_sidecar()
+
+
 def test_the_pod_trusts_the_authorities_the_host_trusts(env):
     """The daemon in the sidecar, the agent and the gate see the host's CA bundle, not their own."""
     pod = env["pod"]

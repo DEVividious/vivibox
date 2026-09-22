@@ -1662,23 +1662,34 @@ class NewTask(Dialog):
 
 
 HELP = """[b]Your decisions[/b], on the selected task
-  a  accept the plan, or the finished work         r  reply: reject, ask, or answer the agent
-  p  approve changes to risky files                g  verify a blocked task again, without the agent
+  a     accept the plan, or the finished work
+  r     reply: reject, ask for changes, or answer the agent
+  p     approve changes to risky files
+  g     verify a blocked task again, without the agent
 
 [b]The selected task[/b]
-  d, Enter  show or hide its details               e  edit the plan; with a manual planner, paste it
-  o  open the review copy in your IDE              v  run the app in its pod, or stop it
-  w  watch or talk to the agent (Ctrl-q leaves)    l  read the newest log in your pager
-  s  stop the task, or start it again              m  what each role runs on, for this task
-  c, C  copy the planning prompt for a chat, or for a CLI (manual planner)
-  x  delete the task; on a finished one, its line in the history
+  d, Enter  show or hide its details
+  e     edit the plan; with a manual planner, paste your chat's plan
+  c, C  copy the planning prompt for a chat, or for a CLI
+  o     open the review copy in your IDE
+  v     run the app in its pod, or stop it
+  w     watch or talk to the agent (Ctrl-q leaves)
+  l     read the newest log in your pager
+  s     stop the task, or start it again
+  m     what each role runs on, for this task
+  x     delete the task; on a finished one, its line in the history
 
 [b]The selected project[/b] (Enter folds or unfolds its tasks)
-  n  new task in it       e  edit its file        o  open its repository in your IDE
-  x  forget it, once it has no tasks
+  n     new task in it
+  e     edit its file
+  o     open its repository in your IDE
+  x     forget it, once it has no tasks
 
 [b]Anywhere[/b]
-  i  set up a project     k  providers & MCP      h  show or hide finished tasks     q  quit
+  i     set up a project
+  k     providers & MCP
+  h     show or hide finished tasks
+  q     quit
 """
 
 
@@ -1686,7 +1697,7 @@ class Help(ModalScreen):
     """Every key, and when it does something. The footer shows only what applies right now."""
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog help"):
+        with VerticalScroll(classes="dialog help"):
             yield Static(HELP, id="help")
             yield Label("Esc closes.", classes="files")
 
@@ -1764,7 +1775,7 @@ class Vivibox(App):
     #detail.hidden { display: none; }
     .dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
               padding: 1 2; }
-    .dialog.help { width: 104; }
+    .dialog.help { width: 76; }
     .dialog TextArea { height: 8; }
     .dialog TextArea.description { height: 10; }
     .dialog TextArea.criteria { height: 6; }

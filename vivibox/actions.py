@@ -685,18 +685,21 @@ def create(
         raise ConfigError("the task needs a description")
     if kind not in KINDS:
         raise ConfigError(f"kind must be one of {KINDS}")
-    found = context.resolve(description, cwd or Path.cwd())  # all checked before anything is created
+    # All checked before anything is created; the project's own files point at the clone.
+    found = context.resolve(description, cwd or Path.cwd(), repo=project.repo)
     template = files("vivibox").joinpath("templates/plan-bug.md" if kind == "bug" else "templates/plan.md")
     plan = template.read_text().replace("{{kind}}", kind)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
     try:
-        described = context.attach(description.strip(), found, task.meta / "context")
+        described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))
         base = repo.prepare(project.repo, task.repo, task.id, task.meta)
     except BaseException:
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     task.set_base_commit(base)
+    if found.notes:  # what the agent sees differs from what you have: said once, kept with the task
+        task.event("context", notes=found.notes)
     for role, (harness, model) in list(chosen.items()):
         if not config.roles[role].model and harness == config.roles[role].harness:
             firstrun.remember(role, harness, model)  # the first model you pick becomes the default
@@ -710,6 +713,11 @@ def create(
     # The risky files as they are in your repository are the starting approval.
     Approvals(task.meta, task.repo, project.risky_extra).approve()
     return task
+
+
+def context_notes(task: Task) -> list[str]:
+    """What the task said about its @files when it was created."""
+    return [n for e in task.events() if e["type"] == "context" for n in e["data"].get("notes", [])]
 
 
 def start(task_id: str, resume: bool = False) -> str:

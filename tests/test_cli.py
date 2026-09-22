@@ -466,3 +466,16 @@ def test_a_supervisor_leaves_its_pid_and_its_code_with_the_task(env):
     actions.supervising(task)
     assert (task.meta / actions.SUPERVISOR_PID).read_text() == str(os.getpid())
     assert (task.meta / code.RECORD).read_text().strip() == code.signature()
+
+
+def test_new_says_when_a_mentioned_file_is_not_what_the_agent_will_see(env, capsys, tmp_path):
+    import subprocess
+
+    repo = env / "repo"
+    (repo / "a.txt").write_text("1\n")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "Add a"], cwd=repo, check=True)
+    (repo / "a.txt").write_text("2\n")
+    assert main(["new", "demo", "Change @a.txt", "--draft"]) == 0
+    out = capsys.readouterr().out
+    assert "a.txt has uncommitted changes; the agent sees the committed version" in out

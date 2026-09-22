@@ -39,10 +39,14 @@ On a project's row: `n` starts a task in it, `e` edits its file (verify commands
 services), `o` opens its repository in your IDE, and `x` forgets it once it has no tasks; the
 repository stays.
 
-**Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write `@~/tickets/PAY-123.md` (or `@/abs/path`, `@./relative`, a folder) in
-the description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder
-opens its contents), relative to where you started `vivibox`. vivibox copies the file into the task; the agent reads the copy, read-only, under
-`/task/context/`, and never sees the rest of your disk. `@notes/x.md` without a leading `./` counts
+**Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write
+`@src/Order.java` or `@~/tickets/PAY-123.md` (also `@/abs/path`, `@./relative`, a folder) in the
+description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder
+opens its contents), from the project's repository and from where you started `vivibox`. A file
+of the project is the same file in the agent's clone, the one it edits, so the description points
+there; if your copy has uncommitted changes the task says so, since the clone is of a commit, and a
+file that is not committed at all is copied instead. Any other file vivibox copies into the task;
+the agent reads the copy, read-only, under `/task/context/`, and never sees the rest of your disk. `@notes/x.md` without a leading `./` counts
 only when the file exists, so `@john.doe` from a pasted ticket stays text. Files that look like
 credentials (`.env`, keys, `settings.xml`, anything under `~/.ssh` or `~/.aws`) are refused, and
 the files of one task may take up to 20 MB.

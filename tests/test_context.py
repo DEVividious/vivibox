@@ -67,3 +67,56 @@ def test_task_numbers_skip_branches_in_your_repository(env):
     source = load_project("demo").repo
     subprocess.run(["git", "branch", "vivibox/demo-4"], cwd=source, check=True)
     assert actions.create("demo", "Next").id == "demo-5"
+
+
+def in_repo(env, path: str, text: str = "x\n", commit: bool = True):
+    import subprocess
+
+    repo = env / "repo"
+    file = repo / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text)
+    if commit:
+        subprocess.run(["git", "add", path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", f"Add {path}"], cwd=repo, check=True)
+    return file
+
+
+def test_a_file_of_the_project_points_at_the_agents_clone_and_is_not_copied(env, tmp_path):
+    in_repo(env, "src/Order.java")
+    task = actions.create("demo", "Round VAT in @src/Order.java per line", cwd=tmp_path)
+    plan = task.plan_path.read_text()
+    assert f"{task.repo}/src/Order.java" in plan and "/task/context" not in plan
+    assert not (task.meta / "context").exists() or not list((task.meta / "context").iterdir())
+    assert (task.repo / "src" / "Order.java").exists(), "the same file, in the clone the agent edits"
+
+
+def test_an_absolute_path_into_the_project_points_at_the_clone_too(env, tmp_path):
+    in_repo(env, "README.md", "readme\n")
+    task = actions.create("demo", f"See @{env / 'repo' / 'README.md'}", cwd=tmp_path)
+    assert f"{task.repo}/README.md" in task.plan_path.read_text()
+
+
+def test_a_changed_file_of_the_project_is_noted_because_the_agent_sees_the_commit(env, tmp_path):
+    in_repo(env, "src/Order.java")
+    in_repo(env, "src/Order.java", "changed\n", commit=False)
+    task = actions.create("demo", "Fix @src/Order.java", cwd=tmp_path)
+    notes = [e["data"]["notes"] for e in task.events() if e["type"] == "context"]
+    assert notes == [["src/Order.java has uncommitted changes; the agent sees the committed version"]]
+    assert (task.repo / "src" / "Order.java").read_text() == "x\n"
+
+
+def test_an_untracked_file_of_the_project_is_copied_since_the_clone_lacks_it(env, tmp_path):
+    in_repo(env, "notes/idea.md", "idea\n", commit=False)
+    task = actions.create("demo", "Do @notes/idea.md", cwd=tmp_path)
+    assert "/task/context/idea.md" in task.plan_path.read_text()
+    notes = [e["data"]["notes"] for e in task.events() if e["type"] == "context"]
+    assert notes == [["notes/idea.md is not committed, so the agent gets a copy under /task/context"]]
+
+
+def test_completion_offers_the_projects_files_as_well_as_where_you_are(env, tmp_path):
+    (env / "repo" / "src").mkdir()
+    (tmp_path / "tickets").mkdir()
+    found = context.complete("", tmp_path, repo=env / "repo")
+    assert found[:1] == ["~/"] and "src/" in found and "tickets/" in found
+    assert context.complete("sr", tmp_path, repo=env / "repo") == ["src/"]

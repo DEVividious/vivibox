@@ -29,6 +29,8 @@ def cmd_new(args: argparse.Namespace) -> int:
         roles[role.strip()] = actions.parse_choice(model)
     task = actions.create(args.project, description, auto=args.auto, kind=args.kind, roles=roles)
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
+    for note in actions.context_notes(task):
+        print(f"Note: {note}")
     print(f"Plan: {task.plan_path}")
     if args.draft:
         print(f"Edit the plan if you like, then 'vivibox start {task.id}'.")

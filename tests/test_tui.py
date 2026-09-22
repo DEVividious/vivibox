@@ -2147,3 +2147,33 @@ def test_stopping_at_a_checkpoint_is_called_stopping_the_pod(env, monkeypatch):
         assert "stop_pod" in keys(app) and "stop_task" not in keys(app)
 
     run(scenario)
+
+
+def test_at_suggests_the_projects_files_and_the_view_notes_uncommitted_ones(env, tmp_path, monkeypatch):
+    import subprocess
+
+    repo = env / "repo"
+    (repo / "src").mkdir()
+    (repo / "src" / "Order.java").write_text("1\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "Add"], cwd=repo, check=True)
+    (repo / "src" / "Order.java").write_text("2\n")
+    monkeypatch.chdir(tmp_path)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix @sr")
+        suggestions = app.screen.query_one("#suggestions")
+        assert suggestions.display and suggestions.get_option_at_index(0).prompt == "src/"
+        await pilot.press("tab", "enter")
+        assert app.screen.query_one("#goal").text == "Fix @src/Order.java "
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert any("uncommitted changes" in str(n.message) for n in app._notifications)
+
+    run(scenario)
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert f"{task.repo}/src/Order.java" in task.plan_path.read_text()
+    assert "uncommitted changes" in detail(task, task.read_state(), 3, running=False), "kept with the task"

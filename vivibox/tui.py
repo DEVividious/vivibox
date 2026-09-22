@@ -371,6 +371,9 @@ def detail(
     ]
     if running and code.older_supervisor(task.meta):
         head += [f"*This task's supervisor {OLDER_SUPERVISOR}.*", ""]
+    # Before the plan: what the agent sees of the files you mentioned may not be what you have.
+    if st.state in (State.PLAN, State.CHECKPOINT_PLAN) and (notes := actions.context_notes(task)):
+        head += [*(f"*{note}.*" for note in notes), ""]
     said = [e for e in task.events() if e["type"] == "serena"]
     if said and (said[-1]["data"].get("on") or providers.serena_mode() == "auto"):
         head += [f"*Serena: {said[-1]['data']['why']}*", ""]
@@ -667,6 +670,9 @@ class DescriptionArea(TextArea):
     def __init__(self, suggestions: OptionList, cwd: Path, **kwargs):
         super().__init__(**kwargs)
         self.suggestions, self.cwd = suggestions, cwd
+        # The selected project's repository: its files are suggested too, and they are the ones
+        # the agent has in its clone.
+        self.repo: Path | None = None
 
     def mention(self) -> str | None:
         row, col = self.cursor_location
@@ -675,7 +681,7 @@ class DescriptionArea(TextArea):
 
     def suggest(self) -> None:
         partial = self.mention()
-        found = context.complete(partial, self.cwd) if partial is not None else []
+        found = context.complete(partial, self.cwd, repo=self.repo) if partial is not None else []
         self.suggestions.set_options(found)
         self.suggestions.display = bool(found)
         if found:
@@ -1608,6 +1614,8 @@ class NewTask(Dialog):
     def for_project(self, name: str) -> None:
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
         self.query_one("#kind", Select).display = not actions.empty_project(name)
+        with contextlib.suppress(ConfigError):
+            self.query_one("#goal", DescriptionArea).repo = load_project(name).repo
 
     def attach(self, path: Path | None) -> None:
         """The picked file or folder as an @mention, where the cursor is in the description."""
@@ -2894,6 +2902,8 @@ class Vivibox(App):
                 form["project"], form["goal"], auto=form["auto"], kind=form["kind"], roles=form.get("roles")
             )
             self.call_from_thread(self.reload)
+            for note in actions.context_notes(task):
+                self.call_from_thread(self.notify, f"{task.id}: {note}.", severity="warning", timeout=12)
             if form["draft"]:
                 self.call_from_thread(
                     self.notify, f"Created {task.id}; edit its plan with e, start it with s."

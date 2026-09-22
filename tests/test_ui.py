@@ -106,19 +106,6 @@ def test_a_finished_task_shows_its_split_or_its_total_from_before():
     assert ui.finished_cost({"cost": 0.42}) == "$0.42"
 
 
-def test_a_log_excerpt_keeps_what_went_wrong():
-    log = "\n".join(
-        [f"[INFO] Downloading artifact {i}" for i in range(500)]
-        + ["[ERROR] ShopIT.pays_out:42 permission denied while trying to connect to the docker API",
-           "[ERROR] Tests run: 3, Failures: 0, Errors: 1, Skipped: 0", "[INFO] BUILD FAILURE"]
-    )  # fmt: skip
-    excerpt = ui.log_excerpt(log)
-    assert "permission denied" in excerpt and "BUILD FAILURE" in excerpt and "Downloading" not in excerpt
-    assert ui.log_excerpt("a\nb\nc", limit=2) == "b\nc", "no trouble lines: the end of the log"
-    many = "\n".join(f"[ERROR] {i}" for i in range(50))
-    assert "20 more such lines" in ui.log_excerpt(many, limit=30)
-
-
 def test_times_are_on_your_clock_not_in_utc(monkeypatch):
     import time
 

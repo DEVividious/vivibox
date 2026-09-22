@@ -149,12 +149,22 @@ def pod_view(task_id: str) -> PodView:
     return pod_views([task_id])[task_id]
 
 
-def build_said(log: Path) -> list[str]:
-    """The lines of the last verification's log that say what failed, and where the rest is."""
+def build_said(log: Path, feedback: str = "") -> list[str]:
+    """The lines of the last verification's log that say what failed, and where the rest is. The
+    feedback the gate writes now quotes them itself; then only the log's place is added."""
     text = read(log)
     if not text:
         return []
-    return ["#### What the build said", "", f"```\n{ui.log_excerpt(text)}\n```", "", f"Full log: `{log}`", ""]
+    if "```" in feedback:
+        return [f"Full log: `{log}`", ""]
+    return [
+        "#### What the build said",
+        "",
+        f"```\n{gate.log_excerpt(text)}\n```",
+        "",
+        f"Full log: `{log}`",
+        "",
+    ]
 
 
 def newest_log(task: Task) -> Path | None:
@@ -463,7 +473,7 @@ def detail(
                 "",
                 read(handoff / "verify-feedback.md"),
                 "",
-                *build_said(handoff / "verify.log"),
+                *build_said(handoff / "verify.log", read(handoff / "verify-feedback.md")),
             ]  # fmt: skip
         )
     elif st.state is State.VERIFY and seen.group == "Working":
@@ -479,7 +489,8 @@ def detail(
             f"{last_gate(task)}{watch}",
         ]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
-            body += ["", read(handoff / "verify-feedback.md"), "", *build_said(handoff / "verify.log")]
+            feedback = read(handoff / "verify-feedback.md")
+            body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]
         body += ["", "#### The plan", "", plan_body(read(task.meta / gate.ACCEPTED_PLAN))]
     else:
         events = task.events()[-8:]

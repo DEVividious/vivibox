@@ -214,7 +214,7 @@ def test_uncommitted_changes_fail_the_gate(task):
     pod = FakePod()
     result = gate.run_gate(task, pod, ["true"], [])
     assert not result.passed and result.uncommitted == ["Forgotten.java"]
-    assert not pod.up, "the gate container is removed after the run"
+    assert not getattr(pod, "up", False), "no gate container is left behind"
     assert "Not committed" in gate.feedback(result)
 
 
@@ -295,3 +295,114 @@ def test_what_does_not_switch_a_test_off_passes(task, path, text):
     (task.repo / path).parent.mkdir(parents=True, exist_ok=True)
     (task.repo / path).write_text(f"{text}\n")
     assert gate.switched_off_tests(task.repo, task.read_state().base_commit) == []
+
+
+def implementing(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+
+
+def test_the_feedback_quotes_what_the_build_said(task):
+    gate.accept_plan(task, ["true"])
+    noise = "\n".join(f"[INFO] Downloading artifact {i}" for i in range(200))
+    said = "[ERROR] ShopIT.pays_out:42 expected 81.2 but was 0\n[INFO] BUILD FAILURE"
+    result = gate.run_gate(
+        task, FakePod(fail={"mvn -B verify"}, output=f"{noise}\n{said}"), ["mvn -B verify"], []
+    )
+    text = gate.feedback(result)
+    assert "expected 81.2 but was 0" in text and "BUILD FAILURE" in text, "the lines that say why"
+    assert "Downloading artifact" not in text, "not the whole log"
+    assert "/task/handoff/verify.log" in text
+
+
+def test_a_reworded_criterion_is_named_in_the_feedback(task):
+    gate.accept_plan(task, ["true"])
+    path = task.meta / "handoff" / gate.CRITERIA_FILE
+    path.write_text(path.read_text().replace("- [ ] endpoint returns 200", "- [x] endpoint returns HTTP 200"))
+    tick(task, "error path is tested")
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert result.missing_criteria == ["endpoint returns 200"]
+    assert result.reworded == {"endpoint returns 200": "endpoint returns HTTP 200"}
+    text = gate.feedback(result)
+    assert "reworded" in text and "restore this exact line" in text and "endpoint returns 200" in text
+    assert "Criterion not ticked: endpoint returns 200" not in text, "one reason, not two"
+
+
+def test_the_feedback_lists_at_most_twenty_uncommitted_files(task):
+    result = gate.GateResult(Path("/dev/null"), uncommitted=[f"f{i}.txt" for i in range(35)])
+    text = gate.feedback(result)
+    assert "f19.txt" in text and "f20.txt" not in text and "15 more" in text
+
+
+def test_nothing_new_committed_reuses_the_last_build(task):
+    gate.accept_plan(task, ["true"])
+    implementing(task)
+    pod = FakePod(fail={"npm test"}, output="[ERROR] expected 1 but was 2")
+    first = gate.run_gate(task, pod, ["npm ci", "npm test"], [])
+    assert not first.passed and pod.commands.count("npm test") == 1
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)  # the agent's turn committed nothing
+    again = gate.run_gate(task, pod, ["npm ci", "npm test"], [])
+    assert pod.commands.count("npm test") == 1, "the same commit builds the same way; not built again"
+    assert [(c.command, c.ok) for c in again.commands] == [("npm ci", True), ("npm test", False)]
+    assert again.log == first.log
+    text = gate.feedback(again)
+    assert "committed nothing" in text and "expected 1 but was 2" in text, "told, with the old result"
+    assert task.events()[-1]["data"]["reused"] == first.log.name
+
+
+def test_a_new_commit_or_a_changed_command_builds_again(task):
+    gate.accept_plan(task, ["true"])
+    implementing(task)
+    pod = FakePod(fail={"npm test"})
+    gate.run_gate(task, pod, ["npm test"], [])
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    gate.run_gate(task, pod, ["npm run check"], [])
+    assert pod.commands.count("npm run check") == 1, "a changed command is a different build"
+    task.transition(State.IMPLEMENT)
+    commit(task.repo, "Fix the test")
+    task.transition(State.VERIFY)
+    gate.run_gate(task, pod, ["npm run check"], [])
+    assert pod.commands.count("npm run check") == 2
+
+
+def test_verifying_again_after_you_fixed_something_builds_again(task):
+    gate.accept_plan(task, ["true"])
+    implementing(task)
+    pod = FakePod(fail={"npm test"})
+    gate.run_gate(task, pod, ["npm test"], [])
+    task.transition(State.CHECKPOINT_BLOCKED)
+    task.transition(State.VERIFY, reason="verify again")
+    gate.run_gate(task, pod, ["npm test"], [])
+    assert pod.commands.count("npm test") == 2, "you pressed g because something outside the code changed"
+
+
+@pytest.mark.parametrize("leave", ["uncommitted", "switched off"])
+def test_what_makes_a_build_meaningless_is_reported_before_it_is_built(task, leave):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    if leave == "uncommitted":
+        (task.repo / "Forgotten.java").write_text("class Forgotten {}\n")
+    else:
+        (task.repo / "ShopIT.java").write_text('@Disabled("later")\n')
+        commit(task.repo, "Add a test")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, ["mvn -B verify"], [])
+    assert not result.passed and "mvn -B verify" not in pod.commands, "the build would prove nothing"
+    text = gate.feedback(result)
+    assert "build was not run" in text and result.log.exists()
+    assert task.events()[-1]["data"]["build_skipped"]
+
+
+def test_a_log_excerpt_keeps_what_went_wrong():
+    log = "\n".join(
+        [f"[INFO] Downloading artifact {i}" for i in range(500)]
+        + ["[ERROR] ShopIT.pays_out:42 permission denied while trying to connect to the docker API",
+           "[ERROR] Tests run: 3, Failures: 0, Errors: 1, Skipped: 0", "[INFO] BUILD FAILURE"]
+    )  # fmt: skip
+    excerpt = gate.log_excerpt(log)
+    assert "permission denied" in excerpt and "BUILD FAILURE" in excerpt and "Downloading" not in excerpt
+    assert gate.log_excerpt("a\nb\nc", limit=2) == "b\nc", "no trouble lines: the end of the log"
+    many = "\n".join(f"[ERROR] {i}" for i in range(50))
+    assert "20 more such lines" in gate.log_excerpt(many, limit=30)

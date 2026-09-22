@@ -317,6 +317,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
     pod.up()
     commands = actions.verify_commands(task, project)
     result = gate.run_gate(task, pod, commands, project.risky_extra, project.java)
+    if result.build_skipped:
+        print(f"SKIP  the build was not run: {result.build_skipped}")
+    if result.unchanged:
+        print("SAME  nothing committed since the last verification; its result stands")
     for c in result.commands:
         print(f"{'PASS' if c.ok else 'FAIL'}  {c.command}  ({c.seconds}s)")
     for c in result.missing_criteria:

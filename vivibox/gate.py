@@ -10,10 +10,15 @@
    checks nothing. They contain no invisible characters either: zero-width, bidirectional controls
    ("Trojan Source") or Unicode tag characters, which hide text from you in a diff but not from a model.
 4. Risky files unchanged since your last approval; changes need approval, not another iteration.
+
+Uncommitted files and switched-off tests are checked before anything is built: a build of a tree
+that is not what was committed, or whose tests do not run, would prove nothing, so it is not run.
+And a turn that committed nothing gets the last build's result again instead of a new build.
 """
 
 from __future__ import annotations
 
+import difflib
 import re
 import shutil
 import time
@@ -126,6 +131,43 @@ def missing_criteria(task: Task) -> list[str]:
     return [c for c in required if c not in ticked]
 
 
+def reworded_criteria(task: Task, missing: list[str]) -> dict[str, str]:
+    """Missing criteria that the agent's checklist carries in other words. An agent that reworded
+    an item and ticked it would otherwise be told only that it is not ticked, and tick the same
+    reworded line again."""
+    reported = task.meta / "handoff" / CRITERIA_FILE
+    if not reported.exists():
+        return {}
+    lines = [c.text for c in checkboxes(reported.read_text())]
+    found = {}
+    for required in missing:
+        close = difflib.get_close_matches(required, lines, n=1, cutoff=0.8)
+        if close and close[0] != required:
+            found[required] = close[0]
+    return found
+
+
+# Lines of a build log that say what went wrong, in the usual tools' words.
+TROUBLE = re.compile(
+    r"\[ERROR\]|BUILD FAILURE|FAILED|FAILURE|Tests run:.*(Failures: [1-9]|Errors: [1-9])"
+    r"|Exception\b|\berror\b|Error:|permission denied|not found|\bfail(ed|s)?\b",
+    re.IGNORECASE,
+)
+
+
+def log_excerpt(text: str, limit: int = 30) -> str:
+    """What a failed build said, short enough to read: its trouble lines, or its end when none of
+    them looks like trouble. The whole log is a file away."""
+    lines = [line.rstrip() for line in text.splitlines()]
+    trouble = list(dict.fromkeys(line for line in lines if TROUBLE.search(line)))
+    if not trouble:
+        return "\n".join(lines[-limit:]).strip()
+    shown = trouble[:limit]
+    if len(trouble) > limit:
+        shown.append(f"… {len(trouble) - limit} more such lines in the full log")
+    return "\n".join(shown)
+
+
 def commit_problems(repo_dir: Path, base: str) -> list[str]:
     log = repo.git("log", "--format=%h%x1f%B%x1e", f"{base}..HEAD", cwd=repo_dir).stdout
     problems = []
@@ -204,6 +246,8 @@ class CommandResult:
     command: str
     ok: bool
     seconds: float
+    # When it failed: the lines of its output that say why, for the agent and for you.
+    said: str = ""
 
 
 @dataclass
@@ -216,6 +260,12 @@ class GateResult:
     switched_off: list[str] = field(default_factory=list)
     uncommitted: list[str] = field(default_factory=list)
     risky: list[Change] = field(default_factory=list)
+    # Required criterion -> the line in criteria.md that looks like it reworded.
+    reworded: dict[str, str] = field(default_factory=dict)
+    # Why the build was not run, when it was not: what made it meaningless.
+    build_skipped: str = ""
+    # The commit whose build this result repeats, when the turn committed nothing new.
+    unchanged: str = ""
 
     @property
     def passed(self) -> bool:
@@ -240,6 +290,7 @@ class GateResult:
             "uncommitted": len(self.uncommitted),
             "risky_changes": [c.path for c in self.risky],
             "log": self.log.name,
+            "build_skipped": self.build_skipped,
         }
 
 
@@ -255,41 +306,103 @@ def masked(text: str, values: list[str]) -> str:
     return text
 
 
+def _after_a_turn(task: Task) -> bool:
+    """Whether this verification follows a turn of the agent, as against your 'verify again'
+    after fixing something outside the code, which must build whatever the commit."""
+    for event in reversed(task.events()):
+        if event["type"] == "state":
+            return event["data"].get("previous") == str(State.IMPLEMENT)
+    return False
+
+
+def _last_build(task: Task) -> dict | None:
+    for event in reversed(task.events()):
+        if event["type"] == "gate" and event["data"].get("commands") is not None:
+            return event["data"]
+    return None
+
+
+def _said_in(log_text: str, command: str) -> str:
+    """The output one command left in a verification log."""
+    m = re.search(rf"^\$ {re.escape(command)}\n(.*?)^\[exit -?\d+\]$", log_text, re.MULTILINE | re.DOTALL)
+    return log_excerpt(m.group(1)) if m else ""
+
+
+def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bool:
+    """The last build's result again, when the agent committed nothing since and the commands are
+    the same: the same commit builds the same way, and a build is minutes."""
+    last = _last_build(task)
+    if not _after_a_turn(task) or not last or last.get("commit") != head or last["commands"] != commands:
+        return False
+    log = task.meta / "log" / last["log"]
+    if not log.exists():
+        return False
+    result.log, result.unchanged = log, head
+    text = log.read_text()
+    failed = set(last.get("failed_commands", []))
+    for command in commands:
+        ok = command not in failed
+        result.commands.append(CommandResult(command, ok, 0.0, "" if ok else _said_in(text, command)))
+        if not ok:
+            break
+    return True
+
+
 def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], java: str = "") -> GateResult:
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
     result = GateResult(log)
+    head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    # Before the build, the two things that would make it meaningless: it would build a tree that
+    # is not what was committed, or run a suite with a test switched off.
+    result.uncommitted = uncommitted(task.repo)
+    result.switched_off = switched_off_tests(task.repo, st.base_commit)
+    if result.uncommitted:
+        result.build_skipped = "there are uncommitted files, and only commits are verified"
+    elif result.switched_off:
+        result.build_skipped = "a test is switched off, so the suite would prove nothing"
+    if result.build_skipped:
+        log.write_text(f"# commit {head}: the build was not run: {result.build_skipped}\n")
+    elif not _reuse(task, result, head, commands):
+        _build(task, pod, commands, java, head, result)
+    # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.
+    accepted = (task.meta / ACCEPTED_PLAN).exists()
+    result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
+    result.reworded = reworded_criteria(task, result.missing_criteria) if accepted else {}
+    result.commit_problems = commit_problems(task.repo, st.base_commit)
+    result.hidden_characters = hidden_characters(task.repo, st.base_commit)
+    result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
+    built = {"commit": head, "commands": commands} if not result.build_skipped else {}
+    reused = {"reused": result.log.name} if result.unchanged else {}
+    task.event("gate", iteration=st.iteration, **result.summary(), **built, **reused)
+    return result
+
+
+def _build(task: Task, pod: Pod, commands: list[str], java: str, head: str, result: GateResult) -> None:
     pod.gate_up()
     try:
         toolchain.install_declared(pod, gate=True)
         toolchain.ensure(pod, java, gate=True)
-        with log.open("w") as out:
-            head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+        with result.log.open("w") as out:
             out.write(f"# fresh clone of commit {head}\n\n")
             for command in commands:
                 out.write(f"$ {command}\n")
                 out.flush()
                 started = time.monotonic()
                 p = pod.gate_exec("bash", "-c", command, check=False)
-                out.write(masked(p.stdout + p.stderr, pod.passed_values()) + f"\n[exit {p.returncode}]\n\n")
+                output = masked(p.stdout + p.stderr, pod.passed_values())
+                out.write(output + f"\n[exit {p.returncode}]\n\n")
+                ok = p.returncode == 0
                 result.commands.append(
-                    CommandResult(command, p.returncode == 0, round(time.monotonic() - started, 1))
+                    CommandResult(
+                        command, ok, round(time.monotonic() - started, 1), "" if ok else log_excerpt(output)
+                    )
                 )
-                if p.returncode != 0:
+                if not ok:
                     break
     finally:
         pod.gate_down()
-    # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.
-    accepted = (task.meta / ACCEPTED_PLAN).exists()
-    result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
-    result.commit_problems = commit_problems(task.repo, st.base_commit)
-    result.hidden_characters = hidden_characters(task.repo, st.base_commit)
-    result.switched_off = switched_off_tests(task.repo, st.base_commit)
-    result.uncommitted = uncommitted(task.repo)
-    result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
-    task.event("gate", iteration=st.iteration, **result.summary())
-    return result
 
 
 def next_state(result: GateResult, iteration: int, max_iterations: int) -> State:
@@ -298,23 +411,49 @@ def next_state(result: GateResult, iteration: int, max_iterations: int) -> State
     return State.APPROVAL_RISKY if result.risky else State.CHECKPOINT_FINAL
 
 
+MAX_LISTED = 20
+
+
+def _listed(items: list[str], line: str) -> list[str]:
+    shown = [line.format(item) for item in items[:MAX_LISTED]]
+    if len(items) > MAX_LISTED:
+        shown.append(f"  … and {len(items) - MAX_LISTED} more")
+    return shown
+
+
 def feedback(result: GateResult) -> str:
-    """What the agent reads in handoff/ before the next iteration."""
+    """What the agent reads in handoff/ before the next iteration: each failure with the lines
+    that say why, so the log is there to consult, not to read through."""
     parts = ["# Verification failed\n"]
+    if result.build_skipped:
+        parts.append(f"- The build was not run: {result.build_skipped}. Fix that first.")
+    if result.unchanged:
+        parts.append(
+            f"- You committed nothing since the last verification (commit {result.unchanged[:10]}),"
+            " so the build was not run again; its result stands:"
+        )
     for c in result.commands:
         if not c.ok:
-            parts.append(f"- Command failed: `{c.command}` (full output: /task/handoff/verify.log)")
-    parts += [f"- Criterion not ticked: {c}" for c in result.missing_criteria]
+            parts.append(
+                f"- Command failed: `{c.command}`. What it said (all of it: /task/handoff/verify.log):"
+            )
+            parts.append(f"  ```\n{c.said or '(no output)'}\n  ```")
+    for c, wrote in result.reworded.items():
+        parts.append(
+            f"- Criterion reworded, so not counted (you wrote: {wrote}); restore this exact line"
+            f" and tick it: {c}"
+        )
+    parts += [f"- Criterion not ticked: {c}" for c in result.missing_criteria if c not in result.reworded]
     parts += [f"- Commit rule: {p}" for p in result.commit_problems]
-    parts += [f"- Invisible character, remove it: {h}" for h in result.hidden_characters]
+    parts += _listed(result.hidden_characters, "- Invisible character, remove it: {}")
     parts += [f"- Test switched off, switch it on again: {t}" for t in result.switched_off]
     if result.switched_off:
         parts.append(
             "  A test that does not run checks nothing. If something outside the code keeps it from"
             " running here (Docker, network, credentials, a service), write that to"
-            " /task/handoff/question.md with the error and end your turn."
+            " /task/handoff/question.md with the error and end the turn."
         )
-    parts += [f"- Not committed (verification uses your commits only): {f}" for f in result.uncommitted]
+    parts += _listed(result.uncommitted, "- Not committed (verification uses your commits only): {}")
     return "\n".join(parts) + "\n"
 
 

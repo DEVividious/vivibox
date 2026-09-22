@@ -76,9 +76,13 @@ def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
         if field.name in ("log", "risky"):  # the log is where the rest is; risky goes to you
             continue
         result = gate.GateResult(Path("/dev/null"))
-        marker = f"zz-{field.name}-zz"
+        marker = f"z{field.name}z"[:10]  # short enough to survive a shortened commit hash
         if field.name == "commands":
             result.commands = [gate.CommandResult(marker, False, 0.1)]
+        elif field.type == "str":
+            setattr(result, field.name, marker)
+        elif field.type.startswith("dict"):
+            setattr(result, field.name, {marker: marker})
         else:
             setattr(result, field.name, [marker])
         assert marker in gate.feedback(result), f"{field.name} fails the gate but the agent is not told"

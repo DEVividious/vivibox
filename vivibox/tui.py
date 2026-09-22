@@ -433,7 +433,7 @@ def detail(
         f"### {st.id} · {seen.status}",
         "",
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
-        f" · planning + implementation {ui.cost(task)}*",
+        + (f" · cost {ui.cost(task)}*" if st.box else f" · planning + implementation {ui.cost(task)}*"),
         "",
         f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
         "",

@@ -78,6 +78,8 @@ class Spend:
 
     planning: float = 0.0
     implementation: float = 0.0
+    # False for a box, which never plans: one number, not a split whose left side is always zero.
+    split: bool = True
 
     @property
     def total(self) -> float:
@@ -87,6 +89,8 @@ class Spend:
         return bool(self.planning or self.implementation)
 
     def __str__(self) -> str:
+        if not self.split:
+            return f"${self.total:.2f}"
         return f"${self.planning:.2f} + ${self.implementation:.2f}"
 
 
@@ -100,6 +104,8 @@ def finished_cost(entry: dict) -> str:
 
 
 def cost(task: Task) -> Spend:
+    """What vivibox itself spent on the task, from its turn events. For a box that is only the
+    turn that works out how to run the app; what you run in it by hand is on your own keys."""
     planning = implementation = 0.0
     for event in task.events():
         if event["type"] != "turn":
@@ -109,7 +115,7 @@ def cost(task: Task) -> Spend:
             planning += spent
         else:
             implementation += spent
-    return Spend(round(planning, 6), round(implementation, 6))
+    return Spend(round(planning, 6), round(implementation, 6), split=not task.read_state().box)
 
 
 # What the task needs, in words, and the commands for your next step.
@@ -219,9 +225,10 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     if st.state is State.DONE:
         return TaskView("done", DONE, FINISHED, commands=(f"vivibox delete {st.id}",))
     if st.box and st.state is State.IMPLEMENT:
-        # Nothing runs in a box but you; open or closed is all there is to say of it.
+        # Nothing runs in a box but you; open or stopped is all there is to say of it. Closing a
+        # box is something else: a, which brings its work to review.
         if st.paused:
-            return TaskView("box closed", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
+            return TaskView("box stopped", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
         return TaskView(
             "box open", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}", f"vivibox accept {st.id}")
         )

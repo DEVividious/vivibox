@@ -1,6 +1,7 @@
 """A box: a project's pod with no task and no agent, for you to work in by hand. Its work comes
 back the way accepted work does."""
 
+import json
 import subprocess
 
 import pytest
@@ -43,11 +44,35 @@ def test_a_box_is_a_task_without_a_plan_or_an_agent(env):
     assert seen(task).commands == (f"vivibox attach {task.id}", f"vivibox accept {task.id}")
 
 
-def test_a_stopped_box_is_closed_and_a_started_one_open(env):
+def test_a_stopped_box_is_stopped_and_a_started_one_open(env):
+    """Stopped, not closed: closing a box is what a brings its work to review with."""
     task = actions.open_box("demo")
     task.set_paused(True)
-    assert seen(task).status == "box closed" and seen(task).group == "Stopped"
+    assert seen(task).status == "box stopped" and seen(task).group == "Stopped"
     assert seen(task).commands == (f"vivibox start {task.id}",)
+    with pytest.raises(actions.PodError, match="stopped"):
+        actions.box_shell_command(task.id)
+
+
+def test_a_box_costs_one_number_not_a_split(env):
+    """A box never plans, so planning + implementation would always read $0.00 + something. What
+    it costs is the one turn vivibox runs for it, working out how to run the app."""
+    from vivibox.tui import detail
+
+    task = actions.open_box("demo")
+    assert not ui.cost(task), "nothing yet"
+    task.event("turn", cost=0.0123, tokens=100, kind="demo")
+    assert str(ui.cost(task)) == "$0.01"
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "cost $0.01" in shown and "planning" not in shown
+    actions.remember_removed(task, load_project("demo"))
+    entry = json.loads(actions.history_path().read_text().splitlines()[-1])
+    assert entry["cost"] == 0.0123 and "planning" not in entry
+    assert ui.finished_cost(entry) == "$0.01"
+    done = actions.Finished(task.id, load_project("demo").repo, ui.cost(task), "Box work")
+    actions.remember(done, load_project("demo"), "abcdef0123456789")
+    entry = json.loads(actions.history_path().read_text().splitlines()[-1])
+    assert "planning" not in entry and ui.finished_cost(entry) == "$0.01"
 
 
 def test_closing_a_box_brings_its_work_to_review(env):

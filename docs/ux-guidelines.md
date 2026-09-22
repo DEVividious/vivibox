@@ -52,7 +52,7 @@ Status labels, the only ones allowed:
 | a start failed | `could not start` | Waiting for you |
 | at work on paper, no supervisor alive | `not running` | Waiting for you |
 | a box, its pod up, for you to work in | `box open` | Working |
-| a box whose pod is down | `box closed` | Stopped |
+| a box whose pod is down (`s`); closing a box is `a`, which brings its work to review | `box stopped` | Stopped |
 | accepted | `done` | Done |
 
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock

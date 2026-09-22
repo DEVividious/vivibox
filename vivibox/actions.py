@@ -709,7 +709,7 @@ def box_shell_command(task_id: str) -> list[str]:
     the box stays."""
     task, _ = load(task_id)
     if task.read_state().paused:
-        raise PodError(f"{task_id} is closed; open it again with: vivibox start {task_id}")
+        raise PodError(f"{task_id} is stopped; start it again with: vivibox start {task_id}")
     pod = task_pod(task_id)
     agent_view(task, ["docker", "exec", "-it", "-w", str(task.repo), pod.agent, "bash", "-l"])
     return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
@@ -1231,7 +1231,8 @@ def remember_removed(task: Task, project: Project) -> None:
         "project": project.name,
         "title": st.goal,
         "cost": round(spent.total, 4),
-        "planning": round(spent.planning, 4),
+        # A box has no planning to split off, and the list shows one number for an entry without it.
+        **({"planning": round(spent.planning, 4)} if spent.split else {}),
         "created": st.created,
         "finished": now(),
         "deleted": str(st.state),
@@ -1250,7 +1251,7 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         "project": project.name,
         "title": done.message or f"Box in {project.name}",
         "cost": round(done.cost.total, 4),
-        "planning": round(done.cost.planning, 4),
+        **({"planning": round(done.cost.planning, 4)} if done.cost.split else {}),
         "commit": commit[:10],
         "branch": done.branch,
         "conflicts": done.conflicts,

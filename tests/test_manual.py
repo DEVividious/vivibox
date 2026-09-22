@@ -309,3 +309,10 @@ def test_an_answer_that_is_not_a_plan_is_reported_once(task, tmp_path):
     sup.step()
     assert task.read_state().awaiting_plan
     assert sum("not readable yet" in n for n in notes) == 1
+
+
+def test_a_chat_is_told_when_the_agent_wrote_no_report(task, tmp_path):
+    task.repo.mkdir()
+    (task.repo / "app.js").write_text("x")
+    web, _ = manual.prompts(task, tmp_path / "src")
+    assert "wrote no report" in web and "new project" not in web, "an empty report is not a new project"

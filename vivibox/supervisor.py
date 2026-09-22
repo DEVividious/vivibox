@@ -26,32 +26,54 @@ from .task import Task, TaskState
 NEXT_PROMPT = "next-prompt.md"
 QUESTION = "question.md"
 
-PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Then write a plan to
-/task/handoff/plan-draft.md: keep the header between the +++ lines of /task/plan.md, set its
-summary to one sentence of at most 100 characters naming what the task does, describe the approach,
-and list concrete, checkable items under "## Acceptance criteria" as "- [ ]" lines. If the header's
-verify list is empty, set it to the command that builds and tests this project once your plan is
-carried out, for example verify = ["npm test"]; the gate runs it on a fresh clone of your commits.
-Do not change code yet. End your turn when the draft is written."""
+# Every prompt that starts a turn ends by naming what ends it: the two endings the brief
+# (templates/instructions.md) allows, and nothing else. docs/prompt-guidelines.md says why.
+PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
+/task/handoff/plan-draft.md as a copy of /task/plan.md, filled in:
+- the header between the +++ lines stays as it is, except: set summary to one sentence of at most
+  100 characters naming what the task does, and, if verify is empty, set it to the command that
+  builds and tests this project once the plan is done, e.g. verify = ["npm test"]; the
+  verification runs it on a fresh clone of your commits;
+- under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
+  check" with concrete "- [ ]" items, each one checkable by reading the code or running it; keep
+  the first item as it is;
+- fill in the other sections; the <!-- notes --> say what goes where. The writer that carries the
+  plan out may not remember this conversation, so the plan says everything it needs.
+Do not change code. End the turn when the draft is written, or when a question is in
+/task/handoff/question.md."""
 
-IMPLEMENT_PROMPT = """The plan in /task/plan.md is accepted. Implement it and commit your work. In
-/task/handoff/criteria.md, tick each item the moment you have verified it, one at a time, before you
-move on: the user watches that file to follow your progress, and ticking everything at the end leaves
-them looking at nothing for the whole turn. End your turn when everything is done."""
+PLAN_REPAIR_PROMPT = """The plan draft in /task/handoff/plan-draft.md is not ready: {problem}. Fix
+that in the draft. End the turn when it is fixed."""
 
-FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md (full output in
-/task/handoff/verify.log), fix the problems, commit, and end your turn. Do not skip or switch off
-tests to get past it: if something outside the code keeps them from running (Docker, network,
-credentials, a service), write that to /task/handoff/question.md with the error and end your turn."""
+IMPLEMENT_PROMPT = """The plan in /task/plan.md is accepted. Carry it out: write the code and the
+tests, commit, and tick each item in /task/handoff/criteria.md the moment you have verified it.
+End the turn when every item is ticked and committed, or when a question is in
+/task/handoff/question.md."""
 
-COMMENT_PROMPT = """The user commented on your work. Read the newest entry in /task/handoff/comments.md,
-act on it, and end your turn."""
+FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md: it names what
+failed and quotes the lines that say why (the whole output is in /task/handoff/verify.log). Fix
+what it names and commit. End the turn when that is done, or, if the cause is outside the code,
+when you have written it to /task/handoff/question.md."""
 
-RESUME_PROMPT = """You were interrupted and the task is resuming. Check `git status` and the files in
-/task/handoff/, then continue where you left off and end your turn when done."""
+COMMENT_PROMPT = """The user replied. Read the newest entry in /task/handoff/comments.md and do
+what it asks. End the turn when that is done and committed, or when you have written a new
+question to /task/handoff/question.md."""
 
 PLAN_COMMENT_PROMPT = """The user commented on your plan. Read the newest entry in
-/task/handoff/comments.md, update /task/handoff/plan-draft.md, and end your turn."""
+/task/handoff/comments.md and update /task/handoff/plan-draft.md. End the turn when the draft is
+updated."""
+
+RESUME_PREFIX = """You were interrupted. Check `git status` and the files in /task/handoff/ for what
+is already done, then go on with this:
+
+"""
+
+
+def resume_prompt(state: State) -> str:
+    """After a stop or a crash: the state's own prompt again, behind a word about the interruption.
+    A session that survived would go on from a bare "continue"; one that was lost would not know
+    what the state asks for."""
+    return RESUME_PREFIX + {State.PLAN: PLAN_PROMPT, State.IMPLEMENT: IMPLEMENT_PROMPT}[state]
 
 
 class Harness(Protocol):
@@ -126,6 +148,9 @@ def accept_plan(task: Task, reason: str, project_verify=(), save_verify=None) ->
     plan = gate.accept_plan(task, project_verify)
     if plan.verify and not project_verify and save_verify:
         save_verify(plan.verify)  # the new project now has a command of its own
+    # A question asked while planning is answered by the plan you accepted; left where it is, the
+    # first turn of implementation would end on it as a new question.
+    put_question_away(task)
     set_next_prompt(task, IMPLEMENT_PROMPT)
     task.reset_iterations()
     task.transition(State.IMPLEMENT, reason=reason)
@@ -135,6 +160,13 @@ def question(task: Task) -> str | None:
     path = task.meta / "handoff" / QUESTION
     text = path.read_text().strip() if path.exists() else ""
     return text or None
+
+
+def put_question_away(task: Task) -> None:
+    """A question that is answered or overtaken: kept for the record, out of the supervisor's way."""
+    path = task.meta / "handoff" / QUESTION
+    if path.exists():
+        path.rename(path.with_name(f"question-answered-{time.strftime('%Y%m%d-%H%M%S')}.md"))
 
 
 @dataclass
@@ -246,14 +278,22 @@ class Supervisor:
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
             return
-        draft = self.task.meta / "handoff" / "plan-draft.md"
-        try:
-            plan = parse_plan(draft.read_text())
-        except (OSError, PlanError) as e:
+        plan, problem = self._read_draft()
+        if problem:
+            # One turn to fix what acceptance would refuse anyway (the placeholder left in, no
+            # criteria, no verify command): cheaper than your reply, and once, not a loop.
+            if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem)) is None:
+                return
+            if q := question(self.task):
+                self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
+                return
+            plan, problem = self._read_draft()
+        if problem:
             self._checkpoint(
-                State.CHECKPOINT_PLAN, f"no valid plan draft ({e}); edit the plan yourself or reply"
+                State.CHECKPOINT_PLAN, f"no valid plan draft ({problem}); edit the plan yourself or reply"
             )
             return
+        draft = self.task.meta / "handoff" / "plan-draft.md"
         # Without the template's notes: from here the plan is yours to read, not a form to fill.
         self.task.plan_path.write_text(without_notes(draft.read_text()))
         if plan.summary:
@@ -268,6 +308,17 @@ class Supervisor:
                 self.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
             return
         self._checkpoint(State.CHECKPOINT_PLAN, "plan ready for review", kind="plan")
+
+    def _read_draft(self):
+        """The draft as a plan, or what keeps it from being one: unreadable, or one acceptance
+        would refuse."""
+        draft = self.task.meta / "handoff" / "plan-draft.md"
+        try:
+            plan = parse_plan(draft.read_text())
+            gate.check_plan(plan, self.project_verify)
+        except (OSError, PlanError, gate.GateError) as e:
+            return None, str(e)
+        return plan, ""
 
     def _plan_manually(self, st: TaskState) -> None:
         """You plan in your own chat. A chat in a browser cannot see the repository, so the writer

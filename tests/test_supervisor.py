@@ -99,7 +99,7 @@ def test_auto_plan_still_stops_without_real_criteria(task):
     write = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
     sup, notes = make(task, FakeHarness(task, [write]))
     sup.step()
-    assert task.read_state().state is State.CHECKPOINT_PLAN and "not accepted automatically" in notes[0]
+    assert task.read_state().state is State.CHECKPOINT_PLAN and "placeholder" in notes[0]
 
 
 def test_auto_plan_stops_for_risky_changes(task):
@@ -373,3 +373,42 @@ def test_only_a_blocked_task_can_be_verified_again(task):
     task.transition(State.CHECKPOINT_PLAN)
     with pytest.raises(gate.GateError, match="verified again"):
         actions.verify_again(task)
+
+
+def test_a_draft_the_gate_would_refuse_gets_one_repair_turn(task):
+    placeholder = DRAFT.replace("health endpoint returns 200", gate.PLACEHOLDER)
+    write_placeholder = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
+    harness = FakeHarness(task, [write_placeholder, write_draft])
+    sup, notes = make(task, harness)
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN and notes == ["plan ready for review"]
+    assert "health endpoint returns 200" in task.plan_path.read_text()
+    assert len(harness.prompts) == 2 and "placeholder" in harness.prompts[1], "told what is wrong"
+
+
+def test_a_draft_still_refused_after_the_repair_turn_stops_for_you(task):
+    placeholder = DRAFT.replace("health endpoint returns 200", gate.PLACEHOLDER)
+    write_placeholder = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
+    harness = FakeHarness(task, [write_placeholder, write_placeholder, write_draft])
+    sup, notes = make(task, harness)
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN
+    assert len(harness.prompts) == 2, "one repair turn, not a loop"
+    assert "placeholder" in notes[0] and "reply" in notes[0]
+
+
+def test_accepting_the_plan_puts_an_old_question_away(task):
+    task.plan_path.write_text(DRAFT)
+    task.transition(State.CHECKPOINT_PLAN)
+    handoff = task.meta / "handoff"
+    (handoff / supervisor.QUESTION).write_text("Which database?")
+    supervisor.accept_plan(task, "plan accepted", ["true"])
+    assert not (handoff / supervisor.QUESTION).exists(), "or it would block the first turn as a new question"
+    assert any(p.name.startswith("question-answered-") for p in handoff.iterdir())
+
+
+def test_resuming_repeats_the_states_own_prompt():
+    own = {State.PLAN: supervisor.PLAN_PROMPT, State.IMPLEMENT: supervisor.IMPLEMENT_PROMPT}
+    for state, prompt in own.items():
+        resumed = supervisor.resume_prompt(state)
+        assert resumed.startswith("You were interrupted") and resumed.endswith(prompt)

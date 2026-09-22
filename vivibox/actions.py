@@ -780,7 +780,7 @@ def _start(task_id: str, resume: bool = False) -> str:
         task.event("session_lost", harness=harness.name, session=was)
     interrupted = st.state in (State.PLAN, State.IMPLEMENT) and (st.paused or resume)
     if interrupted and not (task.meta / supervisor.NEXT_PROMPT).exists():
-        supervisor.set_next_prompt(task, supervisor.RESUME_PROMPT)
+        supervisor.set_next_prompt(task, supervisor.resume_prompt(st.state))
     if st.paused:
         task.set_paused(False)
     task.set_problem("")  # whatever kept it from starting before did not this time
@@ -947,9 +947,7 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
     with (handoff / "comments.md").open("a") as f:
         f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
-    question = handoff / supervisor.QUESTION
-    if question.exists():
-        question.rename(handoff / f"question-answered-{time.strftime('%Y%m%d-%H%M%S')}.md")
+    supervisor.put_question_away(task)
     prompt = supervisor.PLAN_COMMENT_PROMPT if target is State.PLAN else supervisor.COMMENT_PROMPT
     supervisor.set_next_prompt(task, prompt)
     task.reset_iterations()

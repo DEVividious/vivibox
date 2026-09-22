@@ -38,8 +38,8 @@ RECON_PROMPT = """Someone who cannot see this repository will plan the task in /
 the goal there, explore the repository, and write /task/handoff/context.md for them: the stack and
 its versions, how the project is built and tested (the exact commands), how it is laid out, and the
 parts the goal touches, with the code that matters quoted, each quote headed by its path. Be concrete
-and brief; they will paste all of it into a chat. Do not change anything in the repository and do
-not plan the task. End your turn when context.md is written."""
+and brief, under about 150 lines: every line of it will be pasted into a chat. Do not change
+anything in the repository and do not plan the task. End the turn when context.md is written."""
 
 # The chat decides what the plan says; the header is vivibox's bookkeeping, and it already has it.
 # Asking a chat to reproduce a TOML header after an hour of discussion got it back as a line of
@@ -121,7 +121,14 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
     if attached:
         web += ["I will attach these files the goal refers to:", *(f"- {p}" for p in attached), ""]
     web += ["# The plan to fill in", "", _plan_template(task, "(attached)"), ""]
-    web += ["# What is in the repository", "", found or "Nothing: this is a new project.", ""]
+    if not found:
+        # An empty report is not an empty repository: the writer's turn may have failed.
+        found = (
+            "Nothing: this is a new project."
+            if repository_is_empty(task.repo)
+            else "The agent wrote no report on the repository; ask me about it."
+        )
+    web += ["# What is in the repository", "", found, ""]
     decided = DECIDED.format(
         verify=f"`{' && '.join(project_verify)}`" if project_verify else "the command the plan names"
     )

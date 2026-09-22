@@ -39,11 +39,8 @@ class GateError(Exception):
     pass
 
 
-def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
-    """Freezes the plan you accepted and gives the agent a checklist of its criteria to tick.
-    A project with no verify command of its own (a new one) gets it from the plan."""
-    text = task.plan_path.read_text()
-    plan = parse_plan(text)
+def check_plan(plan: Plan, project_verify: list[str] | tuple = ()) -> None:
+    """What keeps a plan from being accepted, as a GateError; the planner is told the same."""
     if any(c.text == PLACEHOLDER for c in plan.criteria):
         raise GateError("the plan still carries the template's placeholder criterion; replace it")
     if not plan.criteria:
@@ -54,6 +51,14 @@ def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
             "this project has no command that builds and tests it yet; the plan must set one, "
             'for example verify = ["npm test"] in its header'
         )
+
+
+def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
+    """Freezes the plan you accepted and gives the agent a checklist of its criteria to tick.
+    A project with no verify command of its own (a new one) gets it from the plan."""
+    text = task.plan_path.read_text()
+    plan = parse_plan(text)
+    check_plan(plan, project_verify)
     (task.meta / ACCEPTED_PLAN).write_text(text)
     checklist = "".join(f"- [ ] {c.text}\n" for c in plan.criteria)
     (task.meta / "handoff" / CRITERIA_FILE).write_text(

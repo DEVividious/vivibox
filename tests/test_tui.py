@@ -425,10 +425,34 @@ def test_the_panel_tells_the_three_states_apart(env):
     assert "It stopped." not in detail(task, st, 3, pod=idle), "it was never started"
 
 
+def test_running_the_app_waits_until_the_work_is_back_with_you(env, monkeypatch):
+    """The agent builds and tests in the same working tree and pod; the app started beside it
+    would fight it for the build output and the ports."""
+    task = new_task()
+    at_plan_checkpoint(task)
+    task.transition(State.IMPLEMENT)
+    view = [tui.PodView("198.51.100.2", [], demo=False)]
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {i: view[0] for i in ids})
+
+    async def scenario(app, pilot):
+        assert await until(pilot, lambda: not app.pod.demo)
+        assert not app.check_action("demo", ()), "not while the agent implements"
+        task.transition(State.VERIFY)
+        app.reload()
+        assert not app.check_action("demo", ()), "not while the gate verifies"
+        task.transition(State.CHECKPOINT_FINAL)
+        app.reload()
+        assert app.check_action("demo", ()), "yours to run once the work is back with you"
+
+    run(scenario)
+
+
 def test_stopping_is_offered_only_while_something_runs(env, monkeypatch):
     task = new_task()
     at_plan_checkpoint(task)
     task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL)
     # Pinned, or the refresh in the background would replace it with what a real pod says.
     view = [tui.PodView("198.51.100.2", [], demo=False)]
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: view[0] for i in ids})

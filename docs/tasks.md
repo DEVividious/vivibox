@@ -186,6 +186,10 @@ after you have read it, so the model works this out once rather than once per ta
 `vivibox demo <id> --stop` stops it; so does stopping the pod. `vivibox pod shell <id>` is still
 there when you would rather run it by hand.
 
+The app runs once the work is back with you (*review the work*, *verification failed*) and in a
+box. While the agent implements or the gate verifies, the pod and its working tree are theirs: a
+second build on the same tree, or a server on a port their tests want, would get in their way.
+
 Each task has its own address, so two tasks can serve on the same port without colliding, and the
 port you use inside the pod is the port you use from outside. Addresses come from
 `198.51.100.0/24`, a range RFC 5737 reserves for documentation so that nothing else may use it; a

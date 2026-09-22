@@ -117,6 +117,26 @@ def test_ranges_overlap_by_their_addresses_not_their_prefix(a, b, shared):
     assert (setup_fn(f"overlaps {a} {b}").returncode == 0) is shared
 
 
+def test_the_task_networks_in_use_are_not_routes_the_pool_collides_with(tmp_path):
+    """setup.sh on a machine with a task: the pool overlapped the route to the task's own network,
+    which is the pool in use. A task network's bridge is br-<network id>; those routes are left out.
+    A Docker network of someone else's in the pool still counts."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "ip").write_text(
+        "#!/bin/sh\n"
+        "echo 'default via 192.168.1.1 dev wlan0 proto dhcp metric 600'\n"
+        "echo '192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.2'\n"
+        "echo '198.51.100.0/28 dev br-bc2b47432840 proto kernel scope link src 198.51.100.1 linkdown'\n"
+        "echo '198.51.100.16/28 dev br-0123456789ab proto kernel scope link src 198.51.100.17'\n"
+    )
+    (fake / "docker").write_text("#!/bin/sh\necho bc2b47432840\n")
+    for script in ("ip", "docker"):
+        (fake / script).chmod(0o755)
+    result = setup_fn("routed", env={"PATH": f"{fake}:{os.environ['PATH']}"})
+    assert result.stdout.split() == ["192.168.1.0/24", "198.51.100.16/28"], result.stderr
+
+
 def test_docker_ranges_are_the_usual_ones_when_nothing_routes_them():
     result = setup_fn("pick_docker_ranges 192.168.1.0/24 198.51.100.0/24")
     assert result.stdout.split() == ["172.20.0.0/16", "172.25.0.0/16"]

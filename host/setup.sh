@@ -60,9 +60,21 @@ overlaps() {
   (($(($(ip2int "${a%/*}") & mask)) == $(($(ip2int "${b%/*}") & mask))))
 }
 
-# The destinations this machine routes, the default route aside.
+# The bridges of vivibox's own task networks, br-<network id>: a route to one of them is the task
+# pool in use, not something else routed there. Nothing when Docker cannot be asked.
+task_bridges() {
+  command -v docker >/dev/null || return 0
+  docker network ls -q --filter 'name=^vivibox-.*-net$' 2>/dev/null | sed 's/^/br-/' || true
+}
+
+# The destinations this machine routes, the default route and the task networks aside.
 routed() {
-  ip -4 route | awk '$1 != "default" {
+  local skip
+  skip=" $(task_bridges | tr '\n' ' ') "
+  ip -4 route | awk -v skip="$skip" '$1 != "default" {
+    dev = ""
+    for (i = 1; i < NF; i++) if ($i == "dev") dev = $(i + 1)
+    if (index(skip, " " dev " ")) next
     for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) { print $i; break }
   }'
 }

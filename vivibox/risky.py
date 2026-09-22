@@ -1,6 +1,7 @@
 """Files that run code on the host without you asking: on IDE import, on opening a folder, on entering
 a directory in a shell, or through git. Changes to them need your approval before you open the task
-in IntelliJ, and before the task can be done.
+in IntelliJ, and before the task can be done. Test configuration is on the list for another
+reason: it decides which tests run, and the gate cannot tell a tidy-up from a test switched off.
 
 The working tree is compared, not commits: IntelliJ reads whatever is on disk.
 """
@@ -33,6 +34,11 @@ DEFAULT_PATTERNS = (
     ".gitmodules",
     # Shell environment managers that run code on entering the directory
     ".envrc", "mise.toml", ".mise.toml", ".tool-versions",
+    # Test configuration: what decides which tests run, and how, switches tests off without any
+    # of the words the gate looks for in added lines
+    "vitest.config.*", "vite.config.*", "jest.config.*", ".mocharc*", "playwright.config.*",
+    "cypress.config.*", "karma.conf.*", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml",
+    "conftest.py", "Makefile", "junit-platform.properties",
 )  # fmt: skip
 SKIP_DIRS = {"node_modules", "target", ".gradle"}
 NESTED_GIT = "nested git repository"

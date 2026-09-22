@@ -342,6 +342,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"FAIL  invisible character at {h}")
     for f in result.uncommitted:
         print(f"FAIL  not committed: {f}")
+    for f in result.no_red_evidence:
+        print(f"FAIL  no red evidence in red.md for: {f}")
+    for t in result.removed_tests:
+        print(f"GONE  test removed: {t}")
     for c in result.risky:
         print(f"RISK  {c.kind}: {c.path}")
     print(f"\nLog: {result.log}")

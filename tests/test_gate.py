@@ -475,3 +475,71 @@ def test_a_failure_of_the_environment_is_not_reused(task):
     task.transition(State.VERIFY)
     gate.run_gate(task, pod, ["npm test"], [])
     assert pod.commands.count("npm test") == 2
+
+
+def test_a_test_file_changed_without_red_evidence_fails_the_gate(task):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    (task.repo / "test").mkdir()
+    (task.repo / "test" / "math.test.js").write_text('test("adds", () => expect(1).toBe(1));\n')
+    (task.repo / "src.js").write_text("x\n")
+    commit(task.repo, "Add a test")
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert result.no_red_evidence == ["test/math.test.js"] and not result.passed
+    text = gate.feedback(result)
+    assert "red.md" in text and "test/math.test.js" in text
+    (task.meta / "handoff" / "red.md").write_text("## math.test.js > adds\nexpected 1, got undefined\n")
+    assert gate.run_gate(task, FakePod(), ["true"], []).passed, "named by its file name is enough"
+
+
+def test_red_evidence_is_asked_only_for_test_files(task):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    (task.repo / "src.js").write_text("x\n")
+    commit(task.repo, "Add code")
+    assert gate.run_gate(task, FakePod(), ["true"], []).passed
+
+
+@pytest.mark.parametrize(
+    "path,is_test",
+    [
+        ("test/math.test.js", True),
+        ("src/__tests__/app.spec.tsx", True),
+        ("tests/test_shop.py", True),
+        ("shop_test.go", True),
+        ("src/test/java/ShopIT.java", True),
+        ("src/test/kotlin/ShopSpec.kt", True),
+        ("src/main/java/Shop.java", False),
+        ("docs/testing.md", False),
+        ("contest/entry.js", False),
+    ],
+)
+def test_what_counts_as_a_test_file(path, is_test):
+    assert gate.is_test_file(path) is is_test
+
+
+def test_removed_tests_are_counted_for_you(tmp_path):
+    from conftest import make_repo
+
+    source = make_repo(tmp_path / "source")
+    (source / "test").mkdir()
+    (source / "test" / "math.test.js").write_text(
+        'import { test } from "vitest";\ntest("adds", () => {});\ntest("subtracts", () => {});\n'
+    )
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add tests")
+    t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    Approvals(t.meta, t.repo).approve()
+    gate.accept_plan(t, ["true"])
+    tick(t, "endpoint returns 200", "error path is tested")
+    (t.repo / "test" / "math.test.js").write_text('import { test } from "vitest";\ntest("adds", () => {});\n')
+    git(t.repo, "commit", "-qam", "Drop a test")
+    (t.meta / "handoff" / "red.md").write_text(
+        "math.test.js: the subtracts test went with the feature; no new test\n"
+    )
+    result = gate.run_gate(t, FakePod(), ["true"], [])
+    assert result.removed_tests == ['test/math.test.js: test("subtracts", () => {});']
+    assert result.passed, "for you to see at review, not a failure"
+    assert t.events()[-1]["data"]["removed_tests"] == 1
+    assert "subtracts" not in gate.feedback(result), "not for the agent, which would put it back"

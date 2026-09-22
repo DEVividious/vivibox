@@ -32,11 +32,12 @@ broken, next to the line that broke it.
 | no test is switched off | `gate.switched_off_tests` |
 | no invisible characters | `gate.hidden_characters` |
 | everything is committed | `gate.uncommitted` |
-| build files, IDE settings and hooks change only with the user's approval | `risky.Approvals.changes` |
+| build files, test configuration, IDE settings and hooks change only with the user's approval | `risky.Approvals.changes` |
+| every test file added or changed is named in `red.md` | `gate.red_evidence_missing` |
 
-A sentence no row covers is one of three things: a fact about the pod ("Docker works here"),
-a description of a file, or something the user checks by reading (`red.md`), and the brief says
-which. Facts are stated as facts, not as prohibitions: "there is no remote to push to" beats
+A sentence no row covers is one of two things: a fact about the pod ("Docker works here") or a
+description of a file. The evidence in `red.md` is the one rule the gate checks only in part
+(that the file is named), and the brief says the user reads the rest. Facts are stated as facts, not as prohibitions: "there is no remote to push to" beats
 "do not push".
 
 ## 3. A turn ends on a condition, not on a feeling

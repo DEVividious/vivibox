@@ -6,6 +6,8 @@
 2. Every acceptance criterion of the plan you accepted is ticked in the agent's handoff/criteria.md.
    The criteria come from the accepted plan, so the agent cannot reword them.
 3. New commits follow the commit rules: one short line, no co-author or AI signature.
+   Every test file added or changed is named in handoff/red.md: the writer's evidence that it saw
+   the test fail first. The gate checks the name is there, not the evidence; you read that.
    Added lines switch no test off (@Disabled, skipITs, it.skip and the like): one that does not run
    checks nothing. They contain no invisible characters either: zero-width, bidirectional controls
    ("Trojan Source") or Unicode tag characters, which hide text from you in a diff but not from a model.
@@ -220,15 +222,25 @@ def _hidden_in(path: str, number: int, line: str) -> list[str]:
 
 def added_lines(repo_dir: Path, base: str):
     """(path, line number, text) of each line added since base, committed or not."""
+    yield from _diff_lines(repo_dir, base, "+")
+
+
+def removed_lines(repo_dir: Path, base: str):
+    """(path, line number in the old file, text) of each line removed since base."""
+    yield from _diff_lines(repo_dir, base, "-")
+
+
+def _diff_lines(repo_dir: Path, base: str, sign: str):
     diff = repo.git("-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", base,
                     cwd=repo_dir).stdout  # fmt: skip
     path, number = "", 0
+    group = 2 if sign == "+" else 1
     for line in diff.splitlines():
         if line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else ""
         elif line.startswith("@@"):
-            number = int(re.match(r"@@ -\S+ \+(\d+)", line).group(1))
-        elif line.startswith("+") and path:
+            number = int(re.match(r"@@ -(\d+)\S* \+(\d+)", line).group(group))
+        elif line.startswith(sign) and path and not line.startswith(sign * 3):
             yield path, number, line[1:]
             number += 1
 
@@ -271,6 +283,51 @@ def switched_off_tests(repo_dir: Path, base: str) -> list[str]:
     ]
 
 
+# Where tests live, by the usual conventions of the languages the image serves.
+TEST_FILE = re.compile(
+    r"(^|/)(test|tests|__tests__|spec)/"  # a test directory anywhere on the path
+    r"|(^|/)test_[^/]*\.py$|_test\.(py|go)$"  # Python, Go
+    r"|\.(test|spec)\.[^/]+$"  # Jest, Vitest, Mocha
+    r"|(Test|Tests|IT|Spec)\.(java|kt|kts|scala|groovy)$"  # JVM
+)
+# A test being defined, in those languages' words: what a removed line of a test file loses.
+TEST_DEFINITION = re.compile(
+    r"^\s*(@Test\b|@ParameterizedTest\b|def test_\w+|func Test\w+"
+    r"|(it|test|describe|context)\s*\(|@pytest\.mark\b)"
+)
+
+
+def is_test_file(path: str) -> bool:
+    return not path.endswith(PROSE) and bool(TEST_FILE.search(path))
+
+
+def changed_test_files(repo_dir: Path, base: str) -> list[str]:
+    """Test files added or changed in the commits since base."""
+    names = repo.git("diff", "--name-only", "--diff-filter=AM", base, "HEAD", cwd=repo_dir).stdout
+    return [path for path in names.splitlines() if path and is_test_file(path)]
+
+
+def red_evidence_missing(task: Task, base: str) -> list[str]:
+    """Changed test files that red.md does not name, by path or by file name. The gate holds the
+    writer to naming each file; whether the evidence is real is yours to read."""
+    red = task.meta / "handoff" / "red.md"
+    text = red.read_text() if red.exists() else ""
+    return [
+        path
+        for path in changed_test_files(task.repo, base)
+        if path not in text and Path(path).name not in text
+    ]
+
+
+def removed_tests(repo_dir: Path, base: str) -> list[str]:
+    """Test definitions removed from test files since base, for you to see at review."""
+    return [
+        f"{path}: {text.strip()[:120]}"
+        for path, _, text in removed_lines(repo_dir, base)
+        if is_test_file(path) and TEST_DEFINITION.search(text)
+    ]
+
+
 @dataclass
 class CommandResult:
     command: str
@@ -299,6 +356,11 @@ class GateResult:
     # What outside the code kept a command from succeeding, in the log's own words; "" when the
     # failure is the code's to fix.
     environment: str = ""
+    # Test files added or changed that red.md does not name.
+    no_red_evidence: list[str] = field(default_factory=list)
+    # Test definitions removed since the base commit, as path: line. For you, at review: a
+    # refactoring removes tests rightly, and an agent told about it would put them back.
+    removed_tests: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -310,6 +372,7 @@ class GateResult:
             and not self.hidden_characters
             and not self.switched_off
             and not self.uncommitted
+            and not self.no_red_evidence
         )
 
     def summary(self) -> dict:
@@ -325,6 +388,9 @@ class GateResult:
             "log": self.log.name,
             "build_skipped": self.build_skipped,
             "environment": self.environment,
+            "no_red_evidence": len(self.no_red_evidence),
+            "removed_tests": len(self.removed_tests),
+            "removed": self.removed_tests[:MAX_LISTED],
         }
 
 
@@ -411,6 +477,8 @@ def run_gate(
     result.reworded = reworded_criteria(task, result.missing_criteria) if accepted else {}
     result.commit_problems = commit_problems(task.repo, st.base_commit)
     result.hidden_characters = hidden_characters(task.repo, st.base_commit)
+    result.no_red_evidence = red_evidence_missing(task, st.base_commit) if accepted else []
+    result.removed_tests = removed_tests(task.repo, st.base_commit)
     result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
     built = {"commit": head, "commands": commands} if not result.build_skipped else {}
     reused = {"reused": result.log.name} if result.unchanged else {}
@@ -518,6 +586,12 @@ def feedback(result: GateResult) -> str:
             " /task/handoff/question.md with the error and end the turn."
         )
     parts += _listed(result.uncommitted, "- Not committed (verification uses your commits only): {}")
+    parts += _listed(
+        result.no_red_evidence,
+        "- No red evidence for test file {}: run its new or changed tests before the change that makes"
+        " them pass and record the failing assertion in /task/handoff/red.md, naming the file; a line"
+        " naming the file and saying why it has no new test counts too",
+    )
     return "\n".join(parts) + "\n"
 
 

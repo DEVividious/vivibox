@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from vivibox.risky import NESTED_GIT, Approvals, matches, scan
+from vivibox.risky import DEFAULT_PATTERNS, NESTED_GIT, Approvals, matches, scan
 
 
 @pytest.mark.parametrize(
@@ -109,3 +109,17 @@ def test_scan_of_a_real_clone_ignores_its_own_git_dir(tmp_path):
     root = tmp_path / "r"
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     assert scan(root) == {}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "vitest.config.ts", "web/vite.config.js", "jest.config.mjs", ".mocharc.yml", "playwright.config.ts",
+        "cypress.config.js", "karma.conf.js", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml",
+        "tests/conftest.py", "Makefile", "src/test/resources/junit-platform.properties",
+    ],
+)  # fmt: skip
+def test_test_configuration_is_risky_too(path):
+    """What decides which tests run, and how, switches tests off without any of the words the gate
+    looks for in added lines; a change to it is for you to see before the work counts."""
+    assert any(matches(path, p) for p in DEFAULT_PATTERNS), path

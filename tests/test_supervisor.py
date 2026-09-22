@@ -465,3 +465,14 @@ def test_the_first_turn_of_a_role_opens_with_its_brief(task):
     first, second = harness.prompts
     assert first.startswith(brief.role_text("writer")) and first.endswith(supervisor.PLAN_PROMPT)
     assert second == supervisor.IMPLEMENT_PROMPT, "said once per conversation, not once per turn"
+
+
+def test_the_review_message_counts_removed_tests(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    result = gate_result(True)
+    result.removed_tests = ["test/a.test.js: test('x')", "test/a.test.js: test('y')"]
+    sup, notes = make(task, FakeHarness(task), results=[result])
+    sup.step()
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_FINAL and "2 tests removed" in notes[-1]

@@ -85,7 +85,11 @@ def test_the_common_brief_names_no_role():
 
 def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
     for field in dataclasses.fields(gate.GateResult):
-        if field.name in ("log", "risky"):  # the log is where the rest is; risky goes to you
+        if field.name in (
+            "log",
+            "risky",
+            "removed_tests",
+        ):  # the log is where the rest is; the others go to you
             continue
         result = gate.GateResult(Path("/dev/null"))
         marker = f"z{field.name}z"[:10]  # short enough to survive a shortened commit hash

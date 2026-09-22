@@ -1,5 +1,6 @@
 import asyncio
 import subprocess
+from pathlib import Path
 
 import pytest
 from textual.widgets import Input, Label, Select, SelectionList, TextArea
@@ -2337,3 +2338,34 @@ def test_a_verification_the_environment_stopped_says_so_and_offers_g_first(env):
     assert lines[2].startswith("**Next:**") and lines[2].index("`g`") < lines[2].index("`r`")
     assert "Verification could not run" in shown and "Cannot connect to the Docker daemon" in shown
     assert "keeps failing" not in shown
+
+
+def test_removed_tests_are_shown_with_the_work(env):
+    task = implementing("Goal")
+    task.transition(State.VERIFY)
+    task.event(
+        "gate",
+        passed=True,
+        removed_tests=2,
+        removed=["test/a.test.js: test('x')", "test/a.test.js: test('y')"],
+    )
+    task.transition(State.CHECKPOINT_FINAL)
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "2 tests removed" in shown and "test('x')" in shown
+
+
+def test_the_plans_verify_command_is_shown_before_you_accept_it(env):
+    """For a new project the plan's command becomes the project's for good once you accept, so
+    you see it where you decide."""
+    (Path(load_config().tasks_dir).parent / "config" / "projects" / "fresh.toml").write_text(
+        f'repo = "{env / "repo"}"\nverify = []\n'
+    )
+    assert main(["new", "fresh", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "fresh-1")
+    at_plan_checkpoint(task)
+    task.plan_path.write_text(task.plan_path.read_text().replace("verify = []", 'verify = ["npm test"]'))
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "`npm test`" in shown and "becomes the project's" in shown
+    demo = new_task()
+    at_plan_checkpoint(demo)
+    assert "becomes the project's" not in detail(demo, demo.read_state(), 3, running=True), "demo has its own"

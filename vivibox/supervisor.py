@@ -400,14 +400,18 @@ class Supervisor:
             )
         else:
             self.task.transition(target, reason="verification passed")
-            self.notify(self.task.id, self._review_message(), kind="review")
+            self.notify(self.task.id, self._review_message(result), kind="review")
 
-    def _review_message(self) -> str:
+    def _review_message(self, result: gate.GateResult | None = None) -> str:
+        # Tests that went missing are said here, not to the agent, which would put them back.
+        n = len(result.removed_tests) if result else 0
+        gone = f"; {n} test{'s' if n != 1 else ''} removed" if n else ""
         try:
             path = self.prepare_review()
         except Exception as e:  # the work is done either way; the review copy is a convenience
             self.task.event("review_prepare_failed", error=str(e)[:500])
-            return f"ready for your review; the review copy failed ({e}), try: vivibox review {self.task.id}"
+            copy = f"the review copy failed ({e}), try: vivibox review {self.task.id}"
+            return f"ready for your review{gone}; {copy}"
         if path is None:
-            return f"ready for your review: vivibox review {self.task.id}"
-        return f"ready for your review in {path}"
+            return f"ready for your review{gone}: vivibox review {self.task.id}"
+        return f"ready for your review in {path}{gone}"

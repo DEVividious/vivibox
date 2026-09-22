@@ -149,6 +149,41 @@ def pod_view(task_id: str) -> PodView:
     return pod_views([task_id])[task_id]
 
 
+def removed_tests(task: Task) -> list[str]:
+    """Tests the work removed, from the last verification: a refactoring does that rightly, and
+    a shortcut does it too, so it is yours to judge."""
+    for event in reversed(task.events()):
+        if event["type"] == "gate":
+            gone = event["data"].get("removed") or []
+            n = event["data"].get("removed_tests", len(gone))
+            if not n:
+                return []
+            return [
+                "",
+                f"**{n} test{'s' if n != 1 else ''} removed**; see whether the plan meant it:",
+                *(f"- `{g}`" for g in gone),
+            ]
+    return []
+
+
+def plans_verify(task: Task, st: TaskState) -> list[str]:
+    """The command the plan brings for a project that has none yet: accepting the plan makes it the
+    project's for good, so it is shown where you decide."""
+    try:
+        verify = parse_plan(read(task.plan_path)).verify
+        project_has_one = bool(actions.load(st.id)[1].verify)
+    except Exception:
+        return []
+    if not verify or project_has_one:
+        return []
+    return [
+        "**Verification:** "
+        + " && ".join(f"`{c}`" for c in verify)
+        + ". From the plan; it becomes the project's command when you accept.",
+        "",
+    ]
+
+
 def build_said(log: Path, feedback: str = "") -> list[str]:
     """The lines of the last verification's log that say what failed, and where the rest is. The
     feedback the gate writes now quotes them itself; then only the log's place is added."""
@@ -439,7 +474,7 @@ def detail(
             plan_body(read(task.plan_path)),
         ]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
-        body = [plan_body(read(task.plan_path))]
+        body = [*plans_verify(task, st), plan_body(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_FINAL:
         try:
             _, project = actions.load(st.id)
@@ -454,6 +489,7 @@ def detail(
             f"Review copy: `{copy}`",
             "",
             f"```\n{stat.rstrip() or 'no changes fetched yet'}\n```",
+            *removed_tests(task),
         ]
     elif st.state is State.APPROVAL_RISKY:
         try:

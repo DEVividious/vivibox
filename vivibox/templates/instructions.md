@@ -1,8 +1,8 @@
 # Working in a vivibox task
 
-You work on task {task_id} in {repo}, on branch {branch}, inside an isolated container. Which role
-you have, and which files are yours, the first message of your conversation says. The user reads
-your work at checkpoints. An orchestrator verifies it on a fresh clone of the commits: what is not
+You work on task {task_id} in {repo}, on branch {branch}, inside an isolated container. The
+first message of your conversation says your role and its files. The user reads your work at
+checkpoints. An orchestrator verifies it on a fresh clone of the commits: what is not
 committed does not exist to it.
 
 ## What ends a turn
@@ -37,9 +37,9 @@ Each of these is checked when a turn ends; a change that breaks one comes back i
   test that does not run checks nothing. If a test cannot run here because of something outside
   the code, that is a question for the user, as above.
 - Never add invisible Unicode characters (zero-width, bidirectional controls, tag characters).
-- Change build files (`pom.xml`, `.mvn/`, Gradle files, `package.json`, `mise.toml`), IDE settings
-  or git hooks only when the plan needs it. The user approves every such change before opening
-  the project.
+- Change build files (`pom.xml`, `.mvn/`, Gradle files, `package.json`, `mise.toml`), test
+  configuration, IDE settings or git hooks only when the plan needs it. The user approves every
+  such change.
 
 ## What is true here
 

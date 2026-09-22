@@ -67,15 +67,21 @@ task_bridges() {
   docker network ls -q --filter 'name=^vivibox-.*-net$' 2>/dev/null | sed 's/^/br-/' || true
 }
 
-# The destinations this machine routes, the default route and the task networks aside.
+# The destinations this machine routes, the default route and the task networks aside. Every
+# table: a VPN (Cloudflare WARP) keeps its routes in one of its own, where the main table does not
+# show them, and a range chosen from the main table alone overlapped a host the VPN routed. Only
+# prefix routes count, not the local and broadcast entries, and not a half of the internet
+# (/0, /1), which is how a full tunnel claims everything and would leave no range free.
 routed() {
   local skip
   skip=" $(task_bridges | tr '\n' ' ') "
-  ip -4 route | awk -v skip="$skip" '$1 != "default" {
+  ip -4 route show table all | awk -v skip="$skip" '$1 ~ /^[0-9]+\./ {
     dev = ""
     for (i = 1; i < NF; i++) if ($i == "dev") dev = $(i + 1)
     if (index(skip, " " dev " ")) next
-    for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) { print $i; break }
+    bits = ($1 ~ /\//) ? substr($1, index($1, "/") + 1) + 0 : 32
+    if (bits < 8) next
+    print $1
   }'
 }
 

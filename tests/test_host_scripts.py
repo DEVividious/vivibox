@@ -137,6 +137,34 @@ def test_the_task_networks_in_use_are_not_routes_the_pool_collides_with(tmp_path
     assert result.stdout.split() == ["192.168.1.0/24", "198.51.100.16/28"], result.stderr
 
 
+def test_routes_of_a_vpn_in_a_table_of_its_own_count_too(tmp_path):
+    """The work laptop's case: Cloudflare WARP routes a corporate host in a table of its own, and setup.sh,
+    reading the main table, gave Docker a pool that contains it. The local and broadcast entries
+    of the local table are not destinations, and a half of the internet is a full tunnel's claim
+    on everything, not a range in use."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "ip").write_text(
+        "#!/bin/sh\n"
+        "echo 'default via 192.168.50.1 dev wlp0s20f3 proto dhcp metric 600'\n"
+        "echo '192.168.50.0/24 dev wlp0s20f3 proto kernel scope link src 192.168.50.219'\n"
+        "echo '0.0.0.0/1 dev CloudflareWARP table 65743 scope link'\n"
+        "echo '128.0.0.0/1 dev CloudflareWARP table 65743 scope link'\n"
+        "echo '172.25.0.10 dev CloudflareWARP table 65743 scope link'\n"
+        "echo 'local 192.168.50.219 dev wlp0s20f3 table local proto kernel scope host src 192.168.50.219'\n"
+        "echo 'broadcast 192.168.50.255 dev wlp0s20f3 table local proto kernel scope link"
+        " src 192.168.50.219'\n"
+    )
+    (fake / "docker").write_text("#!/bin/sh\n")
+    for script in ("ip", "docker"):
+        (fake / script).chmod(0o755)
+    env = {"PATH": f"{fake}:{os.environ['PATH']}"}
+    result = setup_fn("routed", env=env)
+    assert result.stdout.split() == ["192.168.50.0/24", "172.25.0.10"], result.stderr
+    ranges = setup_fn("pick_docker_ranges $(routed)", env=env)
+    assert "172.25.0.0/16" not in ranges.stdout.split(), "the pool with the VPN's host is not free"
+
+
 def test_docker_ranges_are_the_usual_ones_when_nothing_routes_them():
     result = setup_fn("pick_docker_ranges 192.168.1.0/24 198.51.100.0/24")
     assert result.stdout.split() == ["172.20.0.0/16", "172.25.0.0/16"]

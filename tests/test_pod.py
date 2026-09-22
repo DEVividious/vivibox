@@ -14,6 +14,17 @@ def binds(cmd):
     return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-v"]
 
 
+def made_now(pod, state="exited"):
+    """A sidecar as this vivibox would make it today: script, mounts and CA bundle all current."""
+    from vivibox.pod import CA_LABEL, ca_digest
+
+    cmd = pod.sidecar_command()
+    pod.runner.states["vivibox-shop-1-dind"] = state
+    pod.runner.cmds["vivibox-shop-1-dind"] = ["-c", cmd[-1]]
+    pod.runner.binds["vivibox-shop-1-dind"] = binds(cmd)
+    pod.runner.labels["vivibox-shop-1-dind"] = {"vivibox.task": "shop-1", CA_LABEL: ca_digest()}
+
+
 class FakeDocker:
     """Records commands and answers the few queries Pod makes."""
 
@@ -22,6 +33,7 @@ class FakeDocker:
         self.states = states or {}
         self.cmds: dict[str, list[str]] = {}
         self.binds: dict[str, list[str]] = {}
+        self.labels: dict[str, dict[str, str]] = {}
         self.subnets = ""
         self.proc_net_tcp = ""
         self.alive = False
@@ -36,7 +48,11 @@ class FakeDocker:
         if cmd[:2] == ["docker", "inspect"]:
             state = self.states.get(cmd[-1])
             if state and "Config.Cmd" in cmd[3]:
-                made = {"cmd": self.cmds.get(cmd[-1], []), "binds": self.binds.get(cmd[-1], [])}
+                made = {
+                    "cmd": self.cmds.get(cmd[-1], []),
+                    "binds": self.binds.get(cmd[-1], []),
+                    "labels": self.labels.get(cmd[-1], {}),
+                }
                 out, rc = json.dumps(made), 0
             else:
                 out, rc = (state or "", 0 if state else 1)
@@ -44,6 +60,7 @@ class FakeDocker:
             self.states[cmd[4]] = "running"
             self.cmds[cmd[4]] = cmd[cmd.index("-c") + 1 :] if "-c" in cmd else cmd[-1:]
             self.binds[cmd[4]] = binds(cmd)
+            self.labels[cmd[4]] = dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "--label")
         elif cmd[:3] == ["docker", "rm", "-f"]:
             self.states.pop(cmd[3], None)
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
@@ -188,16 +205,32 @@ def test_an_ethernet_uplink_needs_no_clamping(pod):
 
 
 def test_up_with_running_pod_only_reapplies_firewall(pod):
-    pod.runner.states = {"vivibox-shop-1-dind": "running", "vivibox-shop-1-agent": "running"}
+    made_now(pod, state="running")
+    pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up()
     assert not pod.runner.find("docker", "run")
     assert len(pod.runner.find("sudo")) == 1
 
 
+def test_a_running_sidecar_from_before_the_hosts_certificates_changed_is_made_again(pod):
+    """The work laptop's case, fourth round: logging in to the VPN again replaced the corporate authority
+    in the host's bundle, and the sidecar's daemon, which reads the authorities once at its
+    start, failed every pull with "x509: certificate signed by unknown authority" while the
+    same bundle was mounted in it. The sidecar remembers the bundle it started with."""
+    made_now(pod, state="running")
+    pod.runner.states["vivibox-shop-1-agent"] = "running"
+    pod.runner.labels["vivibox-shop-1-dind"]["vivibox.ca"] = "0" * 64
+    pod.up(timeout=1)
+    assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind")
+    assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent"), "it shares the sidecar's network"
+    made = pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")
+    assert made and f"vivibox.ca={pod.runner.labels['vivibox-shop-1-dind']['vivibox.ca']}" in made[0]
+    assert pod.runner.labels["vivibox-shop-1-dind"]["vivibox.ca"] != "0" * 64, "made with today's bundle"
+
+
 def test_restarted_sidecar_gets_a_new_agent(pod):
-    pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "running"}
-    pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", pod.sidecar_command()[-1]]}
-    pod.runner.binds = {"vivibox-shop-1-dind": binds(pod.sidecar_command())}
+    made_now(pod, state="exited")
+    pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent")
     assert pod.runner.find("docker", "start", "vivibox-shop-1-dind")
@@ -218,9 +251,9 @@ def test_a_stopped_sidecar_with_other_mounts_is_made_again(pod):
     """The work laptop's case, second round: the CA bundle mount arrived with a pull, and the task's sidecar
     from before it, stopped and started again, still had no bundle. Mounts are given at docker
     run, so a sidecar with other mounts than this vivibox gives is made again."""
-    pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "exited"}
-    pod.runner.cmds = {"vivibox-shop-1-dind": ["-c", pod.sidecar_command()[-1]]}
-    pod.runner.binds = {"vivibox-shop-1-dind": binds(pod.sidecar_command())[:-1]}
+    made_now(pod, state="exited")
+    pod.runner.states["vivibox-shop-1-agent"] = "exited"
+    pod.runner.binds["vivibox-shop-1-dind"] = binds(pod.sidecar_command())[:-1]
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind")
     assert not pod.runner.find("docker", "start", "vivibox-shop-1-dind")

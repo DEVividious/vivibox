@@ -34,7 +34,9 @@ through a tunnel smaller than Ethernet (a VPN such as Cloudflare WARP), the fire
 the pod to fit it, so large downloads do not stall. The pod trusts the certificate
 authorities your host trusts: the host's CA bundle is mounted read-only over the sidecar's, the
 agent's and the gate's, so a registry or a proxy behind a corporate authority works in the pod as
-it does on your host.
+it does on your host. The sidecar remembers the bundle it started with: when the host's changes,
+as it does when a VPN client installs a new corporate authority, the next start of the task makes
+the sidecar again, because its Docker daemon reads the authorities once, at its start.
 
 The task's clone is a real `git clone`, so your repository's `.git` never enters the pod. In the
 clone, `.git/config` and `.git/hooks/` are read-only for the agent, and the project's own hooks reach

@@ -7,6 +7,7 @@ read-only: under Sysbox, root in a nested container would otherwise write to it 
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -44,6 +45,10 @@ HOST_GATEWAY = "host.docker.internal"
 # (Go), OpenSSL and the system's tools read this file; tools with a store of their own do not.
 HOST_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+# The sidecar carries the digest of the bundle it started with: its daemon reads the authorities
+# once, at its start, so a bundle changed since (a VPN client installing a new one) is not seen
+# until the sidecar is made again.
+CA_LABEL = "vivibox.ca"
 # Running the project for you to look at: its process group, its output, both inside the pod.
 DEMO_PID = "/tmp/vivibox-demo.pid"
 DEMO_LOG = "/tmp/vivibox-demo.log"
@@ -184,6 +189,14 @@ def binds(command: list[str]) -> list[str]:
 def ca_mounts() -> list[Mount]:
     """The host's CA bundle over the container's own, when the host has one."""
     return [Mount(str(HOST_CA_BUNDLE), CA_BUNDLE, read_only=True)] if HOST_CA_BUNDLE.exists() else []
+
+
+def ca_digest() -> str:
+    """What the host's CA bundle holds, in a word; "" when the host has none."""
+    try:
+        return hashlib.sha256(HOST_CA_BUNDLE.read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
 
 @dataclass
@@ -381,9 +394,11 @@ class Pod:
         # Read-only for Docker in the pod: compose and Testcontainers bind-mount files of the build.
         shared = [Mount(str(d), str(d), read_only=True) for d in (self.repo, self.gate_dir) if d]
         shared += ca_mounts()
+        digest = ca_digest()
         return [
             "docker", "run", "-d", "--name", self.sidecar, "--runtime=sysbox-runc",
             "--label", f"vivibox.task={self.task_id}",
+            *(("--label", f"{CA_LABEL}={digest}") if digest else ()),
             "--network", self.network, *(("--ip", address) if address else ()),
             "--add-host", f"{HOST_GATEWAY}:host-gateway",
             "-e", "DOCKER_TLS_CERTDIR=",
@@ -460,6 +475,12 @@ class Pod:
         """Starts whatever is not running. Idempotent."""
         if not self.repo.is_dir():
             raise PodError(f"task repo {self.repo} does not exist")
+        if self._state(self.sidecar) == "running" and self._stale_ca():
+            # Its daemon read the host's authorities at its start and would go on failing TLS
+            # against a new one ("x509: certificate signed by unknown authority"); up() runs
+            # before any turn, so this is the moment to make it again.
+            self._run("docker", "rm", "-f", self.agent, check=False)
+            self._run("docker", "rm", "-f", self.sidecar, check=False)
         if self._state(self.sidecar) != "running":
             # The agent joins the sidecar's network namespace, which a sidecar restart replaces.
             self._run("docker", "rm", "-f", self.agent, check=False)
@@ -481,18 +502,35 @@ class Pod:
             self._run("docker", "rm", "-f", self.agent, check=False)
             self._run(*self.agent_command())
 
-    def _outdated_sidecar(self) -> bool:
-        """Whether the sidecar was made with another script or other mounts than this vivibox
-        would give it: docker start keeps both, so a fix to either would never arrive."""
-        template = '{"cmd":{{json .Config.Cmd}},"binds":{{json .HostConfig.Binds}}}'
+    def _made_with(self) -> dict | None:
+        """The sidecar's script, mounts and labels as it was made; None when it cannot be asked."""
+        template = (
+            '{"cmd":{{json .Config.Cmd}},"binds":{{json .HostConfig.Binds}},"labels":{{json .Config.Labels}}}'
+        )
         p = self._run("docker", "inspect", "-f", template, self.sidecar, check=False)
+        try:
+            return json.loads(p.stdout) if p.returncode == 0 else None
+        except ValueError:
+            return None
+
+    def _stale_ca(self) -> bool:
+        """Whether the host's CA bundle changed since the sidecar was made."""
+        made = self._made_with()
+        return made is not None and (made.get("labels") or {}).get(CA_LABEL, "") != ca_digest()
+
+    def _outdated_sidecar(self) -> bool:
+        """Whether the sidecar was made with another script, other mounts or another CA bundle
+        than this vivibox would give it: docker start keeps all three, so a change would never
+        arrive."""
+        made = self._made_with()
         wanted = self.sidecar_command()
         try:
-            made = json.loads(p.stdout)
-            return p.returncode == 0 and (
-                made["cmd"][-1] != wanted[-1] or set(made["binds"] or []) != set(binds(wanted))
+            return made is not None and (
+                made["cmd"][-1] != wanted[-1]
+                or set(made["binds"] or []) != set(binds(wanted))
+                or (made.get("labels") or {}).get(CA_LABEL, "") != ca_digest()
             )
-        except (ValueError, KeyError, IndexError, TypeError):
+        except (KeyError, IndexError, TypeError):
             return True
 
     def _wait_for_daemon(self, timeout: float) -> None:

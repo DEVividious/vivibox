@@ -85,10 +85,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(ui.task_detail(task, _criteria, config.max_iterations, args.events, style, running), end="")
         return 0
     tasks = list_tasks(config.tasks_dir)
-    if not tasks:
+    live = {task.id for task in tasks}
+    finished = [e for e in actions.history() if e["id"] not in live]
+    if not tasks and not finished:
         print("No tasks. Create one with 'vivibox new <project> \"<goal>\"'.")
         return 0
-    shown = ui.task_list(tasks, _criteria, config.max_iterations, style, running=actions.supervisor_running)
+    shown = ui.task_list(
+        tasks, _criteria, config.max_iterations, style, running=actions.supervisor_running, finished=finished
+    )
     print(shown, end="")
     return 0
 
@@ -136,20 +140,18 @@ def carry_on(task: Task) -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    model = actions.start(args.task, resume=getattr(args, "resume", False))
+    """Starts the task; one started before goes on from where it was, as the view's s does."""
+    task, _ = actions.load(args.task)
+    resume = any(e["type"] == "started" for e in task.events())
+    model = actions.start(args.task, resume=resume)
     print(f"Started {args.task} ({model}). Watch the agent: vivibox attach {args.task} (Ctrl-q leaves).")
     return 0
-
-
-def cmd_resume(args: argparse.Namespace) -> int:
-    args.resume = True
-    return cmd_start(args)
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
     actions.stop(task)
-    print(f"Stopped {task.id}; its work and history are kept. Continue with 'vivibox resume {task.id}'.")
+    print(f"Stopped {task.id}; its work and history are kept. Continue with 'vivibox start {task.id}'.")
     return 0
 
 
@@ -157,12 +159,13 @@ def cmd_rm(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     st = task.read_state()
     if not args.yes:
-        answer = input(f"Remove {task.id} ({st.state}) and all its work, without accepting it? [y/N] ")
+        doing = ui.view(task, st, actions.supervisor_running(task), load_config().max_iterations).status
+        answer = input(f"Delete {task.id} ({doing}) and all its work, without accepting it? [y/N] ")
         if answer.strip().lower() != "y":
             return 1
     if worktree := actions.remove(task, project):
-        print(f"Removed the review copy {worktree}.")
-    print(f"Removed {task.id}.")
+        print(f"Deleted the review copy {worktree}.")
+    print(f"Deleted {task.id}; a line in the history, and its archive, stay.")
     return 0
 
 
@@ -556,8 +559,8 @@ def parser() -> argparse.ArgumentParser:
     approve.set_defaults(func=cmd_approve_risky)
 
     for name, func, text in (
-        ("start", cmd_start, "start the task's pod, agent and supervisor"),
-        ("resume", cmd_resume, "continue a stopped or paused task"),
+        ("start", cmd_start, "start the task, or a stopped one again from where it was"),
+        ("resume", cmd_start, "the same as start"),
         ("stop", cmd_stop, "stop the task, keeping its work"),
         ("attach", cmd_attach, "watch or talk to the agent; Ctrl-q leaves"),
         ("supervise", cmd_supervise, "(run by start, in the background) drive the task through its states"),
@@ -574,10 +577,17 @@ def parser() -> argparse.ArgumentParser:
     )
     accept.set_defaults(func=cmd_accept)
 
-    rm = sub.add_parser("rm", help="remove the task: clone, containers, volumes")
-    rm.add_argument("task", help="task id")
-    rm.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    rm.set_defaults(func=cmd_rm)
+    for name, text in (
+        (
+            "delete",
+            "delete the task without accepting it: clone, containers, volumes; the history keeps a line",
+        ),
+        ("rm", "the same as delete"),
+    ):
+        rm = sub.add_parser(name, help=text)
+        rm.add_argument("task", help="task id")
+        rm.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+        rm.set_defaults(func=cmd_rm)
 
     reply = sub.add_parser("reply", help="answer or reject at a checkpoint; the comment goes to the agent")
     reply.add_argument("task", help="task id")

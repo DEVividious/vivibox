@@ -177,7 +177,7 @@ def next_commands(st: TaskState) -> list[str]:
     if st.state in WAITING:
         return [c.format(id=st.id) for c in WAITING[st.state][1]]
     if st.paused:
-        return [f"vivibox resume {st.id}"]
+        return [f"vivibox start {st.id}"]
     if st.state is State.DONE:
         return [f"vivibox rm {st.id}"]
     return [f"vivibox attach {st.id}"]
@@ -210,7 +210,7 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     """running: whether the task's supervisor is alive. Whatever will not move without you waits
     for you; "Stopped" is only what you stopped yourself."""
     if st.state is State.DONE:
-        return TaskView("done", DONE, FINISHED, commands=(f"vivibox rm {st.id}",))
+        return TaskView("done", DONE, FINISHED, commands=(f"vivibox delete {st.id}",))
     if st.state in WAITING:
         status = activity(st, max_iterations)
         if st.state is State.CHECKPOINT_BLOCKED:
@@ -219,20 +219,27 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
         return TaskView(status, WAITS, DECISION, commands=tuple(next_commands(st)))
     if st.problem:
         what, _, why = st.problem.partition(": ")
-        return TaskView(what, WAITS, FAILED, why, (f"vivibox resume {st.id}",))
+        return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))
     if st.paused:
-        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox resume {st.id}",))
+        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
     if not running:
         if any(e["type"] == "started" for e in task.events()):
-            return TaskView("not running", WAITS, IDLE, commands=(f"vivibox resume {st.id}",))
+            return TaskView("not running", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
         return TaskView("not started", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
     return TaskView(activity(st, max_iterations), WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
 
 
 def task_list(
-    tasks: list[Task], criteria, max_iterations: int, style: Style, now=None, running=lambda task: True
+    tasks: list[Task],
+    criteria,
+    max_iterations: int,
+    style: Style,
+    now=None,
+    running=lambda task: True,
+    finished: list[dict] = (),
 ) -> str:
-    """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest."""
+    """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest.
+    finished: the history's entries, listed under the live tasks as the view lists them."""
     states = [(task, task.read_state()) for task in tasks]
     seen = [(task, st, view(task, st, running(task), max_iterations)) for task, st in states]
     seen.sort(key=lambda found: found[2].rank)
@@ -250,6 +257,19 @@ def task_list(
                 ago(st.updated, now),
                 st.goal,
                 COLORS[shown.group],
+            )
+        )
+    for entry in finished:
+        rows.append(
+            (
+                entry["id"],
+                "deleted" if entry.get("deleted") else "done",
+                "-",
+                finished_cost(entry),
+                ago(entry["created"], now) if entry.get("created") else "-",
+                ago(entry["finished"], now),
+                entry["title"],
+                "dim" if entry.get("deleted") else "green",
             )
         )
     widths = [max(len(r[i]) for r in [header, *rows]) for i in range(6)]

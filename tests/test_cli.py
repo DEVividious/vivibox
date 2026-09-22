@@ -178,9 +178,11 @@ def test_stop_pauses_and_rm_removes_everything(env, capsys, monkeypatch, tmp_pat
     task = find_task(load_config().tasks_dir, "demo-1")
     assert main(["stop", "demo-1"]) == 0
     assert task.read_state().paused
-    assert main(["rm", "demo-1", "--yes"]) == 0
-    assert not task.root.exists()
-    assert main(["status"]) == 0 and "No tasks." in capsys.readouterr().out
+    assert main(["delete", "demo-1", "--yes"]) == 0
+    assert not task.root.exists() and "Deleted demo-1" in capsys.readouterr().out
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "No tasks." not in out and "demo-1" in out and "deleted" in out, "the history, as in the view"
 
 
 def test_rm_asks_first(env, monkeypatch):
@@ -419,7 +421,7 @@ def test_status_calls_a_task_what_the_view_calls_it(env, capsys):
     assert main(["status", "demo-1"]) == 0
     out = capsys.readouterr().out
     assert "agent turn failed" in out and "429 Too Many Requests" in out
-    assert "vivibox resume demo-1" in out
+    assert "vivibox start demo-1" in out
 
 
 def test_verify_again_from_the_shell_starts_a_task_nobody_runs(env, capsys):
@@ -509,3 +511,45 @@ def test_a_deleted_task_is_archived_too_and_forgetting_it_removes_the_archive(en
     assert (kept / "plan.md").exists() and (kept / "events.jsonl").exists()
     actions.forget("demo-1")
     assert not kept.exists() and actions.history() == []
+
+
+def test_start_carries_a_started_task_on_and_resume_is_its_other_name(env, capsys, monkeypatch):
+    from vivibox import actions
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    calls = []
+    monkeypatch.setattr(actions, "start", lambda task_id, resume=False: calls.append(resume) or "m")
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert main(["start", "demo-1"]) == 0
+    task.event("started", model="m")
+    assert main(["start", "demo-1"]) == 0
+    assert main(["resume", "demo-1"]) == 0
+    assert calls == [False, True, True], "a task started before goes on from where it was"
+
+
+def test_stop_points_at_start(env, capsys, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    capsys.readouterr()
+    assert main(["stop", "demo-1"]) == 0
+    out = capsys.readouterr().out
+    assert "vivibox start demo-1" in out and "resume" not in out
+
+
+def test_status_lists_finished_tasks_under_the_live_ones(env, capsys):
+    from vivibox import actions
+    from vivibox.task import now
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    actions.history_path().write_text(
+        '{"id": "demo-0", "project": "demo", "title": "Old one", "cost": 0.1, "commit": "abc", "branch": "",'
+        ' "conflicts": [], "finished": "' + now() + '"}\n'
+    )
+    capsys.readouterr()
+    assert main(["status"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split()[0] for line in lines[1:]] == ["demo-1", "demo-0"]
+    assert "done" in lines[2] and "Old one" in lines[2] and "$0.10" in lines[2]

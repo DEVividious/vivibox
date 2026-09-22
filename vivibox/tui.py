@@ -1900,6 +1900,7 @@ class Vivibox(App):
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
         self.pods: dict[str, PodView] = {}  # what each task's pod is doing, refreshed off the loop
         self.waiting = self.working = 0
+        self.waiting_ids: set[str] | None = None  # None until the first refresh: nothing is new then
         self.table = self.query_one(DataTable)
         self.panel = self.query_one("#detail")
         self.text = self.query_one("#detail-text", Markdown)
@@ -1908,6 +1909,7 @@ class Vivibox(App):
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)
+        self.call_after_refresh(self.offer_restart)
         self.call_after_refresh(self.hint_opencode)
         self.load_models()
 
@@ -1979,6 +1981,22 @@ class Vivibox(App):
             self.catalog = actions.provider_catalog()
         except Exception:  # the dialog reads it itself, or you type the name
             self.catalog = None
+
+    def offer_restart(self) -> None:
+        """After a reboot the tasks that were at work have no supervisor. Asked once, on start,
+        instead of a row-by-row s; a task you stopped yourself stays stopped."""
+        idle = [st.id for task, st in self.pairs if self.views[st.id].status == "not running"]
+        if not idle:
+            return
+        one = len(idle) == 1
+        were, them = ("This task was", "it") if one else ("These tasks were", "them")
+        question = f"{were} running before: {', '.join(idle)}.\n\nStart {them} again?"
+
+        def answered(yes: bool) -> None:
+            for task_id in idle if yes else ():
+                self.start(task_id, resume=True)
+
+        self.push_screen(Confirm(question, "Start"), answered)
 
     def check_code(self) -> None:
         """Whether vivibox on disk is still the one running. Said once, and kept in the title."""
@@ -2185,7 +2203,13 @@ class Vivibox(App):
             # The first task waiting for you; a project row is a heading, not what you came for.
             first = next((i for i, key in enumerate(ids) if not key.startswith(PROJECT_ROW)), 0)
             table.move_cursor(row=first)
-        self.waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in pairs)
+        waiting_now = {st.id for _, st in pairs if self.views[st.id].group == "Waiting for you"}
+        # A task that starts to wait for you rings the bell, once: the sign you can hear from
+        # another window when the desktop's notifications are off.
+        if self.waiting_ids is not None and waiting_now - self.waiting_ids:
+            self.bell()
+        self.waiting_ids = waiting_now
+        self.waiting = len(waiting_now)
         self.working = sum(self.busy(st) for _, st in pairs)
         self.set_sub_title()
         self.show_detail()
@@ -2211,6 +2235,8 @@ class Vivibox(App):
         if self.code_changed:
             parts.append(CODE_CHANGED)
         self.sub_title = " · ".join(parts)
+        # The window's title, for the taskbar: how many wait for you.
+        self.title = f"vivibox ({self.waiting})" if self.waiting else "vivibox"
 
     @property
     def pod(self) -> PodView:

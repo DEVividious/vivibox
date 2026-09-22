@@ -2269,3 +2269,56 @@ def test_forgetting_a_finished_task_says_the_archive_goes_too(env):
         assert not kept.exists()
 
     run(scenario)
+
+
+# --- after a reboot, and when a task starts to wait ---------------------------------------------
+
+
+def test_the_view_offers_to_start_the_tasks_that_were_running_before(env, monkeypatch):
+    dead = implementing("Was running")
+    parked = implementing("Stopped by me")
+    parked.set_paused(True)
+    draft = new_task("Never started")
+
+    async def scenario(app, pilot):
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Confirm), "asked once, on start"
+        assert dead.id in app.screen.question and parked.id not in app.screen.question
+        assert draft.id not in app.screen.question
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert actions.started == [dead.id]
+
+    run(scenario)
+
+
+def test_the_view_does_not_ask_when_nothing_was_running(env):
+    new_task("Never started")
+
+    async def scenario(app, pilot):
+        await pilot.pause()
+        assert not isinstance(app.screen, tui.Confirm)
+
+    run(scenario)
+
+
+def test_a_task_that_starts_to_wait_rings_the_bell_and_counts_in_the_title(env, monkeypatch):
+    task = implementing()
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    rang = []
+
+    async def scenario(app, pilot):
+        monkeypatch.setattr(app, "bell", lambda: rang.append(1))
+        app.reload()
+        await pilot.pause()
+        assert app.title == "vivibox" and not rang
+        task.transition(State.VERIFY)
+        task.transition(State.CHECKPOINT_FINAL)
+        app.reload()
+        await pilot.pause()
+        assert rang == [1] and app.title == "vivibox (1)"
+        app.reload()
+        assert rang == [1], "once per task that starts to wait, not every refresh"
+
+    run(scenario)

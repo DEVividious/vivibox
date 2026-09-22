@@ -120,5 +120,5 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 
 Rules above that the code does not meet yet. Remove a line when it is fixed.
 
-- §2: the panel still says "gate" ("Gate failed at…"), and the command is `vivibox rm`.
+- §2: the panel still says "gate" ("Gate failed at…").
 - §5: only a running verification shows how long it has lasted; implementing does not.

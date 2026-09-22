@@ -33,7 +33,7 @@ them all:
 | `l` | read the newest verification log, or the supervisor's, in your pager |
 | `w` | watch or talk to the agent; Ctrl-q brings you back (Esc there interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
-| `s` | stop a task, or start or resume it |
+| `s` | stop a task, or start it again from where it was |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
 
 On a project's row: `n` starts a task in it, `e` edits its file (verify commands, `pass_env`, host
@@ -55,7 +55,9 @@ the files of one task may take up to 20 MB.
 **Bugs** get a plan that starts by reproducing the bug in a failing test and finding its cause
 before any fix; features and other tasks get the usual plan.
 
-Desktop notifications tell you when a task waits for you, so you can leave the view closed. Their
+Desktop notifications tell you when a task waits for you, so you can leave the view closed. In the
+view itself a task that starts to wait rings the terminal's bell, and the window's title counts
+those waiting. After a reboot the view offers to start the tasks that were running. Their
 buttons (**Show plan**, **Accept plan**, **Open in idea**) cover the common steps too.
 
 Everything the view does is also a command, for scripts or when you prefer a shell:
@@ -188,8 +190,9 @@ serves the built frontend). That also settles CORS.
 
 ### Stopping and removing
 
-`vivibox stop <id>` stops a task and keeps its work, and `vivibox resume <id>` continues it.
-`vivibox rm <id>` removes a task you do not want, without accepting it. Task numbers are never
+`vivibox stop <id>` stops a task and keeps its work, and `vivibox start <id>` continues it from
+where it was (`resume` is the same command). `vivibox delete <id>` (or `rm`) deletes a task you do
+not want, without accepting it; a line in the history and its archive stay. Task numbers are never
 reused, so a removed task's branch is never overwritten.
 
 ---

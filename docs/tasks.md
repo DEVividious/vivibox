@@ -35,6 +35,7 @@ them all:
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
+| `b` | on a project's row: open a box, the project's pod for you to work in, with no agent; in a box, `w` is a shell and `a` closes it for review |
 
 On a project's row: `n` starts a task in it, `e` edits its file (verify commands, `pass_env`, host
 services), `o` opens its repository in your IDE, and `x` forgets it once it has no tasks; the
@@ -191,6 +192,27 @@ A frontend that calls its backend by container name is a separate matter: that n
 the browser on your machine, which knows nothing about it. Let the frontend call a path on its own
 origin and forward it server-side (`server.proxy` in Vite, rewrites in Next, or a backend that
 serves the built frontend). That also settles CORS.
+
+### A box: the pod without an agent
+
+`b` on a project's row, or `vivibox box <project>`, opens a box: the project's clone in a pod of
+its own, with the keys of every provider you have on, opencode's configuration with your MCP
+servers, and the pod's tools (Java, Node, Python, Docker), and no agent. It is for working by hand
+where a mode without permission prompts is safe and Docker works: `w` (or `vivibox attach <id>`)
+gives you a shell in the clone, and there you run `opencode`, or `claude` after logging in with
+its own client, or anything else; Ctrl-q leaves the shell and the box stays. `v` runs the app in
+it like in a task. `vivibox box --new ~/projects/idea` starts a repository and a project there
+first, for a project from scratch.
+
+The box holds a clone of a commit, so uncommitted changes in your checkout are not in it. `a`
+closes the box: whatever you left uncommitted is committed, and the work comes to review the way
+a task's does, with the diff, the review copy, and your approval of risky files; `a` again accepts
+it into your checkout. There is no verification unless you ask for one: `vivibox verify <id>` runs
+the project's commands on the box's commits. `s` takes the pod down and up again; `x` deletes the
+box without bringing anything back.
+
+A login you make inside the box, such as `claude`'s, lives in the box's own volume, which vivibox
+never reads or copies, and goes with the box.
 
 ### Stopping and removing
 

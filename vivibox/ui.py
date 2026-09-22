@@ -218,6 +218,13 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     for you; "Stopped" is only what you stopped yourself."""
     if st.state is State.DONE:
         return TaskView("done", DONE, FINISHED, commands=(f"vivibox delete {st.id}",))
+    if st.box and st.state is State.IMPLEMENT:
+        # Nothing runs in a box but you; open or closed is all there is to say of it.
+        if st.paused:
+            return TaskView("box closed", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
+        return TaskView(
+            "box open", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}", f"vivibox accept {st.id}")
+        )
     if st.state in WAITING:
         status = activity(st, max_iterations)
         if st.state is State.CHECKPOINT_BLOCKED:

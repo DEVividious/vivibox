@@ -2369,3 +2369,59 @@ def test_the_plans_verify_command_is_shown_before_you_accept_it(env):
     demo = new_task()
     at_plan_checkpoint(demo)
     assert "becomes the project's" not in detail(demo, demo.read_state(), 3, running=True), "demo has its own"
+
+
+# --- the box ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def box_env(env, monkeypatch):
+    monkeypatch.setattr(actions, "start_box", lambda task_id: None)
+    monkeypatch.setattr(actions, "box_shell_command", lambda task_id: ["true"])
+    return env
+
+
+def test_b_on_a_project_row_opens_a_box_and_w_enters_it(box_env):
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=0)
+        await pilot.pause()
+        assert app.check_action("new_box", ())
+        await pilot.press("b")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert rows(app) == ["demo", "demo-1"] and app.selected_id() == "demo-1"
+        assert "box open" in cell(app, 1, "STATUS") and "⠼" not in cell(app, 1, "STATUS"), (
+            "no spinner: nothing runs"
+        )
+        assert app.check_action("enter_box", ()) and app.check_action("accept", ())
+        assert not app.check_action("reply", ()) and not app.check_action("new_box", ())
+        assert not app.check_action("watch", ()) and not app.check_action("edit_plan", ())
+        shown = detail(*app.selected(), 3, running=False)
+        assert "`w`" in shown and "`a`" in shown and "Box" in shown
+
+    run(scenario)
+
+
+def test_a_on_an_open_box_closes_it_for_review(box_env, monkeypatch):
+    monkeypatch.setattr(actions, "commit_in_box", lambda task: None)
+    task = actions.open_box("demo")
+    (task.repo / "idea.md").write_text("x\n")
+    subprocess.run(["git", "add", "-A"], cwd=task.repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=A", "-c", "user.email=a@b", "commit", "-qm", "Idea"],
+        cwd=task.repo,
+        check=True,
+    )
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        await pilot.press("a")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert task.read_state().state is State.CHECKPOINT_FINAL
+        assert app.check_action("show_diff", ()) and app.check_action("accept", ())
+
+    run(scenario)

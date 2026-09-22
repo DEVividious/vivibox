@@ -241,6 +241,12 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     """The keys that move this task on, first thing in the panel. Only keys the footer offers now:
     a hint the footer contradicts is worse than none."""
     watch = " · `w` look at the agent" if watchable(task, st, running) else ""
+    if st.box and st.state is State.IMPLEMENT:
+        if st.paused:
+            return "`s` open the box again"
+        return (
+            "`w` enter the box (Ctrl-q leaves) · `a` close it and bring its work to review · `v` run the app"
+        )
     if seen.problem:
         return "`s` try again"
     if seen.status in ("not started",):
@@ -457,7 +463,16 @@ def detail(
         head += ["**Not started yet.**", ""]
     elif seen.group != "Working" and st.state in (State.PLAN, State.IMPLEMENT, State.VERIFY):
         head += ["**The agent is not working on this task.**", ""]
-    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
+    if st.box and st.state is State.IMPLEMENT:
+        body = [
+            "**Box.** The project's clone in a pod, with your keys, opencode and the pod's tools, and",
+            "no agent: yours to work in by hand, where a mode without permission prompts is safe and",
+            "Docker works. Closing commits what you left and brings the work to review, the way a",
+            "task's comes; risky files wait for your approval like a task's.",
+            "",
+            f"Clone: `{task.repo}`",
+        ]
+    elif st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         body = [
             "**Plan this task in your own chat.** The prompt for a chat in your browser, or for a CLI",
             "in your checkout (claude, gemini). When the plan is final, paste the chat's answer into the",
@@ -1748,7 +1763,7 @@ HELP = """[b]Your decisions[/b], on the selected task
   c, C  copy the planning prompt for a chat, or for a CLI
   o     open the review copy in your IDE
   v     run the app in its pod, or stop it
-  w     watch or talk to the agent (Ctrl-q leaves)
+  w     watch or talk to the agent (Ctrl-q leaves); in a box, a shell in it
   l     read the newest log in your pager
   s     stop the task, or start it again
   m     what each role runs on, for this task
@@ -1756,6 +1771,7 @@ HELP = """[b]Your decisions[/b], on the selected task
 
 [b]The selected project[/b] (Enter folds or unfolds its tasks)
   n     new task in it
+  b     open a box: its pod with your keys and tools, and no agent, for you to work in
   e     edit its file
   o     open its repository in your IDE
   x     forget it, once it has no tasks
@@ -1889,6 +1905,8 @@ class Vivibox(App):
         Binding("v", "demo", "Run app"),
         Binding("v", "demo_stop", "Stop app"),
         Binding("w", "watch", "Watch"),
+        Binding("w", "enter_box", "Enter"),
+        Binding("b", "new_box", "Box"),
         Binding("l", "show_log", "Log"),
         # One key, two meanings: the footer shows the one that applies to the selected task. At a
         # checkpoint the agent is not working, so stopping is only taking the pod down.
@@ -2295,7 +2313,7 @@ class Vivibox(App):
 
     def busy(self, st: TaskState) -> bool:
         """The agent or the gate is at work and nothing is needed from you, or the demo is starting."""
-        return self.seen(st).group == "Working" or st.id in self.starting
+        return (self.seen(st).group == "Working" and not st.box) or st.id in self.starting
 
     def seen(self, st: TaskState) -> ui.TaskView:
         """The task as the last refresh saw it; worked out now for one that refresh has not met."""
@@ -2424,12 +2442,14 @@ class Vivibox(App):
         task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
                         "start_task", "stop_task", "stop_pod", "remove", "demo", "demo_stop",
                         "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log",
-                        "show_diff")  # fmt: skip
+                        "show_diff", "enter_box")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
-        if action in ("edit_project", "open_repo", "forget_project"):
+        if action in ("edit_project", "open_repo", "forget_project", "new_box"):
             if not self.on_project_row():
                 return False
+            if action == "new_box":
+                return not self.problems.get(self.selected_project())
             # A project with tasks is not forgotten from under them: delete those first.
             return action != "forget_project" or not any(
                 st.project == self.selected_project() for _, st in self.pairs
@@ -2446,11 +2466,26 @@ class Vivibox(App):
             return action == "remove" and self.finished_entry(self.selected_id()) is not None
         state, running = pick[1].state, self.agent_running(pick[1].id)
         at_work = running and not pick[1].paused
+        box = pick[1].box
+        if box and state is State.IMPLEMENT:
+            # A box has no agent to reply to, watch or model; its keys are the pod's.
+            open_ = not pick[1].paused and pick[1].id not in self.starting
+            return {
+                "enter_box": open_,
+                "accept": open_,
+                "start_task": pick[1].paused and pick[1].id not in self.starting,
+                "stop_task": open_,
+                "remove": True,
+                "demo": open_,
+                "demo_stop": self.pod.demo,
+                "show_log": newest_log(pick[0]) is not None,
+            }.get(action, False)
         allowed = {
             # A manual planner's checkpoint before your plan is in has nothing to accept, and a
             # reply would reach nobody: the planner is your own chat.
             "accept": state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL) and not pick[1].awaiting_plan,
-            "reply": state in WAITING_ONLY and not pick[1].awaiting_plan,
+            "reply": state in WAITING_ONLY and not pick[1].awaiting_plan and not box,
+            "models": state is not State.DONE and not box,
             # Not while the agent may be writing its own draft.
             "edit_plan": state is State.CHECKPOINT_PLAN or (state is State.PLAN and not running),
             "open_ide": state is State.CHECKPOINT_FINAL,
@@ -2474,9 +2509,6 @@ class Vivibox(App):
             # runs is a restart, which is what you want after the agent has changed something.
             "demo": state in (State.CHECKPOINT_FINAL, State.IMPLEMENT, State.VERIFY),
             "demo_stop": self.pod.demo,
-            # Worth changing while a task runs: one going badly is worth finishing on a better
-            # model, and the next start picks it up.
-            "models": state is not State.DONE,
         }
         return allowed.get(action, True)
 
@@ -2487,6 +2519,9 @@ class Vivibox(App):
 
     def action_accept(self) -> None:
         task, st = self.selected()
+        if st.box and st.state is State.IMPLEMENT:
+            self.close_box(task.id)
+            return
         if st.state is State.CHECKPOINT_PLAN:
             try:
                 actions.accept_plan(task, actions.load(task.id)[1])
@@ -2500,6 +2535,56 @@ class Vivibox(App):
                 Confirm(f"Accept the work of {task.id} into your checkout and remove the task?", "Accept"),
                 lambda yes: yes and self.finish(task.id),
             )
+
+    @work(thread=True)
+    def close_box(self, task_id: str) -> None:
+        self.call_from_thread(self.busy_with, task_id, "closing the box…")
+        try:
+            task, project = actions.load(task_id)
+            where = actions.close_box(task, project)
+        except Exception as e:
+            self.call_from_thread(self.fail, e)
+        else:
+            said = f"{task_id} closed; " + (
+                f"its work is ready for your review in {where}" if where else "it changed risky files"
+            )
+            self.call_from_thread(self.notify, said, timeout=8)
+        self.call_from_thread(self.busy_with, task_id, "")
+
+    def action_enter_box(self) -> None:
+        task, _ = self.selected()
+        try:
+            command = actions.box_shell_command(task.id)
+        except Exception as e:
+            self.fail(e)
+            return
+        with self.suspend():
+            subprocess.run(command)
+        self.reload()
+
+    def action_new_box(self) -> None:
+        name = self.selected_project()
+        self.notify(f"Opening a box in {name}…")
+        self.open_box(name)
+
+    @work(thread=True)
+    def open_box(self, name: str) -> None:
+        try:
+            task = actions.open_box(name)
+        except Exception as e:
+            self.call_from_thread(self.fail, e)
+        else:
+            self.call_from_thread(self.notify, f"{task.id} is open; w enters it, a brings its work back.")
+            self.call_from_thread(self.select, task.id)
+        self.call_from_thread(self.reload)
+
+    def select(self, task_id: str) -> None:
+        """Puts the cursor on a row the next refresh will list: what you just made is what you
+        look at next."""
+        self.reload()
+        ids = [str(key.value) for key in self.table.rows]
+        if task_id in ids:
+            self.table.move_cursor(row=ids.index(task_id))
 
     @work(thread=True)
     def finish(self, task_id: str) -> None:

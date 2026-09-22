@@ -56,6 +56,10 @@ on an API key. All of it: [docs/tasks.md](docs/tasks.md).
 - [UX guidelines](docs/ux-guidelines.md), for anyone changing what the view says
 - [Prompt guidelines](docs/prompt-guidelines.md), for anyone changing what the agents read
 
+**A box without an agent.** `b` on a project opens its pod for you: the clone, your keys, opencode
+and the tools, and a shell. Work in it by hand, or run `opencode` there in the mode that asks no
+questions; closing it brings the work back through the same review as a task's.
+
 Status: one agent per task through opencode. Planning can also run on Claude Code, or in your own
 chat. Reviewer agents, GitHub and parallel tasks are next.
 

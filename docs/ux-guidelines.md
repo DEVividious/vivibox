@@ -51,6 +51,8 @@ Status labels, the only ones allowed:
 | the supervisor hit an error | `stopped on an error` | Waiting for you |
 | a start failed | `could not start` | Waiting for you |
 | at work on paper, no supervisor alive | `not running` | Waiting for you |
+| a box, its pod up, for you to work in | `box open` | Working |
+| a box whose pod is down | `box closed` | Stopped |
 | accepted | `done` | Done |
 
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock
@@ -59,7 +61,7 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 ## 3. Keys
 
 - A key is a verb and the selected row is its object: `e` edits, `x` deletes, `o` opens in the
-  IDE, `n` makes a new task. A letter has one verb; a pair of opposites may share one (`s` for
+  IDE, `n` makes a new task, `b` opens a box in a project, `w` watches an agent or enters a box. A letter has one verb; a pair of opposites may share one (`s` for
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
   agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.

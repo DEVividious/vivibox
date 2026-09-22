@@ -50,6 +50,9 @@ class TaskState:
     # Why the task is not moving, when that was not your doing: "<what happened>: <the reason in
     # the failing tool's words>". Kept until the task starts again, so the view can go on saying it.
     problem: str = ""
+    # A box: the project's pod with no plan and no agent, for you to work in by hand. Its work
+    # comes back the way a task's does.
+    box: bool = False
 
 
 class Task:
@@ -103,6 +106,12 @@ class Task:
         else:
             st.models.pop(role, None)
         self._write_state(st)
+
+    def set_box(self) -> None:
+        st = self.read_state()
+        st.box = True
+        self._write_state(st)
+        self.event("box")
 
     def set_paused(self, paused: bool, problem: str = "") -> None:
         """problem: why, when it was not you who stopped it. Starting again is the end of it."""

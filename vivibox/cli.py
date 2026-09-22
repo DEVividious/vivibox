@@ -220,7 +220,13 @@ def cmd_attach(args: argparse.Namespace) -> int:
 def cmd_accept(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     st = task.read_state()
-    if st.state is State.CHECKPOINT_PLAN:
+    if st.box and st.state is State.IMPLEMENT:
+        if where := actions.close_box(task, project):
+            print(f"{task.id} closed; its work is ready for your review in {where}")
+            print(f"Accept it with: vivibox accept {task.id}")
+        else:
+            print(f"{task.id} closed; it changed risky files: vivibox risky {task.id}")
+    elif st.state is State.CHECKPOINT_PLAN:
         actions.accept_plan(task, project)
         print(f"Plan accepted; {task.id} moves on to implementation.")
         carry_on(task)
@@ -402,6 +408,25 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_box(args: argparse.Namespace) -> int:
+    """A box: the project's pod for you to work in, with no agent."""
+    if args.new:
+        where = Path(args.new).expanduser().resolve()
+        found = actions.propose_project(where)
+        name = args.project or found.name
+        actions.setup_project(where, name, found.verify, found.java, create=True)
+        print(f"Set up the project {name} in {where}.")
+    elif not args.project:
+        raise ConfigError("which project? vivibox box <project>, or --new <folder> for one from scratch")
+    else:
+        name = args.project
+    task = actions.open_box(name)
+    print(f"Opened {task.id}: a pod with the project's clone, your keys and tools, and no agent.")
+    print(f"Enter it: vivibox attach {task.id} (Ctrl-q leaves; the box stays).")
+    print(f"Bring its work back: vivibox accept {task.id}")
+    return 0
+
+
 def cmd_verify_again(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
     actions.verify_again(task)
@@ -561,6 +586,11 @@ def parser() -> argparse.ArgumentParser:
     demo.add_argument("--yes", action="store_true", help="use the instruction from the last task")
     demo.add_argument("--no-ask", action="store_true", help="do not ask the agent when nothing is known")
     demo.set_defaults(func=cmd_demo)
+
+    box = sub.add_parser("box", help="open the project's pod for you to work in, with no agent")
+    box.add_argument("project", nargs="?", help="project name; with --new, the name of the new project")
+    box.add_argument("--new", metavar="FOLDER", help="start a project from scratch in this folder first")
+    box.set_defaults(func=cmd_box)
 
     again = sub.add_parser(
         "verify-again",

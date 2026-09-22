@@ -74,7 +74,17 @@ def situations(env):
         failed.set_paused(True, problem=problem)
         found.append((failed, True))
     found.append((implementing("dead"), False))
+    box = actions.open_box("demo")
+    found.append((box, False))
+    closed = actions.open_box("demo")
+    closed.set_paused(True)
+    found.append((closed, False))
     return found
+
+
+@pytest.fixture(autouse=True)
+def no_box_pod(monkeypatch):
+    monkeypatch.setattr(actions, "start_box", lambda task_id: None, raising=False)
 
 
 def test_every_status_is_a_label_from_the_guidelines(env):

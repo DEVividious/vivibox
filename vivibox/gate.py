@@ -165,6 +165,7 @@ ENVIRONMENT = re.compile(
     r"|token.{0,40}(expired|invalid)|(expired|invalid).{0,40}token|credentials? (not found|expired|invalid)"
     r"|SSL certificate problem|unable to get local issuer certificate"
     r"|certificate signed by unknown authority|tls: failed to verify certificate|\bx509: "
+    r"|short read: expected \d+ ?bytes"
     r"|No space left on device|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
     r"|Temporary failure in name resolution|network is unreachable",
     re.IGNORECASE,

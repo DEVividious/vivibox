@@ -26,6 +26,8 @@ DIND_IMAGE = "docker:29.8.1-dind"
 SOCKET_DIR = "/run/vivibox-docker"
 SOCKET = f"{SOCKET_DIR}/docker.sock"
 FIREWALL = "/usr/local/libexec/vivibox-netns"
+ETHERNET_MTU = 1500
+SYS_NET = Path("/sys/class/net")
 # Shared between tasks (N2): the dependency caches are safe to share, the task's Docker data is not.
 CACHES = {
     "m2": "/cache/m2",
@@ -148,6 +150,20 @@ class Mount:
 
     def arg(self) -> str:
         return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
+
+
+def uplink_mtu(runner: Runner = run) -> int:
+    """The MTU of the interface the host reaches the internet through. A VPN tunnel has less than
+    Ethernet's 1500 (Cloudflare WARP: 1280), and a pod, whose own interfaces have 1500, cannot
+    tell: its large downloads through the tunnel stall. 1500 when there is no way to know."""
+    p = runner(["ip", "-o", "route", "get", "1.1.1.1"])
+    words = p.stdout.split()
+    if p.returncode != 0 or "dev" not in words[:-1]:
+        return ETHERNET_MTU
+    try:
+        return int((SYS_NET / words[words.index("dev") + 1] / "mtu").read_text())
+    except (OSError, ValueError):
+        return ETHERNET_MTU
 
 
 def binds(command: list[str]) -> list[str]:
@@ -582,8 +598,11 @@ class Pod:
 
     def apply_firewall(self) -> None:
         # The pool is not a private range, so the helper has to be told to reject it by name:
-        # without that, one task could reach another task's ports.
+        # without that, one task could reach another task's ports. Applied on every start, so the
+        # MSS clamp follows the uplink of the moment: a VPN on or off since the last start.
+        mtu = uplink_mtu(self.runner)
         self._run(
             "sudo", "-n", FIREWALL, "apply", self.sidecar,
-            "--pool", self.network_pool, *self.firewall_targets(),
+            "--pool", self.network_pool, *(("--mtu", str(mtu)) if mtu < ETHERNET_MTU else ()),
+            *self.firewall_targets(),
         )  # fmt: skip

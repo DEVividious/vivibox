@@ -2,7 +2,8 @@
 # Egress firewall for a task pod. Installed root-owned to /usr/local/libexec/vivibox-netns by
 # host/setup.sh and allowed through sudo, so vivibox needs no other root access.
 #
-#   vivibox-netns apply <sidecar> [<ipv4>:<port> ...]   (re)apply rules, allowing only the listed host services
+#   vivibox-netns apply <sidecar> [--pool <cidr>] [--mtu <n>] [<ipv4>:<port> ...]
+#                                                        (re)apply rules, allowing only the listed host services
 #   vivibox-netns clear <sidecar>                        remove the rules
 #   vivibox-netns show  <sidecar>                        print the rules
 #
@@ -12,6 +13,9 @@
 # Inside the pod: DNS and the listed host services are allowed, other private and link-local
 # addresses (the host, your LAN, VPN networks) are rejected, the internet stays open.
 # IPv6 leaving the pod is rejected.
+# With --mtu, the MTU of the host's uplink (a VPN tunnel is smaller than Ethernet: Cloudflare WARP
+# has 1280), TCP MSS is clamped to fit it on every connection through eth0, in both directions.
+# The pod's own interfaces have 1500 and cannot tell; a download through the tunnel would stall.
 #
 # Every argument is validated before anything runs as root. The script only acts on running
 # containers named like vivibox pod sidecars that run under sysbox-runc.
@@ -19,11 +23,12 @@ set -euo pipefail
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 CHAIN=VIVIBOX-EGRESS
+MSS_CHAIN=VIVIBOX-MSS
 SIDECAR_NAME='^vivibox-[a-z0-9][a-z0-9-]*-[0-9]+-dind$'
 PRIVATE_V4=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10)
 
 usage() {
-  echo "usage: vivibox-netns apply <sidecar> [--pool <cidr>] [<ipv4>:<port> ...]" >&2
+  echo "usage: vivibox-netns apply <sidecar> [--pool <cidr>] [--mtu <n>] [<ipv4>:<port> ...]" >&2
   echo "       vivibox-netns clear <sidecar> | show <sidecar>" >&2
   exit 2
 }
@@ -35,6 +40,10 @@ valid_pool() {
   [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
   IFS=. read -ra octets <<<"$net"
   for octet in "${octets[@]}"; do ((10#$octet <= 255)) || return 1; done
+}
+
+valid_mtu() {
+  [[ "$1" =~ ^[0-9]{3,5}$ ]] && ((10#$1 >= 576 && 10#$1 <= 65535))
 }
 
 valid_target() {
@@ -56,13 +65,22 @@ esac
 [[ "$sidecar" =~ $SIDECAR_NAME ]] || die "not an vivibox sidecar name: $sidecar"
 # The task networks are cut from a pool that need not be private (the default is a documentation
 # range), so it is rejected by name: without this a task could reach another task's ports.
-pool=""
-if [[ "${1-}" == "--pool" ]]; then
+pool="" mtu=""
+while [[ "${1-}" == --* ]]; do
   [[ $# -ge 2 ]] || usage
-  pool=$2
-  valid_pool "$pool" || die "not an ipv4 network: $pool"
+  case "$1" in
+    --pool)
+      pool=$2
+      valid_pool "$pool" || die "not an ipv4 network: $pool"
+      ;;
+    --mtu)
+      mtu=$2
+      valid_mtu "$mtu" || die "not an mtu: $mtu"
+      ;;
+    *) usage ;;
+  esac
   shift 2
-fi
+done
 for target in "$@"; do
   valid_target "$target" || die "not <ipv4>:<port>: $target"
 done
@@ -88,12 +106,23 @@ remove() {
       "$t" -X "$CHAIN"
     fi
   done
+  while ipt -t mangle -C PREROUTING -i eth0 -j "$MSS_CHAIN" 2>/dev/null; do
+    ipt -t mangle -D PREROUTING -i eth0 -j "$MSS_CHAIN"
+  done
+  while ipt -t mangle -C POSTROUTING -o eth0 -j "$MSS_CHAIN" 2>/dev/null; do
+    ipt -t mangle -D POSTROUTING -o eth0 -j "$MSS_CHAIN"
+  done
+  if ipt -t mangle -n -L "$MSS_CHAIN" >/dev/null 2>&1; then
+    ipt -t mangle -F "$MSS_CHAIN"
+    ipt -t mangle -X "$MSS_CHAIN"
+  fi
 }
 
 case "$cmd" in
   show)
     ipt -S "$CHAIN" 2>/dev/null || echo "no IPv4 rules"
     ip6t -S "$CHAIN" 2>/dev/null || echo "no IPv6 rules"
+    ipt -t mangle -S "$MSS_CHAIN" 2>/dev/null || echo "no MSS clamping"
     ;;
   clear)
     remove
@@ -118,5 +147,12 @@ case "$cmd" in
       ipt -I "$parent" 1 -o eth0 -j "$CHAIN"
       ip6t -I "$parent" 1 -o eth0 -j "$CHAIN"
     done
+    if [[ -n "$mtu" ]]; then
+      # SYN and SYN-ACK alike: what the pod offers, and what the peer offers it.
+      ipt -t mangle -N "$MSS_CHAIN"
+      ipt -t mangle -A "$MSS_CHAIN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$((mtu - 40))"
+      ipt -t mangle -I PREROUTING 1 -i eth0 -j "$MSS_CHAIN"
+      ipt -t mangle -I POSTROUTING 1 -o eth0 -j "$MSS_CHAIN"
+    fi
     ;;
 esac

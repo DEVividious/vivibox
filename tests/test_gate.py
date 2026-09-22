@@ -428,6 +428,8 @@ def test_a_log_excerpt_keeps_what_went_wrong():
         "No space left on device",
         "testcontainers cannot pull confluentinc/cp-kafka:7.6.1: Docker reports tls: failed to verify"
         " certificate: x509: certificate signed by unknown authority",
+        "testcontainers cannot pull confluentinc/cp-kafka:7.6.1: Docker reports short read: expected"
+        " 115204269 bytes but got 0: unexpected EOF",
     ],
 )
 def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):

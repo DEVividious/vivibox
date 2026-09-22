@@ -26,6 +26,7 @@ class FakeDocker:
         self.proc_net_tcp = ""
         self.alive = False
         self.started = True  # the demo tests turn this off first
+        self.route = ""  # what `ip route get` says; nothing, and the host is taken for Ethernet
 
     def __call__(self, cmd):
         cmd = list(cmd)
@@ -54,6 +55,8 @@ class FakeDocker:
             rc = 0 if self.alive else 1
         elif "kill -TERM" in cmd[-1]:
             pass
+        elif cmd[:3] == ["ip", "-o", "route"]:
+            out = self.route
         elif cmd[:3] == ["docker", "network", "ls"]:
             out = "net1\n" if self.subnets else ""
         elif cmd[:3] == ["docker", "network", "inspect"]:
@@ -138,6 +141,33 @@ def test_up_creates_sidecar_then_firewall_then_agent(pod):
     assert pod.runner.find("sudo")[0][3:] == [
         "apply", "vivibox-shop-1-dind", "--pool", DEFAULT_NETWORK_POOL, "172.20.0.1:5432"
     ]  # fmt: skip
+
+
+def test_a_tunnel_smaller_than_ethernet_clamps_the_pods_mss(pod, tmp_path, monkeypatch):
+    """The work laptop's case, third round: behind Cloudflare WARP (MTU 1280) the pod's daemon fetched an
+    image's manifest and then got 0 of a layer's 115 MB: "unexpected EOF". The pod's interfaces
+    have 1500 and offer an MSS the tunnel cannot carry; the firewall clamps it to the uplink's."""
+    from vivibox import pod as pod_module
+
+    (tmp_path / "CloudflareWARP").mkdir()
+    (tmp_path / "CloudflareWARP" / "mtu").write_text("1280\n")
+    monkeypatch.setattr(pod_module, "SYS_NET", tmp_path)
+    pod.runner.route = "1.1.1.1 via 100.96.0.1 dev CloudflareWARP src 100.96.0.2 uid 1000 \n    cache \n"
+    pod.up()
+    firewall = pod.runner.find("sudo")[0]
+    assert firewall[firewall.index("--mtu") + 1] == "1280"
+    assert firewall.index("--mtu") < firewall.index("172.20.0.1:5432"), "options before the targets"
+
+
+def test_an_ethernet_uplink_needs_no_clamping(pod, tmp_path, monkeypatch):
+    from vivibox import pod as pod_module
+
+    (tmp_path / "wlan0").mkdir()
+    (tmp_path / "wlan0" / "mtu").write_text("1500\n")
+    monkeypatch.setattr(pod_module, "SYS_NET", tmp_path)
+    pod.runner.route = "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.2 uid 1000 \n    cache \n"
+    pod.up()
+    assert "--mtu" not in pod.runner.find("sudo")[0]
 
 
 def test_up_with_running_pod_only_reapplies_firewall(pod):

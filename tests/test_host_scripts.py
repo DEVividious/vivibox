@@ -77,6 +77,20 @@ def test_helper_takes_a_pool_before_the_targets():
     assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"
 
 
+@pytest.mark.parametrize("mtu", ["1280x", "12", "70000", "-1280", ""])
+def test_helper_rejects_a_bad_mtu(mtu):
+    result = helper("apply", "vivibox-shop-1-dind", "--mtu", mtu)
+    assert result.returncode == 1 and "not an mtu" in result.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="checks the non-root path")
+def test_helper_takes_an_mtu_with_the_pool_before_the_targets():
+    result = helper(
+        "apply", "vivibox-shop-1-dind", "--pool", "198.51.100.0/24", "--mtu", "1280", "172.20.0.1:5432"
+    )
+    assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"
+
+
 def setup_fn(call: str, env: dict | None = None) -> subprocess.CompletedProcess:
     """Calls one of setup.sh's functions: sourced, the script defines them and stops."""
     script = f'source "{HOST / "setup.sh"}"; {call}'

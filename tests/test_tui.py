@@ -1714,7 +1714,7 @@ def test_w_is_only_named_when_there_is_an_agent_to_watch(env):
     task = implementing()
     st = task.read_state()
     assert "`w`" not in detail(task, st, 3, running=True), "no session yet: the footer has no w"
-    task.set_session("opencode", "ses_1")
+    task.set_session("writer", "ses_1")
     assert "Look at the agent with `w`" in detail(task, task.read_state(), 3, running=True)
     assert "`w`" not in detail(task, task.read_state(), 3, running=False)
 

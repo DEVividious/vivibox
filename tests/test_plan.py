@@ -98,9 +98,9 @@ def test_every_plan_carries_the_standing_criterion_about_failing_tests():
 
 
 def test_the_agent_is_told_how_to_record_it():
-    from importlib.resources import files
+    from vivibox import brief
 
-    rules = (files("vivibox") / "templates" / "instructions.md").read_text()
+    rules = brief.role_text("writer")
     assert "/task/handoff/red.md" in rules
     assert "cannot fail is worse than no test" in rules
     assert "an assertion that failed, not an error that stopped the test from starting" in rules

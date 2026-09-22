@@ -11,10 +11,9 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from importlib.resources import files
 from pathlib import Path
 
-from . import providers, repo
+from . import brief, providers, repo
 from .pod import Pod
 from .secrets import MOUNT
 from .task import Task
@@ -71,15 +70,7 @@ def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple =
     d = task.meta / "harness"
     d.mkdir(exist_ok=True)
     before = {p.name: p.read_text() for p in d.iterdir()}
-    template = files("vivibox").joinpath("templates/instructions.md").read_text()
-    (d / "instructions.md").write_text(
-        template.format(
-            task_id=task.id,
-            repo=task.repo,
-            branch=repo.branch_name(task.id),
-            verify="\n".join(f"  - `{c}`" for c in verify),
-        )
-    )
+    (d / "instructions.md").write_text(brief.common(task.id, task.repo, repo.branch_name(task.id), verify))
     (d / "opencode.json").write_text(json.dumps(config(model, used, task.repo), indent=2) + "\n")
     # Whether Serena is in, and why, for the task's panel; said again only when it changes.
     on, why = providers.serena_for(task.repo)

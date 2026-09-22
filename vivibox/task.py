@@ -33,8 +33,9 @@ class TaskState:
     created: str
     updated: str
     base_commit: str = ""
-    # One harness conversation each: a planner on claude-code and a writer on opencode do not share
-    # a session, and handing one the other's id starts an error, not a conversation.
+    # One conversation per role. A planner and a writer on the same harness would otherwise share
+    # one, and a reviewer would review its own writing; a session of one harness handed to another
+    # starts an error, not a conversation.
     sessions: dict[str, str] = field(default_factory=dict)
     # A model this task runs a role on, instead of the one in config.toml. Empty means the config
     # decides, which is what almost every task wants.
@@ -74,14 +75,14 @@ class Task:
         st.iteration = 1
         self._write_state(st)
 
-    def set_session(self, harness: str, session: str) -> None:
-        """This harness's session; empty forgets it, and the next turn starts a new one from the
+    def set_session(self, role: str, session: str) -> None:
+        """This role's session; empty forgets it, and the next turn starts a new one from the
         plan and handoff files."""
         st = self.read_state()
         if session:
-            st.sessions[harness] = session
+            st.sessions[role] = session
         else:
-            st.sessions.pop(harness, None)
+            st.sessions.pop(role, None)
         self._write_state(st)
 
     def set_role(self, role: str, harness: str = "", model: str = "") -> None:
@@ -151,9 +152,15 @@ class Task:
     def read_state(self) -> TaskState:
         data = json.loads((self.meta / "state.json").read_text())
         data["state"] = State(data["state"])
-        # Tasks written before roles carry one session, and it was always opencode's.
+        # Tasks written before roles carry one session, and it was always the writer's; tasks
+        # written before roles owned sessions keep them under the harness's name, and opencode
+        # could only be the writer's, claude-code only the planner's.
         if "sessions" not in data and data.get("session"):
-            data["sessions"] = {"opencode": data["session"]}
+            data["sessions"] = {"writer": data["session"]}
+        sessions = data.get("sessions") or {}
+        for harness, role in (("opencode", "writer"), ("claude-code", "planner")):
+            if harness in sessions:
+                sessions.setdefault(role, sessions.pop(harness))
         # Fields a newer vivibox added are ignored: a running supervisor may be older than the CLI.
         return TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
 

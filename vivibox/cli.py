@@ -177,8 +177,8 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     planner = actions.harness_for("planner", pod, task)
 
     def agent_window(st) -> None:
-        # Your view of the agent, ready once the harness session exists; reopened if you closed it.
-        if session := st.sessions.get(harness.name, ""):
+        # Your view of the agent, ready once its conversation exists; reopened if you closed it.
+        if session := actions.watchable_session(task, st):
             actions.agent_view(task, harness.attach_command(session))
 
     sup = supervisor.Supervisor(

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import gate, supervisor
+from vivibox import brief, gate, supervisor
 from vivibox.opencode import Turn
 from vivibox.risky import Change
 from vivibox.states import State
@@ -64,9 +64,9 @@ def test_plan_turn_copies_draft_and_stops_at_checkpoint(task):
     sup, notes = make(task, harness)
     assert sup.step()
     st = task.read_state()
-    assert st.state is State.CHECKPOINT_PLAN and st.sessions == {"opencode": "ses_1"}
+    assert st.state is State.CHECKPOINT_PLAN and st.sessions == {"writer": "ses_1"}
     assert "health endpoint returns 200" in task.plan_path.read_text()
-    assert harness.prompts == [supervisor.PLAN_PROMPT] and notes == ["plan ready for review"]
+    assert harness.prompts[0].endswith(supervisor.PLAN_PROMPT) and notes == ["plan ready for review"]
     assert not sup.step(), "waits for you at a checkpoint"
 
 
@@ -239,7 +239,7 @@ def test_next_prompt_survives_a_failed_turn(task):
     task.set_paused(False)
     sup.harness = FakeHarness(task, [write_draft])
     sup.step()
-    assert sup.harness.prompts == ["custom"]
+    assert len(sup.harness.prompts) == 1 and sup.harness.prompts[0].endswith("custom")
     assert supervisor.next_prompt(task, "default") == "default"
 
 
@@ -286,8 +286,8 @@ def test_the_first_turn_can_be_watched_while_it_runs(task):
     sup, _ = make(task, harness)
     sup.session_started = lambda st: opened.append(dict(st.sessions))
     sup.step()
-    assert harness.seen_during_turn == ("ses_early", {"opencode": "ses_early"}), "recorded before it ran"
-    assert opened == [{"opencode": "ses_early"}]
+    assert harness.seen_during_turn == ("ses_early", {"writer": "ses_early"}), "recorded before it ran"
+    assert opened == [{"writer": "ses_early"}]
     assert harness.title == "demo-1: Add health endpoint"
 
 
@@ -299,7 +299,7 @@ def test_a_session_that_could_not_be_made_leaves_the_turn_to_make_its_own(task):
     harness = Refuses(task, [write_draft])
     sup, _ = make(task, harness)
     sup.step()
-    assert task.read_state().sessions == {"opencode": "ses_1"}
+    assert task.read_state().sessions == {"writer": "ses_1"}
     assert any(e["type"] == "session_not_started" for e in task.events())
 
 
@@ -431,3 +431,37 @@ def test_a_broken_environment_stops_the_task_without_using_an_attempt(task):
         "no feedback turn for something the agent cannot fix"
     )
     assert "Verification could not run" in (task.meta / "handoff" / "verify-feedback.md").read_text()
+
+
+def test_a_planner_and_a_writer_on_one_harness_have_a_conversation_each(task):
+    class Named(FakeHarness):
+        def __init__(self, task, actions=(), session="ses_x"):
+            super().__init__(task, actions)
+            self.session, self.sessions_seen = session, []
+
+        def turn(self, prompt, session="", title=""):
+            self.sessions_seen.append(session)
+            super().turn(prompt, session, title)
+            return Turn(self.session, True, 0.01, 100, "done")
+
+    planner = Named(task, [write_draft], session="ses_planner")
+    writer = Named(task, session="ses_writer")
+    sup, _ = make(task, writer)
+    sup.planner = planner
+    sup.step()  # plan
+    task.transition(State.IMPLEMENT)
+    sup.step()  # implement
+    assert task.read_state().sessions == {"planner": "ses_planner", "writer": "ses_writer"}
+    assert writer.sessions_seen == [""], "the writer's first turn is a new conversation, not the planner's"
+    assert [e["data"]["role"] for e in task.events() if e["type"] == "turn"] == ["planner", "writer"]
+
+
+def test_the_first_turn_of_a_role_opens_with_its_brief(task):
+    harness = FakeHarness(task, [write_draft])
+    sup, _ = make(task, harness)
+    sup.step()  # plan: the writer plans too when there is no planner
+    task.transition(State.IMPLEMENT)
+    sup.step()  # implement, in the same conversation
+    first, second = harness.prompts
+    assert first.startswith(brief.role_text("writer")) and first.endswith(supervisor.PLAN_PROMPT)
+    assert second == supervisor.IMPLEMENT_PROMPT, "said once per conversation, not once per turn"

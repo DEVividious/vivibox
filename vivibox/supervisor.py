@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from . import gate, manual
+from . import brief, gate, manual
 from .opencode import HarnessError, Turn
 from .plan import PlanError, parse_plan, without_notes
 from .risky import Change
@@ -76,7 +76,7 @@ def resume_prompt(state: State) -> str:
 
 
 class Harness(Protocol):
-    # Names the conversation it owns: sessions are kept one per harness, never one per task.
+    # The tool's name, for the event log; conversations are kept one per role, not per harness.
     name: str
     # False when a turn's reported cost is a list price rather than money spent, as it is on a
     # subscription. A total that added the two would be neither.
@@ -193,10 +193,13 @@ class Supervisor:
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None
 
-    def harness_for(self, state: State) -> Harness:
+    def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
         is worth a different model, and sometimes a different tool, from the one that types."""
-        return self.planner if state is State.PLAN and self.planner else self.harness
+        return "planner" if state is State.PLAN and self.planner else "writer"
+
+    def harness_of(self, role: str) -> Harness:
+        return self.planner if role == "planner" and self.planner else self.harness
 
     def step(self) -> bool:
         """Does one unit of work. False when there is nothing to do until you act."""
@@ -225,9 +228,13 @@ class Supervisor:
 
     # --- states -----------------------------------------------------------------------------
 
-    def _turn(self, st: TaskState, prompt: str, harness: Harness | None = None) -> Turn | None:
-        harness = harness or self.harness_for(st.state)
-        was = st.sessions.get(harness.name, "")
+    def _turn(self, st: TaskState, prompt: str, role: str = "") -> Turn | None:
+        role = role or self.role_for(st.state)
+        harness = self.harness_of(role)
+        was = st.sessions.get(role, "")
+        if not was:
+            # The first message of a role's conversation says what the role is and owns.
+            prompt = f"{brief.role_text(role)}\n{prompt}"
         title = f"{self.task.id}: {st.goal}"[:80]
         if not was and hasattr(harness, "start_session"):
             try:
@@ -235,14 +242,15 @@ class Supervisor:
             except HarnessError as e:  # the turn makes its own, as before; only watching waits
                 self.task.event("session_not_started", error=str(e)[:500])
             else:
-                self.task.set_session(harness.name, was)
+                self.task.set_session(role, was)
                 self.session_started(self.task.read_state())
         turn = harness.turn(prompt, session=was, title=title)
         if turn.session and turn.session != was:
-            self.task.set_session(harness.name, turn.session)
+            self.task.set_session(role, turn.session)
         self.task.event(
             "turn",
             state=str(st.state),
+            role=role,
             harness=harness.name,
             metered=getattr(harness, "metered", True),
             ok=turn.ok,
@@ -324,7 +332,7 @@ class Supervisor:
         first reports on it, for cents; a new project has nothing to report."""
         context = self.task.meta / "handoff" / manual.CONTEXT
         known = context.exists() or manual.repository_is_empty(self.task.repo)
-        if not known and self._turn(st, manual.RECON_PROMPT, self.harness) is None:
+        if not known and self._turn(st, manual.RECON_PROMPT, "writer") is None:
             return
         manual.write_prompts(self.task, self.source or self.task.repo, self.project_verify)
         self.task.set_awaiting_plan(True)

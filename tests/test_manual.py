@@ -79,7 +79,9 @@ def test_a_chat_that_cannot_see_the_repository_is_told_what_is_in_it(task, tmp_p
     source = tmp_path / "checkout"
     sup, _ = make(task, writer, source)
     sup.step()
-    assert writer.prompts == [manual.RECON_PROMPT], "the writer reports; the planner runs nothing"
+    assert [p.endswith(manual.RECON_PROMPT) for p in writer.prompts] == [True], (
+        "the writer reports; the planner runs nothing"
+    )
     web = (task.meta / manual.PROMPT).read_text()
     assert "Express 4, tests with vitest." in web and "Add health endpoint" in web
     cli = (task.meta / manual.PROMPT_CLI).read_text()

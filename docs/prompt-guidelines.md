@@ -8,9 +8,12 @@ here in the same commit.
 
 ## 1. Three layers, each sentence in one of them
 
-- **The brief** (`templates/instructions.md`): what is always true. What ends a turn, which
-  files exist and what they are for, what the verification rejects, what is data and what is
-  instruction.
+- **The brief**: what is always true. The part common to every role
+  (`templates/instructions.md`) is the harness's standing instructions: what ends a turn, the
+  files every role has, what the verification rejects, what is data and what is instruction. The
+  role's part (`templates/roles/<role>.md`) says what the role does and which files are its own,
+  and goes as the first message of that role's conversation (`brief.role_text`), because a
+  system prompt per agent would replace the harness's own, which teaches a model its tools.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, …): what to do now, which files to
   read and write, and the sentence that ends the turn.
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
@@ -65,8 +68,8 @@ same file has one name in every prompt, in the feedback and in the view.
 
 ## 7. Length
 
-The brief stays under 800 words and a turn prompt under 160; the numbers are in
-`tests/test_prompt_rules.py`. The prompt that works out how to run the app (`DEMO_ASK`) is a
+The brief, common part and role part together, stays under 800 words and a turn prompt under
+160; the numbers are in `tests/test_prompt_rules.py`. The prompt that works out how to run the app (`DEMO_ASK`) is a
 conversation of its own with no brief behind it, so it carries its own and is not budgeted. Room is made by moving a sentence to the layer it belongs to
 (§1), not by shortening what a weaker model needs spelled out.
 

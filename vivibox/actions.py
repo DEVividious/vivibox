@@ -19,6 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from . import (
+    brief,
     claudecode,
     code,
     context,
@@ -52,7 +53,7 @@ from .plan import KINDS, PlanError, parse_plan
 from .pod import Mount, Pod, PodError
 from .risky import Approvals
 from .states import State
-from .task import Task, create_task, find_task, now
+from .task import Task, TaskState, create_task, find_task, now
 
 SUPERVISOR_PID = "supervisor.pid"
 
@@ -134,12 +135,21 @@ def agent_view(task: Task, command: list[str]) -> None:
         tmux(*option)
 
 
+def watchable_session(task: Task, st: TaskState | None = None) -> str:
+    """The opencode conversation there is to look at, if any: only opencode has a window to attach
+    to, and a claude-code turn is watched through its log. The writer's first, then the planner's."""
+    st = st or task.read_state()
+    for role in brief.ROLES[::-1]:
+        if st.sessions.get(role) and role_of(task, role).harness == opencode.NAME:
+            return st.sessions[role]
+    return ""
+
+
 def attach_command(task_id: str) -> list[str]:
     task, _ = load(task_id)
     st = task.read_state()
     if not tmux_has(tmux_session(task_id)):
-        # Only opencode has a window to attach to; a claude-code turn is watched through its log.
-        watchable = st.sessions.get(opencode.NAME, "")
+        watchable = watchable_session(task, st)
         if not watchable or not supervisor_running(task):
             raise PodError(f"{task_id}: the agent is not working now; nothing to watch")
         agent_view(task, opencode.OpenCode(task_pod(task_id)).attach_command(watchable))
@@ -775,10 +785,10 @@ def _start(task_id: str, resume: bool = False) -> str:
     else:
         harness.ensure_server()
     st = task.read_state()
-    if (was := st.sessions.get(harness.name, "")) and not harness.session_exists(was):
+    if (was := st.sessions.get("writer", "")) and not harness.session_exists(was):
         # The harness lost the conversation; the task goes on from its plan and handoff files.
-        task.set_session(harness.name, "")
-        task.event("session_lost", harness=harness.name, session=was)
+        task.set_session("writer", "")
+        task.event("session_lost", role="writer", harness=harness.name, session=was)
     interrupted = st.state in (State.PLAN, State.IMPLEMENT) and (st.paused or resume)
     if interrupted and not (task.meta / supervisor.NEXT_PROMPT).exists():
         supervisor.set_next_prompt(task, supervisor.resume_prompt(st.state))

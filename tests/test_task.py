@@ -73,16 +73,27 @@ def test_task_numbers_are_not_reused(tmp_path):
     assert create_task(tmp_path, "shop", "second", "{{goal}}").id == "shop-2"
 
 
-def test_sessions_are_kept_one_per_harness(tmp_path):
-    """Planning may run on claude-code and writing on opencode. A single session id for the task
-    would be handed to whichever harness ran next, and that harness has never heard of it."""
+def test_sessions_are_kept_one_per_role(tmp_path):
+    """A planner and a writer on the same harness (two models through opencode) would otherwise
+    share one conversation, and a reviewer would review its own writing."""
     task = create_task(tmp_path, "shop", "goal", "")
-    task.set_session("opencode", "ses_abc")
-    task.set_session("claude-code", "fdcccc7a-1a4d")
+    task.set_session("writer", "ses_abc")
+    task.set_session("planner", "ses_def")
     st = task.read_state()
-    assert st.sessions == {"opencode": "ses_abc", "claude-code": "fdcccc7a-1a4d"}
-    task.set_session("opencode", "")
-    assert task.read_state().sessions == {"claude-code": "fdcccc7a-1a4d"}, "cleared, not emptied"
+    assert st.sessions == {"writer": "ses_abc", "planner": "ses_def"}
+    task.set_session("writer", "")
+    assert task.read_state().sessions == {"planner": "ses_def"}, "cleared, not emptied"
+
+
+def test_a_task_with_sessions_per_harness_keeps_them_under_their_roles(tmp_path):
+    """Until roles owned sessions, a session was kept under its harness's name: opencode's was
+    the writer's (the only one that could write), claude-code's the planner's."""
+    task = create_task(tmp_path, "shop", "goal", "")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data["sessions"] = {"opencode": "ses_abc", "claude-code": "fdcccc7a-1a4d"}
+    path.write_text(json.dumps(data))
+    assert task.read_state().sessions == {"writer": "ses_abc", "planner": "fdcccc7a-1a4d"}
 
 
 def test_a_task_started_before_roles_keeps_its_conversation(tmp_path):
@@ -94,7 +105,7 @@ def test_a_task_started_before_roles_keeps_its_conversation(tmp_path):
     data.pop("sessions", None)
     data["session"] = "ses_from_before"
     path.write_text(json.dumps(data))
-    assert task.read_state().sessions == {"opencode": "ses_from_before"}
+    assert task.read_state().sessions == {"writer": "ses_from_before"}
 
 
 def test_a_task_can_run_a_role_on_another_model(tmp_path):

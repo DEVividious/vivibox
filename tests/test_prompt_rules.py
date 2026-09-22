@@ -8,10 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import actions, gate, manual, risky, supervisor
+from vivibox import actions, brief, gate, manual, risky, supervisor
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
-BRIEF = (files("vivibox") / "templates" / "instructions.md").read_text()
+# The brief each role gets: the common part and its own, as the agent reads them.
+BRIEFS = {
+    role: brief.common("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
+    + "\n"
+    + brief.role_text(role)
+    for role in brief.ROLES
+}
 TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
 # What starts a turn of an agent, wherever vivibox keeps it.
 TURN_PROMPTS = {
@@ -49,9 +55,9 @@ def test_every_turn_prompt_says_what_ends_the_turn(name):
     assert "End the turn when" in text, f"{name}: a turn ends on a condition, not on a feeling"
 
 
-@pytest.mark.parametrize("name", ["BRIEF", *sorted(TURN_PROMPTS)])
+@pytest.mark.parametrize("name", [*sorted(BRIEFS), *sorted(TURN_PROMPTS)])
 def test_every_task_path_is_one_the_pod_mounts(name):
-    text = BRIEF if name == "BRIEF" else TURN_PROMPTS[name]
+    text = BRIEFS[name] if name in BRIEFS else TURN_PROMPTS[name]
     for path in TASK_PATH.findall(text):
         path = path.rstrip("/")
         assert path in MOUNTED or path.startswith("/task/context/") or path in ("/task/handoff",), (
@@ -67,8 +73,14 @@ def sentences(text: str) -> set[str]:
 
 @pytest.mark.parametrize("name", sorted(set(TURN_PROMPTS) - {"DEMO_ASK"}))
 def test_no_sentence_is_in_both_the_brief_and_a_turn_prompt(name):
-    twice = sentences(BRIEF) & sentences(TURN_PROMPTS[name])
-    assert not twice, f"{name} repeats the brief: {twice}"
+    for role, text in BRIEFS.items():
+        twice = sentences(text) & sentences(TURN_PROMPTS[name])
+        assert not twice, f"{name} repeats the {role}'s brief: {twice}"
+
+
+def test_the_common_brief_names_no_role():
+    common = brief.common("demo-1", "/r", "b", [])
+    assert "writer" not in common.casefold() and "planner" not in common.casefold(), "the role is a parameter"
 
 
 def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
@@ -94,13 +106,14 @@ def test_the_templates_placeholder_is_the_one_the_gate_refuses():
 
 
 def test_the_stuck_path_names_the_file_by_its_full_path():
-    for name, text in {"BRIEF": BRIEF, **TURN_PROMPTS}.items():
+    for name, text in {**BRIEFS, **TURN_PROMPTS}.items():
         if re.search(r"(?<![\w-])question\.md", text):
             assert "/task/handoff/question.md" in text, name
 
 
 def test_word_budgets():
-    assert len(BRIEF.split()) <= MAX_BRIEF_WORDS
+    for role, text in BRIEFS.items():
+        assert len(text.split()) <= MAX_BRIEF_WORDS, f"{role}: {len(text.split())} words"
     for name, text in TURN_PROMPTS.items():
         if name == "DEMO_ASK":  # a conversation of its own, with no brief behind it: it is its own
             continue

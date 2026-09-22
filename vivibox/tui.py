@@ -205,7 +205,7 @@ def pager_command(path: Path) -> list[str]:
 def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod: PodView) -> str:
     """The keys that move this task on, first thing in the panel. Only keys the footer offers now:
     a hint the footer contradicts is worse than none."""
-    watch = " · `w` look at the agent" if watchable(st, running) else ""
+    watch = " · `w` look at the agent" if watchable(task, st, running) else ""
     if seen.problem:
         return "`s` try again"
     if seen.status in ("not started",):
@@ -376,10 +376,10 @@ def finished_detail(entry: dict) -> str:
     )
 
 
-def watchable(st: TaskState, running: bool) -> bool:
+def watchable(task: Task, st: TaskState, running: bool) -> bool:
     """Whether w has an agent to show: only opencode has a window to attach to, and only while
     the task is at work. The footer and every hint that names w ask here."""
-    return running and not st.paused and bool(st.sessions.get(actions.opencode.NAME))
+    return running and not st.paused and bool(actions.watchable_session(task, st))
 
 
 def detail(
@@ -387,7 +387,7 @@ def detail(
 ) -> str:
     """What you need to decide on this task, as markdown."""
     seen = ui.view(task, st, running, max_iterations)
-    watch = " Look at the agent with `w`." if watchable(st, running) else ""
+    watch = " Look at the agent with `w`." if watchable(task, st, running) else ""
     head = [
         f"### {st.id} · {seen.status}",
         "",
@@ -2427,7 +2427,7 @@ class Vivibox(App):
             "verify_again": state is State.CHECKPOINT_BLOCKED
             and not (pick[0].meta / "handoff" / supervisor.QUESTION).exists(),
             "show_log": newest_log(pick[0]) is not None,
-            "watch": watchable(pick[1], running),
+            "watch": watchable(pick[0], pick[1], running),
             # Not again while one of them is under way. A task that stopped on a failure still has
             # its supervisor, and what it needs is a start, not a stop followed by a start.
             "start_task": state is not State.DONE and not at_work and pick[1].id not in self.starting,

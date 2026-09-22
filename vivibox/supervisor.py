@@ -30,15 +30,14 @@ QUESTION = "question.md"
 # (templates/instructions.md) allows, and nothing else. docs/prompt-guidelines.md says why.
 PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
 /task/handoff/plan-draft.md as a copy of /task/plan.md, filled in:
-- the header between the +++ lines stays as it is, except: set summary to one sentence of at most
-  100 characters naming what the task does, and, if verify is empty, set it to the command that
-  builds and tests this project once the plan is done, e.g. verify = ["npm test"]; the
-  verification runs it on a fresh clone of your commits;
+- keep the header between the +++ lines, except: set summary to one sentence of at most 100
+  characters naming what the task does, and, if verify is empty, set it to the command that
+  builds and tests this project once the plan is done, e.g. verify = ["npm test"];
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
-  check" with concrete "- [ ]" items, each one checkable by reading the code or running it; keep
-  the first item as it is;
-- fill in the other sections; the <!-- notes --> say what goes where. The writer that carries the
-  plan out may not remember this conversation, so the plan says everything it needs.
+  check" with concrete "- [ ]" items, each checkable by reading the code or running it; keep the
+  first item;
+- fill in the other sections as their <!-- notes --> say. The writer that carries the plan out
+  may not remember this conversation, so the plan says everything it needs.
 Do not change code. End the turn when the draft is written, or when a question is in
 /task/handoff/question.md."""
 

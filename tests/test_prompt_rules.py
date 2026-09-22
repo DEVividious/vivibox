@@ -1,0 +1,103 @@
+"""The mechanical rules of docs/prompt-guidelines.md. A change that breaks one of these changed
+what an agent reads; update the guidelines with it, or fix the change."""
+
+import dataclasses
+import re
+from importlib.resources import files
+from pathlib import Path
+
+import pytest
+
+from vivibox import actions, gate, manual, risky, supervisor
+
+GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
+BRIEF = (files("vivibox") / "templates" / "instructions.md").read_text()
+TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
+# What starts a turn of an agent, wherever vivibox keeps it.
+TURN_PROMPTS = {
+    **{n: t for n, t in vars(supervisor).items() if n.endswith("_PROMPT") and len(t.split()) > 5},
+    "RECON_PROMPT": manual.RECON_PROMPT,
+    "DEMO_ASK": actions.DEMO_ASK,
+}
+MAX_BRIEF_WORDS = 800
+MAX_PROMPT_WORDS = 160
+# The files of /task the pod mounts for the agent (actions.task_pod), by the names the brief gives.
+MOUNTED = {"/task/plan.md", "/task/context", "/task/harness"} | {
+    f"/task/handoff/{name}"
+    for name in (
+        "plan-draft.md", "criteria.md", "red.md", "question.md", "comments.md", "verify-feedback.md",
+        "verify.log", "context.md", "demo.md", "demo-question.md",
+    )
+}  # fmt: skip
+TASK_PATH = re.compile(r"/task/[\w./-]*[\w/]")
+
+
+def test_every_check_the_table_names_exists():
+    rows = re.findall(r"^\| [^|]+ \| `([\w.]+)` \|$", GUIDELINES.read_text(), re.MULTILINE)
+    assert len(rows) >= 6, "the table moved or changed its shape"
+    for dotted in rows:
+        module, *attrs = dotted.split(".")
+        found = {"gate": gate, "risky": risky}[module]
+        for attr in attrs:
+            found = getattr(found, attr)
+        assert callable(found), dotted
+
+
+@pytest.mark.parametrize("name", sorted(TURN_PROMPTS))
+def test_every_turn_prompt_says_what_ends_the_turn(name):
+    text = TURN_PROMPTS[name]
+    assert "End the turn when" in text, f"{name}: a turn ends on a condition, not on a feeling"
+
+
+@pytest.mark.parametrize("name", ["BRIEF", *sorted(TURN_PROMPTS)])
+def test_every_task_path_is_one_the_pod_mounts(name):
+    text = BRIEF if name == "BRIEF" else TURN_PROMPTS[name]
+    for path in TASK_PATH.findall(text):
+        path = path.rstrip("/")
+        assert path in MOUNTED or path.startswith("/task/context/") or path in ("/task/handoff",), (
+            f"{name} names {path}, which the agent does not have"
+        )
+
+
+def sentences(text: str) -> set[str]:
+    plain = re.sub(r"[`*]", "", " ".join(text.split()))
+    found = {s.strip().casefold() for s in re.split(r"(?<=[.!?])\s+", plain)}
+    return {s for s in found if len(s.split()) >= 8}
+
+
+@pytest.mark.parametrize("name", sorted(set(TURN_PROMPTS) - {"DEMO_ASK"}))
+def test_no_sentence_is_in_both_the_brief_and_a_turn_prompt(name):
+    twice = sentences(BRIEF) & sentences(TURN_PROMPTS[name])
+    assert not twice, f"{name} repeats the brief: {twice}"
+
+
+def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
+    for field in dataclasses.fields(gate.GateResult):
+        if field.name in ("log", "risky"):  # the log is where the rest is; risky goes to you
+            continue
+        result = gate.GateResult(Path("/dev/null"))
+        marker = f"zz-{field.name}-zz"
+        if field.name == "commands":
+            result.commands = [gate.CommandResult(marker, False, 0.1)]
+        else:
+            setattr(result, field.name, [marker])
+        assert marker in gate.feedback(result), f"{field.name} fails the gate but the agent is not told"
+
+
+def test_the_templates_placeholder_is_the_one_the_gate_refuses():
+    for template in TEMPLATES:
+        assert f"- [ ] {gate.PLACEHOLDER}" in template
+
+
+def test_the_stuck_path_names_the_file_by_its_full_path():
+    for name, text in {"BRIEF": BRIEF, **TURN_PROMPTS}.items():
+        if re.search(r"(?<![\w-])question\.md", text):
+            assert "/task/handoff/question.md" in text, name
+
+
+def test_word_budgets():
+    assert len(BRIEF.split()) <= MAX_BRIEF_WORDS
+    for name, text in TURN_PROMPTS.items():
+        if name == "DEMO_ASK":  # a conversation of its own, with no brief behind it: it is its own
+            continue
+        assert len(text.split()) <= MAX_PROMPT_WORDS, f"{name}: {len(text.split())} words"

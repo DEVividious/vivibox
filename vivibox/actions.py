@@ -504,7 +504,8 @@ screen, you have misunderstood it.
 
 If a decision is mine rather than yours - which profile, which port, which of two ways the project
 can be run - do not guess. Write the question to /task/handoff/demo-question.md and leave demo.md
-alone. I will answer and you can carry on."""
+alone. I will answer and you can carry on. End the turn when demo.md is written, or when the
+question is."""
 
 
 def _read(path: Path) -> str:

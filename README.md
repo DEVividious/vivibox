@@ -37,12 +37,15 @@ MCP servers you already use. Keys go to vivibox's own key store, never into conf
    for you: `a` accepts the plan, `r` sends it back with a comment, `e` edits it.
 3. The agent implements and commits in its clone, ticking the criteria as it goes.
 4. The gate builds and tests the commits on a fresh clone, checks every criterion is ticked, the
-   commit messages, and that no test was switched off. A red gate sends the agent back, up to a
-   limit; then the task waits for you.
+   commit messages, that no test was switched off, and that every test the agent touched is
+   named in its red evidence. A red gate sends the agent back, up to a limit; then the task
+   waits for you. A gate that could not run at all (no Docker, no network, a token expired)
+   waits for you at once, and `g` runs it again once you have fixed it.
 5. The work waits for you as a review copy: `o` opens it in your IDE as uncommitted changes,
    `v` runs the app in the pod, `a` accepts it into your checkout, `r` asks for changes.
 
-Desktop notifications say when a task waits for you. Everything the view does is also a command
+Desktop notifications say when a task waits for you, and the view lists your projects with
+their tasks under them, the ones waiting for you first. Everything the view does is also a command
 (`vivibox new`, `accept`, `reply`, `status`…), and planning can happen in your own chat instead of
 on an API key. All of it: [docs/tasks.md](docs/tasks.md).
 
@@ -51,6 +54,7 @@ on an API key. All of it: [docs/tasks.md](docs/tasks.md).
 - [What it protects against, and how](docs/security.md), with a comparison to Docker Sandboxes
 - [Configuring providers, MCP servers and projects](docs/configure.md)
 - [UX guidelines](docs/ux-guidelines.md), for anyone changing what the view says
+- [Prompt guidelines](docs/prompt-guidelines.md), for anyone changing what the agents read
 
 Status: one agent per task through opencode. Planning can also run on Claude Code, or in your own
 chat. Reviewer agents, GitHub and parallel tasks are next.

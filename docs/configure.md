@@ -40,6 +40,11 @@ vivibox models anthropic
 
 Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable only by you.
 
+`config.toml` also holds the limits: `max_iterations`, how many verification failures the
+writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one
+verification command may take (1800) before it is stopped and the task waits for you as on any
+failure outside the code. A project file may set its own `verify_timeout`.
+
 Once per repository you want agents to work on: press `i` in the view, and browse to its folder
 (or make a new one there, for a project from scratch), or from a shell inside it:
 

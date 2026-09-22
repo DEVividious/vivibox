@@ -1,6 +1,6 @@
 import pytest
 
-from vivibox import actions, firstrun
+from vivibox import actions, firstrun, keys
 from vivibox.config import ConfigError, config_dir, load_config
 
 
@@ -28,12 +28,19 @@ def test_an_existing_config_is_left_alone(env):
     assert (config_dir() / "config.toml").read_text() == before
 
 
-def test_a_writer_without_a_model_shows_it_and_offers_to_add_one(fresh):
+def test_a_writer_without_a_model_shows_it_at_the_top_of_its_list(fresh):
+    """The list offers what your providers have; a provider itself is added under k, nowhere else."""
     firstrun.ensure_config()
     offered = actions.choices("writer", load_config(), {"deepseek": ["deepseek/deepseek-v4-flash"]})
-    assert offered == [("opencode", ""), ("opencode", "deepseek/deepseek-v4-flash"), actions.ADD]
-    assert actions.choice_label(offered[0]).startswith("no model yet")
-    assert actions.choice_label(actions.ADD).startswith("+ add a provider")
+    assert offered == [("opencode", ""), ("opencode", "deepseek/deepseek-v4-flash")]
+    assert actions.choice_label(offered[0]) == "no model yet: pick one below"
+
+
+def test_a_task_needs_a_provider_before_the_first_dialog(fresh):
+    firstrun.ensure_config()
+    assert actions.needs_provider(load_config()), "no provider and the writer has no model"
+    keys.set_key("deepseek", "sk-mine")
+    assert not actions.needs_provider(load_config()), "with a provider the list has models to pick"
 
 
 def test_a_task_is_refused_until_the_writer_has_a_model(fresh):

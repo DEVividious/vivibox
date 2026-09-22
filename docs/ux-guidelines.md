@@ -87,7 +87,7 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   checkbox is one row with no frame; the only boxes are a multi-line text and the buttons that
   close the dialog. Related fields form a group, and a blank row separates groups.
 - A button that helps fill a field stands in that field's row, compact, or is the last entry of
-  that field's list ("+ add a provider…", "+ set up another project…"). The closing row holds one
+  that field's list ("+ set up another project…"). The closing row holds one
   primary button, then Cancel, then the key that presses the primary button.
 - Focus is one signal: the focused control's text is drawn as the cursor block; a text box shows
   it by its frame.

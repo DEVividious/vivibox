@@ -1411,7 +1411,7 @@ class ManageProviders(Dialog):
     def changed(self, names) -> None:
         if names:
             self.fill()
-            self.app.refresh_models()
+            self.app.refresh_models(names)
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -1610,11 +1610,6 @@ class AddProvider(Dialog):
         self.dismiss([])
 
 
-def first_model(available: dict[str, list[str]] | None, added: list[str]) -> str:
-    """The first model of the providers you just added, to put the role on."""
-    return next((m for name in added for m in (available or {}).get(name, [])), "")
-
-
 class NewTask(Dialog):
     """A form: labels on the left, one field per row, the description and the closing buttons
     the only boxes. Every field is on the screen at once; a short terminal shrinks the
@@ -1748,44 +1743,6 @@ class NewTask(Dialog):
         if path is not None:
             goal.insert(f"@{shown_path(path)} ")
         goal.focus()
-
-    @on(Select.Changed, ".model")
-    def role_changed(self, event: Select.Changed) -> None:
-        if event.value != actions.ADD:
-            return
-        select = event.select
-        role = select.id.removeprefix("role-")
-        select.value = actions.configured_choice(load_config(), role)
-
-        def added(names: list[str]) -> None:
-            if names:
-                self.notify("Asking opencode for their models…")
-                self.refresh_models(role, names)
-
-        self.app.push_screen(AddProvider(self.app.catalog), added)
-
-    @work(thread=True)
-    def refresh_models(self, role: str, names: list[str]) -> None:
-        available = actions.available_models(refresh=True)
-        self.app.call_from_thread(self.show_models, role, names, available)
-
-    def show_models(self, role: str, names: list[str], available: dict[str, list[str]]) -> None:
-        """Every role's list with the new models in it, and the role you added them for on one."""
-        self.available = self.app.available = available
-        config = load_config()
-        for select in self.query(".model").results(Select):
-            name = select.id.removeprefix("role-")
-            kept, configured = select.value, actions.configured_choice(config, name)
-            offered = actions.choices(name, config, available)
-            select.set_options([(actions.choice_label(c, configured), c) for c in offered])
-            select.value = kept if kept in offered else configured
-        model = first_model(available, names)
-        if model:
-            self.query_one(f"#role-{role}", Select).value = ("opencode", model)
-        else:
-            self.notify(
-                f"opencode lists no models for {', '.join(names)}; check the name.", severity="warning"
-            )
 
     def key_ctrl_s(self) -> None:
         self.query_one("#create", Button).press()
@@ -2039,22 +1996,6 @@ class Vivibox(App):
         self.call_after_refresh(self.hint_opencode)
         self.load_models()
 
-    @work(thread=True)
-    def models_then_choose(self, task: Task, role: str) -> None:
-        """After adding a provider: its models, then the list to put the role on one of them."""
-        self.available = actions.available_models(refresh=True)
-        config = load_config()
-
-        def choose() -> None:
-            offered = actions.choices(role, config, self.available)
-            configured = actions.configured_choice(config, role)
-            self.push_screen(
-                ChooseModel(role, offered, configured, self.current_choice(task, role, config)),
-                lambda choice: self.set_choice(task, role, choice, config),
-            )
-
-        self.call_from_thread(choose)
-
     def action_providers(self) -> None:
         self.push_screen(ManageProviders())
 
@@ -2082,8 +2023,16 @@ class Vivibox(App):
         self.push_screen(ImportSource(providers.discover(project_repos())), picked)
 
     @work(thread=True)
-    def refresh_models(self) -> None:
+    def refresh_models(self, added: list[str] = ()) -> None:
+        """The models again, after providers changed. One just added that lists none is most
+        likely a name opencode does not know; a task's list would only show that it has nothing."""
         self.available = actions.available_models(refresh=True)
+        if missing := [name for name in added if not self.available.get(name)]:
+            self.call_from_thread(
+                self.notify,
+                f"opencode lists no models for {', '.join(missing)}; check the name.",
+                severity="warning",
+            )
 
     def hint_opencode(self) -> None:
         """Someone who uses opencode has providers set up already; say they can be brought over."""
@@ -2995,15 +2944,6 @@ class Vivibox(App):
     def set_choice(self, task: Task, role: str, choice: actions.Choice | None, config) -> None:
         if choice is None:
             return
-        if choice == actions.ADD:
-
-            def added(names: list[str]) -> None:
-                if names:
-                    self.notify("Asking opencode for their models…")
-                    self.models_then_choose(task, role)
-
-            self.push_screen(AddProvider(self.catalog), added)
-            return
         harness, model = choice
         if not model and harness != manual.NAME:
             return  # "no model yet" is where the role is, not a model to put it on
@@ -3107,6 +3047,9 @@ class Vivibox(App):
     def action_new(self, preselect: str = "") -> None:
         if not projects():
             self.notify("A task needs a project first; press i to add one.")
+            return
+        if actions.needs_provider(load_config()):
+            self.notify("A task needs a provider first; press k to add one.")
             return
         preselect = preselect or self.selected_project()
 

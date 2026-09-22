@@ -694,7 +694,6 @@ def test_m_puts_one_role_on_another_model_for_this_task_only(env):
             (OC, "m"),
             (OC, "deepseek/deepseek-v4-flash"),
             (OC, "deepseek/deepseek-v4-pro"),
-            actions.ADD,
         ]
         await pilot.press("down", "down", "enter")
         await pilot.pause()
@@ -937,9 +936,9 @@ def test_sending_work_back_can_add_criteria(env):
     assert gate.missing_criteria(task)[-2:] == ["works before a load", "keeps the zoom"]
 
 
-def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env, monkeypatch, tmp_path):
+def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, monkeypatch, tmp_path):
     """The company case: you plan in your own chat, and the writer runs on your employer's model,
-    defined in an opencode.json you already use. Brought over from the list of models itself."""
+    defined in an opencode.json you already use. Brought over under k, then picked in the task."""
     from vivibox import keys, providers
 
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
@@ -956,13 +955,8 @@ def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
-        await pilot.press("n")
+        await pilot.press("k")
         await pilot.pause()
-        await pilot.press(*"Fix login")
-        writer = app.screen.query_one("#role-writer", Select)
-        writer.value = actions.ADD
-        await pilot.pause()
-        assert isinstance(app.screen, tui.AddProvider)
         app.screen.query_one("#import").press()
         await pilot.pause()
         assert isinstance(app.screen, tui.ImportSource)
@@ -974,9 +968,15 @@ def test_a_provider_imported_from_opencode_json_puts_the_writer_on_its_model(env
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert isinstance(app.screen, tui.NewTask)
+        assert isinstance(app.screen, tui.ManageProviders)
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Fix login")
         writer = app.screen.query_one("#role-writer", Select)
-        assert writer.value == (OC, "acme/coder"), "on the first model of the provider just added"
+        assert (OC, "acme/coder") in [c for _, c in writer._options], "its models are on the list"
+        writer.value = (OC, "acme/coder")
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -997,9 +997,9 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
     async def scenario(app, pilot):
         app.available = AVAILABLE
         app.catalog = CATALOG
-        await pilot.press("n")
+        await pilot.press("k")
         await pilot.pause()
-        app.screen.query_one("#role-writer", Select).value = actions.ADD
+        app.screen.query_one("#add").press()
         await pilot.pause()
         await pilot.press(*"open")  # the search field has the focus
         await pilot.pause()
@@ -1009,10 +1009,58 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert app.screen.query_one("#role-writer", Select).value == (OC, "openai/big")
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        writer = app.screen.query_one("#role-writer", Select)
+        assert (OC, "openai/big") in [c for _, c in writer._options], "the new models are on the list"
+        assert not any(str(label).startswith("+") for label, _ in writer._options), "adding is under k"
 
     run(scenario)
     assert keys.get_key("openai") == "sk-openai"
+
+
+def test_a_provider_that_lists_no_models_is_said_to_check_the_name(env, monkeypatch, tmp_path):
+    """A typo in a provider's name is not an error to opencode: it lists nothing. Said at once."""
+    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
+    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        app.catalog = CATALOG
+        await pilot.press("k")
+        await pilot.pause()
+        app.screen.query_one("#add").press()
+        await pilot.pause()
+        await pilot.press(*"azure")
+        app.screen.query_one("#key", Input).value = "sk-azure"
+        app.screen.query_one("#add").press()
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert any("no models for azure; check the name" in str(n.message) for n in app._notifications)
+
+    run(scenario)
+
+
+def test_n_without_a_provider_says_to_press_k(env):
+    """The first run: no provider and the writer without a model. A dialog whose lists have nothing
+    to pick would be a dead end, so n says where to go, as it does without a project."""
+    (env / "config" / "config.toml").write_text(
+        f'tasks_dir = "{env / "tasks"}"\n'
+        '[roles.planner]\nharness = "manual"\nmodel = ""\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = ""\n'
+    )
+
+    async def scenario(app, pilot):
+        app.available = {}
+        await pilot.press("n")
+        await pilot.pause()
+        assert not isinstance(app.screen, tui.NewTask)
+        assert any("press k" in str(n.message) for n in app._notifications)
+
+    run(scenario)
 
 
 def test_d_shows_with_a_task_and_h_with_a_finished_one(env):

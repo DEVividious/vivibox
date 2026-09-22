@@ -199,8 +199,6 @@ def role_of(task: Task | None, role_name: str, config: Config | None = None) -> 
 
 # A choice for a role: the harness it runs in and the model, "" for a manual role.
 Choice = tuple[str, str]
-# The last entry of every list of models: adding a provider, or importing your opencode.json.
-ADD: Choice = ("add", "")
 MODELS_CACHE_SECONDS = 24 * 3600
 
 
@@ -311,7 +309,15 @@ def choices(role_name: str, config: Config, available: dict[str, list[str]] | No
         found = [c for c in found if c[0] == opencode.NAME]
     # A role with no model yet shows that it has none, and no model of its own twice.
     found = [c for c in found if c[1] or c[0] == manual.NAME or c == found[0]]
-    return [*dict.fromkeys(found), ADD]
+    return list(dict.fromkeys(found))
+
+
+def needs_provider(config: Config) -> bool:
+    """True on a first run: no provider set up and a role without a model. A task's lists would
+    have nothing to pick, so the view sends you to k instead of opening them."""
+    if keys.list_keys() or providers.load():
+        return False
+    return any(r.harness != manual.NAME and not r.model for r in config.roles.values())
 
 
 def configured_choice(config: Config, role_name: str) -> Choice:
@@ -321,10 +327,8 @@ def configured_choice(config: Config, role_name: str) -> Choice:
 
 def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
     harness, model = choice
-    if choice == ADD:
-        return "+ add a provider, or import your opencode.json…"
     if not model and harness != manual.NAME:
-        return "no model yet: pick one below, or add a provider"
+        return "no model yet: pick one below"
     text = "you, in your own chat" if harness == manual.NAME else model
     if harness == claudecode.NAME:
         text += " (Claude Code)"

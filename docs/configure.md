@@ -3,9 +3,8 @@
 Run `vivibox`. The first time, it builds the agent image (a few minutes), writes a commented
 `~/.config/vivibox/config.toml` and opens the view. An update that changes the image builds it again
 on the next start and removes the older versions, about 2 GB each, except one a task's pod still runs
-on. Planning starts in your own chat; the writer has
-no model until you create your first task. Its list of models ends with *+ add a provider, or
-import your opencode.json…*:
+on. Planning starts in your own chat; the writer has no model until you add a provider under `k`
+and pick one of its models in your first task. `k` offers two ways in:
 
 - a provider from opencode's own list, searched as you type, and your key, or
 - what an opencode configuration defines: providers, such as your employer's endpoint with its

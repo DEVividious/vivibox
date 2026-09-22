@@ -223,6 +223,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if st.state is State.CHECKPOINT_BLOCKED:
         if (task.meta / "handoff" / supervisor.QUESTION).exists():
             return "`r` answer" + watch
+        if ui.environment_problem(task):
+            return "`g` verify again, once you have fixed it · `r` tell the agent" + watch
         return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
     if st.state is State.VERIFY:
         log = newest_log(task)
@@ -465,11 +467,12 @@ def detail(
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = read(handoff / supervisor.QUESTION)
+        broken = ui.environment_problem(task)
         body = (
             ["**The agent asks:**", "", question]
             if question
             else [
-                "**Verification keeps failing.**",
+                f"**Verification could not run:** {broken}" if broken else "**Verification keeps failing.**",
                 "",
                 read(handoff / "verify-feedback.md"),
                 "",

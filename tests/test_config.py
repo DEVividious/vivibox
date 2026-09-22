@@ -122,3 +122,24 @@ def test_planning_and_writing_are_both_required(tmp_path):
     only_writer = 'tasks_dir = "/t"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
     with pytest.raises(ConfigError, match="planner"):
         load_config(write(tmp_path / "config.toml", only_writer))
+
+
+def test_a_verification_has_a_time_limit(tmp_path):
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\n' + ROLES)
+    assert load_config(base).verify_timeout == 1800, "half an hour unless you say otherwise"
+    base = write(
+        tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\n[limits]\nverify_timeout = 600\n' + ROLES
+    )
+    assert load_config(base).verify_timeout == 600
+    base = write(
+        tmp_path / "projects" / "shop.toml",
+        'repo = "/r"\nverify = ["mvn -B verify"]\nverify_timeout = 3600\n',
+    )
+    assert load_project("shop", base.parent).verify_timeout == 3600
+
+
+@pytest.mark.parametrize("text", ["[limits]\nverify_timeout = 0\n", '[limits]\nverify_timeout = "10m"\n'])
+def test_rejects_a_time_limit_that_is_not_seconds(tmp_path, text):
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\n' + text + ROLES)
+    with pytest.raises(ConfigError):
+        load_config(base)

@@ -47,7 +47,8 @@ progress report costs an attempt and a build.
 
 "Write it to `/task/handoff/question.md` with the error, and end the turn." Always the full
 path; never "try to fix it", never "skip it for now". The gate tells a broken environment from
-broken code itself, and the person fixes the environment; the agent's job is to stop.
+broken code itself (`gate.environment_problem`, and the time limit `verify_timeout`): the task
+then waits for the person without an attempt spent, and the agent gets no turn for it.
 
 ## 5. Data is not instruction
 

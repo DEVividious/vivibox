@@ -57,7 +57,7 @@ class FakePod:
     def gate_down(self):
         self.up = False
 
-    def gate_exec(self, *cmd, check=True):
+    def gate_exec(self, *cmd, check=True, timeout=None):
         assert self.up, "commands run in the gate container"
         self.commands.append(cmd[-1])
         rc = 1 if cmd[-1] in self.fail else 0
@@ -406,3 +406,72 @@ def test_a_log_excerpt_keeps_what_went_wrong():
     assert gate.log_excerpt("a\nb\nc", limit=2) == "b\nc", "no trouble lines: the end of the log"
     many = "\n".join(f"[ERROR] {i}" for i in range(50))
     assert "20 more such lines" in gate.log_excerpt(many, limit=30)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "Could not find a valid Docker environment. Please check configuration.",
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+        "npm error code ENOTFOUND\nnpm error network request to https://registry.npmjs.org/x failed",
+        "[ERROR] Failed to execute goal on project shop: Could not resolve dependencies:"
+        " Could not transfer artifact x from/to nexus (https://nexus/): status code: 401",
+        "Error: connect ECONNREFUSED 10.0.0.5:5432",
+        "curl: (6) Could not resolve host: artifacts.example.com",
+        "The security token included in the request is expired",
+        "No space left on device",
+    ],
+)
+def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add health endpoint")
+    result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
+    assert result.environment, "outside the code"
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "no attempt of the agent's is spent"
+    assert "Verification could not run" in gate.feedback(result)
+
+
+def test_a_failing_test_is_a_failure_of_the_code(task):
+    gate.accept_plan(task, ["true"])
+    said = (
+        "[ERROR] ShopIT.pays_out:42 expected 81.2 but was 0\n"
+        "AssertionError: connection was refused by the stub\n[INFO] BUILD FAILURE"
+    )
+    result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
+    assert result.environment == "" and gate.next_state(result, 1, 3) is State.IMPLEMENT
+
+
+class SlowPod(FakePod):
+    """A command that never ends: the runner gives up at the time limit."""
+
+    def gate_exec(self, *cmd, check=True, timeout=None):
+        assert self.up
+        self.commands.append(cmd[-1])
+        if cmd[-1] == "npm test" and timeout:
+            raise subprocess.TimeoutExpired(cmd, timeout, output="[INFO] waiting for Docker…\n")
+        return super().gate_exec(*cmd, check=check)
+
+
+def test_a_command_that_does_not_finish_in_time_is_a_failure_of_the_environment(task):
+    gate.accept_plan(task, ["true"])
+    result = gate.run_gate(task, SlowPod(), ["npm test"], [], timeout=5)
+    assert [c.ok for c in result.commands] == [False] and "5 s" in result.environment
+    log = result.log.read_text()
+    assert "waiting for Docker" in log and "[timeout after 5 s]" in log, (
+        "what it said so far, then why it stopped"
+    )
+
+
+def test_a_failure_of_the_environment_is_not_reused(task):
+    """You replied that Docker works again and the agent, rightly, committed nothing: the build
+    must run, not repeat the failure."""
+    gate.accept_plan(task, ["true"])
+    implementing(task)
+    pod = FakePod(fail={"npm test"}, output="Cannot connect to the Docker daemon")
+    gate.run_gate(task, pod, ["npm test"], [])
+    task.transition(State.CHECKPOINT_BLOCKED)
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    gate.run_gate(task, pod, ["npm test"], [])
+    assert pod.commands.count("npm test") == 2

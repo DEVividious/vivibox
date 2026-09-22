@@ -11,6 +11,10 @@
    ("Trojan Source") or Unicode tag characters, which hide text from you in a diff but not from a model.
 4. Risky files unchanged since your last approval; changes need approval, not another iteration.
 
+A command that fails on something outside the code (no Docker, no network, a credential, a full
+disk, or its time limit) is a failure of the environment: the task waits for you and no attempt of
+the agent's is spent, because nothing the agent could commit would change it.
+
 Uncommitted files and switched-off tests are checked before anything is built: a build of a tree
 that is not what was committed, or whose tests do not run, would prove nothing, so it is not run.
 And a turn that committed nothing gets the last build's result again instead of a new build.
@@ -21,6 +25,7 @@ from __future__ import annotations
 import difflib
 import re
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,6 +152,31 @@ def reworded_criteria(task: Task, missing: list[str]) -> dict[str, str]:
     return found
 
 
+# What a build says when the trouble is outside the code: no Docker, no network or registry, a
+# credential, a full disk. Matched against the end of a failed command's output only.
+ENVIRONMENT = re.compile(
+    r"Could not find a valid Docker environment|Cannot connect to the Docker daemon"
+    r"|docker: command not found|TESTCONTAINERS.*(?:not found|refused)"
+    r"|\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)\b"
+    r"|Could not resolve host|Could not transfer artifact|Could not resolve dependencies"
+    r"|status code: (401|403|407)|\b(401 Unauthorized|403 Forbidden|407 Proxy)\b"
+    r"|token.{0,40}(expired|invalid)|(expired|invalid).{0,40}token|credentials? (not found|expired|invalid)"
+    r"|SSL certificate problem|unable to get local issuer certificate"
+    r"|No space left on device|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
+    r"|Temporary failure in name resolution|network is unreachable",
+    re.IGNORECASE,
+)
+ENVIRONMENT_TAIL = 60
+
+
+def environment_problem(output: str) -> str:
+    """The line at the end of a failed command's output that says the trouble is outside the code,
+    or "". Only the end: a test that checks a connection refusal prints the same words on purpose,
+    but not as its last words."""
+    tail = [line.strip() for line in output.splitlines()[-ENVIRONMENT_TAIL:] if line.strip()]
+    return next((line[:200] for line in tail if ENVIRONMENT.search(line)), "")
+
+
 # Lines of a build log that say what went wrong, in the usual tools' words.
 TROUBLE = re.compile(
     r"\[ERROR\]|BUILD FAILURE|FAILED|FAILURE|Tests run:.*(Failures: [1-9]|Errors: [1-9])"
@@ -266,6 +296,9 @@ class GateResult:
     build_skipped: str = ""
     # The commit whose build this result repeats, when the turn committed nothing new.
     unchanged: str = ""
+    # What outside the code kept a command from succeeding, in the log's own words; "" when the
+    # failure is the code's to fix.
+    environment: str = ""
 
     @property
     def passed(self) -> bool:
@@ -291,6 +324,7 @@ class GateResult:
             "risky_changes": [c.path for c in self.risky],
             "log": self.log.name,
             "build_skipped": self.build_skipped,
+            "environment": self.environment,
         }
 
 
@@ -334,6 +368,8 @@ def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bo
     last = _last_build(task)
     if not _after_a_turn(task) or not last or last.get("commit") != head or last["commands"] != commands:
         return False
+    if last.get("environment"):
+        return False  # you fixed something outside the code; the same commit may build now
     log = task.meta / "log" / last["log"]
     if not log.exists():
         return False
@@ -348,7 +384,10 @@ def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bo
     return True
 
 
-def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], java: str = "") -> GateResult:
+def run_gate(
+    task: Task, pod: Pod, commands: list[str], risky_extra: list[str], java: str = "", timeout: float = 0
+) -> GateResult:
+    """timeout: seconds one command may take; 0 for no limit."""
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
@@ -365,7 +404,7 @@ def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], 
     if result.build_skipped:
         log.write_text(f"# commit {head}: the build was not run: {result.build_skipped}\n")
     elif not _reuse(task, result, head, commands):
-        _build(task, pod, commands, java, head, result)
+        _build(task, pod, commands, java, head, result, timeout)
     # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.
     accepted = (task.meta / ACCEPTED_PLAN).exists()
     result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
@@ -379,7 +418,9 @@ def run_gate(task: Task, pod: Pod, commands: list[str], risky_extra: list[str], 
     return result
 
 
-def _build(task: Task, pod: Pod, commands: list[str], java: str, head: str, result: GateResult) -> None:
+def _build(
+    task: Task, pod: Pod, commands: list[str], java: str, head: str, result: GateResult, timeout: float = 0
+) -> None:
     pod.gate_up()
     try:
         toolchain.install_declared(pod, gate=True)
@@ -390,10 +431,19 @@ def _build(task: Task, pod: Pod, commands: list[str], java: str, head: str, resu
                 out.write(f"$ {command}\n")
                 out.flush()
                 started = time.monotonic()
-                p = pod.gate_exec("bash", "-c", command, check=False)
-                output = masked(p.stdout + p.stderr, pod.passed_values())
-                out.write(output + f"\n[exit {p.returncode}]\n\n")
-                ok = p.returncode == 0
+                try:
+                    p = pod.gate_exec("bash", "-c", command, check=False, timeout=timeout or None)
+                except subprocess.TimeoutExpired as e:
+                    output = masked(_text(e.stdout) + _text(e.stderr), pod.passed_values())
+                    output += f"\n[timeout after {timeout:g} s]"
+                    ok, code = False, "timeout"
+                    result.environment = f"`{command}` did not finish in {timeout:g} s (verify_timeout)"
+                else:
+                    output = masked(p.stdout + p.stderr, pod.passed_values())
+                    ok, code = p.returncode == 0, p.returncode
+                    if not ok:
+                        result.environment = environment_problem(output)
+                out.write(output + f"\n[exit {code}]\n\n")
                 result.commands.append(
                     CommandResult(
                         command, ok, round(time.monotonic() - started, 1), "" if ok else log_excerpt(output)
@@ -405,7 +455,16 @@ def _build(task: Task, pod: Pod, commands: list[str], java: str, head: str, resu
         pod.gate_down()
 
 
+def _text(value) -> str:
+    if value is None:
+        return ""
+    return value.decode(errors="replace") if isinstance(value, bytes) else str(value)
+
+
 def next_state(result: GateResult, iteration: int, max_iterations: int) -> State:
+    if result.environment:
+        # Nothing the agent could commit would change it: for you, and no attempt is spent.
+        return State.CHECKPOINT_BLOCKED
     if not result.passed:
         return State.IMPLEMENT if iteration < max_iterations else State.CHECKPOINT_BLOCKED
     return State.APPROVAL_RISKY if result.risky else State.CHECKPOINT_FINAL
@@ -425,6 +484,11 @@ def feedback(result: GateResult) -> str:
     """What the agent reads in handoff/ before the next iteration: each failure with the lines
     that say why, so the log is there to consult, not to read through."""
     parts = ["# Verification failed\n"]
+    if result.environment:
+        parts.append(
+            f"- Verification could not run: {result.environment}. That is outside the code; the user"
+            " has been told and will run the verification again. Do not change code for it."
+        )
     if result.build_skipped:
         parts.append(f"- The build was not run: {result.build_skipped}. Fix that first.")
     if result.unchanged:

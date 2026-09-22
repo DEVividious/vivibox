@@ -47,8 +47,9 @@ class PodError(Exception):
     pass
 
 
-def run(cmd: Sequence[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(list(cmd), capture_output=True, text=True)
+def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:
+    """timeout: seconds, after which subprocess.TimeoutExpired is raised with the output so far."""
+    return subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
 
 
 @dataclass(frozen=True)
@@ -184,8 +185,11 @@ class Pod:
     def volumes(self) -> dict[str, str]:
         return {"docker": f"vivibox-{self.task_id}-docker", "socket": f"vivibox-{self.task_id}-socket"}
 
-    def _run(self, *cmd: str, check: bool = True) -> subprocess.CompletedProcess:
-        p = self.runner(cmd)
+    def _run(
+        self, *cmd: str, check: bool = True, timeout: float | None = None
+    ) -> subprocess.CompletedProcess:
+        # The keyword only when there is one: runners that know no time limit (tests) keep working.
+        p = self.runner(cmd, timeout=timeout) if timeout else self.runner(cmd)
         if check and p.returncode != 0:
             raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
         return p
@@ -463,8 +467,13 @@ class Pod:
         self.gate_exec("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.gate_src,
                        workdir=str(self.gate_dir))  # fmt: skip
 
-    def gate_exec(self, *cmd: str, check: bool = True, workdir: str = "") -> subprocess.CompletedProcess:
-        return self._run("docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd, check=check)
+    def gate_exec(
+        self, *cmd: str, check: bool = True, workdir: str = "", timeout: float | None = None
+    ) -> subprocess.CompletedProcess:
+        """timeout: raises subprocess.TimeoutExpired; the command inside goes down with the container."""
+        return self._run(
+            "docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd, check=check, timeout=timeout
+        )
 
     def gate_down(self) -> None:
         self._run("docker", "rm", "-f", self.gate, check=False)

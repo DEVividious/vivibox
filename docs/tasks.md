@@ -84,6 +84,10 @@ vivibox attach myproject-1            # watch or talk to the agent (Ctrl-q leave
 | `vivibox risky <id>` / `vivibox approve-risky <id>` | review and approve changes to files that run code on your host |
 | `vivibox verify-again <id>` | a blocked task: run the verification once more, without the agent |
 
+When a verification fails on something outside the code (no Docker, no network, a credential, a
+full disk, or a command past `verify_timeout`), the task shows `verification could not run` and
+waits for you without spending one of the agent's attempts: fix it and press `g`.
+
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a
   question, or when risky files changed.

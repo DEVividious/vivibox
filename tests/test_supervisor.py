@@ -412,3 +412,22 @@ def test_resuming_repeats_the_states_own_prompt():
     for state, prompt in own.items():
         resumed = supervisor.resume_prompt(state)
         assert resumed.startswith("You were interrupted") and resumed.endswith(prompt)
+
+
+def test_a_broken_environment_stops_the_task_without_using_an_attempt(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    broken = gate.GateResult(Path("/dev/null"))
+    broken.commands = [gate.CommandResult("mvn -B verify", False, 1.0, "Cannot connect to the Docker daemon")]
+    broken.environment = "Cannot connect to the Docker daemon"
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness, results=[broken])
+    sup.step()  # implement
+    sup.step()  # verify
+    st = task.read_state()
+    assert (st.state, st.iteration) == (State.CHECKPOINT_BLOCKED, 1), "the first attempt, still"
+    assert "could not run" in notes[-1] and "Docker" in notes[-1] and "g" in notes[-1]
+    assert not (task.meta / supervisor.NEXT_PROMPT).exists(), (
+        "no feedback turn for something the agent cannot fix"
+    )
+    assert "Verification could not run" in (task.meta / "handoff" / "verify-feedback.md").read_text()

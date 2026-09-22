@@ -32,6 +32,9 @@ RESERVED_ENV = {
 }
 
 
+DEFAULT_VERIFY_TIMEOUT = 1800
+
+
 class ConfigError(Exception):
     pass
 
@@ -53,6 +56,9 @@ class Config:
     # Addresses the task networks are cut from, one /28 per task. The default is TEST-NET-2, which
     # RFC 5737 reserves for documentation: nothing may use it in a real network, so nothing collides.
     network_pool: str = DEFAULT_NETWORK_POOL
+    # Seconds one verification command may take before it is stopped and counted as a failure of
+    # the environment, not of the code.
+    verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,8 @@ class Project:
     # Variables the build needs from your shell, e.g. a package registry token your login sets:
     # the agent and the gate get their values from the environment vivibox was started in.
     pass_env: list[str] = field(default_factory=list)
+    # This project's time limit for one verification command; 0 means config.toml's.
+    verify_timeout: int = 0
 
 
 def config_dir() -> Path:
@@ -112,6 +120,9 @@ def load_config(base: Path | None = None) -> Config:
     max_iterations = data.get("limits", {}).get("max_iterations", 3)
     if not isinstance(max_iterations, int) or max_iterations < 1:
         raise ConfigError(f"{path}: limits.max_iterations must be an integer >= 1")
+    verify_timeout = data.get("limits", {}).get("verify_timeout", DEFAULT_VERIFY_TIMEOUT)
+    if not isinstance(verify_timeout, int) or verify_timeout < 1:
+        raise ConfigError(f"{path}: limits.verify_timeout must be a number of seconds >= 1")
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -154,7 +165,7 @@ def load_config(base: Path | None = None) -> Config:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
         )
-    return Config(tasks_dir, max_iterations, roles, desktop, ide, str(parsed))
+    return Config(tasks_dir, max_iterations, roles, desktop, ide, str(parsed), verify_timeout=verify_timeout)
 
 
 def _host_service(text: str, where: Path) -> HostService:
@@ -192,4 +203,7 @@ def load_project(name: str, base: Path | None = None) -> Project:
         raise ConfigError(f'{path}: pass_env must be a list of variable names, e.g. ["NPM_TOKEN"]')
     if reserved := sorted(set(pass_env) & RESERVED_ENV):
         raise ConfigError(f"{path}: pass_env: vivibox sets {', '.join(reserved)} in the pod itself")
-    return Project(name, repo, verify, risky_extra, services, demo, java, ide, pass_env)
+    verify_timeout = data.get("verify_timeout", 0)
+    if not isinstance(verify_timeout, int) or verify_timeout < 0:
+        raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
+    return Project(name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout)

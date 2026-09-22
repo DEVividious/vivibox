@@ -256,3 +256,15 @@ def test_the_gate_container_gets_the_project_jdk_too(tmp_path):
     args = pod.gate_command()
     assert f"PATH={toolchain.JDK_LINK}/bin:/cache/mise/shims:/usr/bin" in args
     assert f"JAVA_HOME={toolchain.JDK_LINK}" in args
+
+
+def test_a_gate_command_is_given_its_time_limit(tmp_path):
+    seen = {}
+
+    def runner(cmd, timeout=None):
+        seen["timeout"] = timeout
+        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+
+    pod = Pod("t1", tmp_path / "repo", "img", [], gate_dir=tmp_path / "gate", runner=runner)
+    pod.gate_exec("bash", "-c", "npm test", timeout=90)
+    assert seen["timeout"] == 90

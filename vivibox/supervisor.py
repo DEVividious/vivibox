@@ -371,7 +371,15 @@ class Supervisor:
         target = gate.next_state(result, st.iteration, self.max_iterations)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
             gate.write_feedback(self.task, result)
-        if target is State.IMPLEMENT:
+        if result.environment:
+            # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
+            self.task.transition(target, reason="verification could not run")
+            self.notify(
+                self.task.id,
+                f"verification could not run: {result.environment[:150]}; fix it, then press g"
+                f" (vivibox verify-again {self.task.id})",
+            )
+        elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)
             self.task.transition(target, reason="verification failed")
         elif target is State.CHECKPOINT_BLOCKED:

@@ -33,7 +33,8 @@ def task(tmp_path_factory):
     cfg = tmp / "config"
     (cfg / "projects").mkdir(parents=True)
     (cfg / "config.toml").write_text(
-        f'tasks_dir = "{tasks_dir}"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+        f'tasks_dir = "{tasks_dir}"\n[roles.planner]\nharness = "manual"\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
     )
     (cfg / "projects" / "repocheck.toml").write_text(f'repo = "{source}"\nverify = ["test -f hello.txt"]\n')
     mp = pytest.MonkeyPatch()

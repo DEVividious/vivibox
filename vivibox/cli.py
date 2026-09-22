@@ -185,8 +185,13 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         task,
         harness,
         run_gate=lambda t: gate.run_gate(
-            t, pod, actions.verify_commands(t, project), project.risky_extra, project.java
-        ),
+            t,
+            pod,
+            actions.verify_commands(t, project),
+            project.risky_extra,
+            project.java,
+            timeout=project.verify_timeout or config.verify_timeout,
+        ),  # fmt: skip
         risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
         max_iterations=config.max_iterations,
         notify=lambda task_id, message, kind="": supervisor.notify(
@@ -316,7 +321,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
     pod = actions.task_pod(task.id)
     pod.up()
     commands = actions.verify_commands(task, project)
-    result = gate.run_gate(task, pod, commands, project.risky_extra, project.java)
+    config = load_config()
+    result = gate.run_gate(
+        task, pod, commands, project.risky_extra, project.java,
+        timeout=project.verify_timeout or config.verify_timeout,
+    )  # fmt: skip
+    if result.environment:
+        print(f"ENV   verification could not run: {result.environment}")
     if result.build_skipped:
         print(f"SKIP  the build was not run: {result.build_skipped}")
     if result.unchanged:

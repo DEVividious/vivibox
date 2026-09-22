@@ -2322,3 +2322,18 @@ def test_a_task_that_starts_to_wait_rings_the_bell_and_counts_in_the_title(env, 
         assert rang == [1], "once per task that starts to wait, not every refresh"
 
     run(scenario)
+
+
+def test_a_verification_the_environment_stopped_says_so_and_offers_g_first(env):
+    task = implementing("Goal")
+    task.transition(State.VERIFY)
+    task.event("gate", passed=False, environment="Cannot connect to the Docker daemon")
+    (task.meta / "handoff" / "verify-feedback.md").write_text(
+        "# Verification failed\n\n- Verification could not run: Cannot connect to the Docker daemon.\n"
+    )
+    task.transition(State.CHECKPOINT_BLOCKED, reason="verification could not run")
+    shown = detail(task, task.read_state(), 3, running=True)
+    lines = [line for line in shown.splitlines() if line.strip()]
+    assert lines[2].startswith("**Next:**") and lines[2].index("`g`") < lines[2].index("`r`")
+    assert "Verification could not run" in shown and "Cannot connect to the Docker daemon" in shown
+    assert "keeps failing" not in shown

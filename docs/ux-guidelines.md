@@ -44,6 +44,7 @@ Status labels, the only ones allowed:
 | risky files changed | `approve risky files` | Waiting for you |
 | blocked on the agent's question | `agent asks` | Waiting for you |
 | blocked with every attempt used | `verification failed N×` | Waiting for you |
+| blocked by something outside the code (Docker, network, a credential, the time limit); no attempt spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |
 | stopped by the person | `stopped` | Stopped |
 | the agent's turn failed | `agent turn failed` | Waiting for you |

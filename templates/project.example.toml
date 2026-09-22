@@ -7,6 +7,10 @@ repo = "~/projects/example"
 # Verification commands, run by the gate on a fresh clone of the agent's commits, in order.
 verify = ["mvn -B verify"]
 
+# Seconds one verification command may take here, when this project needs more than
+# limits.verify_timeout in config.toml allows.
+# verify_timeout = 3600
+
 # Extra files that run code on IDE import or on the host, on top of the built-in list.
 risky_extra = []
 

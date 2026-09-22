@@ -193,3 +193,12 @@ def test_decisions_come_first_then_failures_then_the_rest(tmp_path):
     rows = [line.split()[0] for line in out.splitlines()[1:]]
     assert rows == [decision.id, failed.id, working.id]
     assert "could not start" in out
+
+
+def test_blocked_by_the_environment_says_so(tmp_path):
+    task = started(tmp_path, State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY)
+    task.event("gate", passed=False, environment="Cannot connect to the Docker daemon")
+    task.transition(State.CHECKPOINT_BLOCKED, reason="verification could not run")
+    assert seen(task, True).status == "verification could not run", (
+        "not the agent's failure, and no attempt spent"
+    )

@@ -138,6 +138,14 @@ def when_deleted(state: str) -> str:
     return f"while it waited for you to {WAITING[was][0]}" if was in WAITING else ""
 
 
+def environment_problem(task: Task) -> str:
+    """What outside the code stopped the last verification, or "" when it ran."""
+    for event in reversed(task.events()):
+        if event["type"] == "gate":
+            return event["data"].get("environment", "")
+    return ""
+
+
 def why_blocked(task: Task) -> Path | None:
     """The file that says why a blocked task needs you: the agent's question, or what the last
     verification found."""
@@ -213,8 +221,12 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     if st.state in WAITING:
         status = activity(st, max_iterations)
         if st.state is State.CHECKPOINT_BLOCKED:
-            asks = (task.meta / "handoff" / "question.md").exists()
-            status = "agent asks" if asks else f"verification failed {st.iteration}×"
+            if (task.meta / "handoff" / "question.md").exists():
+                status = "agent asks"
+            elif environment_problem(task):
+                status = "verification could not run"
+            else:
+                status = f"verification failed {st.iteration}×"
         return TaskView(status, WAITS, DECISION, commands=tuple(next_commands(st)))
     if st.problem:
         what, _, why = st.problem.partition(": ")

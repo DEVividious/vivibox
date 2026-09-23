@@ -30,8 +30,8 @@ them all:
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
 | `p` | approve changes to risky files |
 | `g` | a task blocked on a failed verification, or on a question the agent asked about it: run the verification again without the agent, once you have fixed what was outside the code (a token expired, Docker, a service) |
-| `l` | read the newest verification log, or the supervisor's, in your pager |
-| `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on; while the verification runs, its log as it is written; Ctrl-q brings you back (Esc in the agent's window interrupts the agent) |
+| `l` | the newest verification log, or the supervisor's, in your pager: followed as it is written while the verification runs (Ctrl-C stops following), otherwise opened at its end, where a failed build says why |
+| `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on, and once both have a conversation, the one you pick; while the verification runs, its log as it is written; Ctrl-q brings you back (Esc in the agent's window interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |

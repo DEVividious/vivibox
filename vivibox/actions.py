@@ -153,14 +153,22 @@ def agent_view(task: Task, command: list[str]) -> None:
         tmux(*option)
 
 
-def watchable_session(task: Task, st: TaskState | None = None) -> str:
-    """The opencode conversation there is to look at, if any: only opencode has a window to attach
-    to, and a claude-code turn is watched through its log. The writer's first, then the planner's."""
+def watchable_sessions(task: Task, st: TaskState | None = None) -> list[tuple[str, str]]:
+    """The opencode conversations there are to look at, as (role, session): only opencode has a
+    window to attach to, and a claude-code turn is watched through its log. The writer's first,
+    then the planner's, which stays readable once the writer is at work."""
     st = st or task.read_state()
-    for role in brief.ROLES[::-1]:
-        if st.sessions.get(role) and role_of(task, role).harness == opencode.NAME:
-            return st.sessions[role]
-    return ""
+    return [
+        (role, st.sessions[role])
+        for role in brief.ROLES[::-1]
+        if st.sessions.get(role) and role_of(task, role).harness == opencode.NAME
+    ]
+
+
+def watchable_session(task: Task, st: TaskState | None = None, role: str = "") -> str:
+    """The conversation w shows: the role's you name, else the first there is; "" for none."""
+    found = dict(watchable_sessions(task, st))
+    return found.get(role, "") if role else next(iter(found.values()), "")
 
 
 def verification_log(task: Task, st: TaskState | None = None) -> Path | None:
@@ -178,29 +186,30 @@ def verification_log(task: Task, st: TaskState | None = None) -> Path | None:
 VERIFICATION_VIEW = ["tail", "-n", "+1", "-F"]
 
 
-def view_command(task: Task, st: TaskState) -> list[str]:
-    """What w shows: the verification's log while it runs, else the agent's opencode window."""
+def view_command(task: Task, st: TaskState, role: str = "") -> list[str]:
+    """What w shows: the verification's log while it runs, else the agent's opencode window; the
+    conversation of the role you name, whatever runs."""
     if not supervisor_running(task):
         raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
-    if st.state is State.VERIFY:
+    if st.state is State.VERIFY and not role:
         log = verification_log(task, st)
         if log is None:
             raise PodError(
                 f"{task.id}: the verification is starting and has no log yet; try again in a moment"
             )
         return [*VERIFICATION_VIEW, str(log)]
-    session = watchable_session(task, st)
+    session = watchable_session(task, st, role)
     if not session:
         raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
     return opencode.OpenCode(task_pod(task.id)).attach_command(session)
 
 
-def attach_command(task_id: str) -> list[str]:
+def attach_command(task_id: str, role: str = "") -> list[str]:
     task, _ = load(task_id)
     st = task.read_state()
     if st.box:
         return box_shell_command(task_id)
-    agent_view(task, view_command(task, st))
+    agent_view(task, view_command(task, st, role))
     return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
 
 

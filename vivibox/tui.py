@@ -236,9 +236,32 @@ def git_diff(task: Task, project) -> list[str]:
     return ["git", "-C", str(project.repo), "diff", f"{base}...{actions.repo.review_ref(task.id)}"]
 
 
-def pager_command(path: Path) -> list[str]:
+def pager_command(path: Path, follow: bool = False, at_end: bool = False) -> list[str]:
+    """Your pager on the file. With less: following it as it is written (Ctrl-C stops following),
+    or opened at its end, where a failed build says why."""
     pager = os.environ.get("PAGER") or shutil.which("less") or "more"
-    return [*pager.split(), str(path)]
+    command = pager.split()
+    if Path(command[0]).name == "less":
+        command += ["+F"] if follow else ["+G"] if at_end else []
+    return [*command, str(path)]
+
+
+def log_command(task: Task, st: TaskState, running: bool) -> list[str] | None:
+    """What l opens: the log being written, followed, while the verification runs; else the
+    newest one, at its end."""
+    log = newest_log(task)
+    if log is None:
+        return None
+    following = st.state is State.VERIFY and running and log.name.startswith("verify-")
+    return pager_command(log, follow=following, at_end=not following)
+
+
+def after_window(session_gone: bool) -> None:
+    """Back from the agent's window: tmux prints [exited] when the session ended under the client,
+    and the line would stay on the terminal you come back to after quitting. Wiped here."""
+    if session_gone:
+        sys.stdout.write("\x1b[1A\x1b[2K")
+        sys.stdout.flush()
 
 
 def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod: PodView) -> str:
@@ -966,6 +989,29 @@ class ChooseEditor(ModalScreen[str]):
     @on(OptionList.OptionSelected)
     def chose(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(self.found[event.option_index].command)
+
+    def key_escape(self) -> None:
+        self.dismiss("")
+
+
+class ChooseSession(ModalScreen[str]):
+    """Which conversation w opens when the task has two. Arrows pick, Enter takes, Escape leaves."""
+
+    def __init__(self, rows: list[tuple[str, str]]):
+        super().__init__()
+        self.rows = rows
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Look at:")
+            yield OptionList(*[f"{role}  {doing}" for role, doing in self.rows], id="sessions")
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    @on(OptionList.OptionSelected)
+    def chose(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.rows[event.option_index][0])
 
     def key_escape(self) -> None:
         self.dismiss("")
@@ -1830,8 +1876,9 @@ HELP = """[b]Your decisions[/b], on the selected task
   o     open the review copy in your IDE
   v     run the app in its pod, or stop it
   w     watch or talk to the agent; while verifying, its log (Ctrl-q leaves);
-        in a box, a shell in it
-  l     read the newest log in your pager
+        with two conversations, asks which; in a box, a shell in it
+  l     the newest log in your pager: followed while the verification runs,
+        else opened at its end
   s     stop the task, or start it again
   m     what each role runs on, for this task
   x     delete the task; on a finished one, its line in the history
@@ -2893,11 +2940,10 @@ class Vivibox(App):
 
     def action_show_log(self) -> None:
         """The newest verification log, or the supervisor's, in your pager."""
-        task, _ = self.selected()
-        log = newest_log(task)
-        if log is not None:
+        task, st = self.selected()
+        if command := log_command(task, st, self.agent_running(task.id)):
             with self.suspend():
-                subprocess.run(pager_command(log))
+                subprocess.run(command)
 
     def action_approve_risky(self) -> None:
         task, _ = self.selected()
@@ -3068,14 +3114,28 @@ class Vivibox(App):
         self.reload()
 
     def action_watch(self) -> None:
-        task, _ = self.selected()
+        """The agent, or the verification as it runs. A task with two conversations, the planner's
+        done and the writer's under way, asks which; the verification's log is the writer's turn."""
+        task, st = self.selected()
+        sessions = [] if st.box or st.state is State.VERIFY else actions.watchable_sessions(task, st)
+        if len(sessions) < 2:
+            self.watch(task.id)
+            return
+        at_work = "planner" if st.state is State.PLAN else "writer"
+        rows = [
+            (role, "at work now" if role == at_work else "finished; its conversation") for role, _ in sessions
+        ]
+        self.push_screen(ChooseSession(rows), lambda role: role and self.watch(task.id, role))
+
+    def watch(self, task_id: str, role: str = "") -> None:
         try:
-            command = actions.attach_command(task.id)
+            command = actions.attach_command(task_id, role)
         except Exception as e:
             self.fail(e)
             return
         with self.suspend():
             subprocess.run(command)
+            after_window(session_gone=not actions.tmux_has(actions.tmux_session(task_id)))
         self.reload()
 
     def action_start_task(self) -> None:

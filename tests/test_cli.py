@@ -680,3 +680,31 @@ def test_a_start_says_which_step_it_is_at(env, monkeypatch, tmp_path):
     with pytest.raises(PodError, match="docker is away"):
         actions.start("demo-1", on_step=steps.append)
     assert steps == ["starting the pod…"], "said before the step, which is the one that took long"
+
+
+def test_attach_shows_the_conversation_of_the_role_you_ask_for(env, monkeypatch):
+    from test_tui import implementing
+
+    from vivibox import actions
+    from vivibox.states import State
+
+    task = implementing()
+    task.set_session("planner", "ses_planner")
+    task.set_session("writer", "ses_writer")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    monkeypatch.setattr(actions, "tmux_has", lambda target: False)
+    calls = fake_tmux(monkeypatch, shows="")
+    assert actions.watchable_sessions(task) == [("writer", "ses_writer"), ("planner", "ses_planner")]
+    actions.attach_command(task.id)
+    created = next(c for c in calls if c[0] == "new-session")
+    assert "ses_writer" in created[-1], "the writer's, at work now, unless you say otherwise"
+    calls.clear()
+    actions.attach_command(task.id, role="planner")
+    created = next(c for c in calls if c[0] == "new-session")
+    assert "ses_planner" in created[-1]
+    task.transition(State.VERIFY)
+    (task.meta / "log" / "verify-1-120000.log").write_text("# fresh clone of commit abc\n")
+    calls.clear()
+    actions.attach_command(task.id, role="planner")
+    created = next(c for c in calls if c[0] == "new-session")
+    assert "ses_planner" in created[-1], "asked for by name, even while the verification runs"

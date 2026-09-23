@@ -2185,6 +2185,47 @@ def test_w_looks_at_the_verification_once_its_log_is_there(env, monkeypatch):
     run(scenario)
 
 
+def test_w_asks_which_conversation_when_the_task_has_two(env, monkeypatch):
+    """The planner's conversation stays readable once the writer is at work; with both there, you
+    pick. With one, w opens it without asking."""
+    task = implementing()
+    task.set_session("writer", "ses_w")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    watched = []
+    monkeypatch.setattr(tui.Vivibox, "watch", lambda self, task_id, role="": watched.append((task_id, role)))
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        assert watched == [(task.id, "")], "one conversation: no question"
+        task.set_session("planner", "ses_p")
+        app.reload()
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseSession)
+        options = app.screen.query_one(OptionList)
+        shown = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert "writer" in shown[0] and "at work" in shown[0], "the one at work first"
+        assert "planner" in shown[1] and "finished" in shown[1]
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert watched[-1] == (task.id, "planner")
+
+    run(scenario)
+
+
+def test_the_farewell_tmux_prints_is_wiped_when_its_session_ended(capsys):
+    """tmux says [exited] when the session ends under the client, and that line stays on the
+    terminal you come back to after quitting vivibox."""
+    tui.after_window(session_gone=True)
+    assert capsys.readouterr().out == "\x1b[1A\x1b[2K"
+    tui.after_window(session_gone=False)
+    assert capsys.readouterr().out == ""
+
+
 def test_a_running_verification_is_shown_as_running(env, monkeypatch):
     task = implementing()
     task.transition(State.VERIFY)
@@ -2207,6 +2248,17 @@ def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
     monkeypatch.setenv("PAGER", "less -R")
     assert tui.newest_log(task) == newest
     assert tui.pager_command(newest) == ["less", "-R", str(newest)]
+    # Where the trouble is: at the end. While the verification runs: following it as it is written.
+    assert tui.pager_command(newest, at_end=True) == ["less", "-R", "+G", str(newest)]
+    assert tui.pager_command(newest, follow=True) == ["less", "-R", "+F", str(newest)]
+    monkeypatch.setenv("PAGER", "more")
+    assert tui.pager_command(newest, follow=True) == ["more", str(newest)], "only less knows the flags"
+    monkeypatch.setenv("PAGER", "less -R")
+    assert tui.log_command(task, task.read_state(), running=False) == ["less", "-R", "+G", str(newest)]
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    assert tui.log_command(task, task.read_state(), running=True) == ["less", "-R", "+F", str(newest)]
+    assert tui.log_command(task, task.read_state(), running=False)[2] == "+G", "nothing is being written"
 
     async def scenario(app, pilot):
         app.reload()

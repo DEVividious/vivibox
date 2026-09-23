@@ -7,7 +7,7 @@ from conftest import make_repo
 from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, box, gate, tui, ui
+from vivibox import actions, box, dialogs, gate, tui, ui
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
@@ -226,7 +226,7 @@ def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monke
 
     fresh = tmp_path / "notes"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tui, "browse_start", lambda: tmp_path)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
 
     async def scenario(app, pilot):
         await pilot.press("i")
@@ -433,7 +433,7 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
 
     fresh = tmp_path / "clicker"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tui, "browse_start", lambda: tmp_path)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
@@ -1904,7 +1904,7 @@ def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypat
 def test_the_folder_browser_opens_with_right_and_picks_with_enter(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work" / "shop").mkdir(parents=True)
-    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
@@ -1929,7 +1929,7 @@ def test_a_click_marks_a_folder_and_select_or_new_folder_act_on_it(env, tmp_path
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
     (home / "zoo").mkdir()
-    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
@@ -1953,7 +1953,7 @@ def test_a_click_marks_a_folder_and_select_or_new_folder_act_on_it(env, tmp_path
 def test_select_picks_the_marked_folder(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
-    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
@@ -1971,7 +1971,7 @@ def test_select_picks_the_marked_folder(env, tmp_path, monkeypatch):
 def test_a_double_click_picks(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
-    monkeypatch.setattr(tui, "browse_start", lambda: home)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):

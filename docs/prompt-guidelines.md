@@ -1,7 +1,7 @@
 # Prompt guidelines
 
 Read this before changing anything an agent reads: the prompts in `vivibox/supervisor.py`,
-`vivibox/manual.py` and `vivibox/actions.py`, the templates in `vivibox/templates/`, and the
+`vivibox/manual.py` and `vivibox/demo.py`, the templates in `vivibox/templates/`, and the
 feedback the gate writes in `vivibox/gate.py`. The rules can be checked, and
 `tests/test_prompt_rules.py` checks the mechanical ones. A change to a rule updates the table
 here in the same commit.

@@ -136,6 +136,10 @@ def test_a_plan_without_a_build_is_accepted_without_a_word_about_the_project(env
     assert not load_project("notes").no_build and load_project("notes").verify == []
 
 
+def options_now(app) -> int:
+    return app.screen.query_one(OptionList).highlighted
+
+
 def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch):
     """The commands the build files name, no build, or one of your own; the file itself last."""
     from vivibox.config import load_project
@@ -157,7 +161,8 @@ def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch)
                  for i in range(app.screen.query_one(OptionList).option_count)]  # fmt: skip
         assert "npm ci && npm test" in shown[0] and "package.json" in shown[0]
         assert any("no build" in s for s in shown) and any("edit the project file" in s for s in shown)
-        await pilot.press("enter")  # the first: what package.json names
+        assert "first plan" in shown[options_now(app)], "undecided so far: the cursor says so"
+        await pilot.press("home", "enter")  # the first: what package.json names
         await pilot.pause()
         assert load_project("notes").verify == ["npm ci && npm test"]
         await pilot.press("e")
@@ -220,6 +225,57 @@ def test_the_new_project_dialog_says_where_the_command_comes_from_and_lets_you_p
     assert load_project("shop").verify == ["bash mvnw --batch-mode verify -Pit"]
 
 
+def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeypatch):
+    """The cursor is on the current choice, marked, so Enter changes nothing and the arrows say
+    what the alternatives are: from i on an empty folder, from e on a command of your own."""
+    from vivibox.config import load_project
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
+
+    def current(app):
+        options = app.screen.query_one(OptionList)
+        return str(options.get_option_at_index(options.highlighted).prompt)
+
+    async def scenario(app, pilot):
+        await pilot.press("i")
+        await pilot.pause()
+        app.screen.query_one("#browse").press()
+        await pilot.pause()
+        app.screen.query_one("#new-folder").press()
+        await pilot.pause()
+        await pilot.press(*"notes", "enter")
+        await pilot.pause()
+        app.screen.query_one("#change").press()
+        await pilot.pause()
+        assert "first plan" in current(app) and "← now" in current(app)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "first plan" in str(app.screen.query_one("#verify", Label).render()), "Enter keeps it"
+        app.screen.query_one("#change").press()
+        await pilot.pause()
+        await pilot.press("up", "enter")  # the one above: no build
+        await pilot.pause()
+        assert "no build" in str(app.screen.query_one("#verify", Label).render())
+        app.screen.query_one("#create").press()
+        await pilot.pause()
+        await pilot.press("escape")  # the new project's first task: not now
+        await pilot.pause()
+        actions.save_verify(load_project("notes"), ["make check"])
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("notes"))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseVerify)
+        assert "make check" in current(app) and "← now" in current(app), "a command of your own, too"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("notes").verify == ["make check"], "Enter keeps it"
+
+    run(scenario)
+
+
 def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monkeypatch):
     from vivibox.config import load_project
 
@@ -241,7 +297,8 @@ def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monke
         await pilot.pause()
         options = app.screen.query_one(OptionList)
         labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
-        await pilot.press(*["down"] * labels.index(next(s for s in labels if "no build" in s)), "enter")
+        options.highlighted = labels.index(next(s for s in labels if "no build" in s))
+        await pilot.press("enter")
         await pilot.pause()
         assert "no build" in str(app.screen.query_one("#verify", Label).render())
         app.screen.query_one("#create").press()

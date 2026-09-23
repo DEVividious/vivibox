@@ -390,11 +390,12 @@ class NewProject(Dialog):
 class ChooseVerify(ModalScreen[dict]):
     """How a project is verified: a command its build files or its pipeline name, no build, one of
     your own, or the file itself for the rest of it. Before the project exists (from i), the file
-    is not offered, and leaving it to the first plan is. Arrows pick, Enter takes, Escape leaves
-    it as it is."""
+    is not offered, and leaving it to the first plan is. It opens on what is set now, marked, so
+    Enter keeps it. Arrows pick, Enter takes, Escape leaves it as it is."""
 
     EDIT = "edit the project file in your editor, for pass_env and host services too…"
     PLAN_DECIDES = "leave it to the first plan you accept"
+    NOW = "  ← now"
 
     def __init__(
         self,
@@ -408,35 +409,51 @@ class ChooseVerify(ModalScreen[dict]):
         self.project_name, self.verify, self.no_build = name, verify, no_build
         self.candidates, self.exists = candidates, exists
 
+    def rows(self) -> list[tuple[str, dict]]:
+        """Each choice as its label and what taking it means, the current one marked. A command of
+        your own, from the file or typed in, is a row of its own; undecided is a row when it is
+        what the project is at."""
+        rows: list[tuple[str, dict]] = [
+            (f"{escape(c)}  [dim]from {escape(source)}[/]", {"verify": [c], "no_build": False})
+            for c, source in self.candidates
+        ]
+        if self.verify and self.verify[0] not in {c for c, _ in self.candidates}:
+            source = "the project file" if self.exists else "you"
+            rows.append(
+                (
+                    f"{escape(self.verify[0])}  [dim]from {source}[/]",
+                    {"verify": self.verify, "no_build": False},
+                )
+            )
+        rows.append((escape(actions.NO_BUILD), {"verify": [], "no_build": True}))
+        undecided = not self.verify and not self.no_build
+        if not self.exists or undecided:
+            rows.append((self.PLAN_DECIDES, {"verify": [], "no_build": False}))
+        if self.exists:
+            rows.append((self.EDIT, {"edit": True}))
+        return [(label + (self.NOW if choice == self.now() else ""), choice) for label, choice in rows]
+
+    def now(self) -> dict:
+        return {"verify": self.verify, "no_build": self.no_build}
+
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(f"How {self.project_name} is verified:")
-            now = "  ← now"
-            labels = [
-                f"{escape(c)}  [dim]from {escape(source)}[/]" + (now if [c] == self.verify else "")
-                for c, source in self.candidates
-            ]
-            labels.append(escape(actions.NO_BUILD) + (now if self.no_build else ""))
-            labels.append(self.EDIT if self.exists else self.PLAN_DECIDES)
-            yield OptionList(*labels, id="choices")
+            yield OptionList(*(label for label, _ in self.rows()), id="choices")
             with Horizontal(classes="role"):
                 yield Label("Other")
                 yield Input(placeholder="a command of your own; Enter takes it", id="other")
 
     def on_mount(self) -> None:
-        self.query_one(OptionList).focus()
+        options = self.query_one(OptionList)
+        options.highlighted = next(
+            (i for i, (_, choice) in enumerate(self.rows()) if choice == self.now()), 0
+        )
+        options.focus()
 
     @on(OptionList.OptionSelected)
     def chose(self, event: OptionList.OptionSelected) -> None:
-        i = event.option_index
-        if i < len(self.candidates):
-            self.dismiss({"verify": [self.candidates[i][0]], "no_build": False})
-        elif i == len(self.candidates):
-            self.dismiss({"verify": [], "no_build": True})
-        elif self.exists:
-            self.dismiss({"edit": True})
-        else:
-            self.dismiss({"verify": [], "no_build": False})
+        self.dismiss(self.rows()[event.option_index][1])
 
     @on(Input.Submitted)
     def typed(self, event: Input.Submitted) -> None:

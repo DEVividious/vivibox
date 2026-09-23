@@ -90,6 +90,8 @@ from .panel import (  # noqa: F401
     REFRESH_SECONDS,
     SPIN_SECONDS,
     SPINNER,
+    TASK_ACTIONS,
+    WAITING_ONLY,
     PodView,
     after_window,
     build_said,
@@ -101,12 +103,14 @@ from .panel import (  # noqa: F401
     finished_detail,
     gate_failed,
     git_diff,
+    keys_for,
     last_gate,
     load_collapsed,
     log_command,
     newest_log,
     next_steps,
     pager_command,
+    planned_by_you,
     plans_verify,
     pod_view,
     pod_views,
@@ -124,8 +128,6 @@ from .panel import (  # noqa: F401
 from .plan import PlanError, parse_plan
 from .states import State
 from .task import Task, TaskState, list_tasks
-
-WAITING_ONLY = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY}
 
 
 class LiveFooter(Footer):
@@ -763,10 +765,6 @@ class Vivibox(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Only the keys that do something for the selected task show in the footer."""
-        task_actions = ("accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch",
-                        "start_task", "stop_task", "stop_pod", "remove", "demo", "demo_stop",
-                        "models", "copy_prompt", "copy_prompt_cli", "verify_again", "show_log",
-                        "show_diff", "enter_box")  # fmt: skip
         if action == "new":
             return bool(projects())  # a task needs a project to be in
         if action in ("edit_project", "open_repo", "forget_project", "new_box"):
@@ -782,59 +780,14 @@ class Vivibox(App):
             return bool(projects()) or (self.is_mounted and not self.panel.has_class("hidden"))
         if action == "toggle_done":
             return self.has_done
-        if action not in task_actions:  # quit, and moving focus in dialogs
+        if action not in TASK_ACTIONS:  # quit, and moving focus in dialogs
             return True
         pick = self.selected()
         if not pick:
             # A finished task is history: you can only look at it or forget it.
             return action == "remove" and self.finished_entry(self.selected_id()) is not None
-        state, running = pick[1].state, self.agent_running(pick[1].id)
-        at_work = running and not pick[1].paused
-        box = pick[1].box
-        if box and state is State.IMPLEMENT:
-            # A box has no agent to reply to, watch or model; its keys are the pod's.
-            open_ = not pick[1].paused and pick[1].id not in self.starting
-            return {
-                "enter_box": open_,
-                "accept": open_,
-                "start_task": pick[1].paused and pick[1].id not in self.starting,
-                "stop_task": open_,
-                "remove": True,
-                "demo": open_,
-                "demo_stop": self.pod.demo,
-                "show_log": newest_log(pick[0]) is not None,
-            }.get(action, False)
-        allowed = {
-            # A manual planner's checkpoint before your plan is in has nothing to accept, and a
-            # reply would reach nobody: the planner is your own chat.
-            "accept": state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL) and not pick[1].awaiting_plan,
-            "reply": state in WAITING_ONLY and not pick[1].awaiting_plan and not box,
-            "models": state is not State.DONE and not box,
-            # Not while the agent may be writing its own draft.
-            "edit_plan": state is State.CHECKPOINT_PLAN or (state is State.PLAN and not running),
-            "open_ide": state is State.CHECKPOINT_FINAL,
-            "show_diff": state is State.CHECKPOINT_FINAL,
-            # Also once a plan is in: going back to the same chat is how you change it.
-            "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
-            "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
-            "approve_risky": state is State.APPROVAL_RISKY,
-            # With a question too: the agent asks about the environment more often than the gate
-            # recognises one, and once that is fixed the build is the answer.
-            "verify_again": state is State.CHECKPOINT_BLOCKED,
-            "show_log": newest_log(pick[0]) is not None,
-            "watch": watchable(pick[0], pick[1], running),
-            # Not again while one of them is under way. A task that stopped on a failure still has
-            # its supervisor, and what it needs is a start, not a stop followed by a start.
-            "start_task": state is not State.DONE and not at_work and pick[1].id not in self.starting,
-            "stop_task": at_work and state not in WAITING_ONLY and pick[1].id not in self.starting,
-            "stop_pod": at_work and state in WAITING_ONLY and pick[1].id not in self.starting,
-            "remove": True,
-            # Once the work is back with you, not while the agent builds in the same tree. Running
-            # it again while it runs is a restart, which is what you want after a change.
-            "demo": actions.demo_allowed(pick[1]),
-            "demo_stop": self.pod.demo,
-        }
-        return allowed.get(action, True)
+        task, st = pick
+        return keys_for(task, st, self.agent_running(st.id), st.id in self.starting, self.pod.demo)[action]
 
     def fail(self, error: Exception) -> None:
         self.notify(str(error.args[0] if error.args else error), severity="error", timeout=10)
@@ -984,7 +937,7 @@ class Vivibox(App):
             self.start(task.id, resume=True)
 
     def planned_by_you(self, task: Task) -> bool:
-        return (task.meta / manual.PROMPT).exists()
+        return planned_by_you(task)
 
     def action_edit_plan(self) -> None:
         task, st = self.selected()

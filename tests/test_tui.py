@@ -2282,6 +2282,42 @@ def test_the_farewell_tmux_prints_is_wiped_when_its_session_ended(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_what_each_key_may_do_in_each_state(env):
+    """One table of the task's keys per state, checked as a table: the place a wrong key hides."""
+    from dataclasses import replace
+
+    from vivibox.panel import keys_for
+
+    task = new_task()
+
+    def keys(state, running=False, paused=False, awaiting_plan=False, busy=False, demo=False, box=False):
+        st = replace(task.read_state(), state=state, paused=paused, awaiting_plan=awaiting_plan, box=box)
+        return {key for key, allowed in keys_for(task, st, running, busy, demo).items() if allowed}
+
+    plan = keys(State.CHECKPOINT_PLAN)
+    assert {"accept", "reply", "edit_plan", "models", "start_task", "remove"} <= plan
+    assert not {"verify_again", "open_ide", "show_diff", "demo", "stop_task"} & plan
+    assert "accept" not in keys(State.CHECKPOINT_PLAN, awaiting_plan=True), "no plan of yours in yet"
+    blocked = keys(State.CHECKPOINT_BLOCKED, running=True)
+    assert {"verify_again", "reply", "stop_pod"} <= blocked and not {"stop_task", "start_task"} & blocked
+    final = keys(State.CHECKPOINT_FINAL)
+    assert {"accept", "open_ide", "show_diff", "demo", "reply"} <= final and "demo_stop" not in final
+    assert "demo_stop" in keys(State.CHECKPOINT_FINAL, demo=True)
+    implementing = keys(State.IMPLEMENT, running=True)
+    assert "stop_task" in implementing and not {"stop_pod", "demo", "edit_plan", "start_task"} & implementing
+    assert "start_task" in keys(State.IMPLEMENT, running=False), "nobody is working on it"
+    assert "start_task" not in keys(State.IMPLEMENT, running=False, busy=True), "not twice"
+    assert "edit_plan" in keys(State.PLAN, running=False) and "edit_plan" not in keys(
+        State.PLAN, running=True
+    )
+    done = keys(State.DONE)
+    assert "remove" in done and not {"models", "start_task", "accept"} & done
+    box = keys(State.IMPLEMENT, running=True, box=True)
+    assert {"enter_box", "accept", "stop_task", "demo", "remove"} <= box
+    assert not {"reply", "models", "watch", "verify_again", "start_task"} & box, "a box has no agent"
+    assert "start_task" in keys(State.IMPLEMENT, paused=True, box=True)
+
+
 def test_a_running_verification_is_shown_as_running(env, monkeypatch):
     task = implementing()
     task.transition(State.VERIFY)

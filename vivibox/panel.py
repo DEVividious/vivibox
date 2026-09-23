@@ -415,6 +415,70 @@ def finished_detail(entry: dict) -> str:
     )
 
 
+WAITING_ONLY = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY}
+# The keys that act on the selected task; the rest of the view's keys are always there.
+TASK_ACTIONS = (
+    "accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch", "start_task", "stop_task",
+    "stop_pod", "remove", "demo", "demo_stop", "models", "copy_prompt", "copy_prompt_cli",
+    "verify_again", "show_log", "show_diff", "enter_box",
+)  # fmt: skip
+
+
+def planned_by_you(task: Task) -> bool:
+    return (task.meta / manual.PROMPT).exists()
+
+
+def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running: bool) -> dict[str, bool]:
+    """Which of the task's keys do something now, one table for every state: the footer, the
+    hints and the actions all ask here. busy: a start or a stop of this task is under way."""
+    at_work = running and not st.paused
+    if st.box and st.state is State.IMPLEMENT:
+        # A box has no agent to reply to, watch or model; its keys are the pod's.
+        open_ = not st.paused and not busy
+        allowed = {
+            "enter_box": open_,
+            "accept": open_,
+            "start_task": st.paused and not busy,
+            "stop_task": open_,
+            "remove": True,
+            "demo": open_,
+            "demo_stop": demo_running,
+            "show_log": newest_log(task) is not None,
+        }
+        return {action: allowed.get(action, False) for action in TASK_ACTIONS}
+    allowed = {
+        # A manual planner's checkpoint before your plan is in has nothing to accept, and a
+        # reply would reach nobody: the planner is your own chat.
+        "accept": st.state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL) and not st.awaiting_plan,
+        "reply": st.state in WAITING_ONLY and not st.awaiting_plan and not st.box,
+        "models": st.state is not State.DONE and not st.box,
+        # Not while the agent may be writing its own draft.
+        "edit_plan": st.state is State.CHECKPOINT_PLAN or (st.state is State.PLAN and not running),
+        "open_ide": st.state is State.CHECKPOINT_FINAL,
+        "show_diff": st.state is State.CHECKPOINT_FINAL,
+        # Also once a plan is in: going back to the same chat is how you change it.
+        "copy_prompt": st.state is State.CHECKPOINT_PLAN and planned_by_you(task),
+        "copy_prompt_cli": st.state is State.CHECKPOINT_PLAN and planned_by_you(task),
+        "approve_risky": st.state is State.APPROVAL_RISKY,
+        # With a question too: the agent asks about the environment more often than the gate
+        # recognises one, and once that is fixed the build is the answer.
+        "verify_again": st.state is State.CHECKPOINT_BLOCKED,
+        "show_log": newest_log(task) is not None,
+        "watch": watchable(task, st, running),
+        # Not again while one of them is under way. A task that stopped on a failure still has
+        # its supervisor, and what it needs is a start, not a stop followed by a start.
+        "start_task": st.state is not State.DONE and not at_work and not busy,
+        "stop_task": at_work and st.state not in WAITING_ONLY and not busy,
+        "stop_pod": at_work and st.state in WAITING_ONLY and not busy,
+        "remove": True,
+        # Once the work is back with you, not while the agent builds in the same tree. Running
+        # it again while it runs is a restart, which is what you want after a change.
+        "demo": actions.demo_allowed(st),
+        "demo_stop": demo_running,
+    }
+    return {action: allowed.get(action, True) for action in TASK_ACTIONS}
+
+
 def watchable(task: Task, st: TaskState, running: bool) -> bool:
     """Whether w has something to show, and only while the task is at work: the verification's
     log once the gate has opened it, else the agent, which only opencode has a window for. The

@@ -1941,6 +1941,29 @@ def test_g_verifies_a_blocked_task_again_and_is_offered_only_there(env):
     run(scenario)
 
 
+def test_g_is_offered_on_a_blocked_task_with_a_question_too(env):
+    """The agent asks about the environment more often than the gate recognises one: once you
+    have fixed what it names, g verifies again without a turn, and the question is put away."""
+    task = blocked_on_verification()
+    (task.meta / "handoff" / "question.md").write_text("The image cannot be pulled: x509\n")
+    shown = detail(task, task.read_state(), 3, running=False)
+    next_line = next(line for line in shown.splitlines() if line.startswith("**Next:**"))
+    assert "`r` answer" in next_line and "`g` verify again" in next_line
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        assert app.check_action("verify_again", ())
+        await pilot.press("g")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert task.read_state().state is State.VERIFY
+        assert not (task.meta / "handoff" / "question.md").exists()
+
+    run(scenario)
+
+
 def test_the_next_step_comes_first_in_the_panel(env):
     task = blocked_on_verification()
     shown = detail(task, task.read_state(), 3, running=True)

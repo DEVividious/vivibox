@@ -527,3 +527,16 @@ def test_the_review_message_counts_removed_tests(task):
     sup.step()
     sup.step()
     assert task.read_state().state is State.CHECKPOINT_FINAL and "2 tests removed" in notes[-1]
+
+
+def test_verifying_again_puts_the_agents_question_away(task):
+    """The agent asked about the environment and you fixed it: the question is answered by the
+    build running, and left in place it would block the next turn as a new one."""
+    from vivibox import actions, supervisor
+
+    harness = FakeHarness(task)
+    blocked(task, harness)
+    (task.meta / "handoff" / "question.md").write_text("Docker cannot pull images here: x509\n")
+    actions.verify_again(task)
+    assert supervisor.question(task) is None
+    assert list((task.meta / "handoff").glob("question-answered-*.md")), "kept for the record"

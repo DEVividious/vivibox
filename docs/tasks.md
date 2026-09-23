@@ -29,7 +29,7 @@ them all:
 | `f` | the work as a diff, in git's pager, before you accept it |
 | `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
 | `p` | approve changes to risky files |
-| `g` | a task blocked on a failed verification: run the verification again without the agent, for when the cause was outside the code (a token expired, Docker, a service) |
+| `g` | a task blocked on a failed verification, or on a question the agent asked about it: run the verification again without the agent, once you have fixed what was outside the code (a token expired, Docker, a service) |
 | `l` | read the newest verification log, or the supervisor's, in your pager |
 | `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on; while the verification runs, its log as it is written; Ctrl-q brings you back (Esc in the agent's window interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
@@ -89,7 +89,9 @@ vivibox attach myproject-1            # watch or talk to the agent, or the verif
 
 When a verification fails on something outside the code (no Docker, no network, a credential, a
 full disk, or a command past `verify_timeout`), the task shows `verification could not run` and
-waits for you without spending one of the agent's attempts: fix it and press `g`.
+waits for you without spending one of the agent's attempts: fix it and press `g`. When the
+verification does not recognise such a cause but the agent does and asks about it, `g` is the
+answer too: the build runs again, without a turn of the agent.
 
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a

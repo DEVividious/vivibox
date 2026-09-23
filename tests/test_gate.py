@@ -599,3 +599,43 @@ def test_removed_tests_are_counted_for_you(tmp_path):
     assert result.passed, "for you to see at review, not a failure"
     assert t.events()[-1]["data"]["removed_tests"] == 1
     assert "subtracts" not in gate.feedback(result), "not for the agent, which would put it back"
+
+
+def test_a_certificate_failure_deep_in_a_maven_log_is_of_the_environment(task):
+    """Maven ends a failed build with its reactor summary, dozens of lines below the test that
+    could not pull an image: the words that say why are nowhere near the end."""
+    gate.accept_plan(task, ["true"])
+    x509 = (
+        "Caused by: com.github.dockerjava.api.exception.DockerClientException: Could not pull image:"
+        " tls: failed to verify certificate: x509: certificate signed by unknown authority"
+    )
+    summary = "\n".join(f"[INFO] module-{i} ........... SUCCESS [  0.1 s]" for i in range(80))
+    said = f"[ERROR] ReportsIT.starts:12\n{x509}\n[INFO] Reactor Summary:\n{summary}\n[INFO] BUILD FAILURE"
+    result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
+    assert "x509" in result.environment, "outside the code, wherever in the output it says so"
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
+
+
+def test_a_refused_connection_far_from_the_end_is_still_of_the_code(task):
+    """A test that checks a refusal on purpose prints the same words; only as the build's last
+    words do they mean the environment."""
+    gate.accept_plan(task, ["true"])
+    lines = "\n".join(f"[INFO] line {i}" for i in range(80))
+    said = f"Error: connect ECONNREFUSED 127.0.0.1:1\n{lines}\n[INFO] BUILD FAILURE"
+    result = gate.run_gate(task, FakePod(fail={"npm test"}, output=said), ["npm test"], [])
+    assert result.environment == ""
+
+
+def test_your_reply_builds_the_same_commit_again(task):
+    """The verification failed on something the gate took for the code, the agent asked, and you
+    replied that it is fixed. The agent, rightly, committed nothing: the build must run, not
+    repeat the old failure to the agent, which would only ask again."""
+    gate.accept_plan(task, ["true"])
+    implementing(task)
+    pod = FakePod(fail={"npm test"}, output="[ERROR] expected 1 but was 2")
+    gate.run_gate(task, pod, ["npm test"], [])
+    task.transition(State.CHECKPOINT_BLOCKED, reason="question from the agent")
+    task.transition(State.IMPLEMENT, reason="your reply")
+    task.transition(State.VERIFY)
+    again = gate.run_gate(task, pod, ["npm test"], [])
+    assert pod.commands.count("npm test") == 2 and not again.unchanged

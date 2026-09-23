@@ -1140,12 +1140,15 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
 
 def verify_again(task: Task) -> None:
     """Runs the verification once more on the work as it is, without a turn of the agent. For a
-    failure whose cause was outside the code: an expired token, Docker, a service that was down.
-    A reply would cost a turn and invite the agent to change code that was fine."""
+    failure whose cause was outside the code: an expired token, Docker, a service that was down,
+    whether the gate saw that itself or the agent asked about it. A reply would cost a turn and
+    invite the agent to change code that was fine. A question the agent asked is answered by the
+    build running, so it goes out of the way like an answered one."""
     if task.read_state().state is not State.CHECKPOINT_BLOCKED:
         raise gate.GateError(
             f"{task.id} is not blocked on a failed verification; only that is verified again"
         )
+    supervisor.put_question_away(task)
     task.transition(State.VERIFY, reason="verify again")
 
 

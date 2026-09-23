@@ -263,7 +263,7 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         return "`p` approve the files as shown · `r` send the agent back"
     if st.state is State.CHECKPOINT_BLOCKED:
         if (task.meta / "handoff" / supervisor.QUESTION).exists():
-            return "`r` answer" + watch
+            return "`r` answer · `g` verify again, once you have fixed what it names" + watch
         if ui.environment_problem(task):
             return "`g` verify again, once you have fixed it · `r` tell the agent" + watch
         return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
@@ -2519,9 +2519,9 @@ class Vivibox(App):
             "copy_prompt": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "copy_prompt_cli": state is State.CHECKPOINT_PLAN and self.planned_by_you(pick[0]),
             "approve_risky": state is State.APPROVAL_RISKY,
-            # Only a failed verification is worth running again; a question needs an answer.
-            "verify_again": state is State.CHECKPOINT_BLOCKED
-            and not (pick[0].meta / "handoff" / supervisor.QUESTION).exists(),
+            # With a question too: the agent asks about the environment more often than the gate
+            # recognises one, and once that is fixed the build is the answer.
+            "verify_again": state is State.CHECKPOINT_BLOCKED,
             "show_log": newest_log(pick[0]) is not None,
             "watch": watchable(pick[0], pick[1], running),
             # Not again while one of them is under way. A task that stopped on a failure still has

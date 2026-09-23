@@ -155,7 +155,8 @@ def reworded_criteria(task: Task, missing: list[str]) -> dict[str, str]:
 
 
 # What a build says when the trouble is outside the code: no Docker, no network or registry, a
-# credential, a full disk. Matched against the end of a failed command's output only.
+# credential, a full disk. Matched against the end of a failed command's output only: a test that
+# checks a refusal on purpose prints the same words, but not as its last words.
 ENVIRONMENT = re.compile(
     r"Could not find a valid Docker environment|Cannot connect to the Docker daemon"
     r"|docker: command not found|TESTCONTAINERS.*(?:not found|refused)"
@@ -164,21 +165,29 @@ ENVIRONMENT = re.compile(
     r"|status code: (401|403|407)|\b(401 Unauthorized|403 Forbidden|407 Proxy)\b"
     r"|token.{0,40}(expired|invalid)|(expired|invalid).{0,40}token|credentials? (not found|expired|invalid)"
     r"|SSL certificate problem|unable to get local issuer certificate"
-    r"|certificate signed by unknown authority|tls: failed to verify certificate|\bx509: "
     r"|short read: expected \d+ ?bytes"
-    r"|No space left on device|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
+    r"|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
     r"|Temporary failure in name resolution|network is unreachable",
+    re.IGNORECASE,
+)
+# Words no test prints on purpose, matched anywhere in the output: a build tool that runs many
+# modules ends with its summary, dozens of lines below the test that could not pull an image.
+ENVIRONMENT_ANYWHERE = re.compile(
+    r"certificate signed by unknown authority|tls: failed to verify certificate|\bx509: "
+    r"|No space left on device",
     re.IGNORECASE,
 )
 ENVIRONMENT_TAIL = 60
 
 
 def environment_problem(output: str) -> str:
-    """The line at the end of a failed command's output that says the trouble is outside the code,
-    or "". Only the end: a test that checks a connection refusal prints the same words on purpose,
-    but not as its last words."""
-    tail = [line.strip() for line in output.splitlines()[-ENVIRONMENT_TAIL:] if line.strip()]
-    return next((line[:200] for line in tail if ENVIRONMENT.search(line)), "")
+    """The line of a failed command's output that says the trouble is outside the code, or "".
+    Words only the environment says count anywhere; the rest only at the end."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    tail = lines[-ENVIRONMENT_TAIL:]
+    found = next((line for line in tail if ENVIRONMENT.search(line)), "")
+    found = found or next((line for line in lines if ENVIRONMENT_ANYWHERE.search(line)), "")
+    return found[:200]
 
 
 # Lines of a build log that say what went wrong, in the usual tools' words.
@@ -409,12 +418,14 @@ def masked(text: str, values: list[str]) -> str:
 
 
 def _after_a_turn(task: Task) -> bool:
-    """Whether this verification follows a turn of the agent, as against your 'verify again'
-    after fixing something outside the code, which must build whatever the commit."""
-    for event in reversed(task.events()):
-        if event["type"] == "state":
-            return event["data"].get("previous") == str(State.IMPLEMENT)
-    return False
+    """Whether this verification follows a turn the gate's own feedback sent the agent on. After
+    your 'verify again', or your reply (the agent may rightly commit nothing to "it is fixed"),
+    whatever the commit is built again: what you fixed was outside it."""
+    states = [e["data"] for e in task.events() if e["type"] == "state"]
+    if not states or states[-1].get("previous") != str(State.IMPLEMENT):
+        return False
+    entered = next((s for s in reversed(states[:-1]) if s.get("current") == str(State.IMPLEMENT)), None)
+    return entered is not None and entered.get("previous") == str(State.VERIFY)
 
 
 def _last_build(task: Task) -> dict | None:

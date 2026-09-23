@@ -216,10 +216,8 @@ class Vivibox(App):
     .form Select:focus > SelectCurrent > Static#label {
         color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;
     }
-    Help, Confirm, DeleteTask, Reply, ReplyWithCriteria, NewTask, NewProject, CommitWork, ChooseEditor,
-    AddProvider, ChooseImport, ImportSource, ManageProviders, ManageItems, Browse, NameFolder {
-        align: center middle;
-    }
+    /* Every dialog sits in the middle of the screen, the ones still to be written too. */
+    ModalScreen { align: center middle; }
     """
     # In the footer's order: your decisions first, then the selected row's actions, then what
     # works anywhere. Keys that matter less often are under ? and off the footer, which is short.

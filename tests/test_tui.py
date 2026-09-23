@@ -3024,3 +3024,33 @@ def test_the_panel_says_how_long_the_agent_has_been_implementing(env):
     task._write_state(st)
     shown = detail(task, task.read_state(), 3, running=True)
     assert "**Implementing** for 7 min" in shown
+
+
+def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypatch):
+    """Whatever the dialog, it sits in the middle: the rule is on ModalScreen, not on a list of
+    names a new dialog can be left off."""
+    import inspect
+
+    from textual.screen import ModalScreen
+
+    from vivibox import dialogs
+
+    fresh_project(env, "notes")
+    (env / "notes" / "package.json").write_text("{}")
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("notes"))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseVerify)
+        assert app.screen.styles.align == ("center", "middle"), "the picker from e, in the middle"
+
+    run(scenario)
+    named = [
+        name
+        for name, cls in inspect.getmembers(dialogs, inspect.isclass)
+        if issubclass(cls, ModalScreen) and cls.__module__ == dialogs.__name__ and name in tui.Vivibox.CSS
+    ]
+    assert not named, f"dialogs named in the CSS instead of one rule on ModalScreen: {named}"

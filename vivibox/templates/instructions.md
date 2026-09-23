@@ -48,8 +48,9 @@ Each of these is checked when a turn ends; a change that breaks one comes back i
   included. Pick the language the task calls for, not the one that happens to be installed:
   `mise use <tool>@<version>` writes a `mise.toml` the verification reads too; it is a build file,
   so the plan has to call for it.
-- There is no remote to push to and no credential for one.
-- When a turn ends, the orchestrator runs this on a fresh clone of the commits:
+- There is no remote to push to.
+- When a turn ends, the orchestrator runs this on a fresh clone of the commits, dependencies
+  installed first:
 {verify}
 
 ## What to trust

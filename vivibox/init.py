@@ -88,6 +88,20 @@ NODE_VERIFY = {
     "yarn-classic": "yarn install --frozen-lockfile && yarn test",
     "pnpm": "pnpm install --frozen-lockfile && pnpm test",
 }
+# The install half of each: what a fresh clone needs before any of its scripts can run.
+NODE_INSTALL = {manager: command.split(" && ")[0] for manager, command in NODE_VERIFY.items()}
+# A command that installs the dependencies itself, in any of the package managers' words.
+INSTALLS = re.compile(r"\b(npm (ci|install|i)\b|yarn install\b|pnpm (install|i)\b|corepack\b)|^\s*yarn\s*$")
+
+
+def with_dependencies(repo: Path, commands: list[str]) -> list[str]:
+    """The commands with the project's dependencies installed first, for a Node project whose
+    commands do not do that themselves: on a fresh clone every tool they need is "not found"."""
+    if not commands or not (repo / "package.json").exists():
+        return commands
+    if any(INSTALLS.search(command) for command in commands):
+        return commands
+    return [NODE_INSTALL[package_manager(repo)], *commands]
 
 
 def package_manager(repo: Path) -> str:

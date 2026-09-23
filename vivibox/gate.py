@@ -284,6 +284,11 @@ SWITCHED_OFF = re.compile(
     r"|\bt\.Skip(Now|f)?\s*\("  # Go
 )
 PROSE = (".md", ".txt", ".rst", ".adoc")
+# A test is code in one of these; a fixture, a snapshot or a table under test/ is data it reads.
+CODE = (
+    ".py", ".go", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".java", ".kt", ".kts", ".scala",
+    ".groovy", ".rb", ".rs", ".cs", ".php", ".swift", ".sh",
+)  # fmt: skip
 
 
 def switched_off_tests(repo_dir: Path, base: str) -> list[str]:
@@ -310,7 +315,7 @@ TEST_DEFINITION = re.compile(
 
 
 def is_test_file(path: str) -> bool:
-    return not path.endswith(PROSE) and bool(TEST_FILE.search(path))
+    return path.endswith(CODE) and bool(TEST_FILE.search(path))
 
 
 def changed_test_files(repo_dir: Path, base: str) -> list[str]:
@@ -484,6 +489,7 @@ def run_gate(
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
     result = GateResult(log)
     head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    commands = init.with_dependencies(task.repo, commands)
     # Before the build, the two things that would make it meaningless: it would build a tree that
     # is not what was committed, or run a suite with a test switched off.
     result.uncommitted = uncommitted(task.repo)
@@ -618,7 +624,10 @@ def feedback(result: GateResult) -> str:
             parts.append(
                 f"- Command failed: `{c.command}`. What it said (all of it: /task/handoff/verify.log):"
             )
-            parts.append(f"  ```\n{c.said or '(no output)'}\n  ```")
+            # Indented like the list item it is in, every line: an unindented line would end the
+            # item, and the closing fence would open a block that swallows the rest.
+            said = "\n".join(f"  {line}" for line in (c.said or "(no output)").splitlines())
+            parts.append(f"  ```\n{said}\n  ```")
     for c, wrote in result.reworded.items():
         parts.append(
             f"- Criterion reworded, so not counted (you wrote: {wrote}); restore this exact line"

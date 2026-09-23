@@ -568,6 +568,10 @@ def test_red_evidence_is_asked_only_for_test_files(task):
         ("src/main/java/Shop.java", False),
         ("docs/testing.md", False),
         ("contest/entry.js", False),
+        ("test/fixtures/bootstrap.json", False),  # data a test reads, not a test
+        ("tests/data/players.csv", False),
+        ("test/__snapshots__/app.snap", False),
+        ("spec/models/shop_spec.rb", True),
     ],
 )
 def test_what_counts_as_a_test_file(path, is_test):
@@ -679,3 +683,61 @@ def test_a_build_file_the_task_adds_is_pointed_out_when_the_project_runs_nothing
     assert "package.json" in result.log.read_text() and "npm ci && npm test" in result.log.read_text()
     assert task.events()[-1]["data"]["build_files"] == [["npm ci && npm test", "package.json"]]
     assert gate.run_gate(task, FakePod(), [], [], no_build=True).build_files == []
+
+
+def ran(pod: FakePod) -> list[str]:
+    """The verification's commands, without the toolchain's own mise call."""
+    return [c for c in pod.commands if not c.startswith("mise ")]
+
+
+def test_a_node_projects_dependencies_are_installed_on_the_fresh_clone_first(task):
+    """A plan says verify = ["npm test"]; on a fresh clone there is no node_modules, and every
+    tool it needs is "not found". The gate installs first, the way the lockfile says, as a
+    command of its own in the log; a command that installs already is left alone."""
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    (task.repo / "package.json").write_text('{"scripts": {"test": "tsc --noEmit && vitest run"}}')
+    (task.repo / "package-lock.json").write_text("{}")
+    commit(task.repo, "Scaffold the app")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, ["npm test"], [])
+    assert ran(pod) == ["npm ci", "npm test"]
+    assert [c.command for c in result.commands] == ["npm ci", "npm test"] and result.passed
+    assert "$ npm ci" in result.log.read_text()
+    installs = ["npm ci && npm test"], ["npm install", "npm test"], ["yarn install --immutable", "yarn test"]
+    for own in installs:
+        pod = FakePod()
+        gate.run_gate(task, pod, own, [])
+        assert ran(pod) == own, "installs itself: nothing added"
+    (task.repo / "package-lock.json").unlink()
+    (task.repo / "yarn.lock").write_text("")
+    (task.repo / ".yarnrc.yml").write_text("nodeLinker: node-modules\n")
+    commit(task.repo, "Switch to yarn")
+    pod = FakePod()
+    gate.run_gate(task, pod, ["yarn test"], [])
+    assert ran(pod) == ["yarn install --immutable", "yarn test"], "by the lockfile"
+
+
+def test_a_project_without_package_json_gets_no_install(task):
+    gate.accept_plan(task, ["true"])
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add code")
+    pod = FakePod()
+    gate.run_gate(task, pod, ["mvn -B verify"], [])
+    assert ran(pod) == ["mvn -B verify"]
+
+
+def test_the_feedback_is_markdown_that_keeps_its_list_out_of_the_code_block():
+    """The command's output is a code block inside the first list item; its lines have to be
+    indented like the item, or the parser ends the list there and the next fence swallows every
+    line that follows, unwrapped and cut off in the panel."""
+    from markdown_it import MarkdownIt
+
+    result = gate.GateResult(Path("/dev/null"))
+    said = "sh: 1: tsc: not found\n> tsc && vitest run"
+    result.commands = [gate.CommandResult("npm test", False, 0.1, said)]
+    result.no_red_evidence = ["test/a.test.ts", "test/b.test.ts"]
+    tokens = MarkdownIt().parse(gate.feedback(result))
+    fences = [t.content for t in tokens if t.type == "fence"]
+    assert len(fences) == 1 and "tsc: not found" in fences[0] and "No red evidence" not in fences[0]
+    assert sum(t.type == "list_item_open" for t in tokens) == 3, "the command and the two files"

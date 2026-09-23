@@ -468,3 +468,13 @@ def test_what_the_agent_left_listening_is_stopped_before_the_app_runs(pod):
     assert kills == ["kill -TERM 412 2>/dev/null"], "once per process, and never opencode"
     pod.runner.leftovers = ""
     assert pod.stop_leftovers() == []
+
+
+def test_the_leftovers_script_holds_no_null_byte():
+    """tr '\\0' in a plain string was a real NUL in the script, which subprocess refuses with
+    "embedded null byte": the demo died on it before it started. The shell still parses it."""
+    from vivibox import pod as pod_module
+
+    assert "\0" not in pod_module.LEFTOVERS
+    parsed = subprocess.run(["sh", "-n", "-c", pod_module.LEFTOVERS], capture_output=True, text=True)
+    assert parsed.returncode == 0, parsed.stderr

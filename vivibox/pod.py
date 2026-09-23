@@ -97,7 +97,8 @@ class Leftover:
 # socket's inode and port (in hex); the process holding that socket has it among its fds. The
 # container's /proc has its own processes only, so a service in the pod's Docker, which lives in
 # the sidecar, is never among them.
-LEFTOVERS = """awk '$4=="0A"{print $10, $2}' /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+# A raw string: tr '\0' in a plain one was a real NUL, which subprocess refuses.
+LEFTOVERS = r"""awk '$4=="0A"{print $10, $2}' /proc/net/tcp /proc/net/tcp6 2>/dev/null |
 while read inode addr; do
   for fd in /proc/[0-9]*/fd/*; do
     [ "$(readlink "$fd" 2>/dev/null)" = "socket:[$inode]" ] || continue

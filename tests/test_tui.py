@@ -258,7 +258,9 @@ def test_a_task_can_be_a_whole_ticket(env):
 
 def test_new_task_dialog_takes_a_long_description(env, monkeypatch):
     started = []
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: started.append(task_id) or "m")
+    monkeypatch.setattr(
+        "vivibox.actions.start", lambda task_id, resume=False, on_step=None: started.append(task_id) or "m"
+    )
 
     async def scenario(app, pilot):
         await pilot.press("n")
@@ -282,7 +284,7 @@ def test_at_suggests_paths(env, tmp_path, monkeypatch):
     (tmp_path / "tickets").mkdir()
     (tmp_path / "tickets" / "PAY-1.md").write_text("details")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
         await pilot.press("n")
@@ -376,7 +378,7 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
     fresh = tmp_path / "clicker"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(tui, "browse_start", lambda: tmp_path)
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
         await pilot.press("i")  # a project of its own, from anywhere in the view
@@ -974,7 +976,7 @@ def test_a_new_task_can_run_a_role_on_another_model(env, monkeypatch):
     """Chosen when the task is made, from a list of what you can run, not only with m afterwards:
     the first turn is the one that most often decides which model a task deserves. A role left on
     config.toml's choice keeps following config.toml."""
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
@@ -995,7 +997,7 @@ def test_a_new_task_can_run_a_role_on_another_model(env, monkeypatch):
 
 def test_a_planner_you_plan_with_can_be_given_a_model_for_one_task(env, monkeypatch):
     """The other way round too: config.toml says you plan, and this one task plans on DeepSeek."""
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
     cfg = env / "config" / "config.toml"
     cfg.write_text(
         cfg.read_text().replace(
@@ -1058,7 +1060,7 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
     defined in an opencode.json you already use. Brought over under k, then picked in the task."""
     from vivibox import keys, providers
 
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
     monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
     monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
     monkeypatch.setenv("ACME_KEY", "acme-secret")
@@ -1626,7 +1628,7 @@ def test_stopping_and_starting_show_in_the_status_until_done(env, monkeypatch):
         release.wait(5)
         t.set_paused(True)
 
-    def slow_start(task_id, resume=False):
+    def slow_start(task_id, resume=False, on_step=None):
         release.wait(5)
         return "m"
 
@@ -1653,6 +1655,77 @@ def test_stopping_and_starting_show_in_the_status_until_done(env, monkeypatch):
                 assert after in cell
 
     run(scenario)
+
+
+def test_starting_says_which_step_it_is_at(env, monkeypatch):
+    import threading
+
+    task = new_task()
+    release = threading.Event()
+
+    def slow_start(task_id, resume=False, on_step=lambda step: None):
+        on_step("starting the pod…")
+        release.wait(5)
+        return "m"
+
+    monkeypatch.setattr(actions, "start", slow_start)
+
+    async def scenario(app, pilot):
+        worker = app.start(task.id)
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if app.starting.get(task.id) == "starting the pod…":
+                break
+        assert "starting the pod…" in str(app.table.get_cell(task.id, app.status_column))
+        release.set()
+        await worker.wait()
+
+    run(scenario)
+
+
+def test_the_view_says_what_it_stopped_to_run_the_app(env, monkeypatch):
+    from vivibox.pod import Listener
+
+    task = new_task()
+    opened = []
+    left = ["python -m http.server 8000 (port 8000)"]
+    heard = [Listener(8000, True)]
+    result = actions.Demo(["python -m http.server 8000"], "task", "198.51.100.2", heard, stopped=left)
+    monkeypatch.setattr(actions, "demo", lambda task_id, ask=True, reply="", wait=40: result)
+    monkeypatch.setattr(tui.Vivibox, "open_url", lambda self, url: opened.append(url))
+
+    async def scenario(app, pilot):
+        app.reload()
+        await app.run_demo(task.id).wait()
+        await pilot.pause()
+        assert opened == ["http://198.51.100.2:8000"]
+        said = [str(n.message) for n in app._notifications]
+        assert any(f"Stopped what the agent left running: {left[0]}" in s for s in said)
+
+    run(scenario)
+
+
+def test_the_view_leaves_at_once_when_a_step_still_waits_on_docker(monkeypatch, capsys):
+    """Textual runs thread workers in the loop's default executor, and asyncio waits for them at
+    the end: a pod start that hung held the window until Ctrl-C, which showed a traceback. Nothing
+    is lost by leaving: the pod and the supervisor are processes of their own."""
+    import threading
+    import time
+
+    stuck = threading.Event()
+    executor = tui.LeavingExecutor()
+    executor.submit(stuck.wait, 5)
+    began = time.monotonic()
+    executor.shutdown(wait=True)
+    assert time.monotonic() - began < 1, "asyncio's wait for the executor returns at once"
+    assert executor.unfinished() == 1
+
+    left = []
+    monkeypatch.setattr(tui.Vivibox, "run", lambda self: setattr(self, "executor", executor))
+    monkeypatch.setattr(tui.os, "_exit", lambda code: left.append(code))
+    assert tui.run() == 0 and left == [0]
+    assert "still finishing in the background" in capsys.readouterr().out
+    stuck.set()
 
 
 def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch):
@@ -1754,7 +1827,7 @@ def test_a_folder_is_described_before_you_pick_it(env, tmp_path):
 def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypatch):
     ticket = tmp_path / "ticket.md"
     ticket.write_text("the ticket")
-    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False: "m")
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
         app.available = AVAILABLE

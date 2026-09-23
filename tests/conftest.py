@@ -48,4 +48,6 @@ def no_real_start(request, monkeypatch):
         return
     started: list[str] = []
     monkeypatch.setattr(actions, "started", started, raising=False)
-    monkeypatch.setattr(actions, "start", lambda task_id, resume=False: started.append(task_id) or "m")
+    monkeypatch.setattr(
+        actions, "start", lambda task_id, resume=False, on_step=None: started.append(task_id) or "m"
+    )

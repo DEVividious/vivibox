@@ -36,6 +36,7 @@ class FakeDocker:
         self.labels: dict[str, dict[str, str]] = {}
         self.subnets = ""
         self.proc_net_tcp = ""
+        self.leftovers = ""  # what the agent container has listening: pid, port in hex, command
         self.alive = False
         self.started = True  # the demo tests turn this off first
         self.route = ""  # what `ip route get` says; nothing, and the host is taken for Ethernet
@@ -65,6 +66,8 @@ class FakeDocker:
             self.states.pop(cmd[3], None)
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
             out = "127.0.0.1\tlocalhost\n172.20.0.1\thost.docker.internal\n"
+        elif cmd[:2] == ["docker", "exec"] and "cmdline" in cmd[-1]:
+            out = self.leftovers
         elif cmd[:2] == ["docker", "exec"] and "/proc/net/tcp" in cmd[-1]:
             out = self.proc_net_tcp if self.started else self.proc_net_tcp.split("\n")[0] + "\n  sl\n"
         elif cmd[:3] == ["docker", "exec", "-d"]:
@@ -451,3 +454,17 @@ def test_a_gate_command_is_given_its_time_limit(tmp_path):
     pod = Pod("t1", tmp_path / "repo", "img", [], gate_dir=tmp_path / "gate", runner=runner)
     pod.gate_exec("bash", "-c", "npm test", timeout=90)
     assert seen["timeout"] == 90
+
+
+def test_what_the_agent_left_listening_is_stopped_before_the_app_runs(pod):
+    """A server the agent started in the background during its turn holds the port the app wants,
+    and the app would die on it. Only the agent container's own processes are stopped: a service
+    in the pod's Docker lives in the sidecar, and opencode's server is behind the window you watch
+    the agent in."""
+    server, opencode = "python -m http.server 8000", "opencode serve --port 4096"
+    pod.runner.leftovers = f"412\t1F40\t{server}\n7\t1000\t{opencode}\n412\t1F41\t{server}\n"
+    assert pod.stop_leftovers() == ["python -m http.server 8000 (port 8000)"]
+    kills = [c[-1] for c in pod.runner.calls if "kill -TERM" in c[-1]]
+    assert kills == ["kill -TERM 412 2>/dev/null"], "once per process, and never opencode"
+    pod.runner.leftovers = ""
+    assert pod.stop_leftovers() == []

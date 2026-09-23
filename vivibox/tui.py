@@ -6,13 +6,16 @@ and asks. Slow steps (starting a pod, accepting work) run in threads so the view
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1915,6 +1918,30 @@ class LiveFooter(Footer):
             self.call_after_refresh(self.recompose)
 
 
+class LeavingExecutor(ThreadPoolExecutor):
+    """Where Textual runs the thread workers (a start, a stop, the app being run): the loop's
+    default executor, but one the view can close without waiting for. asyncio waits for the
+    default executor at the end, so a pod start that hung on Docker held the window until Ctrl-C,
+    which showed a traceback. Nothing is lost by leaving: the pod and the supervisor are
+    processes of their own, and a docker command finishes on its own."""
+
+    def __init__(self) -> None:
+        super().__init__(thread_name_prefix="vivibox-step")
+        self.at_work: set[Future] = set()
+
+    def submit(self, fn, /, *args, **kwargs) -> Future:
+        future = super().submit(fn, *args, **kwargs)
+        self.at_work.add(future)
+        future.add_done_callback(self.at_work.discard)
+        return future
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        super().shutdown(wait=False, cancel_futures=cancel_futures)
+
+    def unfinished(self) -> int:
+        return sum(1 for future in self.at_work if not future.done())
+
+
 class Vivibox(App):
     TITLE = "vivibox"
     # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
@@ -2011,6 +2038,7 @@ class Vivibox(App):
     def __init__(self):
         super().__init__()
         self.config = load_config()
+        self.executor = LeavingExecutor()
         self.shown = ""
         # What the table was last drawn from; a refresh that matches it does no work.
         self.drawn: tuple = ()
@@ -2047,6 +2075,7 @@ class Vivibox(App):
         yield LiveFooter(compact=True)
 
     def on_mount(self) -> None:
+        asyncio.get_running_loop().set_default_executor(self.executor)
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
         self.pods: dict[str, PodView] = {}  # what each task's pod is doing, refreshed off the loop
         self.waiting = self.working = 0
@@ -2955,6 +2984,11 @@ class Vivibox(App):
         except Exception as e:
             self.call_from_thread(self.fail, e)
             return
+        if result.stopped:
+            what = "; ".join(result.stopped)
+            self.call_from_thread(
+                self.notify, f"Stopped what the agent left running: {what}", severity="warning", timeout=8
+            )
         if result.question:
             self.call_from_thread(self.answer_demo, task_id, result.question)
         elif urls := result.urls:
@@ -3068,9 +3102,10 @@ class Vivibox(App):
 
     @work(thread=True)
     def start(self, task_id: str, resume: bool = False) -> None:
-        self.call_from_thread(self.busy_with, task_id, "starting…")
+        step = lambda doing: self.call_from_thread(self.busy_with, task_id, doing)  # noqa: E731
+        step("starting…")
         try:
-            model = actions.start(task_id, resume=resume)
+            model = actions.start(task_id, resume=resume, on_step=step)
             self.call_from_thread(self.notify, f"{task_id} started ({model}).")
         except Exception as e:
             self.call_from_thread(self.fail, e)
@@ -3208,7 +3243,12 @@ class Vivibox(App):
                     self.notify, f"Created {task.id}; edit its plan with e, start it with s."
                 )
                 return
-            model = actions.start(task.id)
+            step = lambda doing: self.call_from_thread(self.busy_with, task.id, doing)  # noqa: E731
+            step("starting…")
+            try:
+                model = actions.start(task.id, on_step=step)
+            finally:
+                step("")
             self.call_from_thread(self.notify, f"{task.id} started ({model}).")
         except Exception as e:
             self.call_from_thread(self.fail, e)
@@ -3263,5 +3303,13 @@ class Vivibox(App):
 
 
 def run() -> int:
-    Vivibox().run()
+    app = Vivibox()
+    app.run()
+    if left := app.executor.unfinished():
+        # asyncio would wait for these at the end, and so would the interpreter's exit; the pod and
+        # the supervisor are processes of their own, so the tasks go on without this window.
+        step = "step" if left == 1 else "steps"
+        print(f"{left} {step} still finishing in the background, a pod starting or stopping; the tasks go on")
+        sys.stdout.flush()
+        os._exit(0)
     return 0

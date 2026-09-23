@@ -80,6 +80,34 @@ class Listener:
         return "" if self.reachable else "bound to localhost inside the pod, so nothing outside can reach it"
 
 
+@dataclass(frozen=True)
+class Leftover:
+    """A process of the agent's own container that listens on a port: what a turn started in the
+    background and never stopped."""
+
+    pid: int
+    port: int
+    command: str
+
+    def __str__(self) -> str:
+        return f"{self.command} (port {self.port})"
+
+
+# The agent container's listeners by process: the kernel's TCP table gives each listening
+# socket's inode and port (in hex); the process holding that socket has it among its fds. The
+# container's /proc has its own processes only, so a service in the pod's Docker, which lives in
+# the sidecar, is never among them.
+LEFTOVERS = """awk '$4=="0A"{print $10, $2}' /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+while read inode addr; do
+  for fd in /proc/[0-9]*/fd/*; do
+    [ "$(readlink "$fd" 2>/dev/null)" = "socket:[$inode]" ] || continue
+    pid=${fd#/proc/}; pid=${pid%%/*}
+    printf '%s\t%s\t' "$pid" "${addr##*:}"; tr '\0' ' ' < "/proc/$pid/cmdline"; echo
+  done
+done"""
+MAX_COMMAND = 60
+
+
 # Both questions in one exec: the agent container shares the sidecar's network namespace, so its
 # /proc/net/tcp is the pod's, and its /tmp holds what the demo left behind.
 PROBE = f"""({DEMO_ALIVE}) && echo RUNNING || echo STOPPED
@@ -337,6 +365,37 @@ class Pod:
             return DemoState(False, "")
         first, _, rest = found.stdout.partition("\n")
         return DemoState(first.strip() == "RUNNING", rest.strip())
+
+    def leftovers(self) -> list[Leftover]:
+        """What the agent's container has listening, one entry per process. opencode's own server
+        is left out: it is the agent, behind the window you watch it in."""
+        found = self._run("docker", "exec", self.agent, "sh", "-c", LEFTOVERS, check=False)
+        if found.returncode != 0:
+            return []
+        seen: dict[int, Leftover] = {}
+        for line in found.stdout.splitlines():
+            pid, _, rest = line.partition("\t")
+            port, _, command = rest.partition("\t")
+            try:
+                pid, port = int(pid), int(port, 16)
+            except ValueError:
+                continue
+            command = " ".join(command.split())
+            if "opencode serve" in command or pid in seen:
+                continue
+            seen[pid] = Leftover(pid, port, command[:MAX_COMMAND])
+        return list(seen.values())
+
+    def stop_leftovers(self) -> list[str]:
+        """Stops what the agent left listening in its container and says what went. The app is
+        run once the agent rests, so a server still up in there is a leftover of its turn, and
+        one that holds the port the app wants makes the app die on it."""
+        left = self.leftovers()
+        for process in left:
+            self._run(
+                "docker", "exec", self.agent, "sh", "-c", f"kill -TERM {process.pid} 2>/dev/null", check=False
+            )
+        return [str(process) for process in left]
 
     def demo_stop(self) -> None:
         """Kills the whole process group: a build tool starting a server leaves children behind."""

@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from importlib.resources import files
@@ -592,6 +593,9 @@ class Demo:
     # Nothing listens yet, but the command is still running: a slow install is not a failure, and
     # calling it one sends you looking for a broken app instead of waiting a moment longer.
     starting: bool = False
+    # What the agent had left listening in its container and was stopped to make room, so you
+    # know what went and why the app you see is the current code.
+    stopped: list[str] = field(default_factory=list)
 
     @property
     def urls(self) -> list[str]:
@@ -686,9 +690,19 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
         commands, source = instruction_commands(demo_instruction(task)), "agent"
     if not commands:
         return Demo([], source, pod.address(), question=question)
+    stopped = pod.stop_leftovers()
     heard = pod.demo_start(commands, workdir=str(task.repo), wait=wait)
     still_going = not heard and pod.demo_running()
-    return Demo(commands, source, pod.address(), heard, pod.demo_log(), question, starting=still_going)
+    return Demo(
+        commands,
+        source,
+        pod.address(),
+        heard,
+        pod.demo_log(),
+        question,
+        starting=still_going,
+        stopped=stopped,
+    )
 
 
 def use_instruction(task_id: str, text: str, wait: float = 40) -> Demo:
@@ -898,16 +912,17 @@ def context_notes(task: Task) -> list[str]:
     return [n for e in task.events() if e["type"] == "context" for n in e["data"].get("notes", [])]
 
 
-def start(task_id: str, resume: bool = False) -> str:
+def start(task_id: str, resume: bool = False, on_step: Callable[[str], None] = lambda step: None) -> str:
     """Starts or resumes the task's pod, agent and supervisor. Returns the model. A start that
     fails leaves its reason with the task: the message you get once is gone in seconds, and the row
-    would go on saying "not started" with nothing to say why."""
+    would go on saying "not started" with nothing to say why. on_step hears each step before it
+    runs, for a row to say what a slow start is doing."""
     task, _ = load(task_id)
     try:
         if task.read_state().box:
             start_box(task_id)
             return "you"
-        return _start(task_id, resume)
+        return _start(task_id, resume, on_step)
     except Exception as e:
         task.set_problem(f"could not start: {e.args[0] if e.args else e}")
         raise
@@ -930,7 +945,7 @@ def carry_on(task: Task) -> str:
     return start(task.id, resume=True) if needs_start(task) else ""
 
 
-def _start(task_id: str, resume: bool = False) -> str:
+def _start(task_id: str, resume: bool = False, on_step: Callable[[str], None] = lambda step: None) -> str:
     config = load_config()
     task, project = load(task_id)
     pod = task_pod(task.id)
@@ -949,8 +964,12 @@ def _start(task_id: str, resume: bool = False) -> str:
     used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)
+    on_step("starting the pod…")
     pod.up()
+    if project.java:
+        on_step(f"installing Java {project.java}…")
     toolchain.ensure(pod, project.java)
+    on_step("starting opencode…")
     harness = opencode.OpenCode(pod)
     if changed:
         harness.restart_server()  # the server reads its configuration only at start

@@ -31,6 +31,9 @@ class FakePod:
     def demo_running(self):
         return getattr(self, "running", False)
 
+    def stop_leftovers(self):
+        return getattr(self, "leftovers", [])
+
 
 def a_task(goal="Goal"):
     assert main(["new", "demo", goal, "--draft"]) == 0
@@ -164,3 +167,20 @@ def test_a_command_that_exited_without_listening_is_a_failure(env, monkeypatch):
     monkeypatch.setattr(actions, "task_pod", lambda task_id: pod)
 
     assert not actions.demo(task.id, ask=False).starting
+
+
+def test_what_the_agent_left_on_the_port_is_stopped_and_said(env, monkeypatch):
+    """The app is run once the agent rests, so a server still listening in its container is a
+    leftover of its turn, not something to keep: it goes, the app starts from the current code,
+    and you are told what went."""
+    from vivibox.pod import Listener
+
+    task = back_with_you(a_task())
+    actions.write_instruction(task, "Start it:\n\n```bash\npython -m http.server 8000\n```\n")
+    pod = FakePod(listening=[Listener(8000, True)])
+    pod.leftovers = ["python -m http.server 8000 (port 8000)"]
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: pod)
+
+    result = actions.demo(task.id, ask=False)
+    assert result.stopped == ["python -m http.server 8000 (port 8000)"]
+    assert result.urls == ["http://198.51.100.2:8000"] and pod.started == [["python -m http.server 8000"]]

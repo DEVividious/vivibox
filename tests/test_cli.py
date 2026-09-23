@@ -656,3 +656,27 @@ def test_accepting_the_first_plan_says_how_the_project_is_verified_from_now_on(e
     assert main(["accept", task.id]) == 0
     out = capsys.readouterr().out
     assert "Plan accepted" in out and "npm test" in out and "from now on" in out
+
+
+@pytest.mark.real_start
+def test_a_start_says_which_step_it_is_at(env, monkeypatch, tmp_path):
+    """Starting the pod, installing a JDK, starting opencode: minutes on a slow day, and a row that
+    only said "starting…" looked stuck."""
+    from vivibox import actions, image, opencode, secrets
+    from vivibox.pod import Pod, PodError
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(image, "exists", lambda ref: True)
+    monkeypatch.setattr(secrets, "prepare", lambda task_id, keys: None)
+    monkeypatch.setattr(opencode, "prepare", lambda task, model, verify, used: False)
+    monkeypatch.setattr(opencode, "provider_of", lambda model: "p")
+
+    def away(self):
+        raise PodError("docker is away")
+
+    monkeypatch.setattr(Pod, "up", away)
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    steps = []
+    with pytest.raises(PodError, match="docker is away"):
+        actions.start("demo-1", on_step=steps.append)
+    assert steps == ["starting the pod…"], "said before the step, which is the one that took long"

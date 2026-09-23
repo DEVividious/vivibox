@@ -154,7 +154,9 @@ files when they open it.
 
 ### Running the app
 
-`vivibox demo <id>`, or `v` in the view, starts the project inside its pod and opens it:
+`vivibox demo <id>`, or `v` in the view, starts the project inside its pod and opens it. A server
+the agent left running in the background during its turn would hold the port, so it is stopped
+first, and the view says what went:
 
 ```
 $ vivibox demo myshop-1

@@ -542,11 +542,13 @@ def test_verifying_again_puts_the_agents_question_away(task):
     assert list((task.meta / "handoff").glob("question-answered-*.md")), "kept for the record"
 
 
-def test_the_first_plan_without_a_build_is_kept_for_the_project(task):
+def test_a_plan_without_a_build_settles_nothing_for_the_project(task):
+    """verify = false holds for this task: a new product's first plan finds an empty repository,
+    and what the writer leaves behind is for the next plan to build."""
     saved = []
     task.plan_path.write_text("+++\nverify = false\n+++\n\n## Acceptance criteria\n\n- [ ] x\n")
     task.transition(State.CHECKPOINT_PLAN)
     keep = lambda commands, no_build: saved.append((commands, no_build))  # noqa: E731
     supervisor.accept_plan(task, "plan accepted", save_verify=keep)
-    assert saved == [([], True)]
+    assert saved == [], "nothing kept: the project still has no way of being verified"
     assert task.read_state().state is State.IMPLEMENT

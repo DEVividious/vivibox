@@ -32,13 +32,13 @@ PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Writ
 /task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
 - keep the header between the +++ lines, except: set summary to one line of at most 100
   characters naming what the task does, and, if verify is empty, set it to the command that
-  builds and tests this project once the plan is done, e.g. verify = ["npm test"], or
-  verify = false when there is nothing to build or test;
+  builds and tests this project once the plan is done, a new product's too, e.g.
+  verify = ["npm test"]; verify = false only when there will never be a build;
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
-  check" with concrete "- [ ]" items, each checkable by reading or running the code; keep the
+  check" with concrete "- [ ]" items, each checkable by reading or running code; keep the
   first item;
 - fill in the other sections as their <!-- notes --> say. The writer may not remember this
-  conversation: the plan says everything it needs.
+  conversation: the plan says everything.
 Do not change code. End the turn when the draft is written, or when a question is in
 /task/handoff/question.md."""
 
@@ -148,8 +148,10 @@ def accept_plan(
 ) -> None:
     """Freezes the plan and its criteria, and sends the agent on to implementation."""
     plan = gate.accept_plan(task, project_verify, project_no_build)
-    if (plan.verify or plan.no_build) and not (project_verify or project_no_build) and save_verify:
-        save_verify(plan.verify, plan.no_build)  # the new project now knows how it is verified
+    if plan.verify and not (project_verify or project_no_build) and save_verify:
+        save_verify(plan.verify, False)  # the new project now knows how it is verified
+    # verify = false in a plan holds for this task only: a new product's first plan finds an empty
+    # repository, and the build the writer makes is for the next plan to name.
     # A question asked while planning is answered by the plan you accepted; left where it is, the
     # first turn of implementation would end on it as a new question.
     put_question_away(task)

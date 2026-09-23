@@ -89,6 +89,7 @@ def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
             "log",
             "risky",
             "removed_tests",
+            "build_files",
         ):  # the log is where the rest is; the others go to you
             continue
         result = gate.GateResult(Path("/dev/null"))

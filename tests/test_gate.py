@@ -658,7 +658,24 @@ def test_a_project_with_no_build_is_verified_without_the_pod(task):
     tick(task, "endpoint returns 200", "error path is tested")
     commit(task.repo, "Write the handbook")
     pod = FakePod()
-    result = gate.run_gate(task, pod, [], [])
+    result = gate.run_gate(task, pod, [], [], no_build=True)
     assert result.passed and pod.commands == [] and not hasattr(pod, "up")
+    assert result.build_files == [], "a project that says it has no build is not told about one"
     assert "no build" in result.log.read_text()
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_FINAL
+
+
+def test_a_build_file_the_task_adds_is_pointed_out_when_the_project_runs_nothing(task):
+    """A new product's first plan finds an empty repository and says verify = false; the writer
+    then makes the build. The gate runs none of it, and says so, for you to pick the command."""
+    task.plan_path.write_text(task.plan_path.read_text().replace("+++\n", "+++\nverify = false\n", 1))
+    gate.accept_plan(task, [])
+    tick(task, "endpoint returns 200", "error path is tested")
+    (task.repo / "package.json").write_text('{"scripts": {"test": "node --test"}}')
+    commit(task.repo, "Scaffold the app")
+    result = gate.run_gate(task, FakePod(), [], [])
+    assert result.passed, "a hint, not a failure"
+    assert result.build_files == [("npm ci && npm test", "package.json")]
+    assert "package.json" in result.log.read_text() and "npm ci && npm test" in result.log.read_text()
+    assert task.events()[-1]["data"]["build_files"] == [["npm ci && npm test", "package.json"]]
+    assert gate.run_gate(task, FakePod(), [], [], no_build=True).build_files == []

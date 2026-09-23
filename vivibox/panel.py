@@ -276,6 +276,18 @@ def gate_failed(task: Task) -> bool:
     return bool(gates) and not gates[-1]["data"].get("passed")
 
 
+def build_files_left(task: Task) -> list[str]:
+    """The build files the last verification found in a project that runs nothing: a new product's
+    first task made its build, and the command is yours to pick."""
+    for event in reversed(task.events()):
+        if event["type"] == "gate":
+            return [
+                f"**{source} names `{command}`**, and this project runs nothing yet: `e` on its row picks it."
+                for command, source in event["data"].get("build_files") or []
+            ]
+    return []
+
+
 def last_gate(task: Task) -> str:
     """How the last gate run went, so a checklist that has not moved still shows whether work has."""
     for event in reversed(task.events()):
@@ -613,6 +625,8 @@ def detail(
             "",
             f"{last_gate(task)}{watch}",
         ]
+        if left := build_files_left(task):
+            body += ["", *left]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
             feedback = read(handoff / "verify-feedback.md")
             body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]

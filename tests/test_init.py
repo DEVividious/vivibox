@@ -135,7 +135,7 @@ def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
     assert init.candidates(tmp_path / "nowhere") == []
 
 
-def test_a_project_from_scratch_may_learn_it_has_no_build(env, tmp_path):
+def test_a_plan_without_a_build_holds_for_that_task_only(env, tmp_path):
     from vivibox import actions
     from vivibox.config import config_dir
     from vivibox.states import State
@@ -146,13 +146,12 @@ def test_a_project_from_scratch_may_learn_it_has_no_build(env, tmp_path):
     plan = "+++\nverify = false\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it is written\n"
     task.plan_path.write_text(plan)
     task.transition(State.CHECKPOINT_PLAN)
-    assert "no build" in actions.verify_from_plan(task, load_project("notes"))
+    assert actions.verify_from_plan(task, load_project("notes")) == "", "it settles nothing to confirm"
     actions.accept_plan(task, load_project("notes"))
     project = load_project("notes")
-    assert project.no_build and project.verify == [], "kept: the next plan is not asked again"
-    assert actions.verify_commands(task, project) == []
-    assert "verify = false" in (config_dir() / "projects" / "notes.toml").read_text()
-    assert actions.verify_from_plan(task, project) == "", "settled: nothing to confirm any more"
+    assert not project.no_build and project.verify == [], "the next plan decides for the project"
+    assert actions.verify_commands(task, project) == [], "this task runs no build"
+    assert "verify = false" not in (config_dir() / "projects" / "notes.toml").read_text()
 
 
 def test_the_project_file_takes_a_command_or_no_build_from_the_picker(env, tmp_path):

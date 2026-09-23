@@ -191,6 +191,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
             project.risky_extra,
             project.java,
             timeout=project.verify_timeout or config.verify_timeout,
+            no_build=project.no_build,
         ),  # fmt: skip
         risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
         max_iterations=config.max_iterations,
@@ -341,8 +342,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
     config = load_config()
     result = gate.run_gate(
         task, pod, commands, project.risky_extra, project.java,
-        timeout=project.verify_timeout or config.verify_timeout,
+        timeout=project.verify_timeout or config.verify_timeout, no_build=project.no_build,
     )  # fmt: skip
+    for command, source in result.build_files:
+        print(f"NOTE  {source} names `{command}`, and the project runs nothing yet: set verify in its file")
     if result.environment:
         print(f"ENV   verification could not run: {result.environment}")
     if result.build_skipped:

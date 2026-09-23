@@ -115,7 +115,8 @@ def test_the_first_plan_shows_the_verification_it_sets_before_you_accept(env):
     assert load_project("clicker").verify == ["npm ci && npm test"]
 
 
-def test_the_first_plan_may_say_there_is_no_build(env):
+def test_a_plan_without_a_build_is_accepted_without_a_word_about_the_project(env):
+    """Nothing is settled for the project, so there is nothing to confirm."""
     from vivibox.config import load_project
 
     fresh_project(env, "notes")
@@ -128,13 +129,11 @@ def test_the_first_plan_may_say_there_is_no_build(env):
         await pilot.pause()
         await pilot.press("a")
         await pilot.pause()
-        assert isinstance(app.screen, tui.Confirm) and "no build" in app.screen.question
-        await pilot.press("escape")
-        await pilot.pause()
-        assert task.read_state().state is State.CHECKPOINT_PLAN, "not accepted: you said no"
+        assert not isinstance(app.screen, tui.Confirm)
+        assert task.read_state().state is State.IMPLEMENT
 
     run(scenario)
-    assert not load_project("notes").no_build
+    assert not load_project("notes").no_build and load_project("notes").verify == []
 
 
 def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch):
@@ -559,6 +558,20 @@ def test_a_failed_gate_shows_what_the_build_said(env):
     assert f"Full log: `{handoff / 'verify.log'}`" in shown, "a path on your machine, not in the pod"
     st = task.transition(State.CHECKPOINT_BLOCKED)
     assert "[ERROR] ShopIT: permission denied" in detail(task, st, 3), "and when it keeps failing"
+
+
+def test_the_build_files_a_task_leaves_behind_are_pointed_out(env):
+    """A new product's first task makes the build; the project runs nothing yet, and the panel
+    says which file names the command and where to pick it."""
+    task = new_task()
+    at_plan_checkpoint(task)
+    gate.accept_plan(task, load_project("demo").verify)
+    st = task.transition(State.IMPLEMENT)
+    task.event("gate", passed=True, build_files=[["npm ci && npm test", "package.json"]])
+    shown = detail(task, st, 3)
+    assert "package.json" in shown and "`npm ci && npm test`" in shown and "`e`" in shown
+    task.event("gate", passed=True)
+    assert "package.json" not in detail(task, st, 3), "only while the last gate saw them"
 
 
 def test_a_finished_task_shows_what_it_was_accepted_for():

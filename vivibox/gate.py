@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import repo, toolchain
+from . import init, repo, toolchain
 from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
@@ -373,6 +373,9 @@ class GateResult:
     # Test definitions removed since the base commit, as path: line. For you, at review: a
     # refactoring removes tests rightly, and an agent told about it would put them back.
     removed_tests: list[str] = field(default_factory=list)
+    # The build files at this commit and the commands they name, when the project runs nothing and
+    # has not said it never will: a new product's first task made its build. For you to pick.
+    build_files: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -403,6 +406,7 @@ class GateResult:
             "no_red_evidence": len(self.no_red_evidence),
             "removed_tests": len(self.removed_tests),
             "removed": self.removed_tests[:MAX_LISTED],
+            "build_files": [list(pair) for pair in self.build_files],
         }
 
 
@@ -465,9 +469,16 @@ def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bo
 
 
 def run_gate(
-    task: Task, pod: Pod, commands: list[str], risky_extra: list[str], java: str = "", timeout: float = 0
+    task: Task,
+    pod: Pod,
+    commands: list[str],
+    risky_extra: list[str],
+    java: str = "",
+    timeout: float = 0,
+    no_build: bool = False,
 ) -> GateResult:
-    """timeout: seconds one command may take; 0 for no limit."""
+    """timeout: seconds one command may take; 0 for no limit. no_build: the project has said it
+    has nothing to build, so build files it gains are not pointed out."""
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
@@ -487,6 +498,12 @@ def run_gate(
         # A project with no build: the criteria and the commits are checked, and no clone or
         # container is made for nothing to run.
         log.write_text(f"# commit {head}: no build to run; the criteria and the commits are checked\n")
+        if not no_build:
+            # The tree is the commit's: uncommitted files were ruled out above.
+            result.build_files = init.candidates(task.repo)
+            with log.open("a") as out:
+                for command, source in result.build_files:
+                    out.write(f"# {source} names `{command}`, and the project runs nothing yet: pick it\n")
     elif not _reuse(task, result, head, commands):
         _build(task, pod, commands, java, head, result, timeout)
     # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.

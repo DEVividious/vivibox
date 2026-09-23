@@ -54,11 +54,13 @@ vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the re
 ```
 
 Either way vivibox reads the build files and proposes a project. For a repository that has no code
-yet, leave the command empty: the first plan you accept sets how the project is built and tested,
-and vivibox keeps it for the next task; accepting that plan shows you the command first. A
-repository with nothing to build or test (documents, configuration) says so with `verify = false`,
-in the plan or in the project file: the verification then checks the criteria and the commits
-only. In the view, `e` on the project's row picks between the commands the build files name, what
+yet, leave the command empty: the first plan you accept that names a command sets how the project
+is built and tested, and vivibox keeps it for the next task; accepting that plan shows you the
+command first. A plan with `verify = false` runs no build in its task and settles nothing: a new
+product's first task has nothing to build until the writer makes it, and when the task leaves
+build files behind, its panel names the command they call for and where to pick it. A repository
+with nothing to build or test ever (documents, configuration) says so with `verify = false` in the
+project file: the verification then checks the criteria and the commits only. In the view, `e` on the project's row picks between the commands the build files name, what
 the pipeline runs (read from `.github/workflows`, `.gitlab-ci.yml`, `Jenkinsfile`,
 `bitbucket-pipelines.yml` and `azure-pipelines.yml`: the steps that start with a build tool,
 deploys left out), no build, and one of your own; `i` offers the same before the project exists,

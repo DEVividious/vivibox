@@ -595,16 +595,14 @@ def verify_commands(task: Task, project: Project) -> list[str]:
 
 def verify_from_plan(task: Task, project: Project) -> str:
     """What accepting this plan settles for the project from now on, for you to see first: the
-    command it sets, in backticks, or that there is no build. "" when the project has that
-    settled already, or the plan sets nothing."""
+    command it sets, in backticks. "" when the project has that settled already, or the plan sets
+    nothing; verify = false in a plan holds for the one task and settles nothing."""
     if project.verify or project.no_build:
         return ""
     try:
         plan = parse_plan(task.plan_path.read_text())
     except PlanError:
         return ""
-    if plan.no_build:
-        return NO_BUILD
     return ", ".join(f"`{c}`" for c in plan.verify)
 
 

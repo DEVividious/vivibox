@@ -5,6 +5,7 @@ Nothing happens behind your back: init shows the project file it would write and
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,6 +78,33 @@ def detect_demo(repo: Path) -> list[str]:
     return ["docker compose up"] if any((repo / name).exists() for name in COMPOSE_FILES) else []
 
 
+NODE_VERIFY = {
+    "npm": "npm ci && npm test",
+    "yarn": "yarn install --immutable && yarn test",
+    "yarn-classic": "yarn install --frozen-lockfile && yarn test",
+    "pnpm": "pnpm install --frozen-lockfile && pnpm test",
+}
+
+
+def package_manager(repo: Path) -> str:
+    """The one the project itself names in package.json, then the one its lockfile belongs to;
+    npm last. Yarn 1 is told apart: it knows --frozen-lockfile, not --immutable."""
+    try:
+        named = json.loads(_read(repo / "package.json")).get("packageManager", "")
+    except (ValueError, AttributeError):
+        named = ""
+    name, _, version = str(named).partition("@")
+    if name == "yarn":
+        return "yarn-classic" if version.startswith("1.") else "yarn"
+    if name in NODE_VERIFY:
+        return name
+    if (repo / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (repo / "yarn.lock").exists():
+        return "yarn" if (repo / ".yarnrc.yml").exists() else "yarn-classic"
+    return "npm"
+
+
 def detect(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
     found.demo = detect_demo(repo)
@@ -97,7 +125,7 @@ def detect(repo: Path) -> Detected:
     elif (repo / "pom.xml").exists():
         found.verify = ["mvn -B verify"]
     elif (repo / "package.json").exists():
-        found.verify = ["npm ci && npm test"]
+        found.verify = [NODE_VERIFY[package_manager(repo)]]
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.

@@ -44,6 +44,32 @@ def test_maven_and_npm(tmp_path):
     assert found.verify == ["npm ci && npm test"] and found.name == "web-app"
 
 
+YARN = "yarn install --immutable && yarn test"
+YARN_CLASSIC = "yarn install --frozen-lockfile && yarn test"
+PNPM = "pnpm install --frozen-lockfile && pnpm test"
+
+
+@pytest.mark.parametrize(
+    "package,files,verify",
+    [
+        ('{"packageManager": "yarn@3.6.4"}', {"package-lock.json": ""}, YARN),
+        ('{"packageManager": "yarn@1.22.22"}', {}, YARN_CLASSIC),
+        ('{"packageManager": "pnpm@9.1.0+sha256.abc"}', {"yarn.lock": ""}, PNPM),
+        ('{"packageManager": "npm@10.8.0"}', {"yarn.lock": ""}, "npm ci && npm test"),
+        ("{}", {"yarn.lock": "", ".yarnrc.yml": "nodeLinker: node-modules\n"}, YARN),
+        ("{}", {"yarn.lock": ""}, YARN_CLASSIC),
+        ("{}", {"pnpm-lock.yaml": ""}, PNPM),
+        ("not json", {"pnpm-lock.yaml": ""}, PNPM),
+    ],
+)
+def test_node_projects_are_tested_with_their_own_package_manager(tmp_path, package, files, verify):
+    web = make_repo(tmp_path / "web")
+    (web / "package.json").write_text(package)
+    for name, text in files.items():
+        (web / name).write_text(text)
+    assert init.detect(web).verify == [verify]
+
+
 def test_init_writes_the_project_once(env, tmp_path, capsys):
     repo = gradle_project(tmp_path / "shop", "7.3.3", "11")
     assert main(["init", str(repo / "gradle"), "--yes"]) == 0

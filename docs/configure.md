@@ -56,7 +56,8 @@ vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the re
 Either way vivibox reads the build files and proposes a project. For a repository that has no code
 yet, leave the command empty: the first plan you accept sets how the project is built and tested,
 and vivibox keeps it for the next task. Otherwise: the command the gate runs (`bash gradlew
-test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`) and, when the build needs it,
+test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
+when `packageManager` in `package.json` or the lockfile names them) and, when the build needs it,
 a JDK other than the image's Java 21, for example Java 17 for Gradle 7. It shows the file and writes
 it to `~/.config/vivibox/projects/<name>.toml` only when you confirm. For a folder that is empty or
 does not exist yet, it starts a git repository there with a first commit, so an app can be built

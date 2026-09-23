@@ -1047,7 +1047,11 @@ def accept_plan(task: Task, project: Project) -> None:
     if st.awaiting_plan:
         raise gate.GateError(f"{task.id} has no plan yet; bring yours in with: vivibox plan import {task.id}")
     supervisor.accept_plan(
-        task, "plan accepted", project.verify, lambda commands: save_verify(project, commands)
+        task,
+        "plan accepted",
+        project.verify,
+        lambda commands, no_build: save_verify(project, commands, no_build),
+        project.no_build,
     )
 
 
@@ -1076,20 +1080,40 @@ def import_plan(task: Task, answer: str | None = None) -> str:
     return manual.import_answer(task)
 
 
-def save_verify(project: Project, commands: list[str]) -> None:
-    """Keeps what the plan chose, so the project's next task does not decide again."""
+# What a project with nothing to build or test is told, and told about, in one wording.
+NO_BUILD = "no build: the verification checks the criteria and the commits only"
+
+
+def save_verify(project: Project, commands: list[str], no_build: bool = False) -> None:
+    """Keeps what the plan chose, or what you picked, so the project's next task does not decide
+    again: the commands, or that there is nothing to build (verify = false)."""
     path = config_dir() / "projects" / f"{project.name}.toml"
     text = path.read_text()
-    line = "verify = [" + ", ".join(f'"{c}"' for c in commands) + "]"
-    path.write_text(re.sub(r"^verify = \[.*?\]", line, text, count=1, flags=re.MULTILINE | re.DOTALL))
+    line = "verify = false" if no_build else "verify = [" + ", ".join(f'"{c}"' for c in commands) + "]"
+    path.write_text(re.sub(r"^verify = (\[.*?\]|false)", line, text, count=1, flags=re.MULTILINE | re.DOTALL))
 
 
 def verify_commands(task: Task, project: Project) -> list[str]:
     """The project's commands, or the ones the plan you accepted brought for a new project."""
     accepted = task.meta / gate.ACCEPTED_PLAN
-    if project.verify or not accepted.exists():
+    if project.verify or project.no_build or not accepted.exists():
         return project.verify
     return parse_plan(accepted.read_text()).verify
+
+
+def verify_from_plan(task: Task, project: Project) -> str:
+    """What accepting this plan settles for the project from now on, for you to see first: the
+    command it sets, in backticks, or that there is no build. "" when the project has that
+    settled already, or the plan sets nothing."""
+    if project.verify or project.no_build:
+        return ""
+    try:
+        plan = parse_plan(task.plan_path.read_text())
+    except PlanError:
+        return ""
+    if plan.no_build:
+        return NO_BUILD
+    return ", ".join(f"`{c}`" for c in plan.verify)
 
 
 def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:

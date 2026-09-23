@@ -85,6 +85,8 @@ class Project:
     pass_env: list[str] = field(default_factory=list)
     # This project's time limit for one verification command; 0 means config.toml's.
     verify_timeout: int = 0
+    # There is nothing to build or test here (verify = false): the gate checks the rest.
+    no_build: bool = False
 
 
 def config_dir() -> Path:
@@ -181,10 +183,12 @@ def load_project(name: str, base: Path | None = None) -> Project:
     path = (base or config_dir()) / "projects" / f"{name}.toml"
     data = _read_toml(path)
     repo = Path(_expect(data, "repo", str, path)).expanduser()
-    # Empty for a project that does not exist yet: the plan you accept sets it (see plan.verify).
-    verify = _expect(data, "verify", list, path)
+    # Empty for a project that does not exist yet: the plan you accept sets it (see plan.verify);
+    # false for one with nothing to build or test.
+    no_build = data.get("verify") is False
+    verify = [] if no_build else _expect(data, "verify", list, path)
     if not all(isinstance(c, str) and c.strip() for c in verify):
-        raise ConfigError(f"{path}: verify must be a list of commands")
+        raise ConfigError(f"{path}: verify must be a list of commands, or false")
     risky_extra = data.get("risky_extra", [])
     if not all(isinstance(p, str) for p in risky_extra):
         raise ConfigError(f"{path}: risky_extra must be a list of patterns")
@@ -206,4 +210,6 @@ def load_project(name: str, base: Path | None = None) -> Project:
     verify_timeout = data.get("verify_timeout", 0)
     if not isinstance(verify_timeout, int) or verify_timeout < 0:
         raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
-    return Project(name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout)
+    return Project(
+        name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build
+    )

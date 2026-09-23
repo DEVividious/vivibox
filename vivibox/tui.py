@@ -42,7 +42,8 @@ from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
 from . import actions, code, context, gate, ide, keys, manual, providers, supervisor, ui
-from .config import ConfigError, config_dir, load_config, load_project
+from . import init as project_init
+from .config import ConfigError, Project, config_dir, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .states import State
@@ -867,7 +868,8 @@ class NewProject(Dialog):
         if self.taken:
             notes = [f"already a project: {self.taken}; Set up opens a task for it instead"]
         elif root:
-            notes = [f"repository {root}", *(found.verify or ["no build found"]), *found.notes]
+            how = [f"{c} (from {found.source})" for c in found.verify] or ["no build found"]
+            notes = [f"repository {root}", *how, *found.notes]
         else:
             notes = [f"a new repository starts in {where}", "the first plan you accept sets how to test it"]
         self.query_one("#notes", Label).update(" · ".join(notes))
@@ -889,6 +891,53 @@ class NewProject(Dialog):
     @on(Input.Submitted)
     def submitted(self) -> None:
         self.query_one("#create", Button).press()
+
+    def key_escape(self) -> None:
+        self.dismiss({})
+
+
+class ChooseVerify(ModalScreen[dict]):
+    """How a project is verified: a command its build files name, no build, one of your own, or
+    the file itself for the rest of it. Arrows pick, Enter takes, Escape leaves it as it is."""
+
+    EDIT = "edit the project file in your editor, for pass_env and host services too…"
+
+    def __init__(self, project: Project, candidates: list[tuple[str, str]]):
+        super().__init__()
+        self.project, self.candidates = project, candidates
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"How {self.project.name} is verified:")
+            now = "  ← now"
+            labels = [
+                f"{escape(c)}  [dim]from {escape(source)}[/]" + (now if [c] == self.project.verify else "")
+                for c, source in self.candidates
+            ]
+            labels.append(escape(actions.NO_BUILD) + (now if self.project.no_build else ""))
+            labels.append(self.EDIT)
+            yield OptionList(*labels, id="choices")
+            with Horizontal(classes="role"):
+                yield Label("Other")
+                yield Input(placeholder="a command of your own; Enter takes it", id="other")
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    @on(OptionList.OptionSelected)
+    def chose(self, event: OptionList.OptionSelected) -> None:
+        i = event.option_index
+        if i < len(self.candidates):
+            self.dismiss({"verify": [self.candidates[i][0]], "no_build": False})
+        elif i == len(self.candidates):
+            self.dismiss({"verify": [], "no_build": True})
+        else:
+            self.dismiss({"edit": True})
+
+    @on(Input.Submitted)
+    def typed(self, event: Input.Submitted) -> None:
+        if command := event.value.strip():
+            self.dismiss({"verify": [command], "no_build": False})
 
     def key_escape(self) -> None:
         self.dismiss({})
@@ -2548,13 +2597,25 @@ class Vivibox(App):
             self.close_box(task.id)
             return
         if st.state is State.CHECKPOINT_PLAN:
-            try:
-                actions.accept_plan(task, actions.load(task.id)[1])
-            except Exception as e:
-                self.fail(e)
+            project = actions.load(task.id)[1]
+
+            def accept(yes: bool = True) -> None:
+                if not yes:
+                    return
+                try:
+                    actions.accept_plan(task, project)
+                except Exception as e:
+                    self.fail(e)
+                else:
+                    self.go_on(task, "Plan accepted")
+                self.reload()
+
+            # What the first plan settles for the project, said once, where you decide.
+            if settles := actions.verify_from_plan(task, project):
+                asked = f"The plan sets how {project.name} is verified from now on: {settles}."
+                self.push_screen(Confirm(f"{asked}\n\nAccept the plan?", "Accept"), accept)
             else:
-                self.go_on(task, "Plan accepted")
-            self.reload()
+                accept()
         else:
             self.push_screen(
                 Confirm(f"Accept the work of {task.id} into your checkout and remove the task?", "Accept"),
@@ -3030,6 +3091,30 @@ class Vivibox(App):
         return config_dir() / "projects" / f"{self.selected_project()}.toml"
 
     def action_edit_project(self) -> None:
+        """How the project is verified, picked from what its build files name; the file itself
+        for the rest, and when it cannot be read at all."""
+        name = self.selected_project()
+        try:
+            project = load_project(name)
+        except ConfigError:
+            self.edit_project_file()
+            return
+
+        def chosen(choice: dict) -> None:
+            if not choice:
+                return
+            if choice.get("edit"):
+                self.edit_project_file()
+                return
+            actions.save_verify(project, choice["verify"], choice["no_build"])
+            how = actions.NO_BUILD if choice["no_build"] else ", ".join(f"`{c}`" for c in choice["verify"])
+            self.notify(f"{name} is verified from now on: {how}", timeout=6)
+            self.drawn = ()
+            self.reload()
+
+        self.push_screen(ChooseVerify(project, project_init.candidates(project.repo)), chosen)
+
+    def edit_project_file(self) -> None:
         with self.suspend():
             edit_in_editor(self.project_file())
         self.drawn = ()  # verify, pass_env, the repository: any of it may have changed

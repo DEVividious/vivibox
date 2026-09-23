@@ -24,6 +24,10 @@ class Detected:
     demo: list[str] = field(default_factory=list)
     java: str = ""
     notes: list[str] = field(default_factory=list)
+    # The build file the verify command comes from; "" when none was found.
+    source: str = ""
+    # Nothing to build or test here: verify = false in the project file.
+    no_build: bool = False
 
 
 def project_name(repo: Path) -> str:
@@ -105,27 +109,40 @@ def package_manager(repo: Path) -> str:
     return "npm"
 
 
+def candidates(repo: Path) -> list[tuple[str, str]]:
+    """Every command the project's build files call for, each with the file it comes from, the
+    one detect() picks first. What a picker offers; detection takes the first."""
+    found = []
+    if (repo / "gradlew").exists():
+        # bash: the wrapper is often committed without its executable bit.
+        found.append(("bash gradlew test --no-daemon --console=plain", "gradlew"))
+    elif (repo / "build.gradle.kts").exists():
+        found.append(("gradle test --no-daemon --console=plain", "build.gradle.kts"))
+    elif (repo / "build.gradle").exists():
+        found.append(("gradle test --no-daemon --console=plain", "build.gradle"))
+    if (repo / "mvnw").exists():
+        found.append(("bash mvnw -B verify", "mvnw"))
+    elif (repo / "pom.xml").exists():
+        found.append(("mvn -B verify", "pom.xml"))
+    if (repo / "package.json").exists():
+        found.append((NODE_VERIFY[package_manager(repo)], "package.json"))
+    return found
+
+
 def detect(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
     found.demo = detect_demo(repo)
     level = source_level(repo)
     newest = IMAGE_JAVA
-    if (repo / "gradlew").exists():
-        # bash: the wrapper is often committed without its executable bit.
-        found.verify = ["bash gradlew test --no-daemon --console=plain"]
+    if options := candidates(repo):
+        found.verify, found.source = [options[0][0]], options[0][1]
+    if found.source == "gradlew":
         if version := gradle_version(repo):
             newest = newest_jdk_for_gradle(version)
             if newest < IMAGE_JAVA:
                 found.notes.append(f"Gradle {version[0]}.{version[1]} does not run on Java {IMAGE_JAVA}.")
-    elif (repo / "build.gradle").exists() or (repo / "build.gradle.kts").exists():
-        found.verify = ["gradle test --no-daemon --console=plain"]
+    elif found.source.startswith("build.gradle"):
         found.notes.append("No Gradle wrapper: the image's Gradle is used.")
-    elif (repo / "mvnw").exists():
-        found.verify = ["bash mvnw -B verify"]
-    elif (repo / "pom.xml").exists():
-        found.verify = ["mvn -B verify"]
-    elif (repo / "package.json").exists():
-        found.verify = [NODE_VERIFY[package_manager(repo)]]
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.
@@ -137,11 +154,11 @@ def detect(repo: Path) -> Detected:
 
 
 def render(found: Detected) -> str:
-    verify = ", ".join(f'"{c}"' for c in found.verify)
+    verify = "false" if found.no_build else "[" + ", ".join(f'"{c}"' for c in found.verify) + "]"
     home = Path.home()
     repo = f"~/{found.repo.relative_to(home)}" if found.repo.is_relative_to(home) else str(found.repo)
     demo = ", ".join(f'"{c}"' for c in found.demo)
     return (
-        f'repo = "{repo}"\nverify = [{verify}]\ndemo = [{demo}]\njava = "{found.java}"\n'
+        f'repo = "{repo}"\nverify = {verify}\ndemo = [{demo}]\njava = "{found.java}"\n'
         "risky_extra = []\nhost_services = []\npass_env = []\n"
     )

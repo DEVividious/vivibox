@@ -5,7 +5,7 @@
 repo = "~/projects/example"
 
 # Verification commands, run by the gate on a fresh clone of the agent's commits, in order.
-verify = ["mvn -B verify"]
+verify = ["mvn -B verify"]   # or false when there is nothing to build or test
 
 # Seconds one verification command may take here, when this project needs more than
 # limits.verify_timeout in config.toml allows.

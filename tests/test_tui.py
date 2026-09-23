@@ -3,7 +3,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, Label, Select, SelectionList, TextArea
+from conftest import make_repo
+from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
 from vivibox import actions, gate, tui, ui
@@ -75,6 +76,122 @@ def test_accept_the_plan_with_a(env):
         app.reload()
         await pilot.press("a")
         assert task.read_state().state is State.IMPLEMENT
+
+    run(scenario)
+
+
+def fresh_project(env, name="clicker"):
+    """A project from scratch, with no build of its own yet."""
+    actions.setup_project(env / name, name, [], create=True)
+    return name
+
+
+def plan_with(task, header):
+    task.plan_path.write_text(f"+++\n{header}\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it works\n")
+    task.transition(State.CHECKPOINT_PLAN)
+
+
+def test_the_first_plan_shows_the_verification_it_sets_before_you_accept(env):
+    """The command is kept for the project's next tasks, so it is said once, where you decide."""
+    from vivibox.config import load_project
+
+    fresh_project(env)
+    task = actions.create("clicker", "A click counter page")
+    plan_with(task, 'verify = ["npm ci && npm test"]')
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Confirm)
+        assert "npm ci && npm test" in app.screen.question and "clicker" in app.screen.question
+        await pilot.press("enter")
+        await pilot.pause()
+        assert task.read_state().state is State.IMPLEMENT
+
+    run(scenario)
+    assert load_project("clicker").verify == ["npm ci && npm test"]
+
+
+def test_the_first_plan_may_say_there_is_no_build(env):
+    from vivibox.config import load_project
+
+    fresh_project(env, "notes")
+    task = actions.create("notes", "Write the handbook")
+    plan_with(task, "verify = false")
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Confirm) and "no build" in app.screen.question
+        await pilot.press("escape")
+        await pilot.pause()
+        assert task.read_state().state is State.CHECKPOINT_PLAN, "not accepted: you said no"
+
+    run(scenario)
+    assert not load_project("notes").no_build
+
+
+def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch):
+    """The commands the build files name, no build, or one of your own; the file itself last."""
+    from vivibox.config import load_project
+
+    fresh_project(env, "notes")
+    (env / "notes" / "package.json").write_text("{}")
+    opened = []
+    # The editor takes the terminal over (App.suspend), which Pilot cannot do: the call is checked.
+    monkeypatch.setattr(tui.Vivibox, "edit_project_file", lambda self: opened.append(self.project_file()))
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("notes"))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseVerify)
+        shown = [str(app.screen.query_one(OptionList).get_option_at_index(i).prompt)
+                 for i in range(app.screen.query_one(OptionList).option_count)]  # fmt: skip
+        assert "npm ci && npm test" in shown[0] and "package.json" in shown[0]
+        assert any("no build" in s for s in shown) and any("edit the project file" in s for s in shown)
+        await pilot.press("enter")  # the first: what package.json names
+        await pilot.pause()
+        assert load_project("notes").verify == ["npm ci && npm test"]
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("down", "enter")  # no build
+        await pilot.pause()
+        assert load_project("notes").no_build and load_project("notes").verify == []
+        await pilot.press("e")
+        await pilot.pause()
+        app.screen.query_one("#other", Input).value = "make check"
+        await pilot.press("tab", "enter")
+        await pilot.pause()
+        assert load_project("notes").verify == ["make check"]
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("end", "enter")  # the file itself
+        await pilot.pause()
+        assert opened == [env / "config" / "projects" / "notes.toml"]
+
+    run(scenario)
+
+
+def test_the_new_project_dialog_says_where_the_command_comes_from(env, tmp_path, monkeypatch):
+    repo = tmp_path / "shop"
+    make_repo(repo)
+    (repo / "mvnw").write_text("")
+    monkeypatch.chdir(repo)
+
+    async def scenario(app, pilot):
+        await pilot.press("i")
+        await pilot.pause()
+        notes = str(app.screen.query_one("#notes", Label).render())
+        assert "bash mvnw -B verify" in notes and "from mvnw" in notes
 
     run(scenario)
 

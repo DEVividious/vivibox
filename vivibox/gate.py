@@ -51,26 +51,27 @@ class GateError(Exception):
     pass
 
 
-def check_plan(plan: Plan, project_verify: list[str] | tuple = ()) -> None:
+def check_plan(plan: Plan, project_verify: list[str] | tuple = (), project_no_build: bool = False) -> None:
     """What keeps a plan from being accepted, as a GateError; the planner is told the same."""
     if any(c.text == PLACEHOLDER for c in plan.criteria):
         raise GateError("the plan still carries the template's placeholder criterion; replace it")
     if not plan.criteria:
         # Name the heading: the criteria are usually written, just not where this looks for them.
         raise GateError("no '- [ ]' criteria under an 'Acceptance criteria' heading in the plan")
-    if not project_verify and not plan.verify:
+    if not (project_verify or project_no_build or plan.verify or plan.no_build):
         raise GateError(
             "this project has no command that builds and tests it yet; the plan must set one, "
-            'for example verify = ["npm test"] in its header'
+            'for example verify = ["npm test"] in its header, or verify = false when there is '
+            "nothing to build or test"
         )
 
 
-def accept_plan(task: Task, project_verify: list[str] | tuple = ()) -> Plan:
+def accept_plan(task: Task, project_verify: list[str] | tuple = (), project_no_build: bool = False) -> Plan:
     """Freezes the plan you accepted and gives the agent a checklist of its criteria to tick.
     A project with no verify command of its own (a new one) gets it from the plan."""
     text = task.plan_path.read_text()
     plan = parse_plan(text)
-    check_plan(plan, project_verify)
+    check_plan(plan, project_verify, project_no_build)
     (task.meta / ACCEPTED_PLAN).write_text(text)
     checklist = "".join(f"- [ ] {c.text}\n" for c in plan.criteria)
     (task.meta / "handoff" / CRITERIA_FILE).write_text(
@@ -482,6 +483,10 @@ def run_gate(
         result.build_skipped = "a test is switched off, so the suite would prove nothing"
     if result.build_skipped:
         log.write_text(f"# commit {head}: the build was not run: {result.build_skipped}\n")
+    elif not commands:
+        # A project with no build: the criteria and the commits are checked, and no clone or
+        # container is made for nothing to run.
+        log.write_text(f"# commit {head}: no build to run; the criteria and the commits are checked\n")
     elif not _reuse(task, result, head, commands):
         _build(task, pod, commands, java, head, result, timeout)
     # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.

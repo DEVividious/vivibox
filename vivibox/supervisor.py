@@ -29,15 +29,16 @@ QUESTION = "question.md"
 # Every prompt that starts a turn ends by naming what ends it: the two endings the brief
 # (templates/instructions.md) allows, and nothing else. docs/prompt-guidelines.md says why.
 PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
-/task/handoff/plan-draft.md as a copy of /task/plan.md, filled in:
-- keep the header between the +++ lines, except: set summary to one sentence of at most 100
+/task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
+- keep the header between the +++ lines, except: set summary to one line of at most 100
   characters naming what the task does, and, if verify is empty, set it to the command that
-  builds and tests this project once the plan is done, e.g. verify = ["npm test"];
+  builds and tests this project once the plan is done, e.g. verify = ["npm test"], or
+  verify = false when there is nothing to build or test;
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
-  check" with concrete "- [ ]" items, each checkable by reading the code or running it; keep the
+  check" with concrete "- [ ]" items, each checkable by reading or running the code; keep the
   first item;
-- fill in the other sections as their <!-- notes --> say. The writer that carries the plan out
-  may not remember this conversation, so the plan says everything it needs.
+- fill in the other sections as their <!-- notes --> say. The writer may not remember this
+  conversation: the plan says everything it needs.
 Do not change code. End the turn when the draft is written, or when a question is in
 /task/handoff/question.md."""
 
@@ -142,11 +143,13 @@ def clear_next_prompt(task: Task) -> None:
     (task.meta / NEXT_PROMPT).unlink(missing_ok=True)
 
 
-def accept_plan(task: Task, reason: str, project_verify=(), save_verify=None) -> None:
+def accept_plan(
+    task: Task, reason: str, project_verify=(), save_verify=None, project_no_build: bool = False
+) -> None:
     """Freezes the plan and its criteria, and sends the agent on to implementation."""
-    plan = gate.accept_plan(task, project_verify)
-    if plan.verify and not project_verify and save_verify:
-        save_verify(plan.verify)  # the new project now has a command of its own
+    plan = gate.accept_plan(task, project_verify, project_no_build)
+    if (plan.verify or plan.no_build) and not (project_verify or project_no_build) and save_verify:
+        save_verify(plan.verify, plan.no_build)  # the new project now knows how it is verified
     # A question asked while planning is answered by the plan you accepted; left where it is, the
     # first turn of implementation would end on it as a new question.
     put_question_away(task)
@@ -181,7 +184,8 @@ class Supervisor:
     prepare_review: Callable[[], Path | None] = lambda: None
     # The project's verify commands, and where to keep the ones a plan brings for a new project.
     project_verify: list[str] = field(default_factory=list)
-    save_verify: Callable[[list[str]], None] = lambda commands: None
+    project_no_build: bool = False
+    save_verify: Callable[[list[str], bool], None] = lambda commands, no_build: None
     # The role that plans. None means the writer plans too, which is what a caller with one harness
     # gets; the command line always passes both, because the config always names both.
     planner: Harness | None = None
@@ -330,7 +334,13 @@ class Supervisor:
             # Through the plan checkpoint, so the event log reads the same as when you accept.
             self.task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
             try:
-                accept_plan(self.task, "plan accepted automatically", self.project_verify, self.save_verify)
+                accept_plan(
+                    self.task,
+                    "plan accepted automatically",
+                    self.project_verify,
+                    self.save_verify,
+                    self.project_no_build,
+                )
                 print(f"[{time.strftime('%H:%M:%S')}] plan accepted automatically", flush=True)
             except gate.GateError as e:
                 self.notify(self.task.id, f"plan not accepted automatically ({e}); review it")

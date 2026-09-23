@@ -36,6 +36,8 @@ class Plan:
     summary: str = ""
     # How to build and test the project, when it did not have a command yet (a new project).
     verify: list[str] = field(default_factory=list)
+    # The plan says there is nothing to build or test: verify = false in its header.
+    no_build: bool = False
 
     @property
     def criteria_done(self) -> int:
@@ -131,6 +133,9 @@ def parse_plan(text: str) -> Plan:
     if not isinstance(summary, str) or "\n" in summary:
         raise PlanError("summary must be a single line")
     verify = data.get("verify", [])
+    # false: there is nothing to build or test (a repository of documents); the gate checks the rest.
+    no_build = verify is False
+    verify = [] if no_build else verify
     if not isinstance(verify, list) or not all(isinstance(c, str) and c.strip() for c in verify):
-        raise PlanError("verify must be a list of commands")
-    return Plan(mode, collab, skills, _criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify)
+        raise PlanError("verify must be a list of commands, or false when there is nothing to build")
+    return Plan(mode, collab, skills, _criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify, no_build)

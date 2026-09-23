@@ -143,3 +143,14 @@ def test_rejects_a_time_limit_that_is_not_seconds(tmp_path, text):
     base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\n' + text + ROLES)
     with pytest.raises(ConfigError):
         load_config(base)
+
+
+def test_a_project_may_say_it_has_no_build(tmp_path):
+    base = write(tmp_path / "projects" / "docs.toml", 'repo = "/r"\nverify = false\n')
+    project = load_project("docs", base.parent)
+    assert project.verify == [] and project.no_build
+    write(tmp_path / "projects" / "docs.toml", 'repo = "/r"\nverify = []\n')
+    assert not load_project("docs", base.parent).no_build, "unset is unset, not no build"
+    write(tmp_path / "projects" / "docs.toml", 'repo = "/r"\nverify = true\n')
+    with pytest.raises(ConfigError, match="verify"):
+        load_project("docs", base.parent)

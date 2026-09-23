@@ -199,7 +199,8 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         ),
         prepare_review=lambda: actions.prepare_review(task, project),
         project_verify=project.verify,
-        save_verify=lambda commands: actions.save_verify(project, commands),
+        project_no_build=project.no_build,
+        save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
         planner=planner,
         session_started=agent_window,
         source=project.repo,
@@ -227,8 +228,11 @@ def cmd_accept(args: argparse.Namespace) -> int:
         else:
             print(f"{task.id} closed; it changed risky files: vivibox risky {task.id}")
     elif st.state is State.CHECKPOINT_PLAN:
+        settles = actions.verify_from_plan(task, project)
         actions.accept_plan(task, project)
         print(f"Plan accepted; {task.id} moves on to implementation.")
+        if settles:
+            print(f"Verification of {project.name} from now on: {settles}")
         carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
         done = actions.finish(task, project, branch_only=args.branch)

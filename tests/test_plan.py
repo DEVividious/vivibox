@@ -137,3 +137,12 @@ def test_a_criterion_wrapped_over_two_lines_keeps_all_of_it():
     )
     assert plan.criteria[0].text == "endpoint returns 200 and the body names the failing field"
     assert len(plan.criteria) == 3, "a wrapped line is not a criterion of its own"
+
+
+def test_verify_false_means_there_is_nothing_to_build():
+    """A repository of documents has no build: the plan says so instead of inventing one."""
+    plan = parse_plan("+++\nverify = false\n+++\n\n## Acceptance criteria\n\n- [ ] x\n")
+    assert plan.verify == [] and plan.no_build
+    assert not parse_plan(PLAN).no_build, "unset is unset, not no build"
+    with pytest.raises(PlanError, match="verify"):
+        parse_plan("+++\nverify = true\n+++\n")

@@ -639,3 +639,26 @@ def test_your_reply_builds_the_same_commit_again(task):
     task.transition(State.VERIFY)
     again = gate.run_gate(task, pod, ["npm test"], [])
     assert pod.commands.count("npm test") == 2 and not again.unchanged
+
+
+def test_a_plan_may_say_there_is_nothing_to_build(task):
+    from vivibox.plan import parse_plan
+
+    criteria = "\n\n## Acceptance criteria\n\n- [ ] x\n"
+    gate.check_plan(parse_plan(f"+++\nverify = false\n+++{criteria}"), [])
+    with pytest.raises(gate.GateError, match="verify = false"):
+        gate.check_plan(parse_plan(f"+++\n+++{criteria}"), [])
+    gate.check_plan(parse_plan(f"+++\n+++{criteria}"), [], project_no_build=True)
+
+
+def test_a_project_with_no_build_is_verified_without_the_pod(task):
+    """The criteria, the commits and the rest are checked as ever; there is just nothing to run,
+    so no clone and no container for it."""
+    gate.accept_plan(task, [], project_no_build=True)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Write the handbook")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, [], [])
+    assert result.passed and pod.commands == [] and not hasattr(pod, "up")
+    assert "no build" in result.log.read_text()
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_FINAL

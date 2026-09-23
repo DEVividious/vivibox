@@ -642,3 +642,17 @@ def test_status_lists_finished_tasks_under_the_live_ones(env, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert [line.split()[0] for line in lines[1:]] == ["demo-1", "demo-0"]
     assert "done" in lines[2] and "Old one" in lines[2] and "$0.10" in lines[2]
+
+
+def test_accepting_the_first_plan_says_how_the_project_is_verified_from_now_on(env, capsys):
+    from vivibox import actions
+    from vivibox.states import State
+
+    actions.setup_project(env / "clicker", "clicker", [], create=True)
+    task = actions.create("clicker", "A click counter page")
+    plan = '+++\nverify = ["npm test"]\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it counts\n'
+    task.plan_path.write_text(plan)
+    task.transition(State.CHECKPOINT_PLAN)
+    assert main(["accept", task.id]) == 0
+    out = capsys.readouterr().out
+    assert "Plan accepted" in out and "npm test" in out and "from now on" in out

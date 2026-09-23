@@ -120,3 +120,50 @@ def test_a_project_from_scratch_gets_its_command_from_the_first_plan(env, tmp_pa
     assert load_project("clicker").verify == ["npm test"], "the project keeps it for its next task"
     assert actions.verify_commands(task, load_project("clicker")) == ["npm test"]
     assert (task.meta / gate.ACCEPTED_PLAN).exists()
+
+
+def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
+    """What the picker offers: one command per build file that names it, the detected one first."""
+    (tmp_path / "mvnw").write_text("")
+    (tmp_path / "package.json").write_text("{}")
+    assert init.candidates(tmp_path) == [
+        ("bash mvnw -B verify", "mvnw"),
+        ("npm ci && npm test", "package.json"),
+    ]
+    found = init.detect(tmp_path)
+    assert found.verify == ["bash mvnw -B verify"] and found.source == "mvnw"
+    assert init.candidates(tmp_path / "nowhere") == []
+
+
+def test_a_project_from_scratch_may_learn_it_has_no_build(env, tmp_path):
+    from vivibox import actions
+    from vivibox.config import config_dir
+    from vivibox.states import State
+
+    fresh = tmp_path / "notes"
+    actions.setup_project(fresh, "notes", [], create=True)
+    task = actions.create("notes", "Write the handbook")
+    plan = "+++\nverify = false\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it is written\n"
+    task.plan_path.write_text(plan)
+    task.transition(State.CHECKPOINT_PLAN)
+    assert "no build" in actions.verify_from_plan(task, load_project("notes"))
+    actions.accept_plan(task, load_project("notes"))
+    project = load_project("notes")
+    assert project.no_build and project.verify == [], "kept: the next plan is not asked again"
+    assert actions.verify_commands(task, project) == []
+    assert "verify = false" in (config_dir() / "projects" / "notes.toml").read_text()
+    assert actions.verify_from_plan(task, project) == "", "settled: nothing to confirm any more"
+
+
+def test_the_project_file_takes_a_command_or_no_build_from_the_picker(env, tmp_path):
+    from vivibox import actions
+    from vivibox.config import config_dir
+
+    fresh = tmp_path / "notes"
+    actions.setup_project(fresh, "notes", [], create=True)
+    actions.save_verify(load_project("notes"), [], no_build=True)
+    assert load_project("notes").no_build
+    actions.save_verify(load_project("notes"), ["npm test"])
+    project = load_project("notes")
+    assert project.verify == ["npm test"] and not project.no_build
+    assert (config_dir() / "projects" / "notes.toml").read_text().count("verify") == 1

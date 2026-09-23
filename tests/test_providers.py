@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from vivibox import actions, keys, opencode, providers
+from vivibox import actions, keys, opencode, providers, roles
 from vivibox.config import ConfigError
 
 COMPANY = """{
@@ -84,8 +84,8 @@ def test_a_keyless_provider_needs_no_key_to_start(source, monkeypatch):
 def test_your_providers_are_listed_without_asking_opencode(source, monkeypatch):
     providers.import_opencode(source, env={"ACME_KEY": "k"})
     asked = []
-    monkeypatch.setattr(actions, "provider_models", lambda p: asked.append(p) or [f"{p}/m"])
-    monkeypatch.setattr(actions, "models_cache", lambda: source.parent / "cache.json")
+    monkeypatch.setattr(roles, "provider_models", lambda p: asked.append(p) or [f"{p}/m"])
+    monkeypatch.setattr(roles, "models_cache", lambda: source.parent / "cache.json")
     found = actions.available_models(refresh=True)
     assert found["acme"][0] == "acme/coder-large" and found["local"] == ["local/qwen"]
     assert asked == ["deepseek"], "only providers opencode knows by itself are asked"
@@ -277,8 +277,8 @@ def test_a_serena_from_your_machine_is_not_imported_over_vivibox_own(env, tmp_pa
 
 def test_a_provider_turned_off_offers_no_models(env, monkeypatch, tmp_path):
     keys.set_key("deepseek", "k")
-    monkeypatch.setattr(actions, "provider_models", lambda p: [f"{p}/m"])
-    monkeypatch.setattr(actions, "models_cache", lambda: tmp_path / "cache.json")
+    monkeypatch.setattr(roles, "provider_models", lambda p: [f"{p}/m"])
+    monkeypatch.setattr(roles, "models_cache", lambda: tmp_path / "cache.json")
     assert "deepseek" in actions.available_models(refresh=True)
     providers.set_enabled(providers.PROVIDER, "deepseek", False)
     assert "deepseek" not in actions.available_models(refresh=True)

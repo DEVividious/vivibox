@@ -44,8 +44,9 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
-from . import actions, code, context, gate, ide, keys, manual, providers, supervisor, ui
+from . import actions, code, context, gate, ide, keys, manual, providers, repo, supervisor, ui
 from . import init as project_init
+from . import pod as pod_module
 from .config import ConfigError, config_dir, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -137,8 +138,8 @@ def ticked_at(task: Task) -> float:
 def pod_views(task_ids: list[str]) -> dict[str, PodView]:
     """What every task's pod is doing. One question for all the addresses, then one per pod that is
     up; asking each pod separately for each thing is what would make this too slow to do often."""
-    pods = {task_id: actions.Pod(task_id, Path("."), "") for task_id in task_ids}
-    found = actions.pod_module.addresses([pod.sidecar for pod in pods.values()])
+    pods = {task_id: pod_module.Pod(task_id, Path("."), "") for task_id in task_ids}
+    found = pod_module.addresses([pod.sidecar for pod in pods.values()])
     views = {}
     for task_id, pod in pods.items():
         if not (address := found.get(pod.sidecar, "")):
@@ -233,7 +234,7 @@ def git_diff(task: Task, project) -> list[str]:
     """The work as a diff, from the review ref in your repository: what accepting would bring.
     git pages it itself, so this runs with the terminal handed over."""
     base = task.read_state().base_commit
-    return ["git", "-C", str(project.repo), "diff", f"{base}...{actions.repo.review_ref(task.id)}"]
+    return ["git", "-C", str(project.repo), "diff", f"{base}...{repo.review_ref(task.id)}"]
 
 
 def pager_command(path: Path, follow: bool = False, at_end: bool = False) -> list[str]:
@@ -526,7 +527,7 @@ def detail(
     elif st.state is State.CHECKPOINT_FINAL:
         try:
             _, project = actions.load(st.id)
-            copy = actions.repo.review_worktree_path(project.repo, task.root)
+            copy = repo.review_worktree_path(project.repo, task.root)
             stat = actions.changed_files(task, project)
         except Exception as e:  # shown, not fatal: the view must keep working
             copy, stat = "?", f"({e})"

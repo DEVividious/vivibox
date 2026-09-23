@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from test_tui import at_plan_checkpoint, implementing, new_task, rows
 
-from vivibox import actions, manual, tui, ui
+from vivibox import actions, box, manual, tui, ui
 from vivibox.states import State
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
@@ -89,6 +89,7 @@ def situations(env):
 @pytest.fixture(autouse=True)
 def no_box_pod(monkeypatch):
     monkeypatch.setattr(actions, "start_box", lambda task_id: None, raising=False)
+    monkeypatch.setattr(box, "start_box", lambda task_id: None, raising=False)
 
 
 def test_every_status_is_a_label_from_the_guidelines(env):

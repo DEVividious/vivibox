@@ -7,7 +7,7 @@ from conftest import make_repo
 from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, gate, tui, ui
+from vivibox import actions, box, gate, tui, ui
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
@@ -1117,8 +1117,8 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
     from vivibox import keys, providers
 
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
-    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
-    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+    monkeypatch.setattr("vivibox.roles.provider_models", lambda p: [])
+    monkeypatch.setattr("vivibox.roles.models_cache", lambda: tmp_path / "models.json")
     monkeypatch.setenv("ACME_KEY", "acme-secret")
     source = tmp_path / "xdg" / "opencode" / "opencode.json"
     source.parent.mkdir(parents=True)
@@ -1166,8 +1166,8 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
 def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
     from vivibox import keys
 
-    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [f"{p}/big", f"{p}/small"])
-    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+    monkeypatch.setattr("vivibox.roles.provider_models", lambda p: [f"{p}/big", f"{p}/small"])
+    monkeypatch.setattr("vivibox.roles.models_cache", lambda: tmp_path / "models.json")
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
@@ -1198,8 +1198,8 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
 
 def test_a_provider_that_lists_no_models_is_said_to_check_the_name(env, monkeypatch, tmp_path):
     """A typo in a provider's name is not an error to opencode: it lists nothing. Said at once."""
-    monkeypatch.setattr("vivibox.actions.provider_models", lambda p: [])
-    monkeypatch.setattr("vivibox.actions.models_cache", lambda: tmp_path / "models.json")
+    monkeypatch.setattr("vivibox.roles.provider_models", lambda p: [])
+    monkeypatch.setattr("vivibox.roles.models_cache", lambda: tmp_path / "models.json")
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
@@ -2927,6 +2927,7 @@ def test_the_plans_verify_command_is_shown_before_you_accept_it(env):
 @pytest.fixture
 def box_env(env, monkeypatch):
     monkeypatch.setattr(actions, "start_box", lambda task_id: None)
+    monkeypatch.setattr(box, "start_box", lambda task_id: None)
     monkeypatch.setattr(actions, "box_shell_command", lambda task_id: ["true"])
     return env
 
@@ -2956,6 +2957,7 @@ def test_b_on_a_project_row_opens_a_box_and_w_enters_it(box_env):
 
 def test_a_on_an_open_box_closes_it_for_review(box_env, monkeypatch):
     monkeypatch.setattr(actions, "commit_in_box", lambda task: None)
+    monkeypatch.setattr(box, "commit_in_box", lambda task: None)
     task = actions.open_box("demo")
     (task.repo / "idea.md").write_text("x\n")
     subprocess.run(["git", "add", "-A"], cwd=task.repo, check=True)

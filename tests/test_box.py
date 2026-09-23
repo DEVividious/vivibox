@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from vivibox import actions, ui
+from vivibox import actions, box, ui
 from vivibox.cli import main
 from vivibox.config import load_config, load_project
 from vivibox.states import State
@@ -19,8 +19,10 @@ def no_docker(monkeypatch):
     started: list[str] = []
     monkeypatch.setattr(actions, "boxes_started", started, raising=False)
     monkeypatch.setattr(actions, "start_box", lambda task_id: started.append(task_id))
+    monkeypatch.setattr(box, "start_box", lambda task_id: started.append(task_id))
     # Closing commits inside the pod; here on the host, in the clone, which the pod would do.
     monkeypatch.setattr(actions, "commit_in_box", lambda task: commit_here(task))
+    monkeypatch.setattr(box, "commit_in_box", lambda task: commit_here(task))
 
 
 def commit_here(task):

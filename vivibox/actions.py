@@ -522,7 +522,9 @@ def start_repository(path: Path) -> Path:
     return path
 
 
-def setup_project(path: Path, name: str, verify: list[str], java: str = "", create: bool = False) -> Path:
+def setup_project(
+    path: Path, name: str, verify: list[str], java: str = "", create: bool = False, no_build: bool = False
+) -> Path:
     """Writes ~/.config/vivibox/projects/<name>.toml for this repository. Returns the file."""
     path = path.expanduser().resolve()
     top = git_root(path)
@@ -538,7 +540,12 @@ def setup_project(path: Path, name: str, verify: list[str], java: str = "", crea
     if target.exists():
         raise ConfigError(f"project {name} is already set up in {target}; pick another name")
     found = project_init.Detected(
-        name, top, [c.strip() for c in verify if c.strip()], project_init.detect_demo(top), java
+        name,
+        top,
+        [c.strip() for c in verify if c.strip()],
+        project_init.detect_demo(top),
+        java,
+        no_build=no_build,
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(project_init.render(found))

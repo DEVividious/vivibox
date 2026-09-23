@@ -167,3 +167,48 @@ def test_the_project_file_takes_a_command_or_no_build_from_the_picker(env, tmp_p
     project = load_project("notes")
     assert project.verify == ["npm test"] and not project.no_build
     assert (config_dir() / "projects" / "notes.toml").read_text().count("verify") == 1
+
+
+def test_the_ci_definition_says_how_the_project_is_built(tmp_path):
+    """The one place a project says how it builds, written by people who know it. Offered after
+    the build files' own commands, so the detected default stays what the build tool runs, and
+    said in the notes so a person sees it at init."""
+    (tmp_path / "mvnw").write_text("")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text(
+        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+        "      - run: ./mvnw --batch-mode verify -Pintegration\n"
+        "      - name: Lint\n        run: |\n          npm ci\n          npm run lint\n"
+        "      - run: ./mvnw deploy\n"
+        "      - run: echo ${{ matrix.os }}\n"
+    )
+    assert init.ci_commands(tmp_path) == [
+        ("bash mvnw --batch-mode verify -Pintegration", ".github/workflows/ci.yml"),
+        ("npm ci && npm run lint", ".github/workflows/ci.yml"),
+    ]
+    found = init.candidates(tmp_path)
+    assert found[0] == ("bash mvnw -B verify", "mvnw") and found[1:] == init.ci_commands(tmp_path)
+    detected = init.detect(tmp_path)
+    assert detected.verify == ["bash mvnw -B verify"]
+    assert any("ci.yml runs: bash mvnw --batch-mode verify -Pintegration" in n for n in detected.notes)
+
+
+def test_gitlab_jenkins_and_bitbucket_definitions_are_read_too(tmp_path):
+    (tmp_path / ".gitlab-ci.yml").write_text(
+        "test:\n  script:\n    - ./gradlew test --no-daemon\n    - echo done\n"
+    )
+    (tmp_path / "Jenkinsfile").write_text(
+        "pipeline {\n  stages {\n    stage('Test') {\n      steps {\n        sh 'npm ci && npm test'\n"
+        '        sh "./gradlew publish"\n      }\n    }\n  }\n}\n'
+    )
+    (tmp_path / "bitbucket-pipelines.yml").write_text(
+        "pipelines:\n  default:\n    - step:\n        script:\n"
+        "          - pnpm install --frozen-lockfile\n          - pnpm test\n"
+    )
+    assert init.ci_commands(tmp_path) == [
+        ("bash gradlew test --no-daemon", ".gitlab-ci.yml"),
+        ("npm ci && npm test", "Jenkinsfile"),
+        ("pnpm install --frozen-lockfile && pnpm test", "bitbucket-pipelines.yml"),
+    ]
+    assert init.ci_commands(tmp_path / "nowhere") == []

@@ -109,6 +109,9 @@ def package_manager(repo: Path) -> str:
     return "npm"
 
 
+BUILD_FILES = ("gradlew", "build.gradle.kts", "build.gradle", "mvnw", "pom.xml", "package.json")
+
+
 def candidates(repo: Path) -> list[tuple[str, str]]:
     """Every command the project's build files call for, each with the file it comes from, the
     one detect() picks first. What a picker offers; detection takes the first."""
@@ -126,7 +129,84 @@ def candidates(repo: Path) -> list[tuple[str, str]]:
         found.append(("mvn -B verify", "pom.xml"))
     if (repo / "package.json").exists():
         found.append((NODE_VERIFY[package_manager(repo)], "package.json"))
-    return found
+    return found + [c for c in ci_commands(repo) if c[0] not in {command for command, _ in found}]
+
+
+# Where a project says how its pipeline builds it, in the order they are read.
+CI_FILES = (".gitlab-ci.yml", "Jenkinsfile", "bitbucket-pipelines.yml", "azure-pipelines.yml")
+# A line of a pipeline step that is the build: it starts with a build tool. The rest (checkout,
+# echo, docker, curl) is the pipeline's own business.
+TOOLS = {
+    "mvnw", "mvn", "gradlew", "gradle", "npm", "npx", "yarn", "pnpm", "corepack", "make",
+    "uv", "pytest", "python", "python3", "go", "cargo", "dotnet",
+}  # fmt: skip
+# A step that ships the build is not one that checks it.
+NOT_A_CHECK = re.compile(r"\b(deploy|publish|release|push|upload|sonar)\b")
+YAML_STEP = re.compile(r"^(\s*)(?:-\s+)?(?:run|script|before_script):\s*(.*)$")
+# sh 'cmd', sh "cmd", sh '''…''' and sh """…""" of a Jenkinsfile, one group per quoting.
+SH_STEP = re.compile(
+    r"\bsh\s*\(?\s*(?:'''(.*?)'''|" + '"""(.*?)"""' + r"|'([^'\n]*)'|" + r'"([^"\n]*)")', re.DOTALL
+)
+MAX_CI = 6
+
+
+def _yaml_steps(text: str) -> list[list[str]]:
+    """The commands of each run:/script: step of a workflow, GitLab, Bitbucket or Azure file:
+    one line, or the indented block or list below the key."""
+    lines = text.splitlines()
+    steps = []
+    i = 0
+    while i < len(lines):
+        m = YAML_STEP.match(lines[i])
+        i += 1
+        if not m:
+            continue
+        indent, rest = len(m.group(1)), m.group(2).strip()
+        if rest and rest not in ("|", ">", "|-", ">-", "|+"):
+            steps.append([rest])
+            continue
+        block = []
+        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent):
+            if lines[i].strip():
+                block.append(lines[i].strip().removeprefix("- ").strip())
+            i += 1
+        steps.append(block)
+    return steps
+
+
+def _build_command(step: list[str]) -> str:
+    """The build lines of a step joined as the gate runs them, or "" when the step is no build."""
+    kept = []
+    for line in step:
+        line = line.strip().strip("'\"")
+        words = line[2:].split() if line.startswith("./") else line.split()
+        if not words or words[0] not in TOOLS or "${{" in line or NOT_A_CHECK.search(line):
+            continue
+        if line.startswith("./") and words[0] in ("mvnw", "gradlew"):
+            line = "bash " + line[2:]
+        kept.append(line)
+    return " && ".join(kept)
+
+
+def ci_commands(repo: Path) -> list[tuple[str, str]]:
+    """What the project's pipeline runs to build and test it, with the file each comes from: the
+    one place the project says how it is built, by people who know it. Read by lines, so an
+    unusual file yields nothing rather than a wrong command."""
+    workflows = repo / ".github" / "workflows"
+    sources = sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []
+    sources += [repo / name for name in CI_FILES if (repo / name).is_file()]
+    found: list[tuple[str, str]] = []
+    for path in sources:
+        text = _read(path)
+        if path.name == "Jenkinsfile":
+            steps = [next(filter(None, groups)).splitlines() for groups in SH_STEP.findall(text)]
+        else:
+            steps = _yaml_steps(text)
+        for step in steps:
+            command = _build_command(step)
+            if command and command not in {c for c, _ in found}:
+                found.append((command, str(path.relative_to(repo))))
+    return found[:MAX_CI]
 
 
 def detect(repo: Path) -> Detected:
@@ -143,6 +223,9 @@ def detect(repo: Path) -> Detected:
                 found.notes.append(f"Gradle {version[0]}.{version[1]} does not run on Java {IMAGE_JAVA}.")
     elif found.source.startswith("build.gradle"):
         found.notes.append("No Gradle wrapper: the image's Gradle is used.")
+    for command, source in options[1:]:
+        if source not in BUILD_FILES:
+            found.notes.append(f"{source} runs: {command}")
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.

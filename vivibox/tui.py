@@ -46,7 +46,7 @@ from textual.widgets.selection_list import Selection
 
 from . import actions, code, context, gate, ide, keys, manual, providers, supervisor, ui
 from . import init as project_init
-from .config import ConfigError, Project, config_dir, load_config, load_project
+from .config import ConfigError, config_dir, load_config, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .states import State
@@ -857,7 +857,8 @@ NEW_PROJECT = "+ set up another project…"
 
 class NewProject(Dialog):
     """A repository vivibox does not know yet, or a folder where one should start. How to build and
-    test it is detected, or left to the first plan you accept; it is not asked here."""
+    test it is detected from its build files, with what its pipeline runs a pick away, or left to
+    the first plan you accept."""
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -867,6 +868,10 @@ class NewProject(Dialog):
                 yield Button("Browse…", id="browse")
             yield Label("Name")
             yield Input(id="name")
+            yield Label("Verification")
+            with Horizontal(classes="role"):
+                yield Label("", id="verify", classes="wrap")
+                yield Button("Change…", id="change")
             yield Label("", id="notes")
             with Horizontal(classes="buttons"):
                 yield Button("Set up", variant="primary", id="create")
@@ -888,31 +893,57 @@ class NewProject(Dialog):
         found = actions.propose_project(where)
         root = actions.git_root(where)
         self.taken = actions.project_at(root) if root else ""
+        self.candidates = project_init.candidates(root or where)
+        self.verify, self.source, self.no_build = list(found.verify), found.source, False
         name = self.query_one("#name", Input)
         name.value = self.taken or found.name
         name.disabled = bool(self.taken)
         if self.taken:
             notes = [f"already a project: {self.taken}; Set up opens a task for it instead"]
         elif root:
-            how = [f"{c} (from {found.source})" for c in found.verify] or ["no build found"]
-            notes = [f"repository {root}", *how, *found.notes]
+            notes = [f"repository {root}", *found.notes]
         else:
-            notes = [f"a new repository starts in {where}", "the first plan you accept sets how to test it"]
+            notes = [f"a new repository starts in {where}"]
         self.query_one("#notes", Label).update(" · ".join(notes))
+        self.query_one("#change", Button).display = not self.taken
+        self.show_verify()
         self.query_one("#create", Button).label = "Open a task" if self.taken else "Set up"
+
+    def show_verify(self) -> None:
+        if self.no_build:
+            how = actions.NO_BUILD
+        elif self.verify:
+            how = f"{escape(self.verify[0])}  [dim]from {escape(self.source)}[/]"
+        else:
+            how = "the first plan you accept decides"
+        self.query_one("#verify", Label).update(how)
+
+    def pick_verify(self, choice: dict) -> None:
+        if not choice:
+            return
+        self.verify, self.no_build = choice["verify"], choice["no_build"]
+        self.source = (
+            dict((c, s) for c, s in self.candidates).get(self.verify[0], "you") if self.verify else ""
+        )
+        self.show_verify()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "browse":
             self.app.push_screen(Browse(FOLDER, "Pick the project's folder"), self.use_folder)
+        elif event.button.id == "change":
+            name = self.query_one("#name", Input).value.strip() or "this project"
+            picker = ChooseVerify(name, self.verify, self.no_build, self.candidates, exists=False)
+            self.app.push_screen(picker, self.pick_verify)
         elif event.button.id != "create":
             self.dismiss({})
         elif self.taken:
             self.dismiss({"use": self.taken})
         else:
-            where = self.where
             name = self.query_one("#name", Input).value.strip()
-            self.dismiss({"path": str(where), "name": name, "verify": actions.propose_project(where).verify})
+            self.dismiss(
+                {"path": str(self.where), "name": name, "verify": self.verify, "no_build": self.no_build}
+            )
 
     @on(Input.Submitted)
     def submitted(self) -> None:
@@ -923,25 +954,36 @@ class NewProject(Dialog):
 
 
 class ChooseVerify(ModalScreen[dict]):
-    """How a project is verified: a command its build files name, no build, one of your own, or
-    the file itself for the rest of it. Arrows pick, Enter takes, Escape leaves it as it is."""
+    """How a project is verified: a command its build files or its pipeline name, no build, one of
+    your own, or the file itself for the rest of it. Before the project exists (from i), the file
+    is not offered, and leaving it to the first plan is. Arrows pick, Enter takes, Escape leaves
+    it as it is."""
 
     EDIT = "edit the project file in your editor, for pass_env and host services too…"
+    PLAN_DECIDES = "leave it to the first plan you accept"
 
-    def __init__(self, project: Project, candidates: list[tuple[str, str]]):
+    def __init__(
+        self,
+        name: str,
+        verify: list[str],
+        no_build: bool,
+        candidates: list[tuple[str, str]],
+        exists: bool = True,
+    ):
         super().__init__()
-        self.project, self.candidates = project, candidates
+        self.project_name, self.verify, self.no_build = name, verify, no_build
+        self.candidates, self.exists = candidates, exists
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"How {self.project.name} is verified:")
+            yield Label(f"How {self.project_name} is verified:")
             now = "  ← now"
             labels = [
-                f"{escape(c)}  [dim]from {escape(source)}[/]" + (now if [c] == self.project.verify else "")
+                f"{escape(c)}  [dim]from {escape(source)}[/]" + (now if [c] == self.verify else "")
                 for c, source in self.candidates
             ]
-            labels.append(escape(actions.NO_BUILD) + (now if self.project.no_build else ""))
-            labels.append(self.EDIT)
+            labels.append(escape(actions.NO_BUILD) + (now if self.no_build else ""))
+            labels.append(self.EDIT if self.exists else self.PLAN_DECIDES)
             yield OptionList(*labels, id="choices")
             with Horizontal(classes="role"):
                 yield Label("Other")
@@ -957,8 +999,10 @@ class ChooseVerify(ModalScreen[dict]):
             self.dismiss({"verify": [self.candidates[i][0]], "no_build": False})
         elif i == len(self.candidates):
             self.dismiss({"verify": [], "no_build": True})
-        else:
+        elif self.exists:
             self.dismiss({"edit": True})
+        else:
+            self.dismiss({"verify": [], "no_build": False})
 
     @on(Input.Submitted)
     def typed(self, event: Input.Submitted) -> None:
@@ -3207,7 +3251,10 @@ class Vivibox(App):
             self.drawn = ()
             self.reload()
 
-        self.push_screen(ChooseVerify(project, project_init.candidates(project.repo)), chosen)
+        self.push_screen(
+            ChooseVerify(name, project.verify, project.no_build, project_init.candidates(project.repo)),
+            chosen,
+        )
 
     def edit_project_file(self) -> None:
         with self.suspend():
@@ -3280,7 +3327,9 @@ class Vivibox(App):
                 self.action_new(used)  # the folder is a project already: straight to its next task
                 return
             try:
-                target = actions.setup_project(Path(form["path"]), form["name"], form["verify"], create=True)
+                target = actions.setup_project(
+                    Path(form["path"]), form["name"], form["verify"], create=True, no_build=form["no_build"]
+                )
             except Exception as e:
                 self.fail(e)
                 return

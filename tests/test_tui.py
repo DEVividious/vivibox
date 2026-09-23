@@ -181,19 +181,75 @@ def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch)
     run(scenario)
 
 
-def test_the_new_project_dialog_says_where_the_command_comes_from(env, tmp_path, monkeypatch):
+def test_the_new_project_dialog_says_where_the_command_comes_from_and_lets_you_pick(
+    env, tmp_path, monkeypatch
+):
+    """What the build file says is the default; what the CI definition runs is a pick away, so
+    the verification here is the pipeline's, not a guess."""
+    from vivibox.config import load_project
+
     repo = tmp_path / "shop"
     make_repo(repo)
     (repo / "mvnw").write_text("")
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text(
+        "jobs:\n  b:\n    steps:\n      - run: ./mvnw --batch-mode verify -Pit\n"
+    )
     monkeypatch.chdir(repo)
 
     async def scenario(app, pilot):
         await pilot.press("i")
         await pilot.pause()
-        notes = str(app.screen.query_one("#notes", Label).render())
-        assert "bash mvnw -B verify" in notes and "from mvnw" in notes
+        shown = str(app.screen.query_one("#verify", Label).render())
+        assert "bash mvnw -B verify" in shown and "from mvnw" in shown
+        app.screen.query_one("#change").press()
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseVerify)
+        options = app.screen.query_one(OptionList)
+        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert "ci.yml" in labels[1] and not any("edit the project file" in s for s in labels), "no file yet"
+        assert any("first plan" in s for s in labels), "or leave it to the plan, as before"
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        shown = str(app.screen.query_one("#verify", Label).render())
+        assert "verify -Pit" in shown and "ci.yml" in shown
+        app.screen.query_one("#create").press()
+        await pilot.pause()
 
     run(scenario)
+    assert load_project("shop").verify == ["bash mvnw --batch-mode verify -Pit"]
+
+
+def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monkeypatch):
+    from vivibox.config import load_project
+
+    fresh = tmp_path / "notes"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui, "browse_start", lambda: tmp_path)
+
+    async def scenario(app, pilot):
+        await pilot.press("i")
+        await pilot.pause()
+        app.screen.query_one("#browse").press()
+        await pilot.pause()
+        app.screen.query_one("#new-folder").press()
+        await pilot.pause()
+        await pilot.press(*"notes", "enter")
+        await pilot.pause()
+        assert "first plan" in str(app.screen.query_one("#verify", Label).render())
+        app.screen.query_one("#change").press()
+        await pilot.pause()
+        options = app.screen.query_one(OptionList)
+        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        await pilot.press(*["down"] * labels.index(next(s for s in labels if "no build" in s)), "enter")
+        await pilot.pause()
+        assert "no build" in str(app.screen.query_one("#verify", Label).render())
+        app.screen.query_one("#create").press()
+        await pilot.pause()
+
+    run(scenario)
+    assert load_project("notes").no_build and (fresh / ".git").is_dir()
 
 
 def test_reply_sends_your_comment(env):

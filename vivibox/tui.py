@@ -32,7 +32,6 @@ from textual.widgets import (
 )
 
 from . import actions, code, ide, keys, manual, providers, ui
-from . import init as project_init
 from .config import ConfigError, config_dir, load_config, load_project
 from .dialogs import (  # noqa: F401
     HELP,
@@ -127,6 +126,7 @@ from .panel import (  # noqa: F401
     watchable,
 )
 from .plan import PlanError, parse_plan
+from .settings import ProjectSettings, Settings
 from .states import State
 from .task import Task, TaskState, list_tasks
 
@@ -173,6 +173,7 @@ class Vivibox(App):
     CSS = """
     DataTable { height: 1fr; }
     .catalog { height: 8; }
+    #rows { height: auto; max-height: 20; }
     .tree { height: 16; }
     .found { height: auto; max-height: 8; }
     .group { padding: 1 0 0 0; text-style: bold; }
@@ -254,7 +255,7 @@ class Vivibox(App):
         Binding("i", "new_project", "New project", show=False),
         Binding("h", "toggle_done", "Show/hide accepted", show=False),
         Binding("H", "toggle_deleted", "Show/hide deleted", show=False),
-        Binding("k", "providers", "Providers & MCP", show=False),
+        Binding("k", "settings", "Settings", show=False),
         Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
     ]
@@ -331,8 +332,8 @@ class Vivibox(App):
             return None
         return super().call_from_thread(callback, *args, **kwargs)
 
-    def action_providers(self) -> None:
-        self.push_screen(ManageProviders())
+    def action_settings(self) -> None:
+        self.push_screen(Settings())
 
     def import_opencode(self, done) -> None:
         """Which opencode configuration, then which of its providers; done gets the names brought over."""
@@ -1039,23 +1040,13 @@ class Vivibox(App):
         self.action_copy_prompt(cli=True)
 
     def action_open_ide(self) -> None:
+        """With the editor the project or config.toml names, else the one the repository's own
+        folders point at among those found here; k, or the project's row, changes it."""
         task_id = self.selected()[1].id
-        if actions.editor_command(self.config, actions.load(task_id)[1]):
-            self.open_ide(task_id)
+        if not actions.editor_command(self.config, actions.load(task_id)[1]):
+            self.fail(ConfigError("no editor found; pick one under k, or set [review] ide in config.toml"))
             return
-        found = ide.candidates()
-        if not found:
-            self.fail(ConfigError('no editor found; set [review] ide in config.toml, e.g. "code {path}"'))
-            return
-
-        def chosen(command: str) -> None:
-            if not command:
-                return
-            ide.remember(command)
-            self.config = load_config()
-            self.open_ide(task_id)
-
-        self.push_screen(ChooseEditor(found), chosen)
+        self.open_ide(task_id)
 
     def open_ide(self, task_id: str) -> None:
         task, project = actions.load(task_id)
@@ -1333,7 +1324,19 @@ class Vivibox(App):
         )
 
     def action_help(self) -> None:
-        self.push_screen(Help())
+        self.push_screen(Help(self.editor_note()))
+
+    def editor_note(self) -> str:
+        """What o opens with on this machine: chosen, or the first editor found."""
+        if self.config.ide:
+            return f"o opens with {self.config.ide} (config.toml; k changes it)."
+        found = ide.candidates()
+        if not found:
+            return "o has no editor to open with: none found here; k sets one."
+        return (
+            f"o opens with {found[0].command}, the first editor found here, or what .idea or .vscode "
+            "point at (k changes it)."
+        )
 
     @work(thread=True)
     def start(self, task_id: str, resume: bool = False) -> None:
@@ -1362,31 +1365,15 @@ class Vivibox(App):
         return config_dir() / "projects" / f"{self.selected_project()}.toml"
 
     def action_edit_project(self) -> None:
-        """How the project is verified, picked from what its build files name; the file itself
-        for the rest, and when it cannot be read at all."""
+        """The project's screen: how it is verified and run, its JDK, pass_env, its editor; the
+        file itself for the rest, and when it cannot be read at all."""
         name = self.selected_project()
         try:
-            project = load_project(name)
+            load_project(name)
         except ConfigError:
             self.edit_project_file()
             return
-
-        def chosen(choice: dict) -> None:
-            if not choice:
-                return
-            if choice.get("edit"):
-                self.edit_project_file()
-                return
-            actions.save_verify(project, choice["verify"], choice["no_build"])
-            how = actions.NO_BUILD if choice["no_build"] else ", ".join(f"`{c}`" for c in choice["verify"])
-            self.notify(f"{name} is verified from now on: {how}", timeout=6)
-            self.drawn = ()
-            self.reload()
-
-        self.push_screen(
-            ChooseVerify(name, project.verify, project.no_build, project_init.candidates(project.repo)),
-            chosen,
-        )
+        self.push_screen(ProjectSettings(name))
 
     def edit_project_file(self) -> None:
         with self.suspend():

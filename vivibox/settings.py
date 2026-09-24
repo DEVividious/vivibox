@@ -1,0 +1,391 @@
+"""The settings screen (k) and a project's own screen (e on its row).
+
+What a person changes often is a row here: "name · value", Enter opens the row's own picker or
+field, and the file gets that one key written with its comments kept (configfile). What changes
+rarely stays in the file, one row away. The machine's settings (where the tasks live, the address
+pool) are shown, not edited: they move data.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from rich.markup import escape
+from textual import on
+from textual.app import ComposeResult
+from textual.containers import Vertical
+from textual.widgets import Input, Label, OptionList, TextArea
+from textual.widgets.option_list import Option
+
+from . import actions, configfile, ide, ui
+from . import init as project_init
+from .config import ENV_NAME, JAVA, RESERVED_ENV, ConfigError, config_dir, load_config, load_project
+from .dialogs import (
+    ChooseEditor,
+    ChooseModel,
+    ChooseVerify,
+    Dialog,
+    EdgeTextArea,
+    ManageProviders,
+    provider_rows,
+)
+from .panel import edit_in_editor
+
+# A row: what it is called, what it is now, and the key Enter acts on; None for a heading or a
+# value that is only shown.
+Row = tuple[str, str, str | None]
+
+
+class Ask(Dialog):
+    """One value on one line: Enter takes it, Escape leaves it as it is."""
+
+    def __init__(self, prompt: str, value: str, hint: str = ""):
+        super().__init__()
+        self.prompt, self.value, self.hint = prompt, value, hint
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.prompt)
+            yield Input(self.value, id="value")
+            if self.hint:
+                yield Label(self.hint, classes="files")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    @on(Input.Submitted)
+    def typed(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
+class AskLines(Dialog):
+    """A list, one entry per line: ctrl+s takes it, Escape leaves it as it is."""
+
+    def __init__(self, prompt: str, lines: list[str], hint: str = ""):
+        super().__init__()
+        self.prompt, self.lines, self.hint = prompt, lines, hint
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"{self.prompt} (ctrl+s saves)")
+            yield EdgeTextArea("\n".join(self.lines), id="lines")
+            if self.hint:
+                yield Label(self.hint, classes="files")
+
+    def on_mount(self) -> None:
+        self.query_one(TextArea).focus()
+
+    def key_ctrl_s(self) -> None:
+        self.dismiss([line.strip() for line in self.query_one(TextArea).text.splitlines() if line.strip()])
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
+class Rows(Dialog):
+    """Rows under headings; Enter opens the highlighted row's own picker, Escape closes. The list
+    is drawn again after every change, so a row always says what the file says."""
+
+    TITLE_TEXT = ""
+
+    def rows(self) -> list[Row]:
+        raise NotImplementedError
+
+    def open(self, key: str) -> None:
+        raise NotImplementedError
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.TITLE_TEXT, id="title")
+            yield OptionList(id="rows")
+            yield Label("Enter changes the highlighted one · Esc closes", classes="files")
+
+    def on_mount(self) -> None:
+        self.fill()
+        self.query_one(OptionList).focus()
+
+    def fill(self) -> None:
+        options = self.query_one(OptionList)
+        was = options.highlighted
+        options.clear_options()
+        self.keys: list[str | None] = []
+        for label, value, key in self.rows():
+            self.keys.append(key)
+            if not value and key is None:
+                options.add_option(Option(f"[b]{escape(label)}[/b]", disabled=True))
+            elif key is None:
+                options.add_option(Option(f"  {escape(label)}  [dim]{escape(value)}[/]", disabled=True))
+            else:
+                options.add_option(Option(f"  {escape(label)}  [dim]{escape(ui.shorten(value, 60))}[/]"))
+        first = next((i for i, key in enumerate(self.keys) if key), 0)
+        options.highlighted = was if was is not None and was < len(self.keys) and self.keys[was] else first
+
+    @on(OptionList.OptionSelected)
+    def chose(self, event: OptionList.OptionSelected) -> None:
+        if key := self.keys[event.option_index]:
+            self.open(key)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+    def say(self, text: str) -> None:
+        self.app.notify(text, timeout=6)
+
+    def edit_file(self, path: Path) -> None:
+        """The file itself, in your editor, for what has no row."""
+        with self.app.suspend():
+            edit_in_editor(path)
+
+
+def config_path() -> Path:
+    return config_dir() / "config.toml"
+
+
+class Settings(Rows):
+    """Providers & MCP first, since a task cannot start without a model; then the roles' defaults,
+    the review, the limits, and the machine's own settings, shown only."""
+
+    TITLE_TEXT = "Settings"
+
+    def rows(self) -> list[Row]:
+        config = self.app.config
+        on = [name for _, name, _, enabled in provider_rows() if enabled]
+        editor = config.ide or self.found_editor()
+        return [
+            ("Providers & MCP", "", None),
+            ("providers & MCP", f"{len(on)} on: {', '.join(on)}" if on else "none yet", "providers"),
+            ("Roles, by default", "", None),
+            *(
+                (name, actions.choice_label(actions.configured_choice(config, name)), f"role:{name}")
+                for name in sorted(config.roles)
+            ),
+            ("Review", "", None),
+            (
+                "editor for o",
+                editor if config.ide else f"{editor} (found here)" if editor else "none found",
+                "editor",
+            ),
+            ("desktop notifications", "on" if config.desktop_notifications else "off", "notifications"),
+            ("Limits", "", None),
+            ("max_iterations", str(config.max_iterations), "max_iterations"),
+            ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
+            ("Machine, in config.toml", "", None),
+            ("tasks_dir", str(config.tasks_dir), None),
+            ("network pool", config.network_pool, None),
+            ("edit config.toml in your editor…", " ", "file"),
+        ]
+
+    @staticmethod
+    def found_editor() -> str:
+        found = ide.candidates()
+        return found[0].command if found else ""
+
+    def reread(self) -> None:
+        try:
+            self.app.config = load_config()
+        except ConfigError as e:
+            self.app.fail(e)
+        self.fill()
+
+    def write(self, key: str, value: object, table: str, said: str) -> None:
+        configfile.set_value(config_path(), key, value, table)
+        self.reread()
+        self.say(said)
+
+    def open(self, key: str) -> None:
+        config = self.app.config
+        if key == "providers":
+            self.app.push_screen(ManageProviders(), lambda _: self.fill())
+        elif key.startswith("role:"):
+            role = key.removeprefix("role:")
+            configured = actions.configured_choice(config, role)
+            offered = actions.choices(role, config, self.app.available)
+
+            def picked(choice) -> None:
+                if choice is None or (not choice[1] and choice[0] != "manual"):
+                    return
+                configfile.set_value(config_path(), "harness", choice[0], f"roles.{role}")
+                self.write(
+                    "model",
+                    choice[1],
+                    f"roles.{role}",
+                    f"{role} runs on {actions.choice_label(choice)} by default.",
+                )
+
+            self.app.push_screen(ChooseModel(role, offered, configured, configured), picked)
+        elif key == "editor":
+            found = ide.candidates()
+            if not found:
+                self.say('No editor found here; set [review] ide in config.toml, e.g. "code {path}".')
+                return
+            self.app.push_screen(
+                ChooseEditor(found),
+                lambda command: command and self.write("ide", command, "review", f"o opens with {command}."),
+            )
+        elif key == "notifications":
+            on = not config.desktop_notifications
+            self.write("desktop", on, "notifications", f"Desktop notifications {'on' if on else 'off'}.")
+        elif key in ("max_iterations", "verify_timeout"):
+            prompts = {
+                "max_iterations": "Verification failures the writer may fix on its own before it stops:",
+                "verify_timeout": "Seconds one verification command may take:",
+            }
+            now = config.max_iterations if key == "max_iterations" else config.verify_timeout
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                if not value.isdigit() or int(value) < 1:
+                    self.say(f"{key} must be a whole number of at least 1.")
+                    return
+                self.write(key, int(value), "limits", f"{key} = {value} from the next start.")
+
+            self.app.push_screen(Ask(prompts[key], str(now)), typed)
+        elif key == "file":
+            self.edit_file(config_path())
+            self.reread()
+
+
+class ProjectSettings(Rows):
+    """What belongs to the project: how it is verified and run, its JDK, what its build needs from
+    your shell, and the editor for its review copies. The rest is in its file, the last row."""
+
+    def __init__(self, name: str):
+        super().__init__()
+        self.project_name = name
+        self.TITLE_TEXT = f"Project {name}"
+
+    def path(self) -> Path:
+        return config_dir() / "projects" / f"{self.project_name}.toml"
+
+    def rows(self) -> list[Row]:
+        project = load_project(self.project_name)
+        config = self.app.config
+        if project.no_build:
+            verify = actions.NO_BUILD
+        elif project.verify:
+            verify = ", ".join(project.verify)
+        else:
+            verify = "the first plan you accept decides"
+        machine = config.ide or Settings.found_editor()
+        return [
+            ("verification", verify, "verify"),
+            (
+                "run it, for v",
+                ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
+                "demo",
+            ),
+            ("java", project.java or "21, the image's", "java"),
+            ("pass_env", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
+            (
+                "editor for o",
+                project.ide or f"config.toml's: {machine}" if machine else "none found",
+                "editor",
+            ),
+            ("edit the project file, for host_services and risky_extra…", " ", "file"),
+        ]
+
+    def changed(self) -> None:
+        """The list redraws: verify, pass_env, the repository, any of it may have changed."""
+        self.app.drawn = ()
+        self.app.reload()
+        self.fill()
+
+    def write(self, key: str, value: object, said: str) -> None:
+        configfile.set_value(self.path(), key, value)
+        self.changed()
+        self.say(said)
+
+    def open(self, key: str) -> None:
+        project = load_project(self.project_name)
+        if key == "verify":
+
+            def chosen(choice: dict) -> None:
+                if not choice:
+                    return
+                actions.save_verify(project, choice["verify"], choice["no_build"])
+                how = (
+                    actions.NO_BUILD if choice["no_build"] else ", ".join(f"`{c}`" for c in choice["verify"])
+                )
+                self.changed()
+                self.say(f"{self.project_name} is verified from now on: {how}")
+
+            self.app.push_screen(
+                ChooseVerify(
+                    self.project_name,
+                    project.verify,
+                    project.no_build,
+                    project_init.candidates(project.repo),
+                    offer_file=False,
+                ),
+                chosen,
+            )
+        elif key == "demo":
+            self.app.push_screen(
+                AskLines(
+                    f"How to run {self.project_name} for v, one command per line, the app itself last",
+                    project.demo,
+                    "Empty: vivibox works it out from the repository, or asks the agent once.",
+                ),
+                lambda lines: (
+                    lines is not None
+                    and self.write("demo", lines, f"v runs: {', '.join(lines) or 'worked out'}")
+                ),
+            )
+        elif key == "java":
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                if not JAVA.match(value):
+                    self.say('java must look like "17" or "temurin-17", or be empty for 21.')
+                    return
+                self.write("java", value, f"Java {value or '21'} from the next start")
+
+            self.app.push_screen(
+                Ask(
+                    "A JDK other than the image's Java 21, as a mise version (17 is Corretto 17); empty: 21:",
+                    project.java,
+                ),
+                typed,
+            )
+        elif key == "pass_env":
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                names = value.replace(",", " ").split()
+                if bad := [n for n in names if not ENV_NAME.match(n)]:
+                    self.say(f"not a variable name: {', '.join(bad)}")
+                    return
+                if reserved := sorted(set(names) & RESERVED_ENV):
+                    self.say(f"vivibox sets {', '.join(reserved)} in the pod itself; leave them out.")
+                    return
+                self.write("pass_env", names, f"from your shell: {', '.join(names) or 'nothing'}")
+
+            self.app.push_screen(
+                Ask(
+                    "Variables the build needs from your shell, separated by spaces:",
+                    " ".join(project.pass_env),
+                    "Their values come from the shell you start vivibox in; a task waits while one is unset.",
+                ),
+                typed,
+            )
+        elif key == "editor":
+            found = ide.candidates()
+            if not found:
+                self.say('No editor found here; set ide in the project file, e.g. "code {path}".')
+                return
+            self.app.push_screen(
+                ChooseEditor(found, first=("the one in config.toml", "")),
+                lambda command: (
+                    command is not None
+                    and self.write("ide", command, f"o opens it with {command or 'config.toml’s editor'}")
+                ),
+            )
+        elif key == "file":
+            self.app.edit_project_file()
+            self.fill()

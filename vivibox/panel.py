@@ -339,7 +339,7 @@ def project_detail(name: str, tasks: int, problem: str) -> str:
     if problem:
         lines += [f"**{problem}.**", ""]
     lines += [
-        "**Next:** `n` new task · `e` edit the project's file · `o` open the repository in your IDE"
+        "**Next:** `n` new task · `e` its settings · `o` open the repository in your IDE"
         + (" · `x` forget the project" if not tasks else ""),
         "",
         f"`{path}`",

@@ -24,12 +24,14 @@ a task gets it when its repository has 100 or more source files in a language Se
 finding symbols beats reading files; below that it would only add a language server's start and its
 tools' descriptions to every turn. The task's panel says whether it got Serena, and why.
 
-`k` in the view, *Providers & MCP*, lists what you have. From there: *Add provider…*, *Import
-opencode.json…*, and *Manage…*, where you tick what is on, set Serena's mode, and remove what you
-no longer want. A
-provider turned off offers no models; an MCP server turned off is given to no task; both keep their
-keys for when you turn them on again. The first model you pick for a role becomes its default in
-config.toml. The same, from a shell:
+`k` in the view opens the settings, one row each, Enter on a row changes it and the file keeps its
+comments: *Providers & MCP* first, then what each role runs on by default, the editor `o` opens
+with, desktop notifications, and the limits; `tasks_dir` and the address pool are shown, and the
+last row opens `config.toml` in your editor for the rest. *Providers & MCP* lists what you have.
+From there: *Add provider…*, *Import opencode.json…*, and *Manage…*, where you tick what is on,
+set Serena's mode, and remove what you no longer want. A provider turned off offers no models; an
+MCP server turned off is given to no task; both keep their keys for when you turn them on again.
+The first model you pick for a role becomes its default in config.toml. The same, from a shell:
 
 ```bash
 vivibox auth set anthropic                                 # asks for the key
@@ -79,7 +81,10 @@ toolchain a task needs. A project that wants different versions, or another lang
 own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
 before it reaches your checkout.
 
-Edit the file to add services on your host the agent may reach, or variables the build needs:
+`e` on the project's row opens its settings: the verification, how `v` runs it, its JDK, the
+variables its build needs from your shell, and the editor for its review copies, each written to
+the file alone with the comments kept. The last row opens the file itself, for services on your
+host the agent may reach and for extra risky patterns:
 
 ```toml
 repo = "~/projects/myproject"

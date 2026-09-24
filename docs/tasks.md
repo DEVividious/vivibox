@@ -21,13 +21,13 @@ them all:
 | `h` / `H` | show or hide the tasks you have accepted, or the ones you deleted, listed below the live ones; the deleted ones start hidden, the header counts what is out of sight, and both choices are kept for the next time |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; the verification is what its build files say, with what its pipeline runs (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) a pick away |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
-| `k` | providers & MCP: add a provider from opencode's list with a key, import an opencode.json, or manage what is on and remove what is not wanted |
+| `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `f` | the work as a diff, in git's pager, before you accept it |
-| `o` | open the review copy in your editor; the first time, vivibox lists the editors it finds here and keeps your choice |
+| `o` | open the review copy in your editor: the project's, else `config.toml`'s, else the one the repository's own folders point at (`.idea`, `.vscode`) among those found here, else the first found; `?` says which, `k` or the project's row changes it |
 | `p` | approve changes to risky files |
 | `g` | a task blocked on a failed verification, or on a question the agent asked about it: run the verification again without the agent, once you have fixed what was outside the code (a token expired, Docker, a service) |
 | `l` | the newest verification log, or the supervisor's, in your pager: followed as it is written while the verification runs (Ctrl-C stops following), otherwise opened at its end, where a failed build says why |
@@ -38,10 +38,11 @@ them all:
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
 | `b` | on a project's row: open a box, the project's pod for you to work in by hand, with your keys, the tools and opencode to run yourself, and no agent of its own; in a box, `w` is a shell and `a` closes it for review |
 
-On a project's row: `n` starts a task in it, `e` picks how it is verified (a command its build
-files name, no build, or one of your own; the last entry opens its file for `pass_env` and host
-services), `o` opens its repository in your IDE, and `x` forgets it once it has no tasks; the
-repository stays.
+On a project's row: `n` starts a task in it, `e` opens its settings, one row each: how it is
+verified (a command its build files name, no build, or one of your own), how `v` runs it, its JDK,
+what its build needs from your shell (`pass_env`), the editor for its review copies, and last its
+file for `host_services` and `risky_extra`; `o` opens its repository in your IDE, and `x` forgets
+it once it has no tasks; the repository stays.
 
 **Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write
 `@src/Order.java` or `@~/tickets/PAY-123.md` (also `@/abs/path`, `@./relative`, a folder) in the

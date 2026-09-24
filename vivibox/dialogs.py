@@ -404,10 +404,13 @@ class ChooseVerify(ModalScreen[dict]):
         no_build: bool,
         candidates: list[tuple[str, str]],
         exists: bool = True,
+        offer_file: bool | None = None,
     ):
         super().__init__()
         self.project_name, self.verify, self.no_build = name, verify, no_build
         self.candidates, self.exists = candidates, exists
+        # The file as a row, unless the caller (the project's screen) has one of its own.
+        self.offer_file = exists if offer_file is None else offer_file
 
     def rows(self) -> list[tuple[str, dict]]:
         """Each choice as its label and what taking it means, the current one marked. A command of
@@ -429,7 +432,7 @@ class ChooseVerify(ModalScreen[dict]):
         undecided = not self.verify and not self.no_build
         if not self.exists or undecided:
             rows.append((self.PLAN_DECIDES, {"verify": [], "no_build": False}))
-        if self.exists:
+        if self.offer_file:
             rows.append((self.EDIT, {"edit": True}))
         return [(label + (self.NOW if choice == self.now() else ""), choice) for label, choice in rows]
 
@@ -464,29 +467,34 @@ class ChooseVerify(ModalScreen[dict]):
         self.dismiss({})
 
 
-class ChooseEditor(ModalScreen[str]):
-    """What to open review copies with, asked once: arrows pick, Enter takes, Escape leaves it."""
+class ChooseEditor(ModalScreen["str | None"]):
+    """What to open review copies with, from the editors found here: arrows pick, Enter takes,
+    Escape (None) leaves it as it is. first: a row before them, with the command it stands for
+    ("" for config.toml's own)."""
 
-    def __init__(self, found: list[ide.Editor]):
+    def __init__(self, found: list[ide.Editor], first: tuple[str, str] | None = None):
         super().__init__()
         self.found = found
+        self.commands = [e.command for e in found]
+        self.labels = [e.label for e in found]
+        if first:
+            self.labels.insert(0, first[0])
+            self.commands.insert(0, first[1])
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label("Open the review copy with:")
-            options = OptionList(*[e.label for e in self.found], id="editors")
-            yield options
-            yield Label("Your choice is kept in config.toml; change it there, or per project.")
+            yield OptionList(*self.labels, id="editors")
 
     def on_mount(self) -> None:
         self.query_one(OptionList).focus()
 
     @on(OptionList.OptionSelected)
     def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.found[event.option_index].command)
+        self.dismiss(self.commands[event.option_index])
 
     def key_escape(self) -> None:
-        self.dismiss("")
+        self.dismiss(None)
 
 
 class ChooseSession(ModalScreen[str]):
@@ -1382,13 +1390,13 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]The selected project[/b] (Enter folds or unfolds its tasks)
   n     new task in it
   b     open a box: its pod for you to work in by hand, opencode included
-  e     edit its file
+  e     its settings: verification, how to run it, java, pass_env, editor
   o     open its repository in your IDE
   x     forget it, once it has no tasks
 
 [b]Anywhere[/b]
   i     set up a project
-  k     providers & MCP
+  k     settings: providers & MCP, roles, editor for o, notifications, limits
   h     show or hide the tasks you accepted
   H     show or hide the tasks you deleted (hidden to start with)
   q     quit
@@ -1396,11 +1404,18 @@ HELP = """[b]Your decisions[/b], on the selected task
 
 
 class Help(ModalScreen):
-    """Every key, and when it does something. The footer shows only what applies right now."""
+    """Every key, and when it does something. The footer shows only what applies right now.
+    note: a line about this machine, such as what o opens with."""
+
+    def __init__(self, note: str = ""):
+        super().__init__()
+        self.note = note
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="dialog help"):
             yield Static(HELP, id="help")
+            if self.note:
+                yield Label(self.note, id="note")
             yield Label("Esc closes.", classes="files")
 
     def key_escape(self) -> None:

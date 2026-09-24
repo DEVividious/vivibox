@@ -51,14 +51,20 @@ def review_copy(task: Task, project: Project) -> Path:
 
 
 def editor_command(config: Config, project: Project | None = None) -> str:
-    """The editor to open a review copy with: the project's, else the one in config.toml."""
-    return (project.ide if project and project.ide else "") or config.ide
+    """The editor to open a review copy with: the project's, else config.toml's, else the one the
+    repository's own folders point at among those found here (k or the project's row change it)."""
+    chosen = (project.ide if project and project.ide else "") or config.ide
+    if chosen or project is None:
+        return chosen
+    return ide.default_for(project.repo, ide.candidates())
 
 
 def open_in_ide(config: Config, path: Path, project: Project | None = None) -> None:
     command = editor_command(config, project)
     if not command:
-        raise ConfigError('no editor chosen yet; set [review] ide in config.toml, e.g. ide = "code {path}"')
+        raise ConfigError(
+            'no editor found; pick one under k, or set [review] ide in config.toml, e.g. "code {path}"'
+        )
     ide.open_folder(path, command)
 
 

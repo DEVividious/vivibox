@@ -8,7 +8,7 @@ from conftest import make_repo
 from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, box, dialogs, gate, tui, ui
+from vivibox import actions, box, dialogs, gate, settings, tui, ui
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
@@ -157,29 +157,31 @@ def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch)
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
+        assert isinstance(app.screen, settings.ProjectSettings), "the project's screen: verification first"
+        await pilot.press("enter")
+        await pilot.pause()
         assert isinstance(app.screen, tui.ChooseVerify)
         shown = [str(app.screen.query_one(OptionList).get_option_at_index(i).prompt)
                  for i in range(app.screen.query_one(OptionList).option_count)]  # fmt: skip
         assert "npm ci && npm test" in shown[0] and "package.json" in shown[0]
-        assert any("no build" in s for s in shown) and any("edit the project file" in s for s in shown)
+        assert any("no build" in s for s in shown) and not any("edit the project file" in s for s in shown)
         assert "first plan" in shown[options_now(app)], "undecided so far: the cursor says so"
         await pilot.press("home", "enter")  # the first: what package.json names
         await pilot.pause()
         assert load_project("notes").verify == ["npm ci && npm test"]
-        await pilot.press("e")
+        assert isinstance(app.screen, settings.ProjectSettings), "back on the project's screen"
+        await pilot.press("enter")
         await pilot.pause()
         await pilot.press("down", "enter")  # no build
         await pilot.pause()
         assert load_project("notes").no_build and load_project("notes").verify == []
-        await pilot.press("e")
+        await pilot.press("enter")
         await pilot.pause()
         app.screen.query_one("#other", Input).value = "make check"
         await pilot.press("tab", "enter")
         await pilot.pause()
         assert load_project("notes").verify == ["make check"]
-        await pilot.press("e")
-        await pilot.pause()
-        await pilot.press("end", "enter")  # the file itself
+        await pilot.press("end", "enter")  # the last row: the file itself
         await pilot.pause()
         assert opened == [env / "config" / "projects" / "notes.toml"]
 
@@ -267,6 +269,8 @@ def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeyp
         app.table.move_cursor(row=rows(app).index("notes"))
         await pilot.pause()
         await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("enter")  # the project's screen: its first row is the verification
         await pilot.pause()
         assert isinstance(app.screen, tui.ChooseVerify)
         assert "make check" in current(app) and "← now" in current(app), "a command of your own, too"
@@ -1245,6 +1249,8 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
         app.available = AVAILABLE
         await pilot.press("k")
         await pilot.pause()
+        await pilot.press("enter")  # the settings' first row: Providers & MCP
+        await pilot.pause()
         app.screen.query_one("#import").press()
         await pilot.pause()
         assert isinstance(app.screen, tui.ImportSource)
@@ -1257,7 +1263,7 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert isinstance(app.screen, tui.ManageProviders)
-        await pilot.press("escape")
+        await pilot.press("escape", "escape")  # Providers & MCP, then the settings
         await pilot.pause()
         await pilot.press("n")
         await pilot.pause()
@@ -1287,6 +1293,8 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
         app.catalog = CATALOG
         await pilot.press("k")
         await pilot.pause()
+        await pilot.press("enter")  # the settings' first row: Providers & MCP
+        await pilot.pause()
         app.screen.query_one("#add").press()
         await pilot.pause()
         await pilot.press(*"open")  # the search field has the focus
@@ -1297,7 +1305,7 @@ def test_a_provider_added_by_name_and_key_is_stored(env, monkeypatch, tmp_path):
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        await pilot.press("escape")
+        await pilot.press("escape", "escape")  # Providers & MCP, then the settings
         await pilot.pause()
         await pilot.press("n")
         await pilot.pause()
@@ -1318,6 +1326,8 @@ def test_a_provider_that_lists_no_models_is_said_to_check_the_name(env, monkeypa
         app.available = AVAILABLE
         app.catalog = CATALOG
         await pilot.press("k")
+        await pilot.pause()
+        await pilot.press("enter")  # the settings' first row: Providers & MCP
         await pilot.pause()
         app.screen.query_one("#add").press()
         await pilot.pause()
@@ -1509,6 +1519,177 @@ def test_the_project_is_a_list_even_with_one_project(env):
     run(scenario)
 
 
+def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
+    """One screen for what changes often: providers first, the roles' defaults, the review, the
+    limits; the machine's own settings shown, not edited. Each row writes its key alone, and the
+    file's comments, its manual, stay."""
+    from vivibox import ide
+
+    config = env / "config" / "config.toml"
+    config.write_text(
+        '# The manual.\ntasks_dir = "' + str(env / "tasks") + '"\n\n[limits]\n# Kept.\nmax_iterations = 3\n\n'
+        '[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n\n'
+        '[review]\n# ide = "idea {path}"\n'
+    )
+    monkeypatch.setattr(ide, "candidates", lambda: [ide.Editor("VS Code", "code {path}")])
+
+    def labels(app) -> list[str]:
+        options = app.screen.query_one("#rows", OptionList)
+        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("k")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Settings)
+        shown = labels(app)
+        assert "Providers & MCP" in shown[0] and "serena" in shown[1], "providers first, as before"
+        assert any("code {path} (found here)" in row for row in shown), "o's editor, found, not chosen yet"
+        assert any("tasks_dir" in row for row in shown) and any("network pool" in row for row in shown)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ManageProviders), "the first row is the old k"
+        await pilot.press("escape")
+        await pilot.pause()
+        # The writer's default model.
+        writer = next(i for i, row in enumerate(shown) if row.strip().startswith("writer"))
+        app.screen.query_one("#rows", OptionList).highlighted = writer
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseModel)
+        await pilot.press("down", "enter")  # the first of deepseek's
+        await pilot.pause()
+        text = config.read_text()
+        assert (
+            'model = "deepseek/deepseek-v4-flash"' in text and "# The manual." in text and "# Kept." in text
+        )
+        assert "deepseek-v4-flash" in labels(app)[writer], "the row says so at once"
+        # The editor for o.
+        editor = next(i for i, row in enumerate(labels(app)) if "editor for o" in row)
+        app.screen.query_one("#rows", OptionList).highlighted = editor
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ChooseEditor)
+        await pilot.press("enter")
+        await pilot.pause()
+        text = config.read_text()
+        assert 'ide = "code {path}"' in text and "# ide" not in text and text.count("[review]") == 1
+        # Notifications: a toggle, no dialog.
+        notify = next(i for i, row in enumerate(labels(app)) if "desktop notifications" in row)
+        app.screen.query_one("#rows", OptionList).highlighted = notify
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "desktop = false" in config.read_text() and "off" in labels(app)[notify]
+        # A limit: one line, checked.
+        limit = next(i for i, row in enumerate(labels(app)) if "max_iterations" in row)
+        app.screen.query_one("#rows", OptionList).highlighted = limit
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Ask)
+        app.screen.query_one(Input).value = "0"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "max_iterations = 3" in config.read_text(), "0 is refused"
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "5"
+        await pilot.press("enter")
+        await pilot.pause()
+        text = config.read_text()
+        assert "[limits]\n# Kept.\nmax_iterations = 5\n" in text and app.config.max_iterations == 5
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, settings.Settings)
+
+    run(scenario)
+
+
+def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkeypatch):
+    """What belongs to the project sits on its row: how it is verified and run, its JDK, what its
+    build needs from your shell, its editor; the rest is in the file, the last row."""
+    from vivibox import ide
+
+    monkeypatch.setattr(ide, "candidates", lambda: [ide.Editor("VS Code", "code {path}")])
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(path.read_text() + '# Mine.\ndemo = []\njava = ""\npass_env = []\n')
+    opened = []
+    monkeypatch.setattr(tui.Vivibox, "edit_project_file", lambda self: opened.append(self.project_file()))
+
+    def labels(app) -> list[str]:
+        options = app.screen.query_one("#rows", OptionList)
+        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+    async def go_to(app, pilot, what: str):
+        row = next(i for i, text in enumerate(labels(app)) if what in text)
+        app.screen.query_one("#rows", OptionList).highlighted = row
+        await pilot.press("enter")
+        await pilot.pause()
+        return row
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo"))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.ProjectSettings)
+        assert labels(app)[0].strip().startswith("verification") and "true" in labels(app)[0]
+        await go_to(app, pilot, "run it")
+        assert isinstance(app.screen, settings.AskLines)
+        app.screen.query_one(TextArea).text = "npm install\nnpm start\n"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert load_project("demo").demo == ["npm install", "npm start"] and "# Mine." in path.read_text()
+        await go_to(app, pilot, "java")
+        app.screen.query_one(Input).value = "17"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").java == "17"
+        row = await go_to(app, pilot, "pass_env")
+        app.screen.query_one(Input).value = "PATH"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").pass_env == [], "a variable vivibox sets itself is refused"
+        await go_to(app, pilot, "pass_env")
+        app.screen.query_one(Input).value = "NPM_TOKEN, REPO_TOKEN"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").pass_env == ["NPM_TOKEN", "REPO_TOKEN"]
+        assert "NPM_TOKEN, REPO_TOKEN" in labels(app)[row]
+        await go_to(app, pilot, "editor for o")
+        assert isinstance(app.screen, tui.ChooseEditor)
+        await pilot.press("down", "enter")  # after "the one in config.toml": VS Code
+        await pilot.pause()
+        assert load_project("demo").ide == "code {path}"
+        await go_to(app, pilot, "edit the project file")
+        assert opened == [path]
+
+    run(scenario)
+
+
+def test_o_opens_with_the_editor_the_repository_points_at(env, monkeypatch):
+    """No editor chosen: a repository with .idea opens in the JetBrains one found here, one with
+    .vscode in VS Code, any other in the first editor found; ? says which."""
+    from vivibox import ide
+
+    found = [ide.Editor("VS Code", "code {path}"), ide.Editor("IntelliJ IDEA", "idea {path}")]
+    monkeypatch.setattr(ide, "candidates", lambda: found)
+    project = load_project("demo")
+    assert actions.editor_command(load_config(), project) == "code {path}", "the first found"
+    (project.repo / ".idea").mkdir()
+    assert actions.editor_command(load_config(), project) == "idea {path}"
+    assert ide.default_for(project.repo, []) == ""
+
+    async def scenario(app, pilot):
+        await pilot.press("question_mark")
+        await pilot.pause()
+        note = str(app.screen.query_one("#note", Label).render())
+        assert "o opens with code {path}" in note and "k changes it" in note
+
+    run(scenario)
+
+
 def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env):
     from vivibox import keys, providers
 
@@ -1517,6 +1698,8 @@ def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env
 
     async def scenario(app, pilot):
         await pilot.press("k")
+        await pilot.pause()
+        await pilot.press("enter")  # the settings' first row: Providers & MCP
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, tui.ManageProviders)
@@ -2819,7 +3002,7 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
         text = str(app.screen.query_one("#help").render())
         for key, what in (
             ("i", "set up a project"),
-            ("k", "Providers & MCP"),
+            ("k", "settings: providers & MCP"),
             ("h", "accepted"),
             ("H", "deleted"),
             ("g", "verif"),
@@ -3239,8 +3422,12 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
+        assert isinstance(app.screen, settings.ProjectSettings)
+        assert app.screen.styles.align == ("center", "middle"), "the project's screen from e, in the middle"
+        await pilot.press("enter")
+        await pilot.pause()
         assert isinstance(app.screen, tui.ChooseVerify)
-        assert app.screen.styles.align == ("center", "middle"), "the picker from e, in the middle"
+        assert app.screen.styles.align == ("center", "middle"), "the picker from it, in the middle"
 
     run(scenario)
     named = [

@@ -14,6 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import configfile
 from .config import config_dir
 
 # Editors that open a folder from the command line, in the order they are offered.
@@ -103,6 +104,22 @@ def candidates() -> list[Editor]:
     return found
 
 
+# What a repository's own folders say it is worked on with, and the editors that go with it.
+JETBRAINS = ("idea", "pycharm", "webstorm", "goland", "rider", "clion", "phpstorm", "rubymine", "fleet")
+MARKERS = ((".idea", JETBRAINS), (".vscode", ("code", "code-insiders", "codium")))
+
+
+def default_for(repo: Path, found: list[Editor]) -> str:
+    """The editor to open a repository with when none was chosen: the one its own folders point
+    at (.idea, .vscode), when it is here; else the first one found. "" with none found."""
+    for marker, programs in MARKERS:
+        if (repo / marker).is_dir():
+            for editor in found:
+                if Path(shlex.split(editor.command)[0]).name in programs:
+                    return editor.command
+    return found[0].command if found else ""
+
+
 def command_for(path: Path, command: str) -> list[str]:
     parts = shlex.split(command)
     if any("{path}" in part for part in parts):
@@ -121,16 +138,7 @@ def open_folder(path: Path, command: str) -> None:
 
 
 def remember(command: str) -> Path:
-    """Writes your choice to config.toml, under [review] ide."""
+    """Writes your choice to config.toml, under [review] ide, keeping the file's comments."""
     path = config_dir() / "config.toml"
-    text = path.read_text() if path.exists() else ""
-    line = f'ide = "{command}"'
-    if re.search(r"^\s*#?\s*ide\s*=", text, re.MULTILINE):
-        text = re.sub(r"^\s*#?\s*ide\s*=.*$", line, text, count=1, flags=re.MULTILINE)
-    elif re.search(r"^\[review\]", text, re.MULTILINE):
-        text = re.sub(r"^\[review\]$", f"[review]\n{line}", text, count=1, flags=re.MULTILINE)
-    else:
-        text = text.rstrip("\n") + f"\n\n[review]\n{line}\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    configfile.set_value(path, "ide", command, "review")
     return path

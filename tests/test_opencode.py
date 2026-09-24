@@ -157,3 +157,20 @@ def test_a_turn_that_fails_without_saying_why_brings_the_servers_log_line():
         "; server log: ProviderModelNotFoundError: Model not found: deepseek/deepseek-v4-flash. "
         "Did you mean: deepseek-flash?"
     )
+
+
+def test_the_reviewers_server_has_a_port_of_its_own(monkeypatch):
+    """Its container shares the pod's network namespace with the writer's, whose server has the
+    usual port; a second server on it would not start."""
+    from vivibox import roles
+    from vivibox.config import Role
+
+    class P:
+        agent = "vivibox-demo-1-review"
+
+    reviewer = opencode.OpenCode(P(), "other/strong", port=opencode.REVIEW_PORT)
+    assert f":{opencode.REVIEW_PORT}" in reviewer.attach_command("s")[-1]
+    assert opencode.REVIEW_PORT != opencode.PORT
+    monkeypatch.setattr(roles, "role_of", lambda task, name, config=None: Role("opencode", "other/strong"))
+    assert roles.harness_for("reviewer", P(), None).port == opencode.REVIEW_PORT
+    assert roles.harness_for("writer", P(), None).port == opencode.PORT

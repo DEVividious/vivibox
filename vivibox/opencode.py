@@ -22,6 +22,8 @@ from .task import Task
 NAME = "opencode"
 PORT = 39417
 URL = f"http://127.0.0.1:{PORT}"
+# The reviewer's server, in its own container but the same network namespace as the writer's.
+REVIEW_PORT = 39418
 HARNESS_MOUNT = "/task/harness"
 CONFIG = f"{HARNESS_MOUNT}/opencode.json"
 INSTRUCTIONS = f"{HARNESS_MOUNT}/instructions.md"
@@ -104,14 +106,20 @@ class OpenCode(Harness):
     # A provider key is always billed per token.
     metered = True
 
-    def __init__(self, pod: Pod, model: str = ""):
+    def __init__(self, pod: Pod, model: str = "", port: int = PORT):
         self.pod = pod
         # Sent with every turn. The server has one model in its config, the writer's, and a planner
         # on another model would otherwise plan on the writer's without anything saying so.
         self.model = model
+        # Where this container's server listens: the reviewer's shares the pod's network namespace
+        # with the writer's, so it needs a port of its own.
+        self.port = port
+        self.url = f"http://127.0.0.1:{port}"
 
     def _get(self, path: str) -> bool:
-        probe = f'curl -fsS -o /dev/null -u "opencode:$(cat {MOUNT}/server-password)" {_quote(URL + path)}'
+        probe = (
+            f'curl -fsS -o /dev/null -u "opencode:$(cat {MOUNT}/server-password)" {_quote(self.url + path)}'
+        )
         return self.pod.exec("bash", "-c", probe, check=False).returncode == 0
 
     def healthy(self) -> bool:
@@ -121,7 +129,8 @@ class OpenCode(Harness):
         if self.healthy():
             return
         serve = (
-            f"{WITH_PASSWORD} opencode serve --port {PORT} --hostname 127.0.0.1 >/tmp/opencode-serve.log 2>&1"
+            f"{WITH_PASSWORD} opencode serve --port {self.port} --hostname 127.0.0.1 "
+            ">/tmp/opencode-serve.log 2>&1"
         )
         self.pod.exec_detached("bash", "-c", serve)
         deadline = time.monotonic() + timeout
@@ -143,7 +152,7 @@ class OpenCode(Harness):
         body = json.dumps({"title": title})
         post = (
             f'curl -fsS -u "opencode:$(cat {MOUNT}/server-password)" -X POST '
-            f"-H 'content-type: application/json' -d {_quote(body)} {_quote(URL + '/session')}"
+            f"-H 'content-type: application/json' -d {_quote(body)} {_quote(self.url + '/session')}"
         )
         p = self.pod.exec("bash", "-c", post, check=False)
         try:
@@ -163,7 +172,7 @@ class OpenCode(Harness):
         count at every step_finish as the events stream in, so the view can show them during
         the turn rather than when it ends."""
         self.ensure_server()
-        args = ["opencode", "run", "--attach", URL, "--format", "json", "--auto"]
+        args = ["opencode", "run", "--attach", self.url, "--format", "json", "--auto"]
         args += ["--model", self.model] if self.model else []
         args += ["--session", session] if session else ["--title", title or self.pod.task_id]
         quoted = " ".join(_quote(a) for a in [*args, prompt])
@@ -211,7 +220,7 @@ class OpenCode(Harness):
 
     def attach_command(self, session: str) -> list[str]:
         """For your tmux window: the full opencode interface on the task's session."""
-        attach = f"{WITH_PASSWORD} opencode attach {URL} --session {_quote(session)}"
+        attach = f"{WITH_PASSWORD} opencode attach {self.url} --session {_quote(session)}"
         return ["docker", "exec", "-it", self.pod.agent, "bash", "-c", attach]
 
 

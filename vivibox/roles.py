@@ -274,6 +274,8 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
         return manual.Manual()
     if role.harness == claudecode.NAME:
         return claudecode.ClaudeCode(pod, role.model)
+    if role_name == "reviewer":
+        return opencode.OpenCode(pod, role.model, port=opencode.REVIEW_PORT)
     return opencode.OpenCode(pod, role.model)
 
 

@@ -91,6 +91,7 @@ def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_wr
     out = reviewing.up(task, pod, load_config())
     assert prepared == {f"{task.id}-review": ["other"]}, "the reviewer's key, nobody else's"
     assert out == task.root / "review" / "out" and out.is_dir()
+    assert (task.meta / "review").is_dir(), "the mount point, inside the read-only /task"
     harness = task.root / "review" / "harness"
     config = json.loads((harness / "opencode.json").read_text())
     assert config["model"] == "other/strong" and list(config["provider"]) == ["other"]

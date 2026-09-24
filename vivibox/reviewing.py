@@ -105,6 +105,8 @@ def up(task: Task, pod: Pod, config: Config) -> Path:
     )
     out = pod.review_dir / "out"
     out.mkdir()
+    # The mount point inside /task, which the container has read-only: it has to exist already.
+    (task.meta / "review").mkdir(exist_ok=True)
     mounts = [
         Mount(str(task.meta), "/task", read_only=True),
         Mount(str(harness), opencode.HARNESS_MOUNT, read_only=True),

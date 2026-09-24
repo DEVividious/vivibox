@@ -172,7 +172,7 @@ def task_pod(task_id: str) -> Pod:
     }
     return Pod(
         task.id, task.repo, ref, project.host_services, mounts, env, project.pass_env,
-        gate_dir=task.root / "gate", review_dir=task.root / "review",
+        gate_dir=task.root / "gate", review_dir=task.root / ".review",
         network_pool=load_config().network_pool,
     )  # fmt: skip
 

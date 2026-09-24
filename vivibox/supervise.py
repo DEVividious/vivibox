@@ -45,7 +45,7 @@ def channel_for(config: Config, get_key=keys.get_key, stored=keys.list_keys) -> 
     if not config.ntfy:
         return None
     token = get_key(ntfy.TOKEN) if ntfy.TOKEN in stored() else ""
-    return ntfy.Channel(config.ntfy, config.ntfy_events, token)
+    return ntfy.Channel(f"{config.ntfy_server}/{config.ntfy}", config.ntfy_events, token)
 
 
 def notifier(task: Task, project, config: Config, channel: ntfy.Channel | None):

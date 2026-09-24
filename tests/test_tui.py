@@ -3571,9 +3571,10 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
     assert not named, f"dialogs named in the CSS instead of one rule on ModalScreen: {named}"
 
 
-def test_k_sets_the_ntfy_topic_and_what_goes_there(env):
-    """Two rows under notifications: the topic's address, asked on one line and checked, and what
-    goes there, a toggle between the desktop's messages and every stage."""
+def test_k_sets_the_ntfy_topic_its_server_and_what_goes_there(env):
+    """Three rows under notifications: the topic, a name the app on your phone subscribes to; the
+    server, ntfy.sh unless yours; and what goes there, a toggle. A whole address pasted as the
+    topic is taken apart into the two."""
     config = env / "config" / "config.toml"
     config.write_text(
         'tasks_dir = "' + str(env / "tasks") + '"\n\n[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
@@ -3584,29 +3585,38 @@ def test_k_sets_the_ntfy_topic_and_what_goes_there(env):
         options = app.screen.query_one("#rows", OptionList)
         return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
 
-    async def scenario(app, pilot):
-        await pilot.press("k")
-        await pilot.pause()
-        topic = next(i for i, row in enumerate(labels(app)) if "ntfy topic" in row)
-        assert "off" in labels(app)[topic]
-        app.screen.query_one("#rows", OptionList).highlighted = topic
+    async def answer(app, pilot, row: str, value: str) -> None:
+        index = next(i for i, text in enumerate(labels(app)) if row in text)
+        app.screen.query_one("#rows", OptionList).highlighted = index
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, settings.Ask)
-        app.screen.query_one(Input).value = "my-topic"
+        app.screen.query_one(Input).value = value
         await pilot.press("enter")
         await pilot.pause()
-        assert "ntfy =" not in config.read_text(), "a bare name is refused: the address is asked for"
-        assert isinstance(app.screen, settings.Settings)
-        await pilot.press("enter")  # the row again
+
+    def row(app, name: str) -> str:
+        return next(text for text in labels(app) if name in text)
+
+    async def scenario(app, pilot):
+        await pilot.press("k")
         await pilot.pause()
-        app.screen.query_one(Input).value = "https://ntfy.sh/a-name-nobody-guesses"
-        await pilot.press("enter")
-        await pilot.pause()
+        assert "off" in row(app, "ntfy topic") and "https://ntfy.sh" in row(app, "ntfy server")
+        await answer(app, pilot, "ntfy topic", "not a name!")
+        assert "ntfy =" not in config.read_text(), "refused: a topic is a name"
+        await answer(app, pilot, "ntfy topic", "a-name-nobody-guesses")
         text = config.read_text()
-        assert 'ntfy = "https://ntfy.sh/a-name-nobody-guesses"' in text and "# Kept." in text
-        assert "a-name-nobody-guesses" in labels(app)[topic]
-        events = next(i for i, row in enumerate(labels(app)) if "ntfy events" in row)
+        assert 'ntfy = "a-name-nobody-guesses"' in text and "# Kept." in text
+        assert "a-name-nobody-guesses" in row(app, "ntfy topic")
+        await answer(app, pilot, "ntfy topic", "https://ntfy.example/other")
+        text = config.read_text()
+        assert 'ntfy = "other"' in text and 'ntfy_server = "https://ntfy.example"' in text, (
+            "pasted, taken apart"
+        )
+        assert "ntfy.example" in row(app, "ntfy server")
+        await answer(app, pilot, "ntfy server", "ntfy.sh")
+        assert 'ntfy_server = "https://ntfy.example"' in config.read_text(), "refused: an address"
+        events = next(i for i, text in enumerate(labels(app)) if "ntfy events" in text)
         assert "decisions" in labels(app)[events]
         app.screen.query_one("#rows", OptionList).highlighted = events
         await pilot.press("enter")

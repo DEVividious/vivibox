@@ -15,6 +15,9 @@ HARNESSES = ("opencode", "claude-code", "manual")
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 # What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
 NTFY_LEVELS = ("decisions", "all")
+DEFAULT_NTFY_SERVER = "https://ntfy.sh"
+# A topic is a name: letters, digits, - and _, as ntfy has it.
+NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
 TASK_NETWORK_BITS = 28
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
@@ -61,8 +64,10 @@ class Config:
     # Seconds one verification command may take before it is stopped and counted as a failure of
     # the environment, not of the code.
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
-    # The ntfy topic the supervisor's messages go to as well ("" for none), and which of them.
+    # The ntfy topic the supervisor's messages go to as well ("" for none), on which server, and
+    # which of them.
     ntfy: str = ""
+    ntfy_server: str = DEFAULT_NTFY_SERVER
     ntfy_events: str = "decisions"
 
 
@@ -160,10 +165,11 @@ def load_config(base: Path | None = None) -> Config:
     if not isinstance(desktop, bool):
         raise ConfigError(f"{path}: notifications.desktop must be true or false")
     ntfy = notifications.get("ntfy", "")
-    if not isinstance(ntfy, str) or (ntfy and not ntfy.startswith(("https://", "http://"))):
-        raise ConfigError(
-            f'{path}: notifications.ntfy must be a topic\'s address, e.g. "https://ntfy.sh/<topic>"'
-        )
+    if not isinstance(ntfy, str) or (ntfy and not NTFY_TOPIC.match(ntfy)):
+        raise ConfigError(f"{path}: notifications.ntfy is a topic's name: letters, digits, - and _")
+    ntfy_server = notifications.get("ntfy_server", DEFAULT_NTFY_SERVER)
+    if not isinstance(ntfy_server, str) or not ntfy_server.startswith(("https://", "http://")):
+        raise ConfigError(f'{path}: notifications.ntfy_server is an address, e.g. "{DEFAULT_NTFY_SERVER}"')
     ntfy_events = notifications.get("ntfy_events", NTFY_LEVELS[0])
     if ntfy_events not in NTFY_LEVELS:
         raise ConfigError(f"{path}: notifications.ntfy_events must be one of {', '.join(NTFY_LEVELS)}")
@@ -190,6 +196,7 @@ def load_config(base: Path | None = None) -> Config:
         str(parsed),
         verify_timeout=verify_timeout,
         ntfy=ntfy,
+        ntfy_server=ntfy_server.rstrip("/"),
         ntfy_events=ntfy_events,
     )
 

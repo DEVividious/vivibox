@@ -42,12 +42,13 @@ vivibox models anthropic
 Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable only by you.
 
 The messages a task's supervisor prints, on your phone too: `ntfy` under `[notifications]` names
-a topic on [ntfy](https://ntfy.sh) or on a server of your own, and every message goes there as
-well, high priority when the task waits for you or has stopped. Pick a name nobody guesses, since
-anyone who knows it reads the topic; for that reason a message says what happened, never what the
-agent or the build said (the whole of it stays in the window and the view). A token, when the
-topic needs one, is `vivibox auth set ntfy`. `ntfy_events = "all"` adds every stage of a task
-(planning, implementing, verifying) to the decisions. Both rows are under `k` as well.
+a topic on [ntfy](https://ntfy.sh), the one the app on your phone subscribes to, and every
+message goes there as well, high priority when the task waits for you or has stopped. Pick a name
+nobody guesses, since anyone who knows it reads the topic; for that reason a message says what
+happened, never what the agent or the build said (the whole of it stays in the window and the
+view). `ntfy_server` is ntfy.sh unless you run your own; a token, when the topic needs one, is
+`vivibox auth set ntfy`. `ntfy_events = "all"` adds every stage of a task (planning,
+implementing, verifying) to the decisions. The three rows are under `k` as well.
 
 `config.toml` also holds the limits: `max_iterations`, how many verification failures the
 writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one

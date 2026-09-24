@@ -34,11 +34,12 @@ model = ""                           # picked in the view the first time you cre
 # Desktop notifications (notify-send) when a task waits for you. Messages always appear in the
 # task's supervisor window too.
 desktop = true
-# The same messages on your phone, through ntfy (https://ntfy.sh, or a server of your own): the
-# address of a topic. Pick a name nobody guesses: anyone who knows it reads the messages, which is
-# why they say what happened, never what the agent or the build said. A token, when the topic
-# needs one: vivibox auth set ntfy
-# ntfy = "https://ntfy.sh/<topic>"
+# The same messages on your phone, through ntfy: the name of a topic, which the app on your phone
+# subscribes to. Pick one nobody guesses: anyone who knows it reads the messages, which is why
+# they say what happened, never what the agent or the build said. A token, when the topic needs
+# one: vivibox auth set ntfy
+# ntfy = "<topic>"
+# ntfy_server = "https://ntfy.sh"     # or a server of your own
 # What goes there: "decisions", what the desktop gets, or "all", every stage of a task too.
 # ntfy_events = "decisions"
 

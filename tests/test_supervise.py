@@ -15,14 +15,14 @@ def config(**over) -> Config:
 
 def test_no_topic_no_channel_and_the_token_comes_from_the_key_store():
     assert supervise.channel_for(config()) is None
-    ch = supervise.channel_for(config(ntfy="https://ntfy.sh/t"), get_key=lambda n: "tk", stored=lambda: {})
+    ch = supervise.channel_for(config(ntfy="t"), get_key=lambda n: "tk", stored=lambda: {})
     assert ch is not None and ch.url == "https://ntfy.sh/t" and ch.token == "" and ch.level == "decisions"
     ch = supervise.channel_for(
-        config(ntfy="https://ntfy.sh/t", ntfy_events="all"),
+        config(ntfy="t", ntfy_server="https://ntfy.example", ntfy_events="all"),
         get_key=lambda n: "tk",
         stored=lambda: {"ntfy": "x"},
     )
-    assert ch.token == "tk" and ch.level == "all"
+    assert ch.url == "https://ntfy.example/t" and ch.token == "tk" and ch.level == "all"
 
 
 def test_the_supervisors_messages_reach_the_topic_at_the_tasks_own_priority(tmp_path, monkeypatch):
@@ -35,7 +35,7 @@ def test_the_supervisors_messages_reach_the_topic_at_the_tasks_own_priority(tmp_
     channel = ntfy.Channel(
         "https://ntfy.sh/t", post=lambda u, h, b: sent.append((h, b.decode())), spawn=lambda r: r()
     )
-    notify = supervise.notifier(task, None, config(ntfy="https://ntfy.sh/t"), channel)
+    notify = supervise.notifier(task, None, config(ntfy="t"), channel)
     notify(task.id, "agent turn failed (502); trying again in 30 s")
     task.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
     notify(task.id, "question from the agent: which port?", kind="plan")

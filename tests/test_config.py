@@ -156,16 +156,25 @@ def test_a_project_may_say_it_has_no_build(tmp_path):
         load_project("docs", base.parent)
 
 
-def test_an_ntfy_topic_and_what_goes_there(tmp_path):
-    text = 'tasks_dir = "/t"\n[notifications]\nntfy = "https://ntfy.sh/a-name-nobody-guesses"\n' + ROLES
+def test_an_ntfy_topic_is_a_name_on_a_server(tmp_path):
+    text = 'tasks_dir = "/t"\n[notifications]\nntfy = "a-name-nobody-guesses"\n' + ROLES
     config = load_config(write(tmp_path / "config.toml", text))
-    assert config.ntfy == "https://ntfy.sh/a-name-nobody-guesses" and config.ntfy_events == "decisions"
+    assert (config.ntfy, config.ntfy_server, config.ntfy_events) == (
+        "a-name-nobody-guesses",
+        "https://ntfy.sh",
+        "decisions",
+    )
     assert load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES)).ntfy == "", "off"
-    text = 'tasks_dir = "/t"\n[notifications]\nntfy = "https://ntfy.sh/t"\nntfy_events = "all"\n' + ROLES
-    assert load_config(write(tmp_path / "config.toml", text)).ntfy_events == "all"
+    text = (
+        'tasks_dir = "/t"\n[notifications]\nntfy = "t"\nntfy_server = "https://ntfy.example/"\n'
+        'ntfy_events = "all"\n' + ROLES
+    )
+    config = load_config(write(tmp_path / "config.toml", text))
+    assert config.ntfy_server == "https://ntfy.example" and config.ntfy_events == "all"
     for bad, said in (
-        ('ntfy = "my-topic"', "topic's address"),
-        ('ntfy = "https://ntfy.sh/t"\nntfy_events = "some"', "decisions, all"),
+        ('ntfy = "https://ntfy.sh/t"', "a topic's name"),
+        ('ntfy = "t"\nntfy_server = "ntfy.sh"', "an address"),
+        ('ntfy = "t"\nntfy_events = "some"', "decisions, all"),
     ):
         with pytest.raises(ConfigError, match=said):
             load_config(

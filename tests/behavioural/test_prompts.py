@@ -33,6 +33,8 @@ pytestmark = [pytest.mark.model, pytest.mark.real_start]
 PLANNER = os.environ.get("VIVIBOX_BEHAVIOURAL_PLANNER", "deepseek/deepseek-v4-pro")
 WRITER = os.environ.get("VIVIBOX_BEHAVIOURAL_WRITER", "deepseek/deepseek-v4-flash")
 LIMIT = float(os.environ.get("VIVIBOX_BEHAVIOURAL_LIMIT", "2"))
+# Set to keep the tasks and their pods after the run, to look at what the agent did and said.
+KEEP = bool(os.environ.get("VIVIBOX_BEHAVIOURAL_KEEP"))
 TASKS_ROOT = Path("/srv/vivibox")
 VERIFY = ["python3 -m unittest -q"]
 # What every task of the run has cost so far, by task: the limit is for the run as a whole.
@@ -96,7 +98,10 @@ def bench(tmp_path_factory):
         yield {"tmp": tmp, "cfg": cfg}
     finally:
         print(f"\nbehavioural run: ${sum(SPENT.values()):.3f} spent, planner {PLANNER}, writer {WRITER}")
-        shutil.rmtree(tasks_dir, ignore_errors=True)
+        if KEEP:
+            print(f"kept: {tasks_dir} (VIVIBOX_CONFIG_DIR={cfg})")
+        else:
+            shutil.rmtree(tasks_dir, ignore_errors=True)
         mp.undo()
 
 
@@ -145,6 +150,8 @@ def drive(task, sup, until: set[State], steps: int = 12):
 
 def finish(task) -> None:
     spend(task)
+    if KEEP:
+        return
     task, proj = actions.load(task.id)
     actions.remove(task, proj)
 

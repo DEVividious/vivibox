@@ -9,6 +9,7 @@ localhost and requires a per-task password.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ URL = f"http://127.0.0.1:{PORT}"
 HARNESS_MOUNT = "/task/harness"
 CONFIG = f"{HARNESS_MOUNT}/opencode.json"
 INSTRUCTIONS = f"{HARNESS_MOUNT}/instructions.md"
+# Where opencode writes its own log in the pod (its home is /config).
+SERVER_LOG = "/config/.local/share/opencode/log/*.log"
 WITH_PASSWORD = f"OPENCODE_SERVER_PASSWORD=$(cat {MOUNT}/server-password) exec"
 
 
@@ -192,7 +195,18 @@ class OpenCode:
         turn = parse_events(output)
         if returncode != 0 and turn.ok:
             turn.ok, turn.error = False, (stderr or output).strip()[-2000:]
+        # "Unexpected server error. Check server logs for details." says nothing; the log does.
+        if not turn.ok and "server logs" in turn.error and (said := self.server_error()):
+            turn.error = f"{turn.error}; server log: {said}"
         return turn
+
+    def server_error(self) -> str:
+        """The last error opencode's server logged, for a turn that failed without saying why."""
+        p = self.pod.exec(
+            "bash", "-c", f"grep -h 'level=ERROR' {SERVER_LOG} 2>/dev/null | tail -1", check=False
+        )
+        m = re.search(r' error="((?:[^"\\]|\\.)*)"', p.stdout)
+        return m.group(1).split("\\n")[0][:300] if m else ""
 
     def _stream(self, command: tuple[str, ...], on_step: OnStep) -> tuple[str, int]:
         p = self.pod.stream(*command)

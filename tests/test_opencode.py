@@ -126,3 +126,34 @@ def test_a_turn_reports_each_step_as_the_events_stream_in():
     )
     assert steps == [(0.01, 100, 1), (0.03, 350, 2)], "running totals, one call per step"
     assert (turn.session, turn.ok, turn.cost, turn.tokens, turn.text) == ("ses_1", True, 0.03, 350, "done")
+
+
+def test_a_turn_that_fails_without_saying_why_brings_the_servers_log_line():
+    """opencode answers "Unexpected server error. Check server logs for details."; the reason, a
+    model the catalog retired for instance, is in the log inside the pod."""
+    log = (
+        "timestamp=2026-09-24T08:02:58.344Z level=ERROR run=ffa59bbd message=failed ref=err_aa18b41f "
+        'error="ProviderModelNotFoundError: Model not found: deepseek/deepseek-v4-flash. Did you mean: '
+        'deepseek-flash?" cause="ProviderModelNotFoundError: ...\\n    at <anonymous>"\n'
+    )
+    failed = (
+        '{"type":"error","sessionID":"s","error":{"name":"UnknownError",'
+        '"data":{"message":"Unexpected server error. Check server logs for details."}}}\n'
+    )
+
+    class P:
+        task_id, agent = "t1", "vivibox-t1-agent"
+
+        def exec(self, *cmd, check=True):
+            if "level=ERROR" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, log, "")
+            if "'--format'" in cmd[-1]:  # the turn itself; the others probe the server
+                return subprocess.CompletedProcess(cmd, 1, failed, "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")  # the server is up
+
+    turn = opencode.OpenCode(P()).turn("go")
+    assert not turn.ok
+    assert turn.error.endswith(
+        "; server log: ProviderModelNotFoundError: Model not found: deepseek/deepseek-v4-flash. "
+        "Did you mean: deepseek-flash?"
+    )

@@ -283,3 +283,50 @@ def test_a_provider_turned_off_offers_no_models(env, monkeypatch, tmp_path):
     providers.set_enabled(providers.PROVIDER, "deepseek", False)
     assert "deepseek" not in actions.available_models(refresh=True)
     assert keys.get_key("deepseek") == "k", "its key is kept for when it is on again"
+
+
+def test_a_model_the_catalog_retired_is_not_offered(monkeypatch):
+    """opencode's list still names a deprecated model, and its server then refuses it with
+    "Model not found": the list vivibox offers leaves it out, so nobody picks it."""
+    import subprocess
+
+    from vivibox import roles
+
+    out = (
+        "deepseek/deepseek-flash\ndeepseek/deepseek-v4-flash\ndeepseek/deepseek-v4-pro\n"
+        "---\ndeepseek-v4-flash\n"
+    )
+    monkeypatch.setattr(roles.image, "image_ref", lambda: "img")
+    monkeypatch.setattr(
+        roles.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, out, "")
+    )
+    assert roles.provider_models("deepseek") == ["deepseek/deepseek-flash", "deepseek/deepseek-v4-pro"]
+
+
+def test_a_start_on_a_retired_model_says_so_and_what_to_pick(env, monkeypatch):
+    from vivibox import actions, roles
+    from vivibox.config import load_config
+
+    config = load_config()  # the writer runs on deepseek/m in the test config? no: "m" has no provider
+    available = {"deepseek": ["deepseek/deepseek-flash", "deepseek/deepseek-v4-pro"]}
+    monkeypatch.setattr(roles, "load_config", lambda base=None: config)
+    from vivibox.config import Role
+
+    retired = type(config)(
+        config.tasks_dir, config.max_iterations,
+        {"planner": Role("manual", ""), "writer": Role("opencode", "deepseek/deepseek-v4-flash")},
+    )  # fmt: skip
+    why = actions.model_missing(retired, None, available)
+    assert why.startswith(
+        "the writer's model deepseek/deepseek-v4-flash is not one its provider offers now ("
+    )
+    assert "deepseek-flash" in why and "pick another under m, or k" in why
+    fine = type(config)(
+        config.tasks_dir,
+        3,
+        {"planner": Role("manual", ""), "writer": Role("opencode", "deepseek/deepseek-flash")},
+    )
+    assert actions.model_missing(fine, None, available) == ""
+    assert actions.model_missing(retired, None, {"deepseek": []}) == "", (
+        "a list that could not be read blocks nothing"
+    )

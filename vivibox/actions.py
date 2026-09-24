@@ -123,6 +123,7 @@ from .roles import (  # noqa: F401
     configured_choice,
     fetch_provider_catalog,
     harness_for,
+    model_missing,
     models_cache,
     models_offered,
     needs_provider,
@@ -444,6 +445,12 @@ def _start(
     _, model = writer(config, task)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
+    # A model the catalog retired fails the first turn with an opaque server error; said here,
+    # with the names to pick from, once the day's list is refreshed to be sure.
+    if model_missing(config, task, available_models()) and (
+        why := model_missing(config, task, available_models(refresh=True))
+    ):
+        raise PodError(why)
     secrets.prepare(task.id, provider_keys(config, task) + providers.mcp_secrets())
     used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
             if r.harness == opencode.NAME]  # fmt: skip

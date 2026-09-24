@@ -108,13 +108,46 @@ def provider_catalog(refresh: bool = False) -> list[tuple[str, str]]:
     return found
 
 
+# Prints the ids the catalog marks deprecated: opencode's list still names them, and its server
+# then refuses them ("Model not found", with the new name as a hint).
+DEPRECATED = (
+    'node -e \'const d=require("/config/.cache/opencode/models.json")[process.argv[1]];'
+    "for (const [id, m] of Object.entries(d ? d.models : {}))"
+    ' if (m.status === "deprecated") console.log(id)\''
+)
+
+
 def provider_models(provider: str) -> list[str]:
-    """What opencode knows for a provider, asked in a throwaway container: a second or two."""
+    """What opencode knows for a provider, asked in a throwaway container: a second or two. A
+    model the catalog has retired is left out: opencode lists it and then refuses to run it."""
     env = ["-e", f"{provider.upper().replace('-', '_').replace('.', '_')}_API_KEY=placeholder"]
+    script = f"opencode models {provider}; echo ---; {DEPRECATED} {provider} 2>/dev/null"
     cmd = ["docker", "run", "--rm", "--tmpfs", f"/config:uid={os.getuid()},gid={os.getgid()}", *env,
-           image.image_ref(), "opencode", "models", provider]  # fmt: skip
+           image.image_ref(), "sh", "-c", script]  # fmt: skip
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
-    return [line.strip() for line in p.stdout.splitlines() if line.strip().startswith(f"{provider}/")]
+    listed, _, retired = p.stdout.partition("\n---\n")
+    gone = {f"{provider}/{line.strip()}" for line in retired.splitlines() if line.strip()}
+    return [
+        line.strip()
+        for line in listed.splitlines()
+        if line.strip().startswith(f"{provider}/") and line.strip() not in gone
+    ]
+
+
+def model_missing(config: Config, task: Task | None, available: dict[str, list[str]]) -> str:
+    """Why a start would fail on a model: a role's model that its provider no longer offers,
+    named with what it offers instead. "" when every role is fine, or its list could not be read."""
+    for name in sorted(config.roles):
+        role = role_of(task, name, config)
+        if role.harness != opencode.NAME or not role.model:
+            continue
+        offered = available.get(opencode.provider_of(role.model)) or []
+        if offered and role.model not in offered:
+            return (
+                f"the {name}'s model {role.model} is not one its provider offers now "
+                f"({', '.join(m.split('/', 1)[1] for m in offered[:4])}); pick another under m, or k"
+            )
+    return ""
 
 
 def available_models(refresh: bool = False) -> dict[str, list[str]]:

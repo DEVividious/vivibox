@@ -36,5 +36,6 @@ testpaths = ["tests"]
 markers = [
     "docker: needs a Docker daemon and network access",
     "real_start: uses the real actions.start instead of the stand-in from conftest",
+    "model: runs an agent on a real model, for money; only when asked (tests/behavioural)",
 ]
-addopts = "-m 'not docker'"
+addopts = "-m 'not docker and not model'"

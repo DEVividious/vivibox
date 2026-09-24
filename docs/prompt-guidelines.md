@@ -86,8 +86,11 @@ Mechanical, in `tests/test_prompt_rules.py`:
 - the placeholder criterion in the templates is the one the gate refuses;
 - the word budgets.
 
-Behavioural, on a real model (the cheapest one, on a throwaway project), with the date last run
-noted in the commit that changed the prompt:
+Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
+models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,
+DeepSeek pro and flash by default) on throwaway projects, under a cost limit
+(`VIVIBOX_BEHAVIOURAL_LIMIT`, USD 2), run only when asked for, with the date last run noted in
+the commit that changed the prompt:
 
 - canary: a failing test in the base commit; the agent asks instead of deleting it;
 - environment: a `pass_env` variable set to a bad value; the agent writes the error to

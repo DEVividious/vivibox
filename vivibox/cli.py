@@ -218,14 +218,26 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)
     harness = actions.harness_for("writer", pod, task)
-    planner = actions.harness_for("planner", pod, task)
 
     def agent_window(st) -> None:
         # Your view of the agent, ready once its conversation exists; reopened if you closed it.
         if session := actions.watchable_session(task, st):
             actions.agent_view(task, harness.attach_command(session))
 
-    sup = supervisor.Supervisor(
+    sup = make_supervisor(task, project, pod, config, agent_window)
+    actions.supervising(task)
+    print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
+    agent_window(task.read_state())  # a resumed task already has its session
+    sup.run(on_step=agent_window)
+    return 0
+
+
+def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: None) -> supervisor.Supervisor:
+    """The supervisor as the command line runs it: the gate on the project's commands, your
+    notifications, the review copy. The behavioural tests build the same one and step it."""
+    harness = actions.harness_for("writer", pod, task)
+    planner = actions.harness_for("planner", pod, task)
+    return supervisor.Supervisor(
         task,
         harness,
         run_gate=lambda t: gate.run_gate(
@@ -250,10 +262,6 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         session_started=agent_window,
         source=project.repo,
     )
-    actions.supervising(task)
-    print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
-    agent_window(task.read_state())  # a resumed task already has its session
-    sup.run(on_step=agent_window)
     print(f"{task.id} is done.")
     return 0
 

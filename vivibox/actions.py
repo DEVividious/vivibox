@@ -385,17 +385,23 @@ def context_notes(task: Task) -> list[str]:
     return [n for e in task.events() if e["type"] == "context" for n in e["data"].get("notes", [])]
 
 
-def start(task_id: str, resume: bool = False, on_step: Callable[[str], None] = lambda step: None) -> str:
+def start(
+    task_id: str,
+    resume: bool = False,
+    on_step: Callable[[str], None] = lambda step: None,
+    supervise: bool = True,
+) -> str:
     """Starts or resumes the task's pod, agent and supervisor. Returns the model. A start that
     fails leaves its reason with the task: the message you get once is gone in seconds, and the row
     would go on saying "not started" with nothing to say why. on_step hears each step before it
-    runs, for a row to say what a slow start is doing."""
+    runs, for a row to say what a slow start is doing. supervise=False brings everything up and
+    leaves the supervising to the caller (the behavioural tests drive the supervisor themselves)."""
     task, _ = load(task_id)
     try:
         if task.read_state().box:
             start_box(task_id)
             return "you"
-        return _start(task_id, resume, on_step)
+        return _start(task_id, resume, on_step, supervise)
     except Exception as e:
         task.set_problem(f"could not start: {e.args[0] if e.args else e}")
         raise
@@ -418,7 +424,12 @@ def carry_on(task: Task) -> str:
     return start(task.id, resume=True) if needs_start(task) else ""
 
 
-def _start(task_id: str, resume: bool = False, on_step: Callable[[str], None] = lambda step: None) -> str:
+def _start(
+    task_id: str,
+    resume: bool = False,
+    on_step: Callable[[str], None] = lambda step: None,
+    supervise: bool = True,
+) -> str:
     config = load_config()
     task, project = load(task_id)
     pod = task_pod(task.id)
@@ -459,7 +470,8 @@ def _start(task_id: str, resume: bool = False, on_step: Callable[[str], None] = 
     if st.paused:
         task.set_paused(False)
     task.set_problem("")  # whatever kept it from starting before did not this time
-    start_supervisor(task)
+    if supervise:
+        start_supervisor(task)
     task.event("started", model=model)
     return model
 

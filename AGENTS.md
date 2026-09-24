@@ -12,5 +12,9 @@
   through `actions`. A module past 800 lines is split before a feature is added to it.
 - Before committing: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
+- A change to a prompt that no mechanical test covers gets a behavioural run:
+  `uv run pytest -m model tests/behavioural -x`. It runs agents on real models for money (a
+  limit of USD 2 per run, `VIVIBOX_BEHAVIOURAL_LIMIT`), so it is run only when the person asked
+  for that run; the commit names its date, and the planning notes keep its cost and outcome.
 - The repository is public: nothing from an employer or a private project goes into it.
 - Code, comments, messages and documents are in English.

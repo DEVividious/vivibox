@@ -431,7 +431,8 @@ class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, Wo
         if action == "new":
             return bool(projects())  # a task needs a project to be in
         if action in ("edit_project", "open_repo", "forget_project", "new_box"):
-            if not self.on_project_row():
+            # A forgotten project's row stays for its history, with no file or repository behind it.
+            if not self.on_project_row() or self.selected_project() not in self.problems:
                 return False
             if action == "new_box":
                 return not self.problems.get(self.selected_project())

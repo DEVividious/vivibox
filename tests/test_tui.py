@@ -539,6 +539,47 @@ def test_accepted_and_deleted_tasks_are_shown_or_hidden_separately_and_the_choic
     run(again)
 
 
+def test_a_task_number_twice_in_the_history_is_listed_once_as_the_newest(env):
+    """Older versions could leave one number in the history twice: a number used again, a task
+    written down twice. The list keys its rows by number, and two rows under one key crashed it."""
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    kept = {"project": "demo", "cost": 0.1, "commit": "abc", "branch": "", "conflicts": [], "finished": now()}
+    actions.history_path().write_text(
+        json.dumps({"id": "demo-5", "title": "Older", "deleted": "planning", **kept})
+        + "\n"
+        + json.dumps({"id": "demo-5", "title": "Newer", "deleted": "planning", **kept})
+        + "\n"
+    )
+
+    async def scenario(app, pilot):
+        await pilot.press("H")
+        await pilot.pause()
+        assert rows(app) == ["demo", "demo-5"]
+        assert cell(app, 1, "GOAL") == "Newer"
+
+    run(scenario)
+
+
+def test_a_forgotten_project_keeps_its_history_row_but_not_its_keys(env):
+    """The tasks of a project you forgot stay in the history under its name; there is no file to
+    edit, no repository to open and nothing to start a box in."""
+    (env / "config" / "projects" / "demo.toml").unlink()
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    kept = {"project": "gone", "cost": 0.1, "commit": "abc", "branch": "", "conflicts": [], "finished": now()}
+    actions.history_path().write_text(json.dumps({"id": "gone-1", "title": "Accepted", **kept}) + "\n")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=0)
+        await pilot.pause()
+        assert rows(app) == ["gone", "gone-1"] and app.on_project_row()
+        for action in ("edit_project", "open_repo", "new_box"):
+            assert not app.check_action(action, ()), action
+
+    run(scenario)
+
+
 def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
     from vivibox.config import load_project
 
@@ -3887,3 +3928,4 @@ def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
         assert "max_reviews = 3" in config.read_text() and "3" in row(app, "max_reviews")
 
     run(scenario)
+

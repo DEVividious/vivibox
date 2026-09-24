@@ -89,7 +89,9 @@ def history(limit: int | None = 20) -> list[dict]:
     if not path.exists():
         return []
     done = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return list(reversed(done))[:limit]
+    # One entry per task, the newest: older versions could write a number down twice.
+    newest = {e["id"]: e for e in done}
+    return [e for e in reversed(done) if newest[e["id"]] is e][:limit]
 
 
 def forget(task_id: str) -> None:

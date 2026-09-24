@@ -1,0 +1,49 @@
+DataTable { height: 1fr; }
+.catalog { height: 8; }
+#rows { height: auto; max-height: 20; }
+.tree { height: 16; }
+.found { height: auto; max-height: 8; }
+.group { padding: 1 0 0 0; text-style: bold; }
+#empty { height: 1fr; padding: 2 4; color: $text-muted; }
+#detail { height: 60%; border-top: solid $primary; padding: 0 1; }
+#detail.hidden { display: none; }
+.dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
+          padding: 1 2; }
+.dialog.help { width: 76; }
+.dialog TextArea { height: 8; }
+.dialog TextArea.description { height: 10; }
+.dialog TextArea.criteria { height: 6; }
+#suggestions { max-height: 8; border: none; background: $boost; }
+#editors { max-height: 12; margin: 1 0; }
+.buttons { height: auto; margin-top: 1; }
+.fields { height: auto; }
+.wrap { width: 100%; }
+/* Text beside a button takes what the button leaves. */
+.role > .wrap { width: 1fr; }
+.role > Button { margin-left: 2; }
+.buttons Button { margin-right: 2; }
+.files { color: $text-muted; margin: 1 0; }
+.role { height: auto; }
+.role > Label { padding: 1 0; }
+.role > .role-name { width: 10; }
+.role > Select { width: 1fr; }
+/* A form: a column of labels, one field per row, only the description and the buttons boxed. */
+.dialog.form { max-width: 100%; }
+.form .section { height: auto; margin-top: 1; }
+.form #task { margin-top: 0; }
+.form .row { height: auto; }
+/* Lists of a group a row apart, unless the terminal is short (fit() decides). */
+.form .row.gap { margin-top: 1; }
+.form.tight .row.gap { margin-top: 0; }
+.form .key { width: 10; color: $text-muted; }
+.form .hint { width: 1fr; color: $text-muted; }
+.form .row > Select, .form .row > TextArea { width: 1fr; }
+.form .row > Button { margin: 0 2 0 0; min-width: 9; }
+.form .buttons > .keys { width: auto; padding: 1 0; }
+.form Select > SelectCurrent { background: $boost; }
+/* Focus is one signal: the focused control's text as the cursor block, as on a button. */
+.form Select:focus > SelectCurrent > Static#label {
+    color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;
+}
+/* Every dialog sits in the middle of the screen, the ones still to be written too. */
+ModalScreen { align: center middle; }

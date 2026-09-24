@@ -8,20 +8,28 @@ from conftest import make_repo
 from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, box, browse, dialogs, gate, providers_ui, settings, tui, ui, widgets
+from vivibox import (
+    actions,
+    app_support,
+    box,
+    browse,
+    dialogs,
+    gate,
+    panel,
+    providers_ui,
+    settings,
+    tui,
+    ui,
+    widgets,
+)
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
+from vivibox.dialogs import CommitWork, NewProject
+from vivibox.panel import detail, finished_detail, projects
 from vivibox.pod import Listener
 from vivibox.states import State
 from vivibox.task import find_task, now
-from vivibox.tui import (
-    CommitWork,
-    NewProject,
-    Vivibox,
-    detail,
-    finished_detail,
-    projects,
-)
+from vivibox.tui import Vivibox
 
 OC = "opencode"
 AVAILABLE = {"deepseek": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]}
@@ -426,7 +434,7 @@ def test_at_suggests_paths(env, tmp_path, monkeypatch):
 
 
 def test_a_spinner_shows_tasks_the_agent_is_working_on(env, monkeypatch):
-    from vivibox.tui import SPINNER
+    from vivibox.panel import SPINNER
 
     new_task("Busy")
     monkeypatch.setattr("vivibox.actions.supervisor_running", lambda task: True)
@@ -587,7 +595,7 @@ def test_a_folder_that_is_already_a_project_leads_to_a_task(env, tmp_path, monke
 
 
 def test_a_project_whose_folder_is_gone_is_offered_for_removal(env, tmp_path, monkeypatch):
-    from vivibox.tui import Confirm
+    from vivibox.widgets import Confirm
 
     gone = env / "config" / "projects" / "gone.toml"
     gone.write_text(f'repo = "{tmp_path / "vanished"}"\nverify = ["true"]\n')
@@ -699,20 +707,20 @@ def test_the_panel_tells_the_three_states_apart(env):
     task = new_task()
     st = task.read_state()
 
-    up = tui.PodView("198.51.100.2", [Listener(5173, True)], demo=True)
+    up = panel.PodView("198.51.100.2", [Listener(5173, True)], demo=True)
     assert "[198.51.100.2:5173](http://198.51.100.2:5173)" in detail(task, st, 3, pod=up), "clickable"
 
-    hidden = tui.PodView("198.51.100.2", [Listener(8000, False)], demo=True)
+    hidden = panel.PodView("198.51.100.2", [Listener(8000, False)], demo=True)
     assert "nothing outside can reach it" in detail(task, st, 3, pod=hidden)
 
-    starting = tui.PodView("198.51.100.2", [], demo=True)
+    starting = panel.PodView("198.51.100.2", [], demo=True)
     assert "running, nothing listening yet" in detail(task, st, 3, pod=starting)
 
-    crashed = tui.PodView("198.51.100.2", [], demo=False, log="Traceback…\nKeyError: 'gameweek'")
+    crashed = panel.PodView("198.51.100.2", [], demo=False, log="Traceback…\nKeyError: 'gameweek'")
     text = detail(task, st, 3, pod=crashed)
     assert "It stopped." in text and "KeyError: 'gameweek'" in text, "why, not just that"
 
-    idle = tui.PodView("198.51.100.2", [], demo=False)
+    idle = panel.PodView("198.51.100.2", [], demo=False)
     assert "demo not running" in detail(task, st, 3, pod=idle)
     assert "It stopped." not in detail(task, st, 3, pod=idle), "it was never started"
 
@@ -723,7 +731,7 @@ def test_running_the_app_waits_until_the_work_is_back_with_you(env, monkeypatch)
     task = new_task()
     at_plan_checkpoint(task)
     task.transition(State.IMPLEMENT)
-    view = [tui.PodView("198.51.100.2", [], demo=False)]
+    view = [panel.PodView("198.51.100.2", [], demo=False)]
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: view[0] for i in ids})
 
     async def scenario(app, pilot):
@@ -746,13 +754,13 @@ def test_stopping_is_offered_only_while_something_runs(env, monkeypatch):
     task.transition(State.VERIFY)
     task.transition(State.CHECKPOINT_FINAL)
     # Pinned, or the refresh in the background would replace it with what a real pod says.
-    view = [tui.PodView("198.51.100.2", [], demo=False)]
+    view = [panel.PodView("198.51.100.2", [], demo=False)]
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: view[0] for i in ids})
 
     async def scenario(app, pilot):
         assert await until(pilot, lambda: not app.pod.demo)
         assert app.check_action("demo", ()) and not app.check_action("demo_stop", ())
-        view[0] = tui.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
+        view[0] = panel.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
         assert await until(pilot, lambda: app.pod.demo)
         assert app.check_action("demo_stop", ()), "stop appears once it is up"
         assert app.check_action("demo", ()), "and running it again restarts it"
@@ -816,7 +824,7 @@ def test_the_row_says_whether_that_task_is_serving_anything(env, monkeypatch):
     task = new_task("Waiting")
     at_plan_checkpoint(task)
     task.transition(State.IMPLEMENT)
-    answer = [tui.PodView("198.51.100.2", [], demo=False)]
+    answer = [panel.PodView("198.51.100.2", [], demo=False)]
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: answer[0] for i in ids})
 
     def cell(app):
@@ -824,16 +832,16 @@ def test_the_row_says_whether_that_task_is_serving_anything(env, monkeypatch):
 
     async def scenario(app, pilot):
         assert await until(pilot, lambda: cell(app) == "-"), "nothing started yet"
-        answer[0] = tui.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
+        answer[0] = panel.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
         assert await until(pilot, lambda: "live" in cell(app)), "it is serving"
         assert "8000" not in cell(app), "the address belongs in the panel, where all of it fits"
-        answer[0] = tui.PodView("198.51.100.2", [Listener(5173, True), Listener(8000, True)], demo=True)
+        answer[0] = panel.PodView("198.51.100.2", [Listener(5173, True), Listener(8000, True)], demo=True)
         assert await until(pilot, lambda: "×2" in cell(app)), "a front end and a back end both up"
-        answer[0] = tui.PodView("198.51.100.2", [Listener(8000, False)], demo=True)
+        answer[0] = panel.PodView("198.51.100.2", [Listener(8000, False)], demo=True)
         assert await until(pilot, lambda: "local" in cell(app)), "bound to localhost, never coming"
-        answer[0] = tui.PodView("198.51.100.2", [], demo=True)
+        answer[0] = panel.PodView("198.51.100.2", [], demo=True)
         assert await until(pilot, lambda: "starting" in cell(app)), "up, but no port yet"
-        answer[0] = tui.PodView("198.51.100.2", [], demo=False, log="Error: exploded")
+        answer[0] = panel.PodView("198.51.100.2", [], demo=False, log="Error: exploded")
         assert await until(pilot, lambda: "stopped" in cell(app)), "and when it dies"
         assert app.screen_stack, "the view is still up, not crashed in a worker"
 
@@ -907,8 +915,8 @@ def test_the_view_follows_the_pod_on_its_own(env, monkeypatch):
     task = new_task("Waiting")
     at_plan_checkpoint(task)
     task.transition(State.IMPLEMENT)
-    down = tui.PodView("198.51.100.2", [], demo=False)
-    up = tui.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
+    down = panel.PodView("198.51.100.2", [], demo=False)
+    up = panel.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
     answer = [down]
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: answer[0] for i in ids})
 
@@ -926,7 +934,7 @@ def test_the_view_follows_the_pod_on_its_own(env, monkeypatch):
 
 def test_a_task_with_no_pod_claims_nothing(env):
     task = new_task("Waiting")
-    assert "Pod" not in detail(task, task.read_state(), 3, pod=tui.PodView())
+    assert "Pod" not in detail(task, task.read_state(), 3, pod=panel.PodView())
 
 
 def test_running_it_does_not_stop_to_ask_permission_to_work_out_how(env, monkeypatch):
@@ -961,7 +969,7 @@ def test_a_pod_answer_arriving_after_you_quit_is_dropped(env):
 
     asyncio.run(go())
     assert not app.screen_stack, "the app is gone; docker was still thinking"
-    app.pods_answered({"demo-1": tui.PodView("198.51.100.2", [], demo=True)})
+    app.pods_answered({"demo-1": panel.PodView("198.51.100.2", [], demo=True)})
 
 
 def test_m_puts_one_role_on_another_model_for_this_task_only(env):
@@ -1170,10 +1178,10 @@ def test_the_panel_shows_what_the_browser_prompt_sends_about_the_repository(env)
     task = new_task("Health")
     task.transition(State.CHECKPOINT_PLAN)
     task.set_awaiting_plan(True)
-    shown = detail(task, task.read_state(), 3, running=True, pod=tui.PodView())
+    shown = detail(task, task.read_state(), 3, running=True, pod=panel.PodView())
     assert "Nothing: this is a new project." in shown
     (task.meta / "handoff" / manual.CONTEXT).write_text("Express 4, tests with vitest.\n")
-    shown = detail(task, task.read_state(), 3, running=True, pod=tui.PodView())
+    shown = detail(task, task.read_state(), 3, running=True, pod=panel.PodView())
     assert "Express 4, tests with vitest." in shown and "Health" in shown
 
 
@@ -1801,7 +1809,7 @@ def test_the_panel_says_whether_the_task_got_serena_and_why(env):
 
     task = new_task()
     opencode.prepare(task, "deepseek/deepseek-v4-flash", ["true"])
-    shown = detail(task, task.read_state(), 3, running=False, pod=tui.PodView())
+    shown = detail(task, task.read_state(), 3, running=False, pod=panel.PodView())
     assert "*Serena: off, 0 source files (fewer than 100)*" in shown
     opencode.prepare(task, "deepseek/deepseek-v4-flash", ["true"])
     assert sum(e["type"] == "serena" for e in task.events()) == 1, "said once, not at every start"
@@ -2209,7 +2217,7 @@ def test_the_view_leaves_at_once_when_a_step_still_waits_on_docker(monkeypatch, 
     import time
 
     stuck = threading.Event()
-    executor = tui.LeavingExecutor()
+    executor = app_support.LeavingExecutor()
     executor.submit(stuck.wait, 5)
     began = time.monotonic()
     executor.shutdown(wait=True)
@@ -2719,9 +2727,9 @@ def test_w_asks_which_conversation_when_the_task_has_two(env, monkeypatch):
 def test_the_farewell_tmux_prints_is_wiped_when_its_session_ended(capsys):
     """tmux says [exited] when the session ends under the client, and that line stays on the
     terminal you come back to after quitting vivibox."""
-    tui.after_window(session_gone=True)
+    panel.after_window(session_gone=True)
     assert capsys.readouterr().out == "\x1b[1A\x1b[2K"
-    tui.after_window(session_gone=False)
+    panel.after_window(session_gone=False)
     assert capsys.readouterr().out == ""
 
 
@@ -2781,19 +2789,19 @@ def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
     newest = task.meta / "log" / "verify-2-130000.log"
     newest.write_text("new\n")
     monkeypatch.setenv("PAGER", "less -R")
-    assert tui.newest_log(task) == newest
-    assert tui.pager_command(newest) == ["less", "-R", str(newest)]
+    assert panel.newest_log(task) == newest
+    assert panel.pager_command(newest) == ["less", "-R", str(newest)]
     # Where the trouble is: at the end. While the verification runs: following it as it is written.
-    assert tui.pager_command(newest, at_end=True) == ["less", "-R", "+G", str(newest)]
-    assert tui.pager_command(newest, follow=True) == ["less", "-R", "+F", str(newest)]
+    assert panel.pager_command(newest, at_end=True) == ["less", "-R", "+G", str(newest)]
+    assert panel.pager_command(newest, follow=True) == ["less", "-R", "+F", str(newest)]
     monkeypatch.setenv("PAGER", "more")
-    assert tui.pager_command(newest, follow=True) == ["more", str(newest)], "only less knows the flags"
+    assert panel.pager_command(newest, follow=True) == ["more", str(newest)], "only less knows the flags"
     monkeypatch.setenv("PAGER", "less -R")
-    assert tui.log_command(task, task.read_state(), running=False) == ["less", "-R", "+G", str(newest)]
+    assert panel.log_command(task, task.read_state(), running=False) == ["less", "-R", "+G", str(newest)]
     task.transition(State.IMPLEMENT)
     task.transition(State.VERIFY)
-    assert tui.log_command(task, task.read_state(), running=True) == ["less", "-R", "+F", str(newest)]
-    assert tui.log_command(task, task.read_state(), running=False)[2] == "+G", "nothing is being written"
+    assert panel.log_command(task, task.read_state(), running=True) == ["less", "-R", "+F", str(newest)]
+    assert panel.log_command(task, task.read_state(), running=False)[2] == "+G", "nothing is being written"
 
     async def scenario(app, pilot):
         app.reload()
@@ -2914,7 +2922,7 @@ def test_the_panel_says_when_a_supervisor_runs_older_code(env, monkeypatch):
 
 def rows(app) -> list[str]:
     """The list's rows by key: a project's name, or a task's id."""
-    return [str(key.value).removeprefix(tui.PROJECT_ROW) for key in app.table.rows]
+    return [str(key.value).removeprefix(panel.PROJECT_ROW) for key in app.table.rows]
 
 
 def cell(app, row: int, column: str) -> str:
@@ -2988,7 +2996,7 @@ def test_a_collapsed_project_keeps_saying_what_waits_and_stays_collapsed(env):
         assert rows(app) == ["demo", waiting.id, "demo-2"]
 
     run(scenario)
-    assert tui.load_view().get("collapsed", []) == []
+    assert panel.load_view().get("collapsed", []) == []
 
 
 def test_collapsing_is_remembered_across_views(env):
@@ -3166,7 +3174,7 @@ def test_a_narrow_terminal_shows_task_status_and_goal(env):
         assert "Reject expired cards" in shown and "not started" in shown
         assert "…" in cell(app, 1, "GOAL"), "the goal is cut to fit, not scrolled off"
         for key in ("a", "r", "p", "g"):
-            assert key in tui.DECISION_KEYS
+            assert key in panel.DECISION_KEYS
         assert task.id in shown
 
     run(scenario, size=(80, 24))
@@ -3303,10 +3311,10 @@ def test_f_shows_the_work_as_a_diff_and_is_offered_when_the_work_is_ready(env):
         assert app.diff_command() == [
             "git", "-C", str(load_project("demo").repo), "diff", f"{base}...refs/vivibox/{task.id}"
         ]  # fmt: skip
-        assert "`f`" in tui.detail(task, task.read_state(), 3, running=True)
+        assert "`f`" in panel.detail(task, task.read_state(), 3, running=True)
 
     run(scenario)
-    command = [*tui.git_diff(task, load_project("demo")), "--stat"]
+    command = [*panel.git_diff(task, load_project("demo")), "--stat"]
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     assert "Health.java" in out, command
 
@@ -3553,10 +3561,11 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         assert app.screen.styles.align == ("center", "middle"), "the picker from it, in the middle"
 
     run(scenario)
+    stylesheet = Path(tui.__file__).with_name(tui.Vivibox.CSS_PATH).read_text()
     named = [
         name
         for module in (dialogs, browse, providers_ui, widgets, settings)
         for name, cls in inspect.getmembers(module, inspect.isclass)
-        if issubclass(cls, ModalScreen) and cls.__module__ == module.__name__ and name in tui.Vivibox.CSS
+        if issubclass(cls, ModalScreen) and cls.__module__ == module.__name__ and name in stylesheet
     ]
     assert not named, f"dialogs named in the CSS instead of one rule on ModalScreen: {named}"

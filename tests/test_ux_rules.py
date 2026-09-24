@@ -8,7 +8,20 @@ from pathlib import Path
 import pytest
 from test_tui import at_plan_checkpoint, implementing, new_task, rows
 
-from vivibox import actions, box, dialogs, manual, tui, ui
+from vivibox import (
+    actions,
+    box,
+    browse,
+    dialogs,
+    logs,
+    manual,
+    panel,
+    providers_ui,
+    settings,
+    tui,
+    ui,
+    widgets,
+)
 from vivibox.states import State
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
@@ -105,7 +118,7 @@ def test_every_status_is_a_label_from_the_guidelines(env):
 def test_no_raw_state_names_or_retired_words_reach_the_screen(env):
     for task, running in situations(env):
         st = task.read_state()
-        shown = ui.view(task, st, running, 3).status + tui.detail(task, st, 3, running=running)
+        shown = ui.view(task, st, running, 3).status + panel.detail(task, st, 3, running=running)
         for word in ("checkpoint:", "approval:", "iteration"):
             assert word not in shown.replace(str(task.meta), ""), f"'{word}' shown for {st.goal}"
 
@@ -115,7 +128,7 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
     tasks = situations(env)
     running = {task.id for task, alive in tasks if alive}
     monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id in running)
-    monkeypatch.setattr(tui, "pod_views", lambda ids: {i: tui.PodView() for i in ids})
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {i: panel.PodView() for i in ids})
     by_key: dict[str, list[str]] = {}
     for binding in tui.Vivibox.BINDINGS:
         by_key.setdefault(binding.key, []).append(binding.action)
@@ -129,7 +142,7 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
                 app.table.move_cursor(row=rows(app).index(task.id))
                 await pilot.pause()
                 st = task.read_state()
-                shown = tui.detail(task, st, 3, app.agent_running(st.id), app.pod)
+                shown = panel.detail(task, st, 3, app.agent_running(st.id), app.pod)
                 for key in re.findall(r"`([a-zA-Z])`", shown):
                     offered = any(app.check_action(action, ()) for action in by_key.get(key, []))
                     assert offered, f"{st.goal}: the panel names `{key}`, the footer does not offer it"
@@ -145,8 +158,12 @@ def test_help_fits_in_eighty_columns_without_wrapping():
 
 
 def test_a_dialog_has_at_most_one_primary_button():
-    """One primary button per dialog (§4), checked in the source: a class at a time."""
-    source = Path(tui.__file__).read_text()
-    for chunk in source.split("\nclass ")[1:]:
-        name = chunk.split("(")[0].split(":")[0]
-        assert chunk.count('"primary"') <= 1, f"{name} has more than one primary button"
+    """One primary button per dialog (§4), checked in the source: a class at a time, in every
+    module that defines a screen."""
+    for module in (tui, dialogs, browse, providers_ui, widgets, settings, logs):
+        source = Path(module.__file__).read_text()
+        for chunk in source.split("\nclass ")[1:]:
+            name = chunk.split("(")[0].split(":")[0]
+            assert chunk.count('"primary"') <= 1, (
+                f"{module.__name__}: {name} has more than one primary button"
+            )

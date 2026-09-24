@@ -59,7 +59,7 @@ def test_a_stopped_box_is_stopped_and_a_started_one_open(env):
 def test_a_box_costs_one_number_not_a_split(env):
     """A box never plans, so planning + implementation would always read $0.00 + something. What
     it costs is the one turn vivibox runs for it, working out how to run the app."""
-    from vivibox.tui import detail
+    from vivibox.panel import detail
 
     task = actions.open_box("demo")
     assert not ui.cost(task), "nothing yet"

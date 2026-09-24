@@ -9,193 +9,70 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import shutil
 import subprocess
 import sys
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
-from pathlib import Path
 
-from rich.markup import escape
-from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.widgets import (
-    DataTable,
-    Footer,
-    Header,
-    Markdown,
-    Select,
-    Static,
-)
+from textual.widgets import DataTable, Header, Markdown, Select, Static
 
-from . import actions, code, ide, keys, logs, manual, providers, ui
-from .browse import shown_path
-from .config import ConfigError, config_dir, load_config, load_project
+from . import actions, code, ide, ui
+from .app_support import LeavingExecutor, LiveFooter
+from .config import ConfigError, load_config
 from .dialogs import (
     NEW_PROJECT,
     NO_PROJECTS,
-    ChooseModel,
-    ChooseRole,
     ChooseSession,
     CommitWork,
     DeleteTask,
     Help,
-    NewProject,
     NewTask,
     Reply,
     ReplyWithCriteria,
 )
-from .panel import (  # noqa: F401
+from .keys_demo import DemoKeys
+from .keys_models import ModelKeys
+from .keys_plan import PlanKeys
+from .keys_project import ProjectKeys
+from .keys_run import RunKeys
+from .keys_work import WorkKeys
+from .panel import (
     CODE_CHANGED,
     CODE_CHECK_SECONDS,
-    DECISION_KEYS,
-    OLDER_SUPERVISOR,
     PROJECT_ROW,
-    PROTECTED_BRANCHES,
     REFRESH_SECONDS,
     SPIN_SECONDS,
-    SPINNER,
     TASK_ACTIONS,
-    WAITING_ONLY,
     PodView,
     after_window,
-    build_said,
-    checklist,
     criteria,
-    deleted_detail,
     detail,
-    edit_in_editor,
     finished_detail,
-    gate_failed,
-    git_diff,
     keys_for,
-    last_gate,
     live_at,
     load_view,
-    log_command,
-    newest_log,
-    next_steps,
-    pager_command,
-    planned_by_you,
-    plans_verify,
-    pod_view,
     pod_views,
     project_detail,
-    project_repos,
     projects,
-    read,
-    removed_tests,
     save_collapsed,
     save_view,
     ticked_at,
-    verification_running,
-    view_state_path,
-    watchable,
 )
-from .plan import PlanError, parse_plan
-from .providers_ui import (
-    ChooseImport,
-    ImportSource,
-)
-from .settings import ProjectSettings, Settings
+from .settings import Settings
 from .states import State
+from .table import TaskTable
 from .task import Task, TaskState, list_tasks
 from .widgets import Confirm
 
 
-class LiveFooter(Footer):
-    """Textual's Footer stops redrawing while the terminal has no focus (bindings_changed in
-    widgets/_footer.py returns early). The keys are what tells you a task now needs you, so they
-    must appear while you are in another window, not once you click back into the terminal."""
-
-    def bindings_changed(self, screen) -> None:
-        self._bindings_ready = True
-        if self.is_attached and screen is self.screen:
-            self.call_after_refresh(self.recompose)
-
-
-class LeavingExecutor(ThreadPoolExecutor):
-    """Where Textual runs the thread workers (a start, a stop, the app being run): the loop's
-    default executor, but one the view can close without waiting for. asyncio waits for the
-    default executor at the end, so a pod start that hung on Docker held the window until Ctrl-C,
-    which showed a traceback. Nothing is lost by leaving: the pod and the supervisor are
-    processes of their own, and a docker command finishes on its own."""
-
-    def __init__(self) -> None:
-        super().__init__(thread_name_prefix="vivibox-step")
-        self.at_work: set[Future] = set()
-
-    def submit(self, fn, /, *args, **kwargs) -> Future:
-        future = super().submit(fn, *args, **kwargs)
-        self.at_work.add(future)
-        future.add_done_callback(self.at_work.discard)
-        return future
-
-    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
-        super().shutdown(wait=False, cancel_futures=cancel_futures)
-
-    def unfinished(self) -> int:
-        return sum(1 for future in self.at_work if not future.done())
-
-
-class Vivibox(App):
+class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App):
     TITLE = "vivibox"
     # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
     ENABLE_COMMAND_PALETTE = False
-    CSS = """
-    DataTable { height: 1fr; }
-    .catalog { height: 8; }
-    #rows { height: auto; max-height: 20; }
-    .tree { height: 16; }
-    .found { height: auto; max-height: 8; }
-    .group { padding: 1 0 0 0; text-style: bold; }
-    #empty { height: 1fr; padding: 2 4; color: $text-muted; }
-    #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
-    #detail.hidden { display: none; }
-    .dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
-              padding: 1 2; }
-    .dialog.help { width: 76; }
-    .dialog TextArea { height: 8; }
-    .dialog TextArea.description { height: 10; }
-    .dialog TextArea.criteria { height: 6; }
-    #suggestions { max-height: 8; border: none; background: $boost; }
-    #editors { max-height: 12; margin: 1 0; }
-    .buttons { height: auto; margin-top: 1; }
-    .fields { height: auto; }
-    .wrap { width: 100%; }
-    /* Text beside a button takes what the button leaves. */
-    .role > .wrap { width: 1fr; }
-    .role > Button { margin-left: 2; }
-    .buttons Button { margin-right: 2; }
-    .files { color: $text-muted; margin: 1 0; }
-    .role { height: auto; }
-    .role > Label { padding: 1 0; }
-    .role > .role-name { width: 10; }
-    .role > Select { width: 1fr; }
-    /* A form: a column of labels, one field per row, only the description and the buttons boxed. */
-    .dialog.form { max-width: 100%; }
-    .form .section { height: auto; margin-top: 1; }
-    .form #task { margin-top: 0; }
-    .form .row { height: auto; }
-    /* Lists of a group a row apart, unless the terminal is short (fit() decides). */
-    .form .row.gap { margin-top: 1; }
-    .form.tight .row.gap { margin-top: 0; }
-    .form .key { width: 10; color: $text-muted; }
-    .form .hint { width: 1fr; color: $text-muted; }
-    .form .row > Select, .form .row > TextArea { width: 1fr; }
-    .form .row > Button { margin: 0 2 0 0; min-width: 9; }
-    .form .buttons > .keys { width: auto; padding: 1 0; }
-    .form Select > SelectCurrent { background: $boost; }
-    /* Focus is one signal: the focused control's text as the cursor block, as on a button. */
-    .form Select:focus > SelectCurrent > Static#label {
-        color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;
-    }
-    /* Every dialog sits in the middle of the screen, the ones still to be written too. */
-    ModalScreen { align: center middle; }
-    """
+    CSS_PATH = "vivibox.tcss"
     # In the footer's order: your decisions first, then the selected row's actions, then what
     # works anywhere. Keys that matter less often are under ? and off the footer, which is short.
     BINDINGS = [
@@ -309,64 +186,6 @@ class Vivibox(App):
 
     def action_settings(self) -> None:
         self.push_screen(Settings())
-
-    def import_opencode(self, done) -> None:
-        """Which opencode configuration, then which of its providers; done gets the names brought over."""
-
-        def picked(path: Path | None) -> None:
-            if path is None:
-                done([])
-                return
-            try:
-                reading = providers.read_opencode(path)
-            except ConfigError as e:
-                self.notify(e.args[0], severity="error", timeout=10)
-                done([])
-                return
-            self.push_screen(ChooseImport(path, reading), chosen)
-
-        def chosen(found: list[providers.Found]) -> None:
-            if found:
-                providers.bring_over(found)
-                self.notify(f"Imported {', '.join(f.name for f in found)}.", timeout=8)
-            done([f.name for f in found])
-
-        self.push_screen(ImportSource(providers.discover(project_repos())), picked)
-
-    @work(thread=True)
-    def refresh_models(self, added: list[str] = ()) -> None:
-        """The models again, after providers changed. One just added that lists none is most
-        likely a name opencode does not know; a task's list would only show that it has nothing."""
-        self.available = actions.available_models(refresh=True)
-        if missing := [name for name in added if not self.available.get(name)]:
-            self.call_from_thread(
-                self.notify,
-                f"opencode lists no models for {', '.join(missing)}; check the name.",
-                severity="warning",
-            )
-
-    def hint_opencode(self) -> None:
-        """Someone who uses opencode has providers set up already; say they can be brought over."""
-        if keys.list_keys() or providers.load():
-            return
-        if found := providers.discover(project_repos()):
-            where = shown_path(found[0][0])
-            self.notify(
-                f"Found your opencode configuration, {where}. Press k to bring its providers over.",
-                timeout=15,
-            )
-
-    @work(thread=True)
-    def load_models(self) -> None:
-        """A container per provider the first time in a day; a file read after that."""
-        try:
-            self.available = actions.available_models()
-        except Exception:  # the dialogs fall back to the models config.toml names
-            self.available = None
-        try:
-            self.catalog = actions.provider_catalog()
-        except Exception:  # the dialog reads it itself, or you type the name
-            self.catalog = None
 
     def offer_restart(self) -> None:
         """After a reboot the tasks that were at work have no supervisor. Asked once, on start,
@@ -487,160 +306,6 @@ class Vivibox(App):
         self.drawn = now
         self.fill_table(pairs, selected)
 
-    # The columns a terminal has room for, narrowest first: task, status and goal always.
-    COLUMNS = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
-    NARROW = ("TASK", "STATUS", "GOAL")
-    MEDIUM = ("TASK", "STATUS", "CRITERIA", "UPDATED", "GOAL")
-
-    def columns_for(self, width: int) -> tuple[str, ...]:
-        return self.NARROW if width < 100 else self.MEDIUM if width < 130 else self.COLUMNS
-
-    def set_columns(self) -> None:
-        wanted = self.columns_for(self.size.width)
-        if wanted == self.columns:
-            return
-        self.columns = wanted
-        table = self.table
-        table.clear(columns=True)
-        keys = table.add_columns(*wanted)
-        by_name = dict(zip(wanted, keys, strict=True))
-        self.status_column, self.demo_column = by_name["STATUS"], by_name.get("DEMO")
-        self.cost_column, self.updated_column = by_name.get("COST PLAN + IMPL"), by_name.get("UPDATED")
-        self.drawn = ()
-
-    def on_resize(self) -> None:
-        if self.table is not None:  # a resize before the view is built has nothing to lay out
-            self.set_columns()
-            self.reload()
-
-    def project_order(self, pairs: list) -> list[str]:
-        """Projects with a task waiting for you first, then by name. A project a task belongs to
-        is listed even when its file is gone, so the task is not orphaned off the screen."""
-        ranks: dict[str, int] = {}
-        for _, st in pairs:
-            ranks[st.project] = min(ranks.get(st.project, ui.FINISHED), self.views[st.id].rank)
-        names = set(self.problems) | set(ranks) | {e.get("project", "") for e in self.done}
-        return sorted(names, key=lambda n: (ranks.get(n, ui.FINISHED), n))
-
-    def project_summary(self, name: str, tasks: list, done: int) -> str:
-        """The project row's status: what keeps its tasks from starting, else what they are doing,
-        so a collapsed project still says what waits for you."""
-        waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in tasks)
-        working = sum(self.busy(st) for _, st in tasks)
-        parts = [f"[yellow]{waiting} waiting for you[/]"] * bool(waiting)
-        parts += [f"[cyan]{working} working[/]"] * bool(working)
-        parts += [f"[grey50]{len(tasks) - waiting - working} stopped[/]"] * bool(
-            len(tasks) - waiting - working
-        )
-        parts += [f"[green]{done} done[/]"] * bool(done)
-        return " · ".join(parts) or "[grey50]no tasks · n creates one[/]"
-
-    def fill_table(self, pairs: list, selected: str | None) -> None:
-        table = self.table
-        table.clear()
-        planned: list[tuple[dict[str, str], str]] = []
-        for name in self.project_order(pairs):
-            own = [(t, st) for t, st in pairs if st.project == name]
-            done = [e for e in self.done if e.get("project", "") == name]
-            folded = name in self.collapsed
-            problem, summary = self.problems.get(name, ""), self.project_summary(name, own, len(done))
-            # The problem is the status; otherwise the tasks say what they do, and only a folded
-            # project needs its row to say what waits, in a few characters.
-            waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in own)
-            status = (
-                f"[red]{escape(problem)}[/]" if problem
-                else f"[yellow]{waiting} waiting for you[/]" if folded and waiting
-                else ""
-            )  # fmt: skip
-            planned.append((
-                {"TASK": f"[b]{'▸' if folded else '▾'} {escape(name)}[/]", "STATUS": status, "GOAL": summary},
-                PROJECT_ROW + name,
-            ))  # fmt: skip
-            if folded:
-                continue
-            for task, st in own:
-                spent = ui.cost(task)
-                # During a turn, when the agent last finished a step: the sign it is at work.
-                live = task.live_turn()
-                planned.append((
-                    {"TASK": f"  {st.id}", "STATUS": self.status(st), "DEMO": self.demo_cell(st.id),
-                     "CRITERIA": criteria(task), "COST PLAN + IMPL": str(spent) if spent else "-",
-                     "CREATED": ui.ago(st.created), "UPDATED": ui.ago(live["at"] if live else st.updated),
-                     "GOAL": st.goal},
-                    st.id,
-                ))  # fmt: skip
-            for entry in done:
-                planned.append((
-                    {"TASK": f"  {entry['id']}",
-                     "STATUS": "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
-                     "DEMO": "-", "CRITERIA": "-", "COST PLAN + IMPL": ui.finished_cost(entry),
-                     "CREATED": ui.ago(entry["created"]) if entry.get("created") else "-",
-                     "UPDATED": ui.ago(entry["finished"]), "GOAL": entry["title"]},
-                    entry["id"],
-                ))  # fmt: skip
-        # The goal gets what the other columns leave: a goal that runs off the screen is a goal
-        # nobody reads. Its width comes from the widest thing each other column shows.
-        taken = 0
-        for name in self.columns:
-            if name != "GOAL":
-                widest = max(
-                    (Text.from_markup(cells.get(name, "")).cell_len for cells, _ in planned), default=0
-                )
-                taken += max(widest, len(name)) + 2
-        goal_width = max(self.size.width - taken - 3, 16)
-        ids = [key for _, key in planned]
-        for cells, key in planned:
-            cells = {**cells, "GOAL": ui.shorten(cells.get("GOAL", ""), goal_width)}
-            table.add_row(*(cells.get(name, "") for name in self.columns), key=key)
-        empty = self.query_one("#empty", Static)
-        table.display, empty.display = bool(ids), not ids
-        if not ids:
-            # Nothing left to show details of: the view is back to how it starts.
-            self.panel.add_class("hidden")
-        empty.update("" if ids else NO_PROJECTS)
-        if selected in ids:
-            table.move_cursor(row=ids.index(selected))
-        elif ids:
-            # The first task waiting for you; a project row is a heading, not what you came for.
-            first = next((i for i, key in enumerate(ids) if not key.startswith(PROJECT_ROW)), 0)
-            table.move_cursor(row=first)
-        waiting_now = {st.id for _, st in pairs if self.views[st.id].group == "Waiting for you"}
-        # A task that starts to wait for you rings the bell, once: the sign you can hear from
-        # another window when the desktop's notifications are off.
-        if self.waiting_ids is not None and waiting_now - self.waiting_ids:
-            self.bell()
-        self.waiting_ids = waiting_now
-        self.waiting = len(waiting_now)
-        self.working = sum(self.busy(st) for _, st in pairs)
-        self.set_sub_title()
-        self.show_detail()
-        self.refresh_bindings()
-        self.look_at_pods([st.id for _, st in pairs])
-
-    def demo_cell(self, task_id: str) -> str:
-        """Whether this task is serving anything, on the row itself: the list is what you look at.
-        The addresses stay in the panel, where they are clickable and all of them fit; a single port
-        here would have to pick one of a front end and a back end, and pick it silently."""
-        view = self.pods.get(task_id)
-        if view is None or not view.address or not (state := view.state):
-            return "-"
-        color = {"live": "green", "local": "yellow", "starting": "yellow", "stopped": "red"}[state]
-        # How many came up separates "the back end died" from "everything is there".
-        count = f" ×{len(view.reachable)}" if len(view.reachable) > 1 else ""
-        return f"[{color}]{state}{count}[/]"
-
-    def set_sub_title(self) -> None:
-        parts = [f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you"]
-        if self.working:
-            parts.append(f"{self.working} working")
-        # What h and H keep out of sight, so a list that looks short is not a surprise.
-        parts += [f"{count} {kind} hidden" for kind, count in sorted(self.hidden.items())]
-        if self.code_changed:
-            parts.append(CODE_CHANGED)
-        self.sub_title = " · ".join(parts)
-        # The window's title, for the taskbar: how many wait for you.
-        self.title = f"vivibox ({self.waiting})" if self.waiting else "vivibox"
-
     @property
     def pod(self) -> PodView:
         """The selected task's pod, for the panel and for which keys the footer offers."""
@@ -657,23 +322,6 @@ class Vivibox(App):
             task = next(t for t, s in self.pairs if s.id == st.id)
             found = ui.view(task, st, self.agent_running(st.id), self.config.max_iterations)
         return found
-
-    def status(self, st: TaskState) -> str:
-        seen = self.seen(st)
-        color = {"yellow": "yellow", "cyan": "cyan", "dim": "grey50", "green": "green"}[ui.COLORS[seen.group]]
-        text = seen.status
-        if doing := self.starting.get(st.id):
-            color, text = "cyan", doing
-        mark = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else " "
-        return f"[{color}]{mark} {text}[/]"
-
-    def spin(self) -> None:
-        """Turns the spinner of busy tasks between full refreshes, touching only their status cells."""
-        self.frame += 1
-        table = self.table
-        for _, st in self.pairs:
-            if self.busy(st):
-                table.update_cell(st.id, self.status_column, self.status(st))
 
     def selected_id(self) -> str | None:
         table = self.table
@@ -953,101 +601,6 @@ class Vivibox(App):
         if starts:
             self.start(task.id, resume=True)
 
-    def planned_by_you(self, task: Task) -> bool:
-        return planned_by_you(task)
-
-    def action_edit_plan(self) -> None:
-        task, st = self.selected()
-        manual_plan = st.state is State.CHECKPOINT_PLAN and self.planned_by_you(task)
-        # With a manual planner you edit your chat's answer, which is then brought in again: the
-        # plan and the answer cannot drift apart, and the chat's next answer does not undo yours.
-        path = actions.answer_path(task) if manual_plan else task.plan_path
-        with self.suspend():
-            edit_in_editor(path)
-        if manual_plan and path.exists() and path.read_text().strip():
-            self.bring_in_plan(task)
-        self.reload()
-
-    def bring_in_plan(self, task: Task) -> None:
-        try:
-            actions.import_plan(task)
-        except PlanError as e:
-            self.to_clipboard(manual.repair_prompt(str(e)))
-            self.notify(
-                f"That is not a plan yet: {e}. A message asking your chat to fix it is in your clipboard.",
-                severity="warning",
-                timeout=15,
-            )
-            return
-        except Exception as e:
-            self.fail(e)
-            return
-        count = len(parse_plan(task.plan_path.read_text()).criteria)
-        self.reload()
-        self.push_screen(
-            Confirm(f"Plan brought in, {count} criteria. Accept it and start implementing?", "Accept"),
-            lambda yes: yes and self.action_accept(),
-        )
-
-    def to_clipboard(self, text: str) -> str:
-        """Through the desktop's own tool where there is one; the terminal's clipboard escape
-        (OSC 52) is the fallback, and not every terminal honours it."""
-        for command in (
-            ["wl-copy"],
-            ["xclip", "-selection", "clipboard"],
-            ["xsel", "--clipboard", "--input"],
-        ):
-            if shutil.which(command[0]):
-                with contextlib.suppress(OSError, subprocess.SubprocessError):
-                    subprocess.run(
-                        command, input=text, text=True, check=True, timeout=5,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )  # fmt: skip
-                    return command[0]
-        self.copy_to_clipboard(text)
-        return "the terminal"
-
-    def action_copy_prompt(self, cli: bool = False) -> None:
-        task, _ = self.selected()
-        try:
-            where = self.to_clipboard(actions.plan_prompt(task, cli=cli))
-        except Exception as e:
-            self.fail(e)
-            return
-        file = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
-        self.notify(f"Copied the prompt ({where}); it is also in {file}.", timeout=8)
-
-    def action_copy_prompt_cli(self) -> None:
-        self.action_copy_prompt(cli=True)
-
-    def action_open_ide(self) -> None:
-        """With the editor the project or config.toml names, else the one the repository's own
-        folders point at among those found here; k, or the project's row, changes it."""
-        task_id = self.selected()[1].id
-        if not actions.editor_command(self.config, actions.load(task_id)[1]):
-            self.fail(ConfigError("no editor found; pick one under k, or set [review] ide in config.toml"))
-            return
-        self.open_ide(task_id)
-
-    def open_ide(self, task_id: str) -> None:
-        task, project = actions.load(task_id)
-        command = actions.editor_command(self.config, project)
-        try:
-            path = actions.review_copy(task, project)
-        except Exception as e:
-            self.fail(e)
-            return
-        if ide.is_terminal(command):
-            with self.suspend():  # it takes over the terminal, like the plan editor does
-                subprocess.run(ide.command_for(path, command))
-            self.reload()
-            return
-        try:
-            actions.open_in_ide(self.config, path, project)
-            self.notify(f"Opening {path}")
-        except Exception as e:
-            self.fail(e)
-
     def action_verify_again(self) -> None:
         task, _ = self.selected()
         try:
@@ -1057,34 +610,6 @@ class Vivibox(App):
         else:
             self.go_on(task, f"Verifying {task.id} again")
         self.reload()
-
-    def diff_command(self) -> list[str]:
-        task, _ = self.selected()
-        return git_diff(task, actions.load(task.id)[1])
-
-    def action_show_diff(self) -> None:
-        """The work as a diff, in git's own pager, before you accept it."""
-        try:
-            command = self.diff_command()
-        except Exception as e:
-            self.fail(e)
-            return
-        with self.suspend():
-            subprocess.run(command)
-
-    def action_show_log(self) -> None:
-        """The timeline, a verification log, or the supervisor's, in your pager: one entry opens
-        at once, more are picked from."""
-        task, st = self.selected()
-        found, start = logs.entries(task, st, self.agent_running(task.id))
-        if len(found) == 1:
-            self.read_log(found[0].command)
-            return
-        self.push_screen(logs.ChooseLog(found, start), lambda command: command and self.read_log(command))
-
-    def read_log(self, command: list[str]) -> None:
-        with self.suspend():
-            subprocess.run(command)
 
     def action_approve_risky(self) -> None:
         task, _ = self.selected()
@@ -1111,39 +636,6 @@ class Vivibox(App):
         event.prevent_default()
         self.open_url(event.href)
 
-    def action_demo_stop(self) -> None:
-        task, _ = self.selected()
-        self.stop_demo(task.id)
-
-    @work(thread=True)
-    def stop_demo(self, task_id: str) -> None:
-        try:
-            actions.demo_stop(task_id)
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-            return
-        self.call_from_thread(self.notify, "Stopped.", timeout=3)
-        self.call_from_thread(self.reload)
-
-    def action_demo(self) -> None:
-        """Runs the project in its pod so you can open it. When nothing says how, the agent works it
-        out without asking first: you pressed the key that means run it, and there is no second
-        answer you could give. An instruction an earlier task left behind is a real choice, though,
-        because it may be stale, so that one is still yours to confirm."""
-        task, project = actions.load(self.selected()[1].id)
-        if actions.demo_commands(project, task)[0]:
-            self.run_demo(task.id)
-            return
-        if earlier := actions.demo_from_history(project.name):
-            asked = f"The last task you accepted was run like this:\n\n{earlier}\n\nStill right?"
-            self.push_screen(
-                Confirm(asked, "Use it"),
-                # Saying no means work it out again, not do nothing: you asked for it to run.
-                lambda yes: self.run_demo(task.id, use=earlier) if yes else self.run_demo(task.id, ask=True),
-            )
-            return
-        self.run_demo(task.id, ask=True)
-
     def busy_with(self, task_id: str, doing: str) -> None:
         """What a slow step (the demo, starting or stopping the task) is doing, in the task's
         status, with the spinner a working agent has; "" when it is done, one way or the other."""
@@ -1151,109 +643,6 @@ class Vivibox(App):
             self.starting[task_id] = doing
         else:
             self.starting.pop(task_id, None)
-        self.reload()
-
-    @work(thread=True)
-    def run_demo(self, task_id: str, ask: bool = False, use: str = "", reply: str = "") -> None:
-        doing = "working out how to run it" if ask or reply else "starting the demo"
-        self.call_from_thread(self.busy_with, task_id, doing)
-        try:
-            self.demo_outcome(task_id, ask, use, reply)
-        finally:
-            self.call_from_thread(self.busy_with, task_id, "")
-
-    def demo_outcome(self, task_id: str, ask: bool, use: str, reply: str) -> None:
-        try:
-            if use:
-                result = actions.use_instruction(task_id, use)
-            else:
-                result = actions.demo(task_id, ask=ask or bool(reply), reply=reply)
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-            return
-        if result.stopped:
-            what = "; ".join(result.stopped)
-            self.call_from_thread(
-                self.notify, f"Stopped what the agent left running: {what}", severity="warning", timeout=8
-            )
-        if result.question:
-            self.call_from_thread(self.answer_demo, task_id, result.question)
-        elif urls := result.urls:
-            self.call_from_thread(self.open_url, urls[0])
-        elif blocked := result.unreachable:
-            self.call_from_thread(
-                self.notify, f"Port {blocked[0].port} is {blocked[0].why_not}", severity="warning", timeout=10
-            )
-        elif not result.commands:
-            self.say("Still nothing says how to run it")
-        elif result.starting:
-            # It is alive and installing or compiling. The DEMO column is watching and will say when.
-            self.call_from_thread(
-                self.notify, "Still starting; the DEMO column says when it listens", timeout=8
-            )
-        else:
-            self.say("It stopped without listening; press d for what it said")
-
-    def say(self, message: str) -> None:
-        self.call_from_thread(self.notify, message, severity="error", timeout=8)
-
-    def answer_demo(self, task_id: str, question: str) -> None:
-        """The agent asked something only you can decide. Answering carries the same conversation on,
-        and none of it can move the task between states."""
-        self.push_screen(
-            Reply(task_id, f"Working out how to run it, the agent asks:\n\n{question}\n\nYour answer"),
-            lambda text: self.run_demo(task_id, reply=text) if text else None,
-        )
-
-    def action_models(self) -> None:
-        """Which model each role runs on, for this task only. The machine's config.toml is the
-        default and stays untouched; a task that needs more, or less, says so here."""
-        pick = self.selected()
-        if not pick:
-            return
-        task = pick[0]
-        try:
-            config = load_config()
-            st = task.read_state()
-            rows = [
-                (name, actions.choice_label(self.current_choice(task, name, config)),
-                 name in st.models or name in st.harnesses)
-                for name in sorted(config.roles)
-            ]  # fmt: skip
-        except (ConfigError, OSError) as e:
-            self.fail(e)
-            return
-
-        def role_picked(role: str) -> None:
-            if not role:
-                return
-            offered = actions.choices(role, config, self.available)
-            configured = actions.configured_choice(config, role)
-            self.push_screen(
-                ChooseModel(
-                    role, offered, configured, self.current_choice(task, role, config), self.available
-                ),
-                lambda choice: self.set_choice(task, role, choice, config),
-            )
-
-        self.push_screen(ChooseRole(rows), role_picked)
-
-    @staticmethod
-    def current_choice(task: Task, role: str, config) -> actions.Choice:
-        r = actions.role_of(task, role, config)
-        return r.harness, r.model if r.harness != manual.NAME else ""
-
-    def set_choice(self, task: Task, role: str, choice: actions.Choice | None, config) -> None:
-        if choice is None:
-            return
-        harness, model = choice
-        if not model and harness != manual.NAME:
-            return  # "no model yet" is where the role is, not a model to put it on
-        if choice == actions.configured_choice(config, role):
-            task.set_role(role)  # back to config.toml, and following it when it changes
-        else:
-            task.set_role(role, harness if harness != config.roles[role].harness else "", model)
-        self.notify(f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6)
         self.reload()
 
     def action_watch(self) -> None:
@@ -1281,38 +670,6 @@ class Vivibox(App):
             after_window(session_gone=not actions.tmux_has(actions.tmux_session(task_id)))
         self.reload()
 
-    def action_start_task(self) -> None:
-        task, _ = self.selected()
-        self.start(task.id, resume=any(e["type"] == "started" for e in task.events()))
-
-    def action_stop_task(self) -> None:
-        task, _ = self.selected()
-        self.push_screen(
-            Confirm(f"Stop {task.id}? Its work is kept; start it again with s.", "Stop", destructive=True),
-            lambda yes: yes and self.stop(task.id),
-        )
-
-    def action_stop_pod(self) -> None:
-        """At a checkpoint nothing runs but the pod; your decision starts it again by itself."""
-        task, _ = self.selected()
-        self.push_screen(
-            Confirm(f"Take the pod of {task.id} down? Your next decision starts it again.", "Stop pod"),
-            lambda yes: yes and self.stop(task.id),
-        )
-
-    def action_force_stop(self) -> None:
-        """For a stop that hangs (a container that ignores it, a supervisor stuck in docker) or a
-        start that never ends: kill both, at once. Asked once, since S is one Shift away from s."""
-        task, _ = self.selected()
-        self.push_screen(
-            Confirm(
-                f"Stop {task.id} by force? The turn under way is lost; its work on disk is kept.",
-                "Stop by force",
-                destructive=True,
-            ),
-            lambda yes: yes and self.stop(task.id, force=True),
-        )
-
     def action_help(self) -> None:
         self.push_screen(Help(self.editor_note()))
 
@@ -1327,76 +684,6 @@ class Vivibox(App):
             f"o opens with {found[0].command}, the first editor found here, or what .idea or .vscode "
             "point at (k changes it)."
         )
-
-    @work(thread=True)
-    def start(self, task_id: str, resume: bool = False) -> None:
-        step = lambda doing: self.call_from_thread(self.busy_with, task_id, doing)  # noqa: E731
-        step("starting…")
-        try:
-            model = actions.start(task_id, resume=resume, on_step=step)
-            self.call_from_thread(self.notify, f"{task_id} started ({model}).")
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        self.call_from_thread(self.busy_with, task_id, "")
-
-    @work(thread=True)
-    def stop(self, task_id: str, force: bool = False) -> None:
-        # Taking the pod down takes a while; without this the row looked as if nothing happened.
-        # A forced stop runs beside a stop that hangs; that one is left to finish on its own.
-        self.call_from_thread(self.busy_with, task_id, "stopping…")
-        try:
-            actions.stop(actions.load(task_id)[0], force=force)
-            self.call_from_thread(self.notify, f"{task_id} stopped{' by force' if force else ''}.")
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        self.call_from_thread(self.busy_with, task_id, "")
-
-    def project_file(self) -> Path:
-        return config_dir() / "projects" / f"{self.selected_project()}.toml"
-
-    def action_edit_project(self) -> None:
-        """The project's screen: how it is verified and run, its JDK, pass_env, its editor; the
-        file itself for the rest, and when it cannot be read at all."""
-        name = self.selected_project()
-        try:
-            load_project(name)
-        except ConfigError:
-            self.edit_project_file()
-            return
-        self.push_screen(ProjectSettings(name))
-
-    def edit_project_file(self) -> None:
-        with self.suspend():
-            edit_in_editor(self.project_file())
-        self.drawn = ()  # verify, pass_env, the repository: any of it may have changed
-        self.reload()
-
-    def action_open_repo(self) -> None:
-        try:
-            project = load_project(self.selected_project())
-            actions.open_in_ide(self.config, project.repo, project)
-            self.notify(f"Opening {shown_path(project.repo)}")
-        except Exception as e:
-            self.fail(e)
-
-    def action_forget_project(self) -> None:
-        name = self.selected_project()
-        dialog = DeleteTask(
-            f"Forget the project {name}?",
-            self.problems.get(name, "") or "vivibox will no longer offer it for tasks.",
-            "its project file, with its verify commands and settings.",
-            "the repository, exactly as it is.",
-        )
-
-        def forget(yes: bool) -> None:
-            if yes:
-                try:
-                    actions.forget_project(name)
-                except ConfigError as e:
-                    self.fail(e)
-                self.reload()
-
-        self.push_screen(dialog, forget)
 
     def action_new(self, preselect: str = "") -> None:
         if not projects():
@@ -1420,32 +707,6 @@ class Vivibox(App):
             self.create(form)
 
         self.push_screen(NewTask(preselect, self.available), create)
-
-    def action_new_project(self) -> None:
-        self.new_project()
-
-    def new_project(self) -> None:
-        """Sets up a project, starting a repository when the folder has none, then asks for its first task."""
-
-        def done(form: dict) -> None:
-            if not form:
-                if not projects():
-                    self.notify("vivibox needs a project to work on; press i to set one up.", timeout=10)
-                return
-            if used := form.get("use"):
-                self.action_new(used)  # the folder is a project already: straight to its next task
-                return
-            try:
-                target = actions.setup_project(
-                    Path(form["path"]), form["name"], form["verify"], create=True, no_build=form["no_build"]
-                )
-            except Exception as e:
-                self.fail(e)
-                return
-            self.notify(f"Set up {form['name']} in {target}")
-            self.action_new(form["name"])
-
-        self.push_screen(NewProject(), done)
 
     @work(thread=True)
     def create(self, form: dict) -> None:

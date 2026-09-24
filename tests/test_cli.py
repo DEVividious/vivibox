@@ -514,8 +514,8 @@ def test_a_task_does_not_start_without_the_variables_its_project_passes(env, mon
     # The reason stays with the task: a toast that is gone in ten seconds left the row saying
     # "not started" with nothing to say why.
     from vivibox.config import load_config
+    from vivibox.panel import detail
     from vivibox.task import find_task
-    from vivibox.tui import detail
 
     task = find_task(load_config().tasks_dir, "demo-1")
     shown = detail(task, task.read_state(), 3, running=False)

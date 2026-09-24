@@ -1,8 +1,9 @@
 # Working on vivibox
 
-- Before changing anything a person sees (`vivibox/tui.py`, `vivibox/panel.py`, `vivibox/dialogs.py`,
-  `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/ui.py`, `vivibox/cli.py`,
-  notification texts, the README), read `docs/ux-guidelines.md`.
+- Before changing anything a person sees (the view: `vivibox/tui.py`, `vivibox/table.py`,
+  `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`; the dialogs: `vivibox/dialogs.py`,
+  `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`,
+  `vivibox/widgets.py`; `vivibox/cli.py`, notification texts, the README), read `docs/ux-guidelines.md`.
   `tests/test_ux_rules.py` enforces its mechanical rules.
 - Before changing anything an agent reads (the prompts in `vivibox/supervisor.py`, `vivibox/manual.py`
   and `vivibox/demo.py`, `vivibox/templates/`, the gate's feedback in `vivibox/gate.py`), read
@@ -10,7 +11,9 @@
 - Every change in behaviour gets a test that fails first for its own assertion.
 - `vivibox/actions.py` is the facade the view and the command line call; what it does lives in
   `roles.py`, `projects.py`, `demo.py`, `box.py` and `review.py`, which reach the task primitives
-  through `actions`. A module past 800 lines is split before a feature is added to it.
+  through `actions`. The view is the app in `tui.py` with its keys mixed in by group from `keys_*.py`
+  and the list from `table.py`. A module past 800 lines is split before a feature is added to it
+  (`tests/test_structure.py` fails on one).
 - Before committing: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
 - A change to a prompt that no mechanical test covers gets a behavioural run:

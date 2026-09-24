@@ -131,7 +131,9 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "n")
     assert main(["accept", "demo-1"]) == 0
     assert (source / "one.txt").exists() and git("status", "--porcelain") == "A  one.txt\n"
-    assert 'as "Add one.txt"' in prompts[0], "the agent's commit message is the suggestion"
+    assert prompts[0].startswith("[Y]es"), "the message is shown above the question"
+    shown = capsys.readouterr().out
+    assert "with this message?\n\n  Goal\n\n  - " in shown, "the suggestion: subject, then a list"
     assert not task.root.exists() and "vivibox/demo-1" not in git("branch", "--list")
     git("commit", "-q", "-m", "Mine")
 
@@ -144,6 +146,7 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     assert main(["accept", "demo-2"]) == 0
     assert git("log", "-1", "--format=%s").strip() == "Add two" and git("status", "--porcelain") == ""
+    assert git("log", "-1", "--format=%b").startswith("- "), "editing the subject keeps the list"
 
     # --branch keeps the old way, for pull requests.
     assert main(["new", "demo", "Goal", "--draft"]) == 0
@@ -152,6 +155,36 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     final_checkpoint(task)
     assert main(["accept", "demo-3", "--branch"]) == 0
     assert "vivibox/demo-3" in git("branch", "--list") and not (source / "three.txt").exists()
+
+
+def test_the_suggested_commit_message_is_a_subject_and_a_list(env):
+    """A message the way a history is kept: the subject says what the task set out to do, at most
+    72 characters; a list follows, of the agent's commit subjects when it made several (the gate
+    checked them), else of the criteria the work met. Never a signature."""
+    import subprocess
+
+    from vivibox import actions
+    from vivibox.config import load_project
+
+    source = load_project("demo").repo
+    git = lambda *a: subprocess.run(["git", *a], cwd=source, capture_output=True, text=True).stdout  # noqa: E731
+    base = git("rev-parse", "HEAD").strip()
+    for name in ("one.txt", "two.txt"):
+        (source / name).write_text("x\n")
+        git("add", name)
+        git("-c", "user.name=A", "-c", "user.email=a@b", "commit", "-q", "-m", f"Add {name}")
+    head = git("rev-parse", "HEAD").strip()
+    goal = "Reject expired cards at checkout, so that a card past its date is refused before payment"
+    criteria = ["An expired card is refused", "Co-Authored-By: a robot"]
+
+    message = actions.suggested_message(source, base, head, goal, criteria)
+    subject, blank, *points = message.splitlines()
+    assert len(subject) <= 72 and subject.startswith("Reject expired cards at checkout, so that")
+    assert blank == "" and points == ["- Add one.txt", "- Add two.txt"], "the agent's commits, oldest first"
+
+    single = actions.suggested_message(source, git("rev-parse", "HEAD~1").strip(), head, goal, criteria)
+    assert single.splitlines()[2:] == ["- An expired card is refused"], "one commit: criteria, no signature"
+    assert actions.suggested_message(source, head, head, "Fix the build.", []) == "Fix the build"
 
 
 def test_accept_refuses_over_your_staged_changes(env, capsys):

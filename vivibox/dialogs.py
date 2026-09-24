@@ -1421,8 +1421,8 @@ class CommitWork(Dialog):
             yield Label(f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:")
             yield Label(self.done.status.rstrip() or "(no changes)", classes="files")
             warn = " (your main branch)" if self.branch in panel.PROTECTED_BRANCHES else ""
-            yield Label(f"Commit to {self.branch}{warn} with this message?")
-            yield Input(self.done.message, id="message")
+            yield Label(f"Commit to {self.branch}{warn} with this message? (ctrl+s commits)")
+            yield EdgeTextArea(self.done.message, id="message")
             with Horizontal(classes="buttons"):
                 # On a main branch the safe choice comes first.
                 commit = Button("Commit", variant="primary", id="commit")
@@ -1434,11 +1434,10 @@ class CommitWork(Dialog):
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(self.query_one(Input).value if event.button.id == "commit" else "")
+        self.dismiss(self.query_one(TextArea).text if event.button.id == "commit" else "")
 
-    @on(Input.Submitted)
-    def submitted(self) -> None:
-        self.dismiss(self.query_one(Input).value)
+    def key_ctrl_s(self) -> None:
+        self.dismiss(self.query_one(TextArea).text)
 
     def key_escape(self) -> None:
         self.dismiss("")

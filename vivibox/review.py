@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -161,7 +160,7 @@ def remember(done: Finished, project: Project, commit: str) -> None:
     entry = {
         "id": done.task_id,
         "project": project.name,
-        "title": done.message or f"Box in {project.name}",
+        "title": done.message.partition("\n")[0] or f"Box in {project.name}",
         "cost": round(done.cost.total, 4),
         **({"planning": round(done.cost.planning, 4)} if done.cost.split else {}),
         "commit": commit[:10],
@@ -205,10 +204,11 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
     commit = fetch_work(task, project)
     st = task.read_state()
     spent = ui.cost(task)
+    criteria = accepted_criteria(task)
     # A box's "Work in the box" is not a message for your history: that one is yours to write.
-    message = "" if st.box else suggested_message(project.repo, st.base_commit, commit, st.goal)
+    message = "" if st.box else suggested_message(project.repo, st.base_commit, commit, st.goal, criteria)
     done = Finished(task.id, project.repo, spent, message)
-    done.criteria = accepted_criteria(task)
+    done.criteria = criteria
     done.created = st.created
     done.demo = actions.demo_instruction(task)
     if branch_only:
@@ -225,13 +225,20 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
     return done
 
 
-def suggested_message(source: Path, base: str, commit: str, goal: str) -> str:
-    """The agent's commit message when it made one commit (the gate checked it), else the goal, short."""
-    subjects = repo.git("log", "--format=%s", f"{base}..{commit}", cwd=source).stdout.splitlines()
-    if len(subjects) == 1:
-        return subjects[0]
-    first = re.split(r"[:;,.]\s", goal, maxsplit=1)[0].strip()
-    return ui.shorten(first, gate.MAX_SUBJECT)
+def suggested_message(source: Path, base: str, commit: str, goal: str, criteria: list[str] = ()) -> str:
+    """A commit message the way a history is kept: a subject of at most 72 characters saying what
+    the task set out to do (the plan's summary, once there is one), then a list: the agent's commit
+    subjects when it made several (the gate checked them), else the criteria the work met. A line
+    that reads like a signature is left out."""
+    log = repo.git("log", "--reverse", "--format=%s", f"{base}..{commit}", cwd=source).stdout
+    subjects = log.splitlines()
+    first = goal.strip().splitlines()[0].strip().rstrip(".") if goal.strip() else ""
+    subject = ui.shorten(first, gate.MAX_SUBJECT)
+    points = subjects if len(subjects) > 1 else list(criteria)
+    points = [p.strip() for p in points if p.strip() and not gate.AI_MARKERS.search(p)]
+    if not points:
+        return subject
+    return subject + "\n\n" + "\n".join(f"- {p}" for p in points)
 
 
 def apply_work(source: Path, task_id: str, commit: str) -> list[str]:

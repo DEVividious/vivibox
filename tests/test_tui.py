@@ -347,14 +347,16 @@ def test_accepting_the_work_offers_a_commit(env):
         assert isinstance(app.screen, CommitWork)
         # The repository is on its main branch, so leaving it uncommitted is the focused choice.
         assert app.screen.focused.id == "later"
-        await pilot.press("right")
-        assert app.screen.focused.id == "commit"
-        await pilot.press("enter")
+        message = app.screen.query_one("#message", TextArea)
+        assert message.text.startswith("Goal\n\n- "), "the suggestion: subject, a blank line, a list"
+        message.focus()
+        await pilot.press("end", *" now")
+        await pilot.press("ctrl+s")  # a multi-line field: ctrl+s submits, like every other one
         await pilot.pause()
 
     run(scenario)
-    log = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=source, capture_output=True, text=True)
-    assert log.stdout.strip() == "Add one" and (source / "one.txt").exists()
+    log = subprocess.run(["git", "log", "-1", "--format=%s%n%b"], cwd=source, capture_output=True, text=True)
+    assert log.stdout.startswith("Goal now\n- ") and (source / "one.txt").exists()
     assert not task.root.exists()
 
 

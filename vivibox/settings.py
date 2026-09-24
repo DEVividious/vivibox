@@ -282,7 +282,7 @@ class Settings(Rows):
             )
         elif key == "ntfy_events":
             level = NTFY_LEVELS[(NTFY_LEVELS.index(config.ntfy_events) + 1) % len(NTFY_LEVELS)]
-            said = "what the desktop gets" if level == NTFY_LEVELS[0] else "every stage of a task too"
+            said = "the start and what the desktop gets" if level == NTFY_LEVELS[0] else "every stage too"
             self.write("ntfy_events", level, "notifications", f"ntfy gets {level}: {said}.")
         elif key in ("max_iterations", "verify_timeout"):
             prompts = {

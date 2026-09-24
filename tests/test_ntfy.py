@@ -1,4 +1,4 @@
-from vivibox import ntfy, ui
+from vivibox import ntfy
 from vivibox.states import State
 from vivibox.task import TaskState
 
@@ -62,15 +62,27 @@ def state(st: State, iteration: int = 1) -> TaskState:
     )  # fmt: skip
 
 
-def test_stages_are_sent_only_at_level_all_and_only_when_they_change():
+def test_the_start_is_said_at_every_level_and_the_stages_at_level_all_when_they_change():
+    """The word at the start is the first thing a topic gets after being set up, so it says the
+    channel works; on a task that had turns before, it is started again."""
     sent = []
     stages = ntfy.Stages(channel(sent, level=ntfy.ALL))
     for st in (State.PLAN, State.PLAN, State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         stages.seen(state(st))
     stages.seen(state(State.IMPLEMENT, iteration=2))
-    assert [s[2] for s in sent] == ["planning", "implementing", "verifying", "implementing, attempt 2"]
+    assert [s[2] for s in sent] == [
+        "started: planning",
+        "implementing",
+        "verifying",
+        "implementing, attempt 2",
+    ]
     assert all(s[1]["Priority"] == "default" for s in sent), "a stage is news, not a decision"
-    assert set(s[2].split(",")[0] for s in sent) <= set(ui.WORKING.values()), "the list's own words"
-    quiet = []
-    ntfy.Stages(channel(quiet)).seen(state(State.PLAN))
-    assert quiet == [], "at the default level only decisions go"
+    decisions = []
+    stages = ntfy.Stages(channel(decisions), again=True)
+    for st in (State.IMPLEMENT, State.VERIFY, State.IMPLEMENT):
+        stages.seen(state(st, iteration=2))
+    assert decisions[0][2] == "started again: implementing, attempt 2"
+    assert len(decisions) == 1, "at the default level the stages after the start do not go"
+    waiting = []
+    ntfy.Stages(channel(waiting), again=True).seen(state(State.CHECKPOINT_PLAN))
+    assert waiting[0][2] == "started again", "taken up at a checkpoint: nothing is being done yet"

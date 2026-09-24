@@ -25,7 +25,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
             actions.agent_view(task, harness.attach_command(session))
 
     channel = channel_for(config)
-    stages = ntfy.Stages(channel) if channel else None
+    stages = ntfy.Stages(channel, again=any(e["type"] == "turn" for e in task.events())) if channel else None
 
     def stepped(st) -> None:
         agent_window(st)

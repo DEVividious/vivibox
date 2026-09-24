@@ -85,16 +85,25 @@ class Channel:
 
 @dataclass
 class Stages:
-    """What the task is doing, sent when it changes; only at level all. What waits for you comes
-    as a decision, so only the working states are said here."""
+    """A word when the supervisor takes the task up, at every level: the first message after
+    setting the topic up, so it says the channel works. Then, at level all only, what the task is
+    doing whenever that changes; what waits for you comes as a decision, so only the working
+    states are said here."""
 
     channel: Channel
+    # A task that had turns before this supervisor is started again, not started.
+    again: bool = False
     last: str = field(default="")
 
     def seen(self, st: TaskState) -> None:
-        if self.channel.level != ALL or str(st.state) == self.last:
+        if str(st.state) == self.last:
             return
-        self.last = str(st.state)
-        if doing := ui.WORKING.get(st.state):
-            attempt = f", attempt {st.iteration}" if st.state is State.IMPLEMENT and st.iteration > 1 else ""
-            self.channel.send(st.id, f"{doing}{attempt}", "default", "")
+        first, self.last = not self.last, str(st.state)
+        doing = ui.WORKING.get(st.state, "")
+        if st.state is State.IMPLEMENT and st.iteration > 1:
+            doing += f", attempt {st.iteration}"
+        if first:
+            began = "started again" if self.again else "started"
+            self.channel.send(st.id, f"{began}: {doing}" if doing else began, "default", "")
+        elif self.channel.level == ALL and doing:
+            self.channel.send(st.id, doing, "default", "")

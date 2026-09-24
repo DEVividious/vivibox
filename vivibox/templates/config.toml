@@ -40,7 +40,8 @@ desktop = true
 # one: vivibox auth set ntfy
 # ntfy = "<topic>"
 # ntfy_server = "https://ntfy.sh"     # or a server of your own
-# What goes there: "decisions", what the desktop gets, or "all", every stage of a task too.
+# What goes there: "decisions", a word at the start and then what the desktop gets, or "all",
+# every stage of a task too.
 # ntfy_events = "decisions"
 
 [review]

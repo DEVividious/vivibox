@@ -240,6 +240,12 @@ red evidence, hidden characters, something outside the code, a build not run). `
 `--since YYYY-MM-DD` narrow it, `--json` is for a script. These are the numbers to look at before
 changing a word of a prompt.
 
+### When a task costs too much
+
+`cost_warning` and `cost_limit` in `config.toml` (under `k`, limits) are dollars per task. Past
+the warning you are told once and the task goes on; at the limit it stops before its next turn
+and waits with the figures on its row. Raise the limit and press `s` to take it on.
+
 ### When a turn fails
 
 An error that passes with time (the provider busy or rate limiting, the network gone for a

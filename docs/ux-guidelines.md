@@ -52,6 +52,7 @@ Status labels, the only ones allowed:
 | stopped by force (`S`), the turn under way lost | `stopped by force` | Waiting for you |
 | the agent's turn failed | `agent turn failed` | Waiting for you |
 | the supervisor hit an error | `stopped on an error` | Waiting for you |
+| stopped at the cost limit | `cost limit reached` | Waiting for you |
 | a start failed | `could not start` | Waiting for you |
 | at work on paper, no supervisor alive | `not running` | Waiting for you |
 | a box, its pod up, for you to work in | `box open` | Working |

@@ -180,3 +180,14 @@ def test_an_ntfy_topic_is_a_name_on_a_server(tmp_path):
             load_config(
                 write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[notifications]\n{bad}\n' + ROLES)
             )
+
+
+def test_cost_limits_are_dollars_per_task_and_none_by_default(tmp_path):
+    config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
+    assert (config.cost_warning, config.cost_limit) == (0.0, 0.0), "none"
+    text = 'tasks_dir = "/t"\n[limits]\ncost_warning = 1\ncost_limit = 2.5\n' + ROLES
+    config = load_config(write(tmp_path / "config.toml", text))
+    assert (config.cost_warning, config.cost_limit) == (1.0, 2.5)
+    for bad in ('cost_limit = "2"', "cost_limit = -1", "cost_warning = true"):
+        with pytest.raises(ConfigError, match="dollars"):
+            load_config(write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[limits]\n{bad}\n' + ROLES))

@@ -10,6 +10,11 @@ max_iterations = 3
 # Seconds one verification command may take. Past it the command is stopped and the task waits
 # for you as on any failure outside the code (a build waiting for Docker, a registry that hangs).
 verify_timeout = 1800
+# Dollars a task may cost, planning and implementation together, before you are told, and before
+# it stops for you (it waits with the figures on its row; raise the limit and start it again).
+# Checked before each turn, so a turn may run past the limit by its own cost. Left out: no limit.
+# cost_warning = 1.0
+# cost_limit = 2.0
 
 # One entry per role; planner and writer are both required.
 # harness: "opencode" or "claude-code", which run on an API key, or "manual" for the planner.

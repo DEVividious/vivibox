@@ -15,7 +15,7 @@ def render(value: object) -> str:
     """A value as TOML writes it: strings quoted, lists on one line."""
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
+    if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
         return json.dumps(value)

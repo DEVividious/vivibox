@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, manual
+from . import brief, gate, manual, ui
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
@@ -215,6 +215,9 @@ class Supervisor:
     source: Path | None = None
     # The answer file as last tried, so an answer that is not a plan is reported once, not every poll.
     answer_seen: float = 0.0
+    # Dollars the task may cost before you are told, and before it stops for you; 0 is no limit.
+    cost_warning: float = 0.0
+    cost_limit: float = 0.0
 
     def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -232,9 +235,30 @@ class Supervisor:
             return False
         if st.paused or st.state is State.DONE or waits_for_user(st.state):
             return False
+        if st.state in (State.PLAN, State.IMPLEMENT) and self._past_the_limit():
+            return False
         handlers = {State.PLAN: self._plan, State.IMPLEMENT: self._implement, State.VERIFY: self._verify}
         handlers[st.state](st)
         return True
+
+    def _past_the_limit(self) -> bool:
+        """Before a turn is paid for: past the warning, said once; at the limit, the task stops
+        for you with the figures on its row, and goes on once you raise the limit and start it."""
+        if not (self.cost_warning or self.cost_limit):
+            return False
+        spent = ui.cost(self.task).total
+        if self.cost_limit and spent >= self.cost_limit:
+            figures = f"cost limit reached: ${spent:.2f} of ${self.cost_limit:.2f}"
+            self.task.set_paused(True, problem=figures)
+            self.ports.notify(self.task.id, f"{figures}; raise limits.cost_limit under k, then s")
+            return True
+        warned = any(e["type"] == "cost_warning" for e in self.task.events())
+        if self.cost_warning and spent >= self.cost_warning and not warned:
+            self.task.event("cost_warning", spent=spent, warning=self.cost_warning)
+            self.ports.notify(
+                self.task.id, f"cost ${spent:.2f}, past the warning of ${self.cost_warning:.2f}"
+            )
+        return False
 
     def run(self, poll: float = 2.0, on_step: Callable[[TaskState], None] = lambda st: None) -> None:
         while self.task.read_state().state is not State.DONE:

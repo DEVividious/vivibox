@@ -64,6 +64,9 @@ class Config:
     # Seconds one verification command may take before it is stopped and counted as a failure of
     # the environment, not of the code.
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
+    # Dollars a task may cost before you are told, and before it stops for you; 0 is no limit.
+    cost_warning: float = 0.0
+    cost_limit: float = 0.0
     # The ntfy topic the supervisor's messages go to as well ("" for none), on which server, and
     # which of them.
     ntfy: str = ""
@@ -135,6 +138,12 @@ def load_config(base: Path | None = None) -> Config:
     verify_timeout = data.get("limits", {}).get("verify_timeout", DEFAULT_VERIFY_TIMEOUT)
     if not isinstance(verify_timeout, int) or verify_timeout < 1:
         raise ConfigError(f"{path}: limits.verify_timeout must be a number of seconds >= 1")
+    costs = {}
+    for name in ("cost_warning", "cost_limit"):
+        value = data.get("limits", {}).get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ConfigError(f"{path}: limits.{name} is dollars per task, e.g. 2.5; 0 for none")
+        costs[name] = float(value)
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -196,6 +205,7 @@ def load_config(base: Path | None = None) -> Config:
         str(parsed),
         verify_timeout=verify_timeout,
         ntfy=ntfy,
+        **costs,
         ntfy_server=ntfy_server.rstrip("/"),
         ntfy_events=ntfy_events,
     )

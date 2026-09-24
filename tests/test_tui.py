@@ -3625,3 +3625,47 @@ def test_k_sets_the_ntfy_topic_its_server_and_what_goes_there(env):
         assert app.config.ntfy_events == "all", "the running view reads the file again"
 
     run(scenario)
+
+
+def test_k_sets_the_cost_limits_in_dollars(env):
+    """Two rows under limits, none unless set: dollars a task may cost before you are told, and
+    before it stops. 0 is none."""
+    config = env / "config" / "config.toml"
+    config.write_text(
+        'tasks_dir = "' + str(env / "tasks") + '"\n\n[limits]\n# Kept.\nmax_iterations = 3\n\n'
+        '[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    )
+
+    def labels(app) -> list[str]:
+        options = app.screen.query_one("#rows", OptionList)
+        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+    async def answer(app, pilot, row: str, value: str) -> None:
+        index = next(i for i, text in enumerate(labels(app)) if row in text)
+        app.screen.query_one("#rows", OptionList).highlighted = index
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Ask)
+        app.screen.query_one(Input).value = value
+        await pilot.press("enter")
+        await pilot.pause()
+
+    def row(app, name: str) -> str:
+        return next(text for text in labels(app) if name in text)
+
+    async def scenario(app, pilot):
+        await pilot.press("k")
+        await pilot.pause()
+        assert "none" in row(app, "cost_limit") and "none" in row(app, "cost_warning")
+        await answer(app, pilot, "cost_limit", "two")
+        assert "cost_limit =" not in config.read_text(), "refused: dollars"
+        await answer(app, pilot, "cost_limit", "2.5")
+        text = config.read_text()
+        assert "cost_limit = 2.5" in text and "# Kept." in text and "$2.50" in row(app, "cost_limit")
+        await answer(app, pilot, "cost_warning", "1")
+        assert "cost_warning = 1" in config.read_text() and "$1.00" in row(app, "cost_warning")
+        await answer(app, pilot, "cost_limit", "0")
+        assert "cost_limit = 0" in config.read_text() and "none" in row(app, "cost_limit")
+
+    run(scenario)

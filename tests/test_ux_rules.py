@@ -89,7 +89,12 @@ def situations(env):
     stopped = implementing("stopped")
     stopped.set_paused(True)
     found.append((stopped, False))
-    for problem in ("agent turn failed: 429", "stopped on an error: boom", "could not start: X not set"):
+    for problem in (
+        "agent turn failed: 429",
+        "stopped on an error: boom",
+        "could not start: X not set",
+        "cost limit reached: $2.10 of $2.00",
+    ):
         failed = implementing(problem)
         failed.set_paused(True, problem=problem)
         found.append((failed, True))

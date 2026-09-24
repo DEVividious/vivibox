@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import brief, gate, supervisor
+from vivibox import brief, gate, supervisor, ui
 from vivibox.harness import Harness, Turn
 from vivibox.risky import Change
 from vivibox.states import State
@@ -637,3 +637,52 @@ def test_every_tool_keeps_the_harness_contract():
     assert manual.Manual().manual and not opencode.OpenCode.manual
     source = inspect.getsource(supervisor)
     assert "hasattr(" not in source and "getattr(" not in source, "the contract says it all"
+
+
+def priced(task, harness, results=(), **limits):
+    sup, notes = make(task, harness, results)
+    for name, value in limits.items():
+        setattr(sup, name, value)
+    return sup, notes
+
+
+def test_the_cost_limit_stops_the_task_before_the_writers_next_turn(task):
+    """Checked before a turn is paid for, not in the middle of one: a turn may run past the limit
+    by its own cost, and the next one does not start. The task waits for you with the figures on
+    its row; raising the limit and s takes it on."""
+    harness = FakeHarness(task, [write_draft])  # every turn of the fake costs $0.01
+    sup, notes = priced(task, harness, cost_limit=0.025)
+    sup.step()  # the plan: $0.01
+    task.transition(State.IMPLEMENT)  # your acceptance
+    assert sup.step() and turns(task) == 2, "the first implement turn: $0.02, under the limit"
+    task.transition(State.IMPLEMENT)  # as a failed verification would
+    assert sup.step() and turns(task) == 3, "the second: $0.03, the turn that crosses the limit runs"
+    task.transition(State.IMPLEMENT)
+    assert not sup.step() and turns(task) == 3, "the next does not"
+    st = task.read_state()
+    assert st.paused and st.problem == "cost limit reached: $0.03 of $0.03"
+    assert notes[-1] == "cost limit reached: $0.03 of $0.03; raise limits.cost_limit under k, then s"
+    assert ui.view(task, st, True, 3).status == "cost limit reached", "the row says so"
+    sup.cost_limit = 0.05  # raised under k; s clears the pause as it does after any problem
+    task.set_paused(False)
+    task.set_problem("")
+    assert sup.step() and turns(task) == 4
+
+
+def test_the_cost_warning_is_said_once_and_the_task_goes_on(task):
+    harness = FakeHarness(task, [write_draft])
+    sup, notes = priced(task, harness, cost_warning=0.015)
+    sup.step()  # the plan: $0.01
+    task.transition(State.IMPLEMENT)  # your acceptance
+    sup.step()  # $0.02 after it, past the warning
+    for _ in range(2):
+        task.transition(State.IMPLEMENT)  # as a failed verification would
+        assert sup.step(), "goes on"
+    warned = [n for n in notes if "warning" in n]
+    assert warned == ["cost $0.02, past the warning of $0.01"], "once, not at every turn"
+    assert [e for e in task.events() if e["type"] == "cost_warning"], "and on the timeline"
+    assert turns(task) == 4 and not task.read_state().paused
+
+
+def turns(task) -> int:
+    return sum(1 for e in task.events() if e["type"] == "turn")

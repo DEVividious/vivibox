@@ -186,6 +186,12 @@ class Settings(Rows):
             ("Limits", "", None),
             ("max_iterations", str(config.max_iterations), "max_iterations"),
             ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
+            (
+                "cost_warning",
+                f"${config.cost_warning:.2f}" if config.cost_warning else "none",
+                "cost_warning",
+            ),
+            ("cost_limit", f"${config.cost_limit:.2f}" if config.cost_limit else "none", "cost_limit"),
             ("Machine, in config.toml", "", None),
             ("tasks_dir", str(config.tasks_dir), None),
             ("network pool", config.network_pool, None),
@@ -300,6 +306,28 @@ class Settings(Rows):
                 self.write(key, int(value), "limits", f"{key} = {value} from the next start.")
 
             self.app.push_screen(Ask(prompts[key], str(now)), typed)
+        elif key in ("cost_warning", "cost_limit"):
+            prompts = {
+                "cost_warning": "Dollars a task may cost before you are told (0 for none):",
+                "cost_limit": "Dollars a task may cost before it stops for you (0 for none):",
+            }
+            now = config.cost_warning if key == "cost_warning" else config.cost_limit
+
+            def dollars(value: str | None) -> None:
+                if value is None:
+                    return
+                try:
+                    amount = float(value)
+                except ValueError:
+                    amount = -1.0
+                if amount < 0:
+                    self.say(f"{key} is dollars, e.g. 2.5; 0 for none.")
+                    return
+                amount = int(amount) if amount == int(amount) else amount
+                said = f"{key} = ${amount:.2f} from the next turn." if amount else f"{key}: none."
+                self.write(key, amount, "limits", said)
+
+            self.app.push_screen(Ask(prompts[key], f"{now:g}"), dollars)
         elif key == "file":
             self.edit_file(config_path())
             self.reread()

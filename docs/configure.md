@@ -54,7 +54,11 @@ stage after that (implementing, verifying) to the decisions. The three rows are 
 `config.toml` also holds the limits: `max_iterations`, how many verification failures the
 writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one
 verification command may take (1800) before it is stopped and the task waits for you as on any
-failure outside the code. A project file may set its own `verify_timeout`.
+failure outside the code. A project file may set its own `verify_timeout`. `cost_warning` and
+`cost_limit` are dollars a task may cost, planning and implementation together, before you are
+told and before it stops for you: it waits with the figures on its row (*cost limit reached*),
+and goes on once you raise the limit under `k` and press `s`. Both are checked before a turn, so
+a turn may run past the limit by its own cost; neither is set unless you set it.
 
 Once per repository you want agents to work on: press `i` in the view, and browse to its folder
 (or make a new one there, for a project from scratch), or from a shell inside it:

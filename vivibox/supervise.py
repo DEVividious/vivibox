@@ -91,6 +91,8 @@ def make_supervisor(
         harness,
         ports,
         max_iterations=config.max_iterations,
+        cost_warning=config.cost_warning,
+        cost_limit=config.cost_limit,
         project_verify=project.verify,
         project_no_build=project.no_build,
         planner=planner,

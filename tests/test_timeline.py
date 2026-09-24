@@ -42,3 +42,12 @@ def test_the_timeline_reads_the_events_as_a_person_would(tmp_path):
     assert all(len(when) == 8 and when[2] == ":" for when, _ in timeline.entries(task)), "on your clock"
     assert timeline.latest(task, 2) == timeline.lines(task)[-2:]
     assert timeline.write(task).read_text().startswith("# demo-1: Add health endpoint\n\n")
+
+
+def test_the_cost_warning_and_the_limit_read_as_money(tmp_path):
+    task = create_task(tmp_path, "demo", "Add health endpoint", "")
+    task.event("cost_warning", spent=1.5, warning=1.0)
+    task.set_paused(True, problem="cost limit reached: $2.10 of $2.00")
+    said = [what for _, what in timeline.entries(task)]
+    assert "cost $1.50, past the warning of $1.00" in said
+    assert "stopped: cost limit reached: $2.10 of $2.00" in said

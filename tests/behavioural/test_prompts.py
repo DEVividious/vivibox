@@ -23,10 +23,10 @@ import pytest
 from conftest import make_repo
 
 from vivibox import actions, gate, image, keys, plan, supervisor, ui
-from vivibox.cli import make_supervisor
 from vivibox.config import load_config
 from vivibox.pod import FIREWALL
 from vivibox.states import State
+from vivibox.supervise import make_supervisor
 
 pytestmark = [pytest.mark.model, pytest.mark.real_start]
 

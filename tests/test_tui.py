@@ -3669,3 +3669,33 @@ def test_k_sets_the_cost_limits_in_dollars(env):
         assert "cost_limit = 0" in config.read_text() and "none" in row(app, "cost_limit")
 
     run(scenario)
+
+
+def test_the_settings_list_grows_with_the_terminal_and_fits_a_short_one(env):
+    """A tall terminal shows every row at once instead of a fixed twenty and a scrollbar; a short
+    one keeps the whole dialog, its hint included, on the screen."""
+    config = env / "config" / "config.toml"
+    config.write_text(
+        'tasks_dir = "' + str(env / "tasks") + '"\n\n[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    )
+
+    async def tall(app, pilot):
+        await pilot.press("k")
+        await pilot.pause()
+        rows = app.screen.query_one("#rows", OptionList)
+        assert rows.option_count >= 20, "as many rows as the old fixed height held, or more"
+        assert rows.size.height >= rows.option_count, f"{rows.size.height} lines for {rows.option_count} rows"
+        assert rows.max_scroll_y == 0, "nothing to scroll on a tall terminal"
+
+    async def short(app, pilot):
+        await pilot.press("k")
+        await pilot.pause()
+        dialog = app.screen.query_one(".dialog")
+        assert dialog.region.height <= app.size.height, "the dialog fits"
+        hint = app.screen.query_one(".files")
+        assert hint.region.y + hint.region.height <= app.size.height, "its hint is on the screen"
+        assert app.screen.query_one("#rows", OptionList).max_scroll_y > 0, "the rows scroll instead"
+
+    run(tall, size=(140, 60))
+    run(short, size=(140, 24))

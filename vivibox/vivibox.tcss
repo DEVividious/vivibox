@@ -1,8 +1,9 @@
 DataTable { height: 1fr; }
-.catalog { height: 8; }
-#rows { height: auto; max-height: 20; }
-.tree { height: 16; }
-.found { height: auto; max-height: 8; }
+/* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
+.catalog { height: auto; max-height: 40vh; }
+#rows { height: auto; max-height: 75vh; }
+.tree { height: 60vh; }
+.found { height: auto; max-height: 30vh; }
 .group { padding: 1 0 0 0; text-style: bold; }
 #empty { height: 1fr; padding: 2 4; color: $text-muted; }
 #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
@@ -14,7 +15,7 @@ DataTable { height: 1fr; }
 .dialog TextArea.description { height: 10; }
 .dialog TextArea.criteria { height: 6; }
 #suggestions { max-height: 8; border: none; background: $boost; }
-#editors { max-height: 12; margin: 1 0; }
+#editors { max-height: 40vh; margin: 1 0; }
 .buttons { height: auto; margin-top: 1; }
 .fields { height: auto; }
 .wrap { width: 100%; }

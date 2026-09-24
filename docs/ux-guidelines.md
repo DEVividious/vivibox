@@ -99,6 +99,9 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   it by its frame.
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
   text gives way first, down to one line, before anything scrolls.
+- A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall
+  one it shows everything, on a short one it scrolls. Its height is a share of the screen (`vh`),
+  never a fixed number of lines.
 
 ## 5. Errors
 

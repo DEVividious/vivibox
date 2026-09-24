@@ -78,13 +78,23 @@ def latest(task: Task) -> Path | None:
     return max(found)[1] if found else None
 
 
+def secrets_id(task_id: str) -> str:
+    """The key store's runtime directory of the reviewer's container: the task's, apart."""
+    return f"{task_id}-review"
+
+
+def forget(task_id: str) -> None:
+    """The reviewer's key is gone from the machine with the task's, on a stop and on a removal."""
+    secrets.remove(secrets_id(task_id))
+
+
 def up(task: Task, pod: Pod, config: Config) -> Path:
     """The reviewer's container, ready for a turn: a fresh clone, the reviewer's own key and
     harness files, the task's files to read, and the directory its review goes to, returned."""
     role = roles.role_of(task, "reviewer", config)
     provider = opencode.provider_of(role.model)
     needed = ([] if providers.keyless(provider) else [provider]) + providers.mcp_secrets()
-    runtime = secrets.prepare(f"{task.id}-review", needed)
+    runtime = secrets.prepare(secrets_id(task.id), needed)
     pod.review_fresh()
     harness = pod.review_dir / "harness"
     harness.mkdir()

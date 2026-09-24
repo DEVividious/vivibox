@@ -244,7 +244,8 @@ def test_a_forced_stop_kills_the_supervisor_and_the_pod_and_says_so(env, capsys,
     monkeypatch.setattr(secrets, "remove", lambda task_id: removed.append(task_id))
 
     assert main(["stop", "demo-1", "--force"]) == 0
-    assert signals == [(4242, signal.SIGKILL)] and killed == ["demo-1"] and removed == ["demo-1"]
+    assert signals == [(4242, signal.SIGKILL)] and killed == ["demo-1"]
+    assert removed == ["demo-1", "demo-1-review"], "the reviewer's key goes with the task's"
     st = task.read_state()
     assert st.paused and st.problem == "stopped by force"
     out = capsys.readouterr().out

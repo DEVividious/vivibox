@@ -510,6 +510,9 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     side.exec_detached("bash", "-c", "serve")
     assert pod.runner.find("docker", "exec", "-d", pod.review, "bash")
     pod.review_down()
-    assert pod.runner.find("docker", "rm", "-f", pod.review)
+    dropped = len(pod.runner.find("docker", "rm", "-f", pod.review))
+    assert dropped
+    pod.down()
+    assert len(pod.runner.find("docker", "rm", "-f", pod.review)) == dropped + 1, "a stop drops the round too"
     pod.remove()
     assert any(pod.review in c for c in pod.runner.find("docker", "rm", "-f")), "gone with the pod"

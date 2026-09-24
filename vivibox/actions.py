@@ -31,6 +31,7 @@ from . import (
     opencode,
     providers,
     repo,
+    reviewing,
     secrets,
     supervisor,
     toolchain,
@@ -171,7 +172,8 @@ def task_pod(task_id: str) -> Pod:
     }
     return Pod(
         task.id, task.repo, ref, project.host_services, mounts, env, project.pass_env,
-        gate_dir=task.root / "gate", network_pool=load_config().network_pool,
+        gate_dir=task.root / "gate", review_dir=task.root / "review",
+        network_pool=load_config().network_pool,
     )  # fmt: skip
 
 
@@ -545,6 +547,7 @@ def stop(task: Task, force: bool = False) -> None:
     else:
         pod.down()
     secrets.remove(task.id)
+    reviewing.forget(task.id)
     if force:
         task.set_paused(True, problem=FORCED)
     elif not task.read_state().paused:
@@ -561,6 +564,7 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     archive(task)
     task_pod(task.id).remove()
     secrets.remove(task.id)
+    reviewing.forget(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)
     repo.drop_review_ref(project.repo, task.id)
     # Plain file removal: no git runs in the clone on the host.

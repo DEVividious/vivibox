@@ -100,3 +100,13 @@ def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_wr
     assert f"{task.meta}:/task:ro" in joined and f"{harness}:{opencode.HARNESS_MOUNT}:ro" in joined
     assert f"{out}:{reviewing.MOUNT}" in joined and f"{env / 'rt'}:{secrets.MOUNT}:ro" in joined
     assert f"OPENCODE_CONFIG={opencode.CONFIG}" in run
+
+
+def test_the_reviewers_key_goes_with_the_tasks(tmp_path, monkeypatch):
+    from vivibox import secrets
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    secrets.prepare(reviewing.secrets_id("demo-1"), [])
+    assert secrets.runtime_dir("demo-1-review").is_dir()
+    reviewing.forget("demo-1")
+    assert not secrets.runtime_dir("demo-1-review").exists()

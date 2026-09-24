@@ -230,6 +230,16 @@ box without bringing anything back.
 A login you make inside the box, such as `claude`'s, lives in the box's own volume, which vivibox
 never reads or copies, and goes with the box.
 
+### What the tasks cost, and what the gate refused
+
+`vivibox stats` adds up the events of every task, live and finished: how many verification runs
+a task took to pass (median and maximum), what a turn costs per role and per state, how many
+turns failed or were retried, and how often the gate refused work for each reason (a command
+failed, criteria not met, commit problems, tests switched off, uncommitted files, tests without
+red evidence, hidden characters, something outside the code, a build not run). `--project` and
+`--since YYYY-MM-DD` narrow it, `--json` is for a script. These are the numbers to look at before
+changing a word of a prompt.
+
 ### When a turn fails
 
 An error that passes with time (the provider busy or rate limiting, the network gone for a

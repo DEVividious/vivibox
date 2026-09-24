@@ -82,8 +82,9 @@ def history_path() -> Path:
     return Path(base) / "vivibox" / "history.jsonl"
 
 
-def history(limit: int = 20) -> list[dict]:
-    """Tasks you accepted, newest first. The task itself is gone; this is what it left behind."""
+def history(limit: int | None = 20) -> list[dict]:
+    """Tasks you accepted or deleted, newest first; None for all of them. The task itself is
+    gone; this is what it left behind."""
     path = history_path()
     if not path.exists():
         return []

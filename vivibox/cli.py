@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-from . import actions, context, gate, image, keys, manual, opencode, providers, repo, supervisor, timeline, ui
+from . import (
+    actions,
+    context,
+    gate,
+    image,
+    keys,
+    manual,
+    opencode,
+    providers,
+    repo,
+    stats,
+    supervisor,
+    timeline,
+    ui,
+)
 from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
@@ -80,6 +95,27 @@ def cmd_timeline(args: argparse.Namespace) -> int:
     """What happened to a task, one line each, on your clock."""
     task, _ = actions.load(args.task)
     print(timeline.render(task), end="")
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    """What the events of every task, live and finished, add up to: the numbers to look at before
+    changing a prompt."""
+    config = load_config()
+    sources = []
+    for task in list_tasks(config.tasks_dir):
+        if not args.project or task.read_state().project == args.project:
+            sources.append((task.events(), True))
+    live = {t.id for t in list_tasks(config.tasks_dir)}
+    for entry in actions.history(limit=None):
+        if entry["id"] in live or (args.project and entry.get("project") != args.project):
+            continue
+        sources.append((stats.read_events(actions.archive_path(entry["id"]) / "events.jsonl"), False))
+    found = stats.collect(sources, since=args.since or "")
+    if args.json:
+        print(json.dumps(stats.as_dict(found), indent=2))
+    else:
+        print(stats.report(found), end="")
     return 0
 
 
@@ -583,6 +619,14 @@ def parser() -> argparse.ArgumentParser:
         "planner=claude-opus-5 (Claude Code), or planner=manual to plan in your own chat",
     )
     new.set_defaults(func=cmd_new)
+
+    stat = sub.add_parser(
+        "stats", help="what the tasks' events add up to: attempts, cost per turn, why the gate refused"
+    )
+    stat.add_argument("--project", help="only this project's tasks")
+    stat.add_argument("--since", help="only events from this date on (YYYY-MM-DD)")
+    stat.add_argument("--json", action="store_true", help="as JSON, for a script")
+    stat.set_defaults(func=cmd_stats)
 
     status = sub.add_parser("status", help="list tasks, or show one task")
     status.add_argument("task", nargs="?", help="task id")

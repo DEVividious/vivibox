@@ -26,7 +26,7 @@ from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.dialogs import CommitWork, NewProject
 from vivibox.panel import detail, finished_detail, projects
-from vivibox.pod import Listener
+from vivibox.probe import Listener
 from vivibox.states import State
 from vivibox.task import find_task, now
 from vivibox.tui import Vivibox
@@ -2188,7 +2188,7 @@ def test_S_stops_by_force_even_while_a_stop_hangs(env, monkeypatch):
 
 
 def test_the_view_says_what_it_stopped_to_run_the_app(env, monkeypatch):
-    from vivibox.pod import Listener
+    from vivibox.probe import Listener
 
     task = new_task()
     opened = []

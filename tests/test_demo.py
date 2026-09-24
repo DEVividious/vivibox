@@ -173,7 +173,7 @@ def test_what_the_agent_left_on_the_port_is_stopped_and_said(env, monkeypatch):
     """The app is run once the agent rests, so a server still listening in its container is a
     leftover of its turn, not something to keep: it goes, the app starts from the current code,
     and you are told what went."""
-    from vivibox.pod import Listener
+    from vivibox.probe import Listener
 
     task = back_with_you(a_task())
     actions.write_instruction(task, "Start it:\n\n```bash\npython -m http.server 8000\n```\n")

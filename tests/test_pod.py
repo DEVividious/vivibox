@@ -6,7 +6,8 @@ import pytest
 
 from vivibox import toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
-from vivibox.pod import SOCKET_DIR, Listener, Mount, Pod, PodError
+from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
+from vivibox.probe import Listener
 
 
 def binds(cmd):
@@ -473,10 +474,10 @@ def test_what_the_agent_left_listening_is_stopped_before_the_app_runs(pod):
 def test_the_leftovers_script_holds_no_null_byte():
     """tr '\\0' in a plain string was a real NUL in the script, which subprocess refuses with
     "embedded null byte": the demo died on it before it started. The shell still parses it."""
-    from vivibox import pod as pod_module
+    from vivibox import probe
 
-    assert "\0" not in pod_module.LEFTOVERS
-    parsed = subprocess.run(["sh", "-n", "-c", pod_module.LEFTOVERS], capture_output=True, text=True)
+    assert "\0" not in probe.LEFTOVERS
+    parsed = subprocess.run(["sh", "-n", "-c", probe.LEFTOVERS], capture_output=True, text=True)
     assert parsed.returncode == 0, parsed.stderr
 
 

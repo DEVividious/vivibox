@@ -12,9 +12,9 @@ from . import (
     actions,
     gate,
     opencode,
+    probe,
 )
 from . import init as project_init
-from . import pod as pod_module
 from .config import (
     Project,
 )
@@ -69,7 +69,7 @@ class Demo:
     # Where it came from: this task's instruction, your project file, the repository, the agent.
     source: str = ""
     address: str = ""
-    listening: list[pod_module.Listener] = field(default_factory=list)
+    listening: list[probe.Listener] = field(default_factory=list)
     log: str = ""
     question: str = ""
     # An instruction from an earlier task, waiting for you to say it still applies.
@@ -86,7 +86,7 @@ class Demo:
         return [f"http://{self.address}:{p.port}" for p in self.listening if p.reachable]
 
     @property
-    def unreachable(self) -> list[pod_module.Listener]:
+    def unreachable(self) -> list[probe.Listener]:
         return [p for p in self.listening if not p.reachable]
 
 

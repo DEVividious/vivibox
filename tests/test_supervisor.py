@@ -23,7 +23,7 @@ class FakeHarness:
     def __init__(self, task, actions=()):
         self.task, self.actions, self.prompts = task, list(actions), []
 
-    def turn(self, prompt, session="", title=""):
+    def turn(self, prompt, session="", title="", on_step=None):
         self.prompts.append(prompt)
         if self.actions:
             self.actions.pop(0)(self.task)
@@ -267,7 +267,7 @@ def test_risky_changes_hold_back_checkpoints(task):
 
 def test_failed_turn_pauses_the_task(task):
     class Broken(FakeHarness):
-        def turn(self, prompt, session="", title=""):
+        def turn(self, prompt, session="", title="", on_step=None):
             return Turn("", False, 0, 0, "", "APIError: invalid key")
 
     sup, notes = make(task, Broken(task))
@@ -278,7 +278,7 @@ def test_failed_turn_pauses_the_task(task):
 
 def test_next_prompt_survives_a_failed_turn(task):
     class Broken(FakeHarness):
-        def turn(self, prompt, session="", title=""):
+        def turn(self, prompt, session="", title="", on_step=None):
             self.prompts.append(prompt)
             return Turn("", False, 0, 0, "", "network down")
 
@@ -323,7 +323,7 @@ class StartsSessions(FakeHarness):
         self.title = title
         return "ses_early"
 
-    def turn(self, prompt, session="", title=""):
+    def turn(self, prompt, session="", title="", on_step=None):
         self.seen_during_turn = (session, self.task.read_state().sessions)
         return super().turn(prompt, session, title)
 
@@ -356,7 +356,7 @@ def test_a_session_that_could_not_be_made_leaves_the_turn_to_make_its_own(task):
 
 def test_a_failed_turn_leaves_its_reason_with_the_task(task):
     class Broken(FakeHarness):
-        def turn(self, prompt, session="", title=""):
+        def turn(self, prompt, session="", title="", on_step=None):
             return Turn("", False, 0, 0, "", "429 Too Many Requests")
 
     sup, _ = make(task, Broken(task))
@@ -368,7 +368,7 @@ def test_a_failed_turn_leaves_its_reason_with_the_task(task):
 
 def test_an_error_in_the_supervisor_leaves_its_reason_with_the_task(task):
     class Explodes(FakeHarness):
-        def turn(self, prompt, session="", title=""):
+        def turn(self, prompt, session="", title="", on_step=None):
             raise RuntimeError("network vivibox-demo-1 not found")
 
     class Enough(Exception):
@@ -490,7 +490,7 @@ def test_a_planner_and_a_writer_on_one_harness_have_a_conversation_each(task):
             super().__init__(task, actions)
             self.session, self.sessions_seen = session, []
 
-        def turn(self, prompt, session="", title=""):
+        def turn(self, prompt, session="", title="", on_step=None):
             self.sessions_seen.append(session)
             super().turn(prompt, session, title)
             return Turn(self.session, True, 0.01, 100, "done")
@@ -552,3 +552,27 @@ def test_a_plan_without_a_build_settles_nothing_for_the_project(task):
     supervisor.accept_plan(task, "plan accepted", save_verify=keep)
     assert saved == [], "nothing kept: the project still has no way of being verified"
     assert task.read_state().state is State.IMPLEMENT
+
+
+def test_a_turn_leaves_its_running_cost_with_the_task_while_it_runs(task):
+    """During a turn the task holds what it has cost so far, for the view to add; when the turn
+    ends the turn event is the record and the running figure goes. The turn's start is an event too."""
+    seen = []
+
+    class Streaming(FakeHarness):
+        def turn(self, prompt, session="", title="", on_step=None):
+            on_step(0.02, 150, 1)
+            seen.append(self.task.live_turn())
+            on_step(0.05, 400, 2)
+            seen.append(self.task.live_turn())
+            return Turn("ses_1", True, 0.05, 400, "done")
+
+    write_draft(task)
+    sup, _ = make(task, Streaming(task))
+    sup.step()
+    assert [(s["cost"], s["tokens"], s["steps"]) for s in seen] == [(0.02, 150, 1), (0.05, 400, 2)]
+    assert all(s["at"] for s in seen) and task.live_turn() is None, "gone with the turn"
+    kinds = [e["type"] for e in task.events()]
+    assert kinds.index("turn_started") < kinds.index("turn")
+    started = next(e for e in task.events() if e["type"] == "turn_started")
+    assert started["data"]["state"] == "plan" and started["data"]["role"]

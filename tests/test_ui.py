@@ -113,6 +113,19 @@ def test_cost_is_split_into_planning_and_implementation(tmp_path):
     assert str(ui.cost(task)) == "$0.50 + $0.09"
 
 
+def test_the_running_turn_counts_in_the_cost_and_the_panel_says_when_it_last_stepped(tmp_path):
+    task = create_task(tmp_path, "demo", "goal", "")
+    task.event("turn", state="plan", cost=0.40, tokens=1)
+    task.transition(State.CHECKPOINT_PLAN)
+    task.transition(State.IMPLEMENT)
+    task.set_live_turn(0.03, 300, 2)
+    assert ui.cost(task) == ui.Spend(0.4, 0.03), "the running turn is implementing"
+    shown = ui.task_detail(task, lambda t: 0, 3, 0, lambda text, _style: text)
+    assert "last step just now" in shown
+    task.clear_live_turn()
+    assert ui.cost(task) == ui.Spend(0.4, 0.0) and task.live_turn() is None
+
+
 def test_a_finished_task_shows_its_split_or_its_total_from_before():
     assert ui.finished_cost({"cost": 0.59, "planning": 0.5}) == "$0.50 + $0.09"
     assert ui.finished_cost({"cost": 0.42}) == "$0.42"

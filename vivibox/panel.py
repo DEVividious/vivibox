@@ -104,6 +104,14 @@ def ticked_at(task: Task) -> float:
         return 0.0
 
 
+def live_at(task: Task) -> float:
+    """When the turn under way last wrote its running cost; 0 with no turn running."""
+    try:
+        return (task.meta / task.LIVE_TURN).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def pod_views(task_ids: list[str]) -> dict[str, PodView]:
     """What every task's pod is doing. One question for all the addresses, then one per pod that is
     up; asking each pod separately for each thing is what would make this too slow to do often."""
@@ -527,7 +535,10 @@ def detail(
         f"### {st.id} · {seen.status}",
         "",
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
-        + (f" · cost {ui.cost(task)}*" if st.box else f" · planning + implementation {ui.cost(task)}*"),
+        + (f" · cost {ui.cost(task)}" if st.box else f" · planning + implementation {ui.cost(task)}")
+        # During a turn: the cost above grows with it, and this says the agent is still at it.
+        + (f" · last step {ui.ago(live['at'])}" if (live := task.live_turn()) else "")
+        + "*",
         "",
         f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
         "",

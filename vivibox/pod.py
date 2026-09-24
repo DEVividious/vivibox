@@ -682,6 +682,13 @@ class Pod:
     def exec_detached(self, *cmd: str) -> None:
         self._run("docker", "exec", "-d", self.agent, *cmd)
 
+    def stream(self, *cmd: str) -> subprocess.Popen:
+        """A command in the agent container whose output is read as it comes, errors in the same
+        stream; the caller reads stdout to the end and waits."""
+        return self.popen(
+            ["docker", "exec", self.agent, *cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+
     # --- network ----------------------------------------------------------------------------
 
     def gateway(self) -> str:

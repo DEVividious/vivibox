@@ -46,7 +46,7 @@ def a_task(goal="Goal"):
 def answering(monkeypatch, write):
     """An agent turn that writes what `write` says, instead of talking to a model."""
 
-    def turn(self, prompt, session="", title=""):
+    def turn(self, prompt, session="", title="", on_step=None):
         write(prompt, session)
         return opencode.Turn("ses_demo", True, 0.01, 10, "done")
 

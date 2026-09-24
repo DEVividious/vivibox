@@ -131,7 +131,12 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
     (handoff / DEMO_QUESTION).unlink(missing_ok=True)
     kept = handoff / DEMO_SESSION
     session = _read(kept) if reply else ""
-    turn = opencode.OpenCode(pod).turn(reply or DEMO_ASK, session=session, title=f"{task.id}-demo")
+    try:
+        turn = opencode.OpenCode(pod).turn(
+            reply or DEMO_ASK, session=session, title=f"{task.id}-demo", on_step=task.set_live_turn
+        )
+    finally:
+        task.clear_live_turn()
     if turn.session:
         kept.write_text(turn.session)
     task.event("turn", cost=turn.cost, tokens=turn.tokens, kind="demo")

@@ -83,7 +83,7 @@ class Manual:
     metered = True
     manual = True
 
-    def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
+    def turn(self, prompt: str, session: str = "", title: str = "", on_step=None) -> Turn:
         raise HarnessError("the manual planner runs no turns; plan in your own chat")
 
 

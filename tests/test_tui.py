@@ -1060,6 +1060,38 @@ def test_the_view_rebuilds_itself_only_when_something_moved(env, monkeypatch):
     run(scenario)
 
 
+def test_the_running_turns_cost_and_last_step_show_in_the_row_and_the_panel(env, monkeypatch):
+    """A long turn used to be a frozen row: the cost came with the turn event at its end, and
+    nothing said the agent was still at work. Now the row's cost grows step by step and UPDATED
+    is when the agent last finished a step; the panel says "last step … ago"."""
+    task = new_task()
+    task.event("started", model="m")
+    task.event("turn", state="plan", cost=0.10, tokens=1)
+    at_plan_checkpoint(task)
+    task.transition(State.IMPLEMENT)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: t.id == task.id)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.00"
+        task.set_live_turn(0.04, 400, 3)
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.04", "the turn so far"
+        assert str(app.table.get_cell(task.id, app.updated_column)) == "just now"
+        await pilot.press("d")
+        await pilot.pause()
+        assert "last step just now" in app.shown
+        task.clear_live_turn()
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.00"
+        assert "last step" not in app.shown
+
+    run(scenario)
+
+
 def test_criteria_ticked_during_a_turn_show_up(env, monkeypatch):
     """The agent ticks criteria while it works, and watching them fill in is how you see a long
     turn progressing. Skipping the redraw when the task's state has not moved froze the column for

@@ -30,7 +30,7 @@ class Writer:
     def __init__(self, task):
         self.task, self.prompts = task, []
 
-    def turn(self, prompt, session="", title=""):
+    def turn(self, prompt, session="", title="", on_step=None):
         self.prompts.append(prompt)
         (self.task.meta / "handoff" / manual.CONTEXT).write_text("Express 4, tests with vitest.")
         return Turn("ses_1", True, 0.01, 100, "done")

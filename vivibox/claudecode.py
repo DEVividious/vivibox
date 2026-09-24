@@ -90,7 +90,8 @@ class ClaudeCode:
             == 0
         )
 
-    def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
+    def turn(self, prompt: str, session: str = "", title: str = "", on_step=None) -> Turn:
+        # on_step: claude -p reports its cost when the turn ends; nothing to report as it runs.
         args = ["claude", "-p", "--output-format", "json", "--model", self.model]
         # The pod is the boundary, as it is for opencode: inside it the agent may edit and run
         # anything, and nobody is there to answer a prompt during a headless turn. Without this the

@@ -179,6 +179,22 @@ class Task:
         tmp.write_text(json.dumps(asdict(st), indent=2, ensure_ascii=False) + "\n")
         os.replace(tmp, path)
 
+    # What the turn under way has cost so far; written at every step, gone when the turn ends.
+    LIVE_TURN = "turn.json"
+
+    def set_live_turn(self, cost: float, tokens: int, steps: int) -> None:
+        live = {"cost": round(cost, 6), "tokens": tokens, "steps": steps, "at": now()}
+        (self.meta / self.LIVE_TURN).write_text(json.dumps(live))
+
+    def live_turn(self) -> dict | None:
+        try:
+            return json.loads((self.meta / self.LIVE_TURN).read_text())
+        except (OSError, ValueError):
+            return None
+
+    def clear_live_turn(self) -> None:
+        (self.meta / self.LIVE_TURN).unlink(missing_ok=True)
+
     def event(self, type_: str, **data) -> None:
         line = json.dumps({"ts": now(), "task": self.id, "type": type_, "data": data}, ensure_ascii=False)
         with (self.meta / "events.jsonl").open("a") as f:

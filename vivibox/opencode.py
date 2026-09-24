@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,6 +79,10 @@ def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple =
     if not said or said[-1]["data"].get("why") != why:
         task.event("serena", on=on, why=why)
     return before != {p.name: p.read_text() for p in d.iterdir()}
+
+
+# The running cost, tokens and step count of a turn, reported as each step of it finishes.
+OnStep = Callable[[float, int, int], None]
 
 
 @dataclass
@@ -168,17 +173,45 @@ class OpenCode:
         self.pod.exec("pkill", "-f", "opencode serve", check=False)
         self.ensure_server()
 
-    def turn(self, prompt: str, session: str = "", title: str = "") -> Turn:
+    def turn(self, prompt: str, session: str = "", title: str = "", on_step: OnStep | None = None) -> Turn:
+        """One turn of the agent. on_step, when given, gets the running cost, tokens and step
+        count at every step_finish as the events stream in, so the view can show them during
+        the turn rather than when it ends."""
         self.ensure_server()
         args = ["opencode", "run", "--attach", URL, "--format", "json", "--auto"]
         args += ["--model", self.model] if self.model else []
         args += ["--session", session] if session else ["--title", title or self.pod.task_id]
         quoted = " ".join(_quote(a) for a in [*args, prompt])
-        p = self.pod.exec("bash", "-c", f"{WITH_PASSWORD} {quoted}", check=False)
-        turn = parse_events(p.stdout)
-        if p.returncode != 0 and turn.ok:
-            turn.ok, turn.error = False, (p.stderr or p.stdout).strip()[-2000:]
+        command = ("bash", "-c", f"{WITH_PASSWORD} {quoted}")
+        if on_step is not None and hasattr(self.pod, "stream"):
+            output, returncode = self._stream(command, on_step)
+            stderr = ""
+        else:
+            p = self.pod.exec(*command, check=False)
+            output, returncode, stderr = p.stdout, p.returncode, p.stderr
+        turn = parse_events(output)
+        if returncode != 0 and turn.ok:
+            turn.ok, turn.error = False, (stderr or output).strip()[-2000:]
         return turn
+
+    def _stream(self, command: tuple[str, ...], on_step: OnStep) -> tuple[str, int]:
+        p = self.pod.stream(*command)
+        lines: list[str] = []
+        cost, tokens, steps = 0.0, 0, 0
+        for line in p.stdout:
+            lines.append(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "step_finish":
+                part = event.get("part") or {}
+                cost = round(cost + float(part.get("cost") or 0), 6)
+                tokens += int((part.get("tokens") or {}).get("total") or 0)
+                steps += 1
+                on_step(cost, tokens, steps)
+        p.wait()
+        return "".join(lines), p.returncode
 
     def attach_command(self, session: str) -> list[str]:
         """For your tmux window: the full opencode interface on the task's session."""

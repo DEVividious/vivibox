@@ -115,7 +115,15 @@ def cost(task: Task) -> Spend:
             planning += spent
         else:
             implementation += spent
-    return Spend(round(planning, 6), round(implementation, 6), split=not task.read_state().box)
+    st = task.read_state()
+    # The turn under way, so far: its event comes when it ends, and a long turn is exactly when
+    # watching the figure move is the only sign the agent is at work.
+    if live := task.live_turn():
+        if str(st.state) in PLANNING_STATES:
+            planning += live["cost"]
+        else:
+            implementation += live["cost"]
+    return Spend(round(planning, 6), round(implementation, 6), split=not st.box)
 
 
 # What the task needs, in words, and the commands for your next step.
@@ -320,6 +328,8 @@ def task_detail(
     meta = [ago(st.updated)] if st.box else [f"{criteria(task)} criteria", ago(st.updated)]
     if spent := cost(task):
         meta.append(str(spent))
+    if live := task.live_turn():
+        meta.append(f"last step {ago(live['at'])}")
     lines = [
         f"{style(st.id, 'bold')}  {style(shown.status, COLORS[shown.group])}"
         f"  {style(' · '.join(meta), 'dim')}",

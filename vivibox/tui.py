@@ -104,6 +104,7 @@ from .panel import (  # noqa: F401
     git_diff,
     keys_for,
     last_gate,
+    live_at,
     load_view,
     log_command,
     newest_log,
@@ -460,6 +461,8 @@ class Vivibox(App):
                 # exactly when watching it fill in is the only sign of progress. A stat, not a
                 # parse: the redraw does the reading.
                 ticked_at(task),
+                # The turn under way writes its running cost at every step; the same reason.
+                live_at(task),
             )
             for task, st in self.pairs
         )
@@ -528,6 +531,7 @@ class Vivibox(App):
         keys = table.add_columns(*wanted)
         by_name = dict(zip(wanted, keys, strict=True))
         self.status_column, self.demo_column = by_name["STATUS"], by_name.get("DEMO")
+        self.cost_column, self.updated_column = by_name.get("COST PLAN + IMPL"), by_name.get("UPDATED")
         self.drawn = ()
 
     def on_resize(self) -> None:
@@ -582,10 +586,13 @@ class Vivibox(App):
                 continue
             for task, st in own:
                 spent = ui.cost(task)
+                # During a turn, when the agent last finished a step: the sign it is at work.
+                live = task.live_turn()
                 planned.append((
                     {"TASK": f"  {st.id}", "STATUS": self.status(st), "DEMO": self.demo_cell(st.id),
                      "CRITERIA": criteria(task), "COST PLAN + IMPL": str(spent) if spent else "-",
-                     "CREATED": ui.ago(st.created), "UPDATED": ui.ago(st.updated), "GOAL": st.goal},
+                     "CREATED": ui.ago(st.created), "UPDATED": ui.ago(live["at"] if live else st.updated),
+                     "GOAL": st.goal},
                     st.id,
                 ))  # fmt: skip
             for entry in done:

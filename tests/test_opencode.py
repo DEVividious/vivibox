@@ -89,3 +89,40 @@ def test_a_session_is_made_before_the_turn():
     assert opencode.OpenCode(P()).start_session("t1: goal") == "ses_new"
     post = next(c for c in ran if "-X POST" in c)
     assert '"title": "t1: goal"' in post and post.endswith("/session'")
+
+
+def test_a_turn_reports_each_step_as_the_events_stream_in():
+    """opencode reports cost and tokens at every step_finish; read as they come, the running total
+    reaches the view during the turn, not minutes later when the turn ends."""
+    lines = [
+        '{"type":"step_start","sessionID":"ses_1"}\n',
+        '{"type":"step_finish","sessionID":"ses_1","part":{"cost":0.01,"tokens":{"total":100}}}\n',
+        "not json\n",
+        '{"type":"step_finish","sessionID":"ses_1","part":{"cost":0.02,"tokens":{"total":250}}}\n',
+        '{"type":"text","sessionID":"ses_1","part":{"text":"done"}}\n',
+    ]
+
+    class Streaming:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = iter(lines)
+
+        def wait(self):
+            return 0
+
+    class P:
+        task_id, agent = "t1", "vivibox-t1-agent"
+
+        def exec(self, *cmd, check=True):
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        def stream(self, *cmd):
+            return Streaming()
+
+    steps = []
+    turn = opencode.OpenCode(P()).turn(
+        "go", on_step=lambda cost, tokens, steps_: steps.append((cost, tokens, steps_))
+    )
+    assert steps == [(0.01, 100, 1), (0.03, 350, 2)], "running totals, one call per step"
+    assert (turn.session, turn.ok, turn.cost, turn.tokens, turn.text) == ("ses_1", True, 0.03, 350, "done")

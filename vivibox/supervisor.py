@@ -83,7 +83,7 @@ class Harness(Protocol):
     # subscription. A total that added the two would be neither.
     metered: bool
 
-    def turn(self, prompt: str, session: str = "", title: str = "") -> Turn: ...
+    def turn(self, prompt: str, session: str = "", title: str = "", on_step=None) -> Turn: ...
 
 
 @dataclass(frozen=True)
@@ -250,7 +250,11 @@ class Supervisor:
             else:
                 self.task.set_session(role, was)
                 self.session_started(self.task.read_state())
-        turn = harness.turn(prompt, session=was, title=title)
+        self.task.event("turn_started", state=str(st.state), role=role)
+        try:
+            turn = harness.turn(prompt, session=was, title=title, on_step=self.task.set_live_turn)
+        finally:
+            self.task.clear_live_turn()  # the turn event is the record from here on
         if turn.session and turn.session != was:
             self.task.set_session(role, turn.session)
         self.task.event(

@@ -237,9 +237,7 @@ def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: No
     notifications, the review copy. The behavioural tests build the same one and step it."""
     harness = actions.harness_for("writer", pod, task)
     planner = actions.harness_for("planner", pod, task)
-    return supervisor.Supervisor(
-        task,
-        harness,
+    ports = supervisor.Ports(
         run_gate=lambda t: gate.run_gate(
             t,
             pod,
@@ -250,16 +248,21 @@ def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: No
             no_build=project.no_build,
         ),  # fmt: skip
         risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
-        max_iterations=config.max_iterations,
         notify=lambda task_id, message, kind="": supervisor.notify(
             task_id, message, config.desktop_notifications, actions.buttons(task, project, config, kind)
         ),
         prepare_review=lambda: actions.prepare_review(task, project),
+        save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
+        session_started=agent_window,
+    )
+    return supervisor.Supervisor(
+        task,
+        harness,
+        ports,
+        max_iterations=config.max_iterations,
         project_verify=project.verify,
         project_no_build=project.no_build,
-        save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
         planner=planner,
-        session_started=agent_window,
         source=project.repo,
     )
     print(f"{task.id} is done.")

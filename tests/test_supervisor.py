@@ -46,16 +46,13 @@ def task(tmp_path):
 def make(task, harness, results=(), risky=()):
     results = list(results)
     notes = []
-    sup = supervisor.Supervisor(
-        task,
-        harness,
+    ports = supervisor.Ports(
         run_gate=lambda t: results.pop(0),
         risky_changes=lambda: [Change(p, "changed") for p in risky],
-        max_iterations=2,
-        project_verify=["true"],
         notify=lambda _id, msg, kind="": notes.append(msg),
         sleep=lambda seconds: None,  # a retry's wait, not waited in tests
     )
+    sup = supervisor.Supervisor(task, harness, ports, max_iterations=2, project_verify=["true"])
     return sup, notes
 
 
@@ -223,7 +220,7 @@ def test_final_checkpoint_prepares_the_review(task):
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         task.transition(s)
     sup, notes = make(task, FakeHarness(task), results=[gate_result(True)])
-    sup.prepare_review = lambda: Path("/srv/vivibox/demo-1/demo")
+    sup.ports.prepare_review = lambda: Path("/srv/vivibox/demo-1/demo")
     sup.step()
     assert notes == ["ready for your review in /srv/vivibox/demo-1/demo"]
 
@@ -236,7 +233,7 @@ def test_failed_review_preparation_still_reaches_the_checkpoint(task):
     def fail():
         raise RuntimeError("local changes")
 
-    sup.prepare_review = fail
+    sup.ports.prepare_review = fail
     sup.step()
     assert task.read_state().state is State.CHECKPOINT_FINAL
     assert "local changes" in notes[0] and "vivibox review demo-1" in notes[0]
@@ -273,7 +270,7 @@ def test_failed_turn_pauses_the_task(task):
 
     waits = []
     sup, notes = make(task, Broken(task))
-    sup.sleep = waits.append
+    sup.ports.sleep = waits.append
     sup.step()
     assert task.read_state().paused and "invalid key" in notes[0]
     assert waits == [], "a key that is wrong does not pass with time: no retry"
@@ -339,7 +336,7 @@ def test_the_first_turn_can_be_watched_while_it_runs(task):
     harness = StartsSessions(task, [write_draft])
     opened = []
     sup, _ = make(task, harness)
-    sup.session_started = lambda st: opened.append(dict(st.sessions))
+    sup.ports.session_started = lambda st: opened.append(dict(st.sessions))
     sup.step()
     assert harness.seen_during_turn == ("ses_early", {"writer": "ses_early"}), "recorded before it ran"
     assert opened == [{"writer": "ses_early"}]
@@ -604,7 +601,7 @@ def test_a_turn_is_tried_again_after_an_error_that_passes_with_time(task):
     waits = []
     harness = Flaky(task, ["429 Too Many Requests", "503 Service Unavailable: overloaded"])
     sup, notes = make(task, harness)
-    sup.sleep = waits.append
+    sup.ports.sleep = waits.append
     sup.step()
     assert waits == [30, 60] and len(harness.prompts) == 3
     assert not task.read_state().paused and task.read_state().state is State.CHECKPOINT_PLAN
@@ -618,7 +615,7 @@ def test_a_turn_that_keeps_failing_with_time_is_given_up_after_three_retries(tas
     waits = []
     harness = Flaky(task, ["connection reset by peer"] * 5)
     sup, _ = make(task, harness)
-    sup.sleep = waits.append
+    sup.ports.sleep = waits.append
     sup.step()
     assert waits == [30, 60, 120] and len(harness.prompts) == 4
     st = task.read_state()

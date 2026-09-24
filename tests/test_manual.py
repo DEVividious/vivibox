@@ -43,16 +43,12 @@ def task(tmp_path):
 
 def make(task, writer, source):
     notes = []
-    sup = supervisor.Supervisor(
-        task,
-        writer,
+    ports = supervisor.Ports(
         run_gate=lambda t: None,
         risky_changes=lambda: [],
-        max_iterations=2,
         notify=lambda _id, msg, kind="": notes.append(msg),
-        planner=manual.Manual(),
-        source=source,
     )
+    sup = supervisor.Supervisor(task, writer, ports, max_iterations=2, planner=manual.Manual(), source=source)
     return sup, notes
 
 

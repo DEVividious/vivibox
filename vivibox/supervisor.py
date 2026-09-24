@@ -189,20 +189,36 @@ def transient(error: str) -> bool:
 
 
 @dataclass
-class Supervisor:
-    task: Task
-    harness: Harness
+class Ports:
+    """What the supervisor asks of whoever runs it: the gate and the risky files of the task's
+    clone, you (a notification, the review copy, a window on the agent), where a plan's
+    verification is kept, and how a wait passes. The command line wires them to the project and
+    the pod in cli.make_supervisor; a test passes what it wants to see."""
+
     run_gate: Callable[[Task], gate.GateResult]
     risky_changes: Callable[[], list[Change]]
-    max_iterations: int
     # notify(task_id, message, kind): kind "plan" or "review" lets the caller add notification buttons.
     notify: Callable[..., None] = lambda task_id, message, kind="": notify(task_id, message)
     # Fetches the work into your repository and updates the review copy; returns the copy's path.
     prepare_review: Callable[[], Path | None] = lambda: None
-    # The project's verify commands, and where to keep the ones a plan brings for a new project.
+    # Where to keep the verify commands a plan brings for a new project.
+    save_verify: Callable[[list[str], bool], None] = lambda commands, no_build: None
+    # Called once a turn's session is known and recorded, before the turn runs: your view of the
+    # agent opens then, not when the turn you wanted to watch is already over.
+    session_started: Callable[[TaskState], None] = lambda st: None
+    # How a retry waits; a test passes something that does not.
+    sleep: Callable[[float], None] = time.sleep
+
+
+@dataclass
+class Supervisor:
+    task: Task
+    harness: Harness
+    ports: Ports
+    max_iterations: int
+    # The project's verify commands, and whether it has nothing to build.
     project_verify: list[str] = field(default_factory=list)
     project_no_build: bool = False
-    save_verify: Callable[[list[str], bool], None] = lambda commands, no_build: None
     # The role that plans. None means the writer plans too, which is what a caller with one harness
     # gets; the command line always passes both, because the config always names both.
     planner: Harness | None = None
@@ -210,11 +226,6 @@ class Supervisor:
     source: Path | None = None
     # The answer file as last tried, so an answer that is not a plan is reported once, not every poll.
     answer_seen: float = 0.0
-    # Called once a turn's session is known and recorded, before the turn runs: your view of the
-    # agent opens then, not when the turn you wanted to watch is already over.
-    session_started: Callable[[TaskState], None] = lambda st: None
-    # How a retry waits; a test passes something that does not.
-    sleep: Callable[[float], None] = time.sleep
 
     def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -243,7 +254,9 @@ class Supervisor:
             except Exception as e:  # keep the task inspectable instead of dying silently
                 self.task.set_paused(True, problem=f"stopped on an error: {e}")
                 self.task.event("error", message=str(e)[:2000])
-                self.notify(self.task.id, f"stopped on an error, see 'vivibox status {self.task.id}': {e}")
+                self.ports.notify(
+                    self.task.id, f"stopped on an error, see 'vivibox status {self.task.id}': {e}"
+                )
                 progressed = False
             on_step(self.task.read_state())
             if not progressed:
@@ -266,7 +279,7 @@ class Supervisor:
                 self.task.event("session_not_started", error=str(e)[:500])
             else:
                 self.task.set_session(role, was)
-                self.session_started(self.task.read_state())
+                self.ports.session_started(self.task.read_state())
         turn = self._attempts(harness, prompt, was, title, st, role)
         if turn.session and turn.session != was:
             self.task.set_session(role, turn.session)
@@ -283,7 +296,7 @@ class Supervisor:
         )
         if not turn.ok:
             self.task.set_paused(True, problem=f"agent turn failed: {turn.error or turn.text}")
-            self.notify(self.task.id, f"agent turn failed, task paused: {turn.error[:200]}")
+            self.ports.notify(self.task.id, f"agent turn failed, task paused: {turn.error[:200]}")
             return None
         clear_next_prompt(self.task)
         return turn
@@ -299,8 +312,10 @@ class Supervisor:
             if turn.ok or not transient(turn.error):
                 return turn
             self.task.event("turn_retry", wait=wait, error=turn.error[:500])
-            self.notify(self.task.id, f"agent turn failed ({turn.error[:80]}); trying again in {wait} s")
-            self.sleep(wait)
+            self.ports.notify(
+                self.task.id, f"agent turn failed ({turn.error[:80]}); trying again in {wait} s"
+            )
+            self.ports.sleep(wait)
         return self._one_turn(harness, prompt, session, title, st, role)
 
     def _one_turn(
@@ -314,14 +329,14 @@ class Supervisor:
 
     def _checkpoint(self, target: State, reason: str, kind: str = "") -> None:
         # Every checkpoint first checks risky files: you may open the project in IntelliJ at a checkpoint.
-        if self.risky_changes():
+        if self.ports.risky_changes():
             self.task.transition(State.APPROVAL_RISKY, reason=reason, then=str(target))
-            self.notify(
+            self.ports.notify(
                 self.task.id, f"{reason}; risky files changed, run 'vivibox risky {self.task.id}' first"
             )
         else:
             self.task.transition(target, reason=reason)
-            self.notify(self.task.id, reason, kind=kind)
+            self.ports.notify(self.task.id, reason, kind=kind)
 
     def _plan(self, st: TaskState) -> None:
         if (plan := self._your_plan(st)) is not None:
@@ -373,7 +388,7 @@ class Supervisor:
     def _plan_ready(self, st: TaskState, plan: Plan, yours: bool = False) -> None:
         if plan.summary:
             self.task.set_goal(plan.summary)
-        if st.auto_plan and not self.risky_changes():
+        if st.auto_plan and not self.ports.risky_changes():
             # Through the plan checkpoint, so the event log reads the same as when you accept.
             self.task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
             try:
@@ -381,12 +396,12 @@ class Supervisor:
                     self.task,
                     "plan accepted automatically",
                     self.project_verify,
-                    self.save_verify,
+                    self.ports.save_verify,
                     self.project_no_build,
                 )
                 print(f"[{time.strftime('%H:%M:%S')}] plan accepted automatically", flush=True)
             except gate.GateError as e:
-                self.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
+                self.ports.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
             return
         self._checkpoint(
             State.CHECKPOINT_PLAN,
@@ -437,12 +452,14 @@ class Supervisor:
             manual.import_answer(self.task)
         except (OSError, PlanError) as e:
             self.task.event("plan_unreadable", error=str(e)[:500])
-            self.notify(
+            self.ports.notify(
                 self.task.id, f"the plan in {answer.name} is not readable yet ({e}); press e to see it"
             )
             return
         count = len(parse_plan(self.task.plan_path.read_text()).criteria)
-        self.notify(self.task.id, f"your plan is in, {count} criteria; review and accept it", kind="plan")
+        self.ports.notify(
+            self.task.id, f"your plan is in, {count} criteria; review and accept it", kind="plan"
+        )
 
     def _implement(self, st: TaskState) -> None:
         if self._turn(st, next_prompt(self.task, IMPLEMENT_PROMPT)) is None:
@@ -453,14 +470,14 @@ class Supervisor:
         self.task.transition(State.VERIFY)
 
     def _verify(self, st: TaskState) -> None:
-        result = self.run_gate(self.task)
+        result = self.ports.run_gate(self.task)
         target = gate.next_state(result, st.iteration, self.max_iterations)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
             gate.write_feedback(self.task, result)
         if result.environment:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
             self.task.transition(target, reason="verification could not run")
-            self.notify(
+            self.ports.notify(
                 self.task.id,
                 f"verification could not run: {result.environment[:150]}; fix it, then press g"
                 f" (vivibox verify-again {self.task.id})",
@@ -470,22 +487,22 @@ class Supervisor:
             self.task.transition(target, reason="verification failed")
         elif target is State.CHECKPOINT_BLOCKED:
             self.task.transition(target, reason="verification still failing")
-            self.notify(self.task.id, f"verification still failing after {st.iteration} attempts")
+            self.ports.notify(self.task.id, f"verification still failing after {st.iteration} attempts")
         elif target is State.APPROVAL_RISKY:
             self.task.transition(target, reason="verification passed", then=str(State.CHECKPOINT_FINAL))
-            self.notify(
+            self.ports.notify(
                 self.task.id, f"done pending your approval of risky files: 'vivibox risky {self.task.id}'"
             )
         else:
             self.task.transition(target, reason="verification passed")
-            self.notify(self.task.id, self._review_message(result), kind="review")
+            self.ports.notify(self.task.id, self._review_message(result), kind="review")
 
     def _review_message(self, result: gate.GateResult | None = None) -> str:
         # Tests that went missing are said here, not to the agent, which would put them back.
         n = len(result.removed_tests) if result else 0
         gone = f"; {n} test{'s' if n != 1 else ''} removed" if n else ""
         try:
-            path = self.prepare_review()
+            path = self.ports.prepare_review()
         except Exception as e:  # the work is done either way; the review copy is a convenience
             self.task.event("review_prepare_failed", error=str(e)[:500])
             copy = f"the review copy failed ({e}), try: vivibox review {self.task.id}"

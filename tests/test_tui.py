@@ -1619,6 +1619,32 @@ def test_the_import_from_adding_a_provider_comes_back_with_what_came(env, tmp_pa
     assert added == [["acme"]]
 
 
+def test_a_step_that_outlives_the_view_has_nobody_to_tell(env):
+    """A thread worker can finish after the view is gone (a docker command, a start): its loop is
+    closed, so telling the view anything is dropped, without an error in the thread and without a
+    coroutine Textual would leave unawaited, which ended every run of these tests with a warning."""
+    import threading
+
+    kept = []
+
+    async def scenario(app, pilot):
+        kept.append(app)
+
+    run(scenario)
+    app, outcome = kept[0], []
+
+    def late() -> None:
+        try:
+            outcome.append(app.call_from_thread(app.notify, "too late"))
+        except RuntimeError as e:
+            outcome.append(e)
+
+    thread = threading.Thread(target=late)
+    thread.start()
+    thread.join()
+    assert outcome == [None], f"dropped quietly, not {outcome}"
+
+
 @pytest.mark.parametrize("height", [20, 24, 30, 50])
 def test_a_new_task_can_be_filled_in_on_a_short_terminal(env, height):
     """Every field and button reachable however few rows the terminal has: the fields scroll, the

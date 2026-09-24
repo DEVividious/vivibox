@@ -321,6 +321,15 @@ class Vivibox(App):
         self.call_after_refresh(self.hint_opencode)
         self.load_models()
 
+    def call_from_thread(self, callback, *args, **kwargs):
+        """A step that outlives the view (a docker command that took longer than the window was
+        open, a start after q) has nobody to tell: its loop is closed. Textual would raise in the
+        thread, or leave the callback's coroutine unawaited; here the message is dropped."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return None
+        return super().call_from_thread(callback, *args, **kwargs)
+
     def action_providers(self) -> None:
         self.push_screen(ManageProviders())
 

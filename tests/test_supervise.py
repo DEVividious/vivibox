@@ -35,7 +35,8 @@ def test_the_supervisors_messages_reach_the_topic_at_the_tasks_own_priority(tmp_
     channel = ntfy.Channel(
         "https://ntfy.sh/t", post=lambda u, h, b: sent.append((h, b.decode())), spawn=lambda r: r()
     )
-    notify = supervise.notifier(task, None, config(ntfy="t"), channel)
+    monkeypatch.setattr(supervise, "channel_for", lambda config: channel if config.ntfy else None)
+    notify = supervise.notifier(task, None, lambda: config(ntfy="t"))
     notify(task.id, "agent turn failed (502); trying again in 30 s")
     task.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
     notify(task.id, "question from the agent: which port?", kind="plan")
@@ -51,6 +52,37 @@ def test_the_supervisors_messages_reach_the_topic_at_the_tasks_own_priority(tmp_
         ("high", "hourglass", "question from the agent"),
         ("high", "warning", "stopped on an error"),
     ]
-    quiet = supervise.notifier(task, None, config(), None)
+    quiet = supervise.notifier(task, None, lambda: config())
     quiet(task.id, "plan ready for review")
     assert len(sent) == 3, "no channel, nothing sent"
+
+
+def test_a_topic_set_while_the_task_runs_gets_the_next_message(tmp_path, monkeypatch):
+    """The settings are read at every message, not once at the start: a topic set under k while
+    a task runs gets the next decision, and a file that cannot be read keeps the last settings."""
+    task = create_task(tmp_path, "demo", "Add health endpoint", TEMPLATE)
+    sent = []
+    monkeypatch.setattr(supervise.supervisor, "notify", lambda *a: None)
+    monkeypatch.setattr(supervise.actions, "buttons", lambda *a: [])
+    channel = ntfy.Channel(
+        "https://ntfy.sh/t", post=lambda u, h, b: sent.append(b.decode()), spawn=lambda r: r()
+    )
+    monkeypatch.setattr(supervise, "channel_for", lambda config: channel if config.ntfy else None)
+    now = [config()]
+    notify = supervise.notifier(task, None, lambda: now[0])
+    notify(task.id, "plan ready for review")
+    now[0] = config(ntfy="t")
+    notify(task.id, "work ready for your review")
+    assert sent == ["work ready for your review"]
+    loads = [Exception("broken")]
+    start = config(ntfy="t")
+
+    def load_config():
+        if loads:
+            raise supervise.ConfigError(str(loads.pop()))
+        return config()
+
+    monkeypatch.setattr(supervise, "load_config", load_config)
+    current = supervise.live_config(start)
+    assert current() is start, "unreadable for a moment: the settings the supervisor started with"
+    assert current().ntfy == "", "readable again: what the file says now"

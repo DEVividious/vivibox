@@ -49,7 +49,8 @@ happened, never what the agent or the build said (the whole of it stays in the w
 view). `ntfy_server` is ntfy.sh unless you run your own; a token, when the topic needs one, is
 `vivibox auth set ntfy`. The first message is a word when the supervisor takes the task up
 (*started: planning*), so a topic just set up shows it works; `ntfy_events = "all"` adds every
-stage after that (implementing, verifying) to the decisions. The three rows are under `k` as well.
+stage after that (implementing, verifying) to the decisions. The three rows are under `k` as well, and a change there
+reaches a running task from its next message.
 
 `config.toml` also holds the limits: `max_iterations`, how many verification failures the
 writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one

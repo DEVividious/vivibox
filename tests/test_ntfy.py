@@ -73,7 +73,7 @@ def test_the_start_is_said_at_every_level_and_the_stages_at_level_all_when_they_
     """The word at the start is the first thing a topic gets after being set up, so it says the
     channel works; on a task that had turns before, it is started again."""
     sent = []
-    stages = ntfy.Stages(channel(sent, level=ntfy.ALL))
+    stages = ntfy.Stages(lambda: channel(sent, level=ntfy.ALL))
     for st in (State.PLAN, State.PLAN, State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         stages.seen(state(st))
     stages.seen(state(State.IMPLEMENT, iteration=2))
@@ -85,11 +85,23 @@ def test_the_start_is_said_at_every_level_and_the_stages_at_level_all_when_they_
     ]
     assert all(s[1]["Priority"] == "default" for s in sent), "a stage is news, not a decision"
     decisions = []
-    stages = ntfy.Stages(channel(decisions), again=True)
+    stages = ntfy.Stages(lambda: channel(decisions), again=True)
     for st in (State.IMPLEMENT, State.VERIFY, State.IMPLEMENT):
         stages.seen(state(st, iteration=2))
     assert decisions[0][2] == "started again: implementing, attempt 2"
     assert len(decisions) == 1, "at the default level the stages after the start do not go"
     waiting = []
-    ntfy.Stages(channel(waiting), again=True).seen(state(State.CHECKPOINT_PLAN))
+    ntfy.Stages(lambda: channel(waiting), again=True).seen(state(State.CHECKPOINT_PLAN))
     assert waiting[0][2] == "started again", "taken up at a checkpoint: nothing is being done yet"
+
+
+def test_a_topic_set_while_the_task_runs_gets_the_next_stage():
+    """The supervisor asks for the channel at every step, so a topic set under k while a task runs
+    starts getting its stages from the next one, with the word at the start first."""
+    sent, topic = [], []
+    stages = ntfy.Stages(lambda: topic[0] if topic else None)
+    stages.seen(state(State.PLAN))
+    assert sent == [], "no topic yet"
+    topic.append(channel(sent, level=ntfy.ALL))
+    stages.seen(state(State.IMPLEMENT))
+    assert [s[2] for s in sent] == ["started: implementing"], "the first stage it sees is its start"

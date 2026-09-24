@@ -12,8 +12,10 @@
 - `vivibox/actions.py` is the facade the view and the command line call; what it does lives in
   `roles.py`, `projects.py`, `demo.py`, `box.py` and `review.py`, which reach the task primitives
   through `actions`. The view is the app in `tui.py` with its keys mixed in by group from `keys_*.py`
-  and the list from `table.py`. A module past 800 lines is split before a feature is added to it
-  (`tests/test_structure.py` fails on one).
+  and the list from `table.py`. The supervisor in `supervisor.py` drives a task through its states
+  on a tool that keeps the `harness.Harness` contract, through what `supervisor.Ports` hands it;
+  `supervise.py` wires both for the command line. A module past 800 lines is split before a
+  feature is added to it (`tests/test_structure.py` fails on one).
 - Before committing: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
 - A change to a prompt that no mechanical test covers gets a behavioural run:

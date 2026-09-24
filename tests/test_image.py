@@ -90,3 +90,16 @@ def test_nothing_is_removed_when_docker_cannot_say_what_is_in_use():
 
     docker = Down(images=["vivibox-agent:new", "vivibox-agent:old"], containers=[])
     assert image.remove_old("vivibox-agent:new", runner=docker) == [] and docker.removed == []
+
+
+def test_the_shared_maven_repository_is_set_for_every_maven_a_wrapper_may_fetch():
+    """MAVEN_ARGS is read by Maven 3.9 and later only. A project's mvnw fetching an older Maven
+    built into $HOME/.m2 instead: the writer's home, which the gate, whose home is fresh, never
+    sees, so its fresh clone lacked what the writer had built. MAVEN_OPTS reaches every version."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    assert 'MAVEN_OPTS="-Dmaven.repo.local=/cache/m2"' in text
+    assert 'MAVEN_ARGS="-Dmaven.repo.local=/cache/m2' in text, "3.9's own way stays, with the file locks"
+    checks = image.checks(1000, 1000)
+    assert any("$MAVEN_OPTS" in check.command for check in checks), "the image check covers it"

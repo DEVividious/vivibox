@@ -67,10 +67,14 @@ RUN groupadd -o -g "${GID}" agent \
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.
 # Caches live under /cache, mounted as volumes shared between tasks.
 # MAVEN_CONFIG is cleared because the mvn script passes it on as command-line arguments.
+# The local repository is set twice: MAVEN_ARGS is read by Maven 3.9 and later, MAVEN_OPTS by every
+# Maven the mvnw wrapper of a project may fetch, older ones included; a build that fell back to
+# $HOME/.m2 left the gate, whose home is fresh, without what the writer had built.
 # The file-lock settings let parallel builds share one local repository (needs Maven >= 3.9).
 ENV HOME=/config \
     MAVEN_CONFIG= \
     MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav" \
+    MAVEN_OPTS="-Dmaven.repo.local=/cache/m2" \
     GRADLE_USER_HOME=/cache/gradle \
     npm_config_cache=/cache/npm \
     npm_config_update_notifier=false \

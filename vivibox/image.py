@@ -107,6 +107,11 @@ def checks(uid: int, gid: int) -> list[Check]:
             "-Dmaven.repo.local=/cache/m2",
         ),
         Check(
+            "an older Maven from a project's wrapper uses it too",
+            "echo $MAVEN_OPTS",
+            "-Dmaven.repo.local=/cache/m2",
+        ),
+        Check(
             "caches are writable",
             "cd /cache && for d in m2 gradle npm mise corepack build-cache; do touch $d/.w || exit 1; done;"
             " echo ok",

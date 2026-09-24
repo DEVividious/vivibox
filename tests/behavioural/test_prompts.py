@@ -31,7 +31,7 @@ from vivibox.states import State
 pytestmark = [pytest.mark.model, pytest.mark.real_start]
 
 PLANNER = os.environ.get("VIVIBOX_BEHAVIOURAL_PLANNER", "deepseek/deepseek-v4-pro")
-WRITER = os.environ.get("VIVIBOX_BEHAVIOURAL_WRITER", "deepseek/deepseek-v4-flash")
+WRITER = os.environ.get("VIVIBOX_BEHAVIOURAL_WRITER", "deepseek/deepseek-flash")
 LIMIT = float(os.environ.get("VIVIBOX_BEHAVIOURAL_LIMIT", "2"))
 # Set to keep the tasks and their pods after the run, to look at what the agent did and said.
 KEEP = bool(os.environ.get("VIVIBOX_BEHAVIOURAL_KEEP"))
@@ -107,6 +107,8 @@ def bench(tmp_path_factory):
 
 def project(bench, name: str, files: dict[str, str], verify: list[str], pass_env: tuple = ()) -> Path:
     repo = make_repo(bench["tmp"] / name)
+    # Bytecode a test run leaves would count as uncommitted files, and the gate builds commits only.
+    (repo / ".gitignore").write_text("__pycache__/\n")
     for path, text in files.items():
         (repo / path).write_text(text)
     git = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731

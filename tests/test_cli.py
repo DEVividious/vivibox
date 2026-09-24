@@ -772,3 +772,21 @@ def test_attach_shows_the_conversation_of_the_role_you_ask_for(env, monkeypatch)
     actions.attach_command(task.id, role="planner")
     created = next(c for c in calls if c[0] == "new-session")
     assert "ses_planner" in created[-1], "asked for by name, even while the verification runs"
+
+
+def test_timeline_prints_what_happened_one_line_each(env, capsys):
+    from vivibox.config import load_config
+    from vivibox.states import State
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    task.event("turn_started", state="plan", role="planner")
+    task.event("turn", state="plan", role="planner", ok=True, cost=0.1234, tokens=1200)
+    task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
+    capsys.readouterr()
+    assert main(["timeline", "demo-1"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "# demo-1: Goal" and out[2].endswith("created: Goal")
+    assert any(line.endswith("planner turn: $0.12, 1200 tokens, 0 s") for line in out)
+    assert out[-1].endswith("→ review the plan (plan ready)")

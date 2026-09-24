@@ -2768,14 +2768,73 @@ def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
     run(scenario)
 
 
-def test_l_is_offered_only_when_there_is_a_log(env):
+def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
+    """A fresh task has its timeline to read, so l is always on. With more to read, l picks:
+    the timeline, the verification logs newest first with what ran and how it went, the
+    supervisor's log last; during a verification the cursor starts on its log."""
+    from vivibox import logs
+
     task = new_task()
+    opened = []
+    monkeypatch.setattr(tui.Vivibox, "read_log", lambda self, command: opened.append(command))
+    monkeypatch.setenv("PAGER", "less")
 
     async def scenario(app, pilot):
         app.reload()
-        assert not app.check_action("show_log", ())
-        (task.meta / "log" / "supervisor.log").write_text("Supervising\n")
         assert app.check_action("show_log", ())
+        await pilot.press("l")
+        await pilot.pause()
+        assert opened == [["less", "+G", str(task.meta / "log" / "timeline.txt")]], "one entry opens at once"
+        assert "created: Goal" in (task.meta / "log" / "timeline.txt").read_text()
+        (task.meta / "log" / "verify-1-120000.log").write_text(
+            "# started 12:00:00\n$ npm test\nFAIL a\n[exit 1 after 3 s]\n\n# summary\n"
+        )
+        newest = task.meta / "log" / "verify-2-130000.log"
+        newest.write_text("# started 13:00:00\n$ npm test\n[exit 0 after 2 s]\n\n# summary\n")
+        (task.meta / "log" / "supervisor.log").write_text("Supervising\n")
+        await pilot.press("l")
+        await pilot.pause()
+        assert isinstance(app.screen, logs.ChooseLog)
+        labels = [e.label for e in app.screen.found]
+        assert labels == ["timeline", "verify-2-130000.log", "verify-1-120000.log", "supervisor.log"]
+        assert app.screen.found[1].said == "attempt 2 · `npm test` · passed · 2 s · 5 lines"
+        assert app.screen.found[2].said == "attempt 1 · `npm test` · failed · 3 s · 6 lines"
+        assert app.screen.query_one(OptionList).highlighted == 0, "the timeline first, nothing running"
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert opened[-1] == ["less", "+G", str(newest)]
+
+    run(scenario)
+
+    at_plan_checkpoint(task)
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+
+    async def verifying(app, pilot):
+        app.reload()
+        await pilot.press("l")
+        await pilot.pause()
+        assert app.screen.query_one(OptionList).highlighted == 1, "the log being written"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert opened[-1] == ["less", "+F", str(task.meta / "log" / "verify-2-130000.log")], "followed"
+
+    run(verifying)
+
+
+def test_the_panel_at_implementing_says_what_happened_lately(env, monkeypatch):
+    task = implementing("Goal")
+    task.event("turn_started", state="implement", role="writer")
+    task.event("turn", state="implement", role="writer", ok=True, cost=0.05, tokens=500)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("d")
+        await pilot.pause()
+        assert "**Lately**" in app.shown and "writer turn: $0.05, 500 tokens" in app.shown
+        assert "`l` reads the whole timeline." in app.shown
 
     run(scenario)
 

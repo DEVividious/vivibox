@@ -30,7 +30,7 @@ them all:
 | `o` | open the review copy in your editor: the project's, else `config.toml`'s, else the one the repository's own folders point at (`.idea`, `.vscode`) among those found here, else the first found; `?` says which, `k` or the project's row changes it |
 | `p` | approve changes to risky files |
 | `g` | a task blocked on a failed verification, or on a question the agent asked about it: run the verification again without the agent, once you have fixed what was outside the code (a token expired, Docker, a service) |
-| `l` | the newest verification log, or the supervisor's, in your pager: followed as it is written while the verification runs (Ctrl-C stops following), otherwise opened at its end, where a failed build says why |
+| `l` | read, in your pager: the task's timeline (what happened, one line each: states and why, turns with their cost and time, verifications with what failed, your decisions), a verification log (newest first, each with what ran and how it went; a log ends with a summary naming the first trouble line, and the pager opens at its end), or the supervisor's log as diagnostics; with one entry it opens at once; while the verification runs its log is the cursor's and followed as it is written (Ctrl-C stops following). `vivibox timeline <id>` prints the timeline |
 | `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on, and once both have a conversation, the one you pick; while the verification runs, its log as it is written; Ctrl-q brings you back (Esc in the agent's window interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |

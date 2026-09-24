@@ -447,7 +447,11 @@ def _last_build(task: Task) -> dict | None:
 
 def _said_in(log_text: str, command: str) -> str:
     """The output one command left in a verification log."""
-    m = re.search(rf"^\$ {re.escape(command)}\n(.*?)^\[exit -?\d+\]$", log_text, re.MULTILINE | re.DOTALL)
+    m = re.search(
+        rf"^\$ {re.escape(command)}\n(.*?)^\[exit -?\d+( after [^\]]*)?\]$",
+        log_text,
+        re.MULTILINE | re.DOTALL,
+    )
     return log_excerpt(m.group(1)) if m else ""
 
 
@@ -541,7 +545,7 @@ def _build(
             toolchain.install_declared(pod, gate=True)
             toolchain.ensure(pod, java, gate=True)
             for command in commands:
-                out.write(f"$ {command}\n")
+                out.write(f"# started {time.strftime('%H:%M:%S')}\n$ {command}\n")
                 out.flush()
                 started = time.monotonic()
                 said, code = _stream(pod, command, out, values, timeout)
@@ -556,16 +560,49 @@ def _build(
                         result.environment = environment_problem("".join(said))
                     if said and not said[-1].endswith("\n"):
                         out.write("\n")
-                out.write(f"[exit {code}]\n\n")
-                out.flush()
                 took = round(time.monotonic() - started, 1)
+                out.write(f"[exit {code} after {took:g} s]\n\n")
+                out.flush()
                 result.commands.append(
                     CommandResult(command, ok, took, "" if ok else log_excerpt("".join(said)))
                 )
                 if not ok:
                     break
+            out.write(log_summary(result, commands, result.log.read_text()))
         finally:
             pod.gate_down()
+
+
+def log_summary(result: GateResult, commands: list[str], text: str) -> str:
+    """The end of the log, where a pager opened at the end lands: each command's outcome and time,
+    and for one that failed the line its first trouble is on, so it is a jump away."""
+    lines = text.splitlines()
+    said = ["# summary"]
+    ran = {c.command: c for c in result.commands}
+    for command in commands:
+        if (c := ran.get(command)) is None:
+            said.append(f"# {command}: not run")
+            continue
+        outcome = "ok" if c.ok else "failed"
+        line = f"# {command}: {outcome} after {c.seconds:g} s"
+        if not c.ok and (at := first_trouble(lines, command)):
+            line += f", first trouble at line {at}"
+        said.append(line)
+    return "\n".join(said) + "\n"
+
+
+def first_trouble(lines: list[str], command: str) -> int:
+    """The 1-based line of the log where the command's output first looks like trouble; 0 when
+    nothing in it does."""
+    inside = False
+    for n, line in enumerate(lines, 1):
+        if line == f"$ {command}":
+            inside = True
+        elif inside and line.startswith("[exit "):
+            return 0
+        elif inside and TROUBLE.search(line):
+            return n
+    return 0
 
 
 def _stream(pod: Pod, command: str, out, values: list[str], timeout: float) -> tuple[list[str], int | str]:

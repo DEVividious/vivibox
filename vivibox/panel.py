@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import actions, code, gate, manual, providers, repo, supervisor, ui
+from . import actions, code, gate, manual, providers, repo, supervisor, timeline, ui
 from . import pod as pod_module
 from .config import ConfigError, config_dir, load_project
 from .plan import PlanError, parse_plan
@@ -475,7 +475,7 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
             "remove": True,
             "demo": open_,
             "demo_stop": demo_running,
-            "show_log": newest_log(task) is not None,
+            "show_log": True,  # the timeline, at least
         }
         return {action: allowed.get(action, False) for action in TASK_ACTIONS}
     allowed = {
@@ -495,7 +495,7 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
         # With a question too: the agent asks about the environment more often than the gate
         # recognises one, and once that is fixed the build is the answer.
         "verify_again": st.state is State.CHECKPOINT_BLOCKED,
-        "show_log": newest_log(task) is not None,
+        "show_log": True,  # the timeline, at least
         "watch": watchable(task, st, running),
         # Not again while one of them is under way. A task that stopped on a failure still has
         # its supervisor, and what it needs is a start, not a stop followed by a start.
@@ -656,6 +656,10 @@ def detail(
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
             feedback = read(handoff / "verify-feedback.md")
             body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]
+        if st.state is State.IMPLEMENT:
+            # A long turn is a still row; what happened lately says it is a turn, not a hang.
+            body += ["", "**Lately**", "", *(f"- `{line}`" for line in timeline.latest(task)), "",
+                     "`l` reads the whole timeline."]  # fmt: skip
         body += ["", "#### The plan", "", plan_body(read(task.meta / gate.ACCEPTED_PLAN))]
     else:
         events = task.events()[-8:]

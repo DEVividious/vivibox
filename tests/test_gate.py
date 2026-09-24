@@ -507,7 +507,12 @@ def test_the_log_is_written_while_the_command_runs(task):
     pod = WatchedPod(task)
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     assert pod.seen_mid_command.endswith("$ mvn -B verify\n[INFO] Compiling 12 files\n"), pod.seen_mid_command
-    assert result.log.read_text().endswith("[INFO] Compiling 12 files\n[INFO] BUILD SUCCESS\n[exit 0]\n\n")
+    text = result.log.read_text()
+    assert (
+        "# started " in text
+        and "\n$ mvn -B verify\n[INFO] Compiling 12 files\n[INFO] BUILD SUCCESS\n[exit 0 after " in text
+    )
+    assert text.endswith("# summary\n# mvn -B verify: ok after 0 s\n"), text
 
 
 def test_the_log_is_there_before_the_gate_container_comes_up(task):
@@ -741,3 +746,20 @@ def test_the_feedback_is_markdown_that_keeps_its_list_out_of_the_code_block():
     fences = [t.content for t in tokens if t.type == "fence"]
     assert len(fences) == 1 and "tsc: not found" in fences[0] and "No red evidence" not in fences[0]
     assert sum(t.type == "list_item_open" for t in tokens) == 3, "the command and the two files"
+
+
+def test_the_log_ends_with_a_summary_that_names_the_first_trouble_line(task):
+    """A pager opened at the end lands on the summary: each command's outcome and time, and for
+    the one that failed the line of its first trouble, a jump away."""
+    gate.accept_plan(task, ["true"])
+    pod = FakePod(fail={"npm test"}, output="ok\nFAIL src/a.test.js\n  Error: boom\n")
+    result = gate.run_gate(task, pod, ["npm run lint", "npm test", "npm run e2e"], [])
+    text = result.log.read_text()
+    lines = text.splitlines()
+    # The lint printed the same lines and passed: the trouble named is the failed command's own.
+    at = lines.index("FAIL src/a.test.js", lines.index("$ npm test")) + 1
+    assert text.endswith(
+        "# summary\n# npm run lint: ok after 0 s\n# npm test: failed after 0 s, first trouble at line "
+        f"{at}\n# npm run e2e: not run\n"
+    )
+    assert gate.first_trouble(["$ x", "fine", "[exit 0 after 1 s]"], "x") == 0

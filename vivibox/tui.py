@@ -31,7 +31,7 @@ from textual.widgets import (
     Static,
 )
 
-from . import actions, code, ide, keys, manual, providers, ui
+from . import actions, code, ide, keys, logs, manual, providers, ui
 from .config import ConfigError, config_dir, load_config, load_project
 from .dialogs import (  # noqa: F401
     HELP,
@@ -1099,11 +1099,18 @@ class Vivibox(App):
             subprocess.run(command)
 
     def action_show_log(self) -> None:
-        """The newest verification log, or the supervisor's, in your pager."""
+        """The timeline, a verification log, or the supervisor's, in your pager: one entry opens
+        at once, more are picked from."""
         task, st = self.selected()
-        if command := log_command(task, st, self.agent_running(task.id)):
-            with self.suspend():
-                subprocess.run(command)
+        found, start = logs.entries(task, st, self.agent_running(task.id))
+        if len(found) == 1:
+            self.read_log(found[0].command)
+            return
+        self.push_screen(logs.ChooseLog(found, start), lambda command: command and self.read_log(command))
+
+    def read_log(self, command: list[str]) -> None:
+        with self.suspend():
+            subprocess.run(command)
 
     def action_approve_risky(self) -> None:
         task, _ = self.selected()

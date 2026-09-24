@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import actions, context, gate, image, keys, manual, opencode, providers, repo, supervisor, ui
+from . import actions, context, gate, image, keys, manual, opencode, providers, repo, supervisor, timeline, ui
 from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
@@ -73,6 +73,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"Wrote {target}. Start a task with n in 'vivibox'.")
     if not (config_dir() / "config.toml").exists():
         print(f"There is no {config_dir() / 'config.toml'} yet; run vivibox to set it up.")
+    return 0
+
+
+def cmd_timeline(args: argparse.Namespace) -> int:
+    """What happened to a task, one line each, on your clock."""
+    task, _ = actions.load(args.task)
+    print(timeline.render(task), end="")
     return 0
 
 
@@ -624,6 +631,7 @@ def parser() -> argparse.ArgumentParser:
     approve.set_defaults(func=cmd_approve_risky)
 
     for name, func, text in (
+        ("timeline", cmd_timeline, "what happened to the task, one line each: states, turns, verifications"),
         ("start", cmd_start, "start the task, or a stopped one again from where it was"),
         ("resume", cmd_start, "the same as start"),
         ("stop", cmd_stop, "stop the task, keeping its work"),

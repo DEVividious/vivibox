@@ -8,7 +8,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.widgets import Static
 
-from . import ui
+from . import actions, ui
 from .dialogs import NO_PROJECTS
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
@@ -52,6 +52,20 @@ class TaskTable:
         if self.table is not None:  # a resize before the view is built has nothing to lay out
             self.set_columns()
             self.reload()
+
+    def take_history(self, live: set[str], known: list[str]) -> None:
+        """The finished tasks the list shows, and how many of each kind are out of sight."""
+        # A forgotten project's history goes with it: with no project, the view is as it starts.
+        kept = [e for e in actions.history() if e["id"] not in live and e.get("project") in known]
+        shown = lambda e: self.show_deleted if e.get("deleted") else self.show_done  # noqa: E731
+        self.done = [e for e in kept if shown(e)]
+        self.hidden = {}
+        for entry in kept:
+            if not shown(entry):
+                kind = "deleted" if entry.get("deleted") else "done"
+                self.hidden[kind] = self.hidden.get(kind, 0) + 1
+        self.has_done = any(not e.get("deleted") for e in kept)
+        self.has_deleted = any(e.get("deleted") for e in kept)
 
     def project_order(self, pairs: list) -> list[str]:
         """Projects with a task waiting for you first, then by name. A project a task belongs to
@@ -135,6 +149,8 @@ class TaskTable:
             table.add_row(*(cells.get(name, "") for name in self.columns), key=key)
         empty = self.query_one("#empty", Static)
         table.display, empty.display = bool(ids), not ids
+        if ids and self.focused is None:  # hiding the list took its focus; the arrows are for it
+            table.focus()
         if not ids:
             # Nothing left to show details of: the view is back to how it starts.
             self.panel.add_class("hidden")

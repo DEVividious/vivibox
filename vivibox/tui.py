@@ -288,17 +288,9 @@ class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, Wo
         }
         self.pairs = pairs = sorted(pairs, key=lambda p: self.views[p[1].id].rank)
         live = {st.id for _, st in pairs}
-        kept = [e for e in actions.history() if e["id"] not in live]
-        shown = lambda e: self.show_deleted if e.get("deleted") else self.show_done  # noqa: E731
-        self.done = [e for e in kept if shown(e)]
-        self.hidden = {}
-        for entry in kept:
-            if not shown(entry):
-                kind = "deleted" if entry.get("deleted") else "done"
-                self.hidden[kind] = self.hidden.get(kind, 0) + 1
-        self.has_done = any(not e.get("deleted") for e in kept)
-        self.has_deleted = any(e.get("deleted") for e in kept)
-        self.problems = {name: actions.project_problem(name) for name in projects()}
+        known = projects()
+        self.take_history(live, known)
+        self.problems = {name: actions.project_problem(name) for name in known}
         now = self.snapshot()
         if now == self.drawn:
             self.look_at_pods([st.id for _, st in pairs])

@@ -560,20 +560,63 @@ def test_a_task_number_twice_in_the_history_is_listed_once_as_the_newest(env):
     run(scenario)
 
 
-def test_a_forgotten_project_keeps_its_history_row_but_not_its_keys(env):
-    """The tasks of a project you forgot stay in the history under its name; there is no file to
-    edit, no repository to open and nothing to start a box in."""
+def test_a_forgotten_project_takes_its_history_with_it(env, tmp_path, monkeypatch):
+    """Forgetting every project leaves the view as it starts, even with the deleted tasks shown:
+    the history of a project that is gone is not what you came for, and H has nothing to toggle."""
     (env / "config" / "projects" / "demo.toml").unlink()
+    monkeypatch.chdir(tmp_path)
     actions.history_path().parent.mkdir(parents=True, exist_ok=True)
     kept = {"project": "gone", "cost": 0.1, "commit": "abc", "branch": "", "conflicts": [], "finished": now()}
-    actions.history_path().write_text(json.dumps({"id": "gone-1", "title": "Accepted", **kept}) + "\n")
+    actions.history_path().write_text(
+        json.dumps({"id": "gone-1", "title": "Accepted", **kept})
+        + "\n"
+        + json.dumps({"id": "gone-2", "title": "Thrown away", "deleted": "planning", **kept})
+        + "\n"
+    )
+    panel.save_view(show_deleted=True, show_done=True)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert "No projects yet" in str(app.query_one("#empty").render()) and not app.table.display
+        assert not app.check_action("toggle_deleted", ()) and not app.check_action("toggle_done", ())
+        assert "hidden" not in app.sub_title
+
+    run(scenario)
+
+
+def test_the_list_that_comes_back_takes_the_arrows(env):
+    """The list is hidden while there is nothing in it, which takes the focus away; when it is
+    back, the arrows move in it again instead of nowhere."""
+    project = env / "config" / "projects" / "demo.toml"
+    saved = project.read_text()
+
+    async def scenario(app, pilot):
+        assert app.focused is app.table
+        project.unlink()
+        app.reload()
+        await pilot.pause()
+        assert not app.table.display
+        project.write_text(saved)
+        app.reload()
+        await pilot.pause()
+        assert app.table.display and app.focused is app.table
+
+    run(scenario)
+
+
+def test_a_task_whose_project_is_gone_keeps_its_row_but_not_the_project_keys(env):
+    """A task outlives its project's file, so it is not orphaned off the screen; its project row has
+    no file to edit, no repository to open and nothing to start a box in."""
+    task = new_task("Task")
+    (env / "config" / "projects" / "demo.toml").unlink()
 
     async def scenario(app, pilot):
         app.reload()
         await pilot.pause()
         app.table.move_cursor(row=0)
         await pilot.pause()
-        assert rows(app) == ["gone", "gone-1"] and app.on_project_row()
+        assert rows(app) == ["demo", task.id] and app.on_project_row()
         for action in ("edit_project", "open_repo", "new_box"):
             assert not app.check_action(action, ()), action
 
@@ -1452,7 +1495,8 @@ def test_d_shows_with_a_task_and_h_with_a_finished_one(env):
         assert not app.check_action("toggle_done", ()), "nothing finished yet"
         actions.history_path().parent.mkdir(parents=True, exist_ok=True)
         actions.history_path().write_text(
-            '{"id": "demo-9", "title": "Old", "cost": 0, "finished": "2026-09-01T00:00:00+00:00"}\n'
+            '{"id": "demo-9", "project": "demo", "title": "Old", "cost": 0,'
+            ' "finished": "2026-09-01T00:00:00+00:00"}\n'
         )
         app.reload()
         assert app.check_action("toggle_done", ())

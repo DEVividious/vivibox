@@ -8,6 +8,9 @@ it is off by default and run only when asked for:
 
 The planner is a stronger model than the writer, as in a real setup (VIVIBOX_BEHAVIOURAL_PLANNER,
 VIVIBOX_BEHAVIOURAL_WRITER); the whole run stops past VIVIBOX_BEHAVIOURAL_LIMIT dollars.
+
+The last test is a measurement, not a check: what one writer session costs turn after turn.
+Run it alone with -k tokens_per_turn.
 """
 
 from __future__ import annotations
@@ -61,6 +64,12 @@ if [ "$REPO_TOKEN" != "good" ]; then
     exit 1
 fi
 """
+ONE_STEP = (
+    "Step {n} of {of}: add only {name}(a, b) to calc.py, with one unit test in test_calc.py. Run "
+    "the tests, commit, tick its item in /task/handoff/criteria.md, and end the turn. Leave the "
+    "other functions for later turns."
+)
+STEPS = ("subtract", "multiply", "divide", "power", "modulo")
 REPORT_ONLY = (
     "For this turn only: change no file and commit nothing. Write two sentences on how you would "
     "carry out the plan, as your final message, and end the turn."
@@ -246,5 +255,53 @@ def test_early_stop_a_report_costs_an_attempt_and_the_next_turn_commits(bench):
         sup.step()  # the turn that reads the feedback, without a prompt of ours
         spend(task)
         assert head(task.repo) != base, "and commits"
+    finally:
+        finish(task)
+
+
+def writer_turns(task) -> list[tuple[int, float, float]]:
+    """(tokens, cost, seconds) of every writer turn, in order; seconds from turn_started to turn."""
+    from datetime import datetime
+
+    rows, started = [], None
+    for e in task.events():
+        if e["type"] == "turn_started" and e["data"].get("role") == "writer":
+            started = datetime.fromisoformat(e["ts"])
+        elif e["type"] == "turn" and e["data"].get("role") == "writer":
+            took = (datetime.fromisoformat(e["ts"]) - started).total_seconds() if started else 0.0
+            rows.append((int(e["data"].get("tokens") or 0), float(e["data"].get("cost") or 0), took))
+    return rows
+
+
+def test_measure_tokens_per_turn_in_one_writer_session(bench):
+    """Whether a writer's turns grow with the conversation behind them: one session, five turns of
+    the same size, each adding one function. The table is the result; the assertions only say the
+    measurement is what it claims to be (five turns, one session, tokens reported)."""
+    project(bench, "growth", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
+    functions = ", ".join(f"{f}(a, b)" for f in STEPS)
+    goal = f"Add {functions} to calc.py, each with a unit test in test_calc.py"
+    task, sup = begin("growth", goal)
+    try:
+        st = drive(task, sup, {State.IMPLEMENT})
+        assert st.state is State.IMPLEMENT and (task.meta / gate.ACCEPTED_PLAN).exists()
+        session = ""
+        for n, name in enumerate(STEPS, 1):
+            supervisor.set_next_prompt(task, ONE_STEP.format(n=n, of=len(STEPS), name=name))
+            sup.step()  # one writer turn
+            spend(task)
+            st = task.read_state()
+            assert st.state is State.VERIFY, f"turn {n} ended in {st.state}: {st.problem or 'a question'}"
+            session = session or st.sessions["writer"]
+            assert st.sessions["writer"] == session, "the same conversation all along"
+            # Back to work without a verification: the gate is not what is measured here.
+            task.transition(State.IMPLEMENT, reason="measurement: verification skipped")
+        rows = writer_turns(task)
+        assert len(rows) == len(STEPS) and all(tokens for tokens, _, _ in rows)
+        print(f"\nwriter {WRITER}, one session, one function per turn:")
+        print("  turn      tokens      $    seconds")
+        for n, (tokens, cost, took) in enumerate(rows, 1):
+            print(f"  {n:>4}  {tokens:>10}  {cost:.3f}  {took:>7.0f}")
+        first, last = rows[0][0], rows[-1][0]
+        print(f"  turn {len(rows)} against turn 1: {last / first:.2f}x the tokens")
     finally:
         finish(task)

@@ -21,6 +21,13 @@ def test_a_message_carries_the_kind_of_event_never_what_was_said():
         "stopped on an error, see 'vivibox status demo-1'"
     )
     assert ntfy.terse("plan ready for review") == "plan ready for review"
+    assert ntfy.terse("work ready for your review in /srv/vivibox/demo-1/demo; 2 tests removed") == (
+        "work ready for your review"
+    ), "a path names the project, and says nothing on a phone"
+    assert (
+        ntfy.terse("agent turn failed (502); trying again in 30 s")
+        == "agent turn failed (502); trying again in 30 s"
+    )
 
 
 def test_a_decision_is_high_priority_and_a_retry_is_not():

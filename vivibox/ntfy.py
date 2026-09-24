@@ -7,6 +7,7 @@ what the agent or the build said: "question from the agent", not the question.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import urllib.error
@@ -32,9 +33,15 @@ def post(url: str, headers: dict[str, str], body: bytes) -> None:
         pass
 
 
+# Where a message stops saying what happened and starts quoting: a colon, or a path.
+QUOTED = re.compile(r": | in /")
+
+
 def terse(message: str) -> str:
-    """The message up to its first colon: the kind of event, without what came after it."""
-    return message.split(": ", 1)[0]
+    """The message up to its first colon or path: the kind of event, without what came after it.
+    "plan ready for review" and "work ready for your review" stay as they are; a question, an
+    error, or where the review copy is do not go along."""
+    return QUOTED.split(message, 1)[0]
 
 
 def said(text: str) -> None:

@@ -495,7 +495,7 @@ class Supervisor:
         except Exception as e:  # the work is done either way; the review copy is a convenience
             self.task.event("review_prepare_failed", error=str(e)[:500])
             copy = f"the review copy failed ({e}), try: vivibox review {self.task.id}"
-            return f"ready for your review{gone}; {copy}"
+            return f"work ready for your review{gone}; {copy}"
         if path is None:
-            return f"ready for your review{gone}: vivibox review {self.task.id}"
-        return f"ready for your review in {path}{gone}"
+            return f"work ready for your review{gone}: vivibox review {self.task.id}"
+        return f"work ready for your review in {path}{gone}"

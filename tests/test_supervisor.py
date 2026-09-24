@@ -213,7 +213,7 @@ def test_passing_gate_reaches_final_checkpoint(task):
     sup, notes = make(task, FakeHarness(task), results=[gate_result(True)])
     sup.step()
     assert task.read_state().state is State.CHECKPOINT_FINAL
-    assert notes == [f"ready for your review: vivibox review {task.id}"]
+    assert notes == [f"work ready for your review: vivibox review {task.id}"]
 
 
 def test_final_checkpoint_prepares_the_review(task):
@@ -222,7 +222,7 @@ def test_final_checkpoint_prepares_the_review(task):
     sup, notes = make(task, FakeHarness(task), results=[gate_result(True)])
     sup.ports.prepare_review = lambda: Path("/srv/vivibox/demo-1/demo")
     sup.step()
-    assert notes == ["ready for your review in /srv/vivibox/demo-1/demo"]
+    assert notes == ["work ready for your review in /srv/vivibox/demo-1/demo"]
 
 
 def test_failed_review_preparation_still_reaches_the_checkpoint(task):

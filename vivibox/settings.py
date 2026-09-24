@@ -20,16 +20,10 @@ from textual.widgets.option_list import Option
 from . import actions, configfile, ide, ui
 from . import init as project_init
 from .config import ENV_NAME, JAVA, RESERVED_ENV, ConfigError, config_dir, load_config, load_project
-from .dialogs import (
-    ChooseEditor,
-    ChooseModel,
-    ChooseVerify,
-    Dialog,
-    EdgeTextArea,
-    ManageProviders,
-    provider_rows,
-)
+from .dialogs import ChooseEditor, ChooseModel, ChooseVerify
 from .panel import edit_in_editor
+from .providers_ui import ManageProviders, provider_rows
+from .widgets import Dialog, EdgeTextArea
 
 # A row: what it is called, what it is now, and the key Enter acts on; None for a heading or a
 # value that is only shown.

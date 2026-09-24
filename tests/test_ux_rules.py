@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from test_tui import at_plan_checkpoint, implementing, new_task, rows
 
-from vivibox import actions, box, manual, tui, ui
+from vivibox import actions, box, dialogs, manual, tui, ui
 from vivibox.states import State
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
@@ -140,7 +140,7 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
 def test_help_fits_in_eighty_columns_without_wrapping():
     """The help is one column so it never wraps (§3); a line longer than the modal wraps after all,
     and a wrapped line can read as something else ("no agent, for you to work in")."""
-    for line in tui.HELP.splitlines():
+    for line in dialogs.HELP.splitlines():
         assert len(line) <= 78, f"{len(line)} columns: {line!r}"
 
 

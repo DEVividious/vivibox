@@ -8,7 +8,7 @@ from conftest import make_repo
 from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
-from vivibox import actions, box, dialogs, gate, settings, tui, ui
+from vivibox import actions, box, browse, dialogs, gate, providers_ui, settings, tui, ui, widgets
 from vivibox.cli import main
 from vivibox.config import ConfigError, Role, load_config, load_project
 from vivibox.pod import Listener
@@ -106,7 +106,7 @@ def test_the_first_plan_shows_the_verification_it_sets_before_you_accept(env):
         await pilot.pause()
         await pilot.press("a")
         await pilot.pause()
-        assert isinstance(app.screen, tui.Confirm)
+        assert isinstance(app.screen, widgets.Confirm)
         assert "npm ci && npm test" in app.screen.question and "clicker" in app.screen.question
         await pilot.press("enter")
         await pilot.pause()
@@ -130,7 +130,7 @@ def test_a_plan_without_a_build_is_accepted_without_a_word_about_the_project(env
         await pilot.pause()
         await pilot.press("a")
         await pilot.pause()
-        assert not isinstance(app.screen, tui.Confirm)
+        assert not isinstance(app.screen, widgets.Confirm)
         assert task.read_state().state is State.IMPLEMENT
 
     run(scenario)
@@ -160,7 +160,7 @@ def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch)
         assert isinstance(app.screen, settings.ProjectSettings), "the project's screen: verification first"
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseVerify)
+        assert isinstance(app.screen, dialogs.ChooseVerify)
         shown = [str(app.screen.query_one(OptionList).get_option_at_index(i).prompt)
                  for i in range(app.screen.query_one(OptionList).option_count)]  # fmt: skip
         assert "npm ci && npm test" in shown[0] and "package.json" in shown[0]
@@ -212,7 +212,7 @@ def test_the_new_project_dialog_says_where_the_command_comes_from_and_lets_you_p
         assert "bash mvnw -B verify" in shown and "from mvnw" in shown
         app.screen.query_one("#change").press()
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseVerify)
+        assert isinstance(app.screen, dialogs.ChooseVerify)
         options = app.screen.query_one(OptionList)
         labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
         assert "ci.yml" in labels[1] and not any("edit the project file" in s for s in labels), "no file yet"
@@ -234,7 +234,7 @@ def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeyp
     from vivibox.config import load_project
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
+    monkeypatch.setattr(browse, "browse_start", lambda: tmp_path)
 
     def current(app):
         options = app.screen.query_one(OptionList)
@@ -272,7 +272,7 @@ def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeyp
         await pilot.pause()
         await pilot.press("enter")  # the project's screen: its first row is the verification
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseVerify)
+        assert isinstance(app.screen, dialogs.ChooseVerify)
         assert "make check" in current(app) and "← now" in current(app), "a command of your own, too"
         await pilot.press("enter")
         await pilot.pause()
@@ -286,7 +286,7 @@ def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monke
 
     fresh = tmp_path / "notes"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
+    monkeypatch.setattr(browse, "browse_start", lambda: tmp_path)
 
     async def scenario(app, pilot):
         await pilot.press("i")
@@ -481,7 +481,7 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
         assert app.check_action("remove", ()) and not app.check_action("accept", ())
         await pilot.press("x")
         await pilot.pause()
-        assert isinstance(app.screen, tui.DeleteTask) and app.screen.focused.id == "no", "Cancel first"
+        assert isinstance(app.screen, dialogs.DeleteTask) and app.screen.focused.id == "no", "Cancel first"
         await pilot.press("left", "enter")  # Delete
         await pilot.pause()
         assert rows(app) == ["demo", "demo-1"] and actions.history() == []
@@ -536,7 +536,7 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
 
     fresh = tmp_path / "clicker"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: tmp_path)
+    monkeypatch.setattr(browse, "browse_start", lambda: tmp_path)
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
 
     async def scenario(app, pilot):
@@ -545,12 +545,12 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
         assert app.screen.where == tmp_path, "where you started vivibox, until you browse elsewhere"
         app.screen.query_one("#browse").press()
         await pilot.pause()
-        assert isinstance(app.screen, tui.Browse)
+        assert isinstance(app.screen, browse.Browse)
         app.screen.query_one("#new-folder").press()  # a project from scratch: no folder yet
         await pilot.pause()
         await pilot.press(*"clicker", "enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.NewProject) and app.screen.where == fresh and fresh.is_dir()
+        assert isinstance(app.screen, dialogs.NewProject) and app.screen.where == fresh and fresh.is_dir()
         assert app.screen.query_one("#name", Input).value == "clicker"
         app.screen.query_one("#create").press()
         await pilot.pause()
@@ -620,7 +620,7 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
         assert not app.check_action("details", ()) and not app.check_action("toggle_done", ()), "nor d and h"
         await pilot.press("n")
         await pilot.pause()
-        assert not isinstance(app.screen, tui.NewTask)
+        assert not isinstance(app.screen, dialogs.NewTask)
         (env / "config" / "projects" / "demo.toml").write_text(
             f'repo = "{env / "repo"}"\nverify = ["true"]\n'
         )
@@ -975,12 +975,12 @@ def test_m_puts_one_role_on_another_model_for_this_task_only(env):
         app.reload()
         await pilot.press("m")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseRole)
+        assert isinstance(app.screen, dialogs.ChooseRole)
         assert [r[0] for r in app.screen.rows] == ["planner", "writer"], "both roles, named"
 
         await pilot.press("down", "enter")  # writer
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseModel)
+        assert isinstance(app.screen, dialogs.ChooseModel)
         # A list of what you can run, not a field to type a model id into.
         assert app.screen.offered == [
             (OC, "m"),
@@ -1249,7 +1249,7 @@ def test_sending_work_back_can_add_criteria(env):
         app.reload()
         await pilot.press("r")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ReplyWithCriteria)
+        assert isinstance(app.screen, dialogs.ReplyWithCriteria)
         app.screen.query_one("#comment", TextArea).text = "Nothing happens on a fresh page."
         app.screen.query_one("#criteria", TextArea).text = "works before a load\n\nkeeps the zoom\n"
         await pilot.press("ctrl+s")
@@ -1285,16 +1285,16 @@ def test_a_provider_imported_from_opencode_json_is_offered_to_the_writer(env, mo
         await pilot.pause()
         app.screen.query_one("#import").press()
         await pilot.pause()
-        assert isinstance(app.screen, tui.ImportSource)
+        assert isinstance(app.screen, providers_ui.ImportSource)
         await pilot.press("enter")  # the configuration found where opencode keeps it
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseImport), "you see what comes before it comes"
+        assert isinstance(app.screen, providers_ui.ChooseImport), "you see what comes before it comes"
         assert keys.list_keys() == {}, "nothing kept yet"
         app.screen.query_one("#import").press()
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert isinstance(app.screen, tui.ManageProviders)
+        assert isinstance(app.screen, providers_ui.ManageProviders)
         await pilot.press("escape", "escape")  # Providers & MCP, then the settings
         await pilot.pause()
         await pilot.press("n")
@@ -1387,7 +1387,7 @@ def test_n_without_a_provider_says_to_press_k(env):
         app.available = {}
         await pilot.press("n")
         await pilot.pause()
-        assert not isinstance(app.screen, tui.NewTask)
+        assert not isinstance(app.screen, dialogs.NewTask)
         assert any("press k" in str(n.message) for n in app._notifications)
 
     run(scenario)
@@ -1414,17 +1414,22 @@ CATALOG = [("anthropic", "Anthropic"), ("openai", "OpenAI"), ("deepseek", "DeepS
 
 
 def test_providers_are_found_by_name_or_id_and_a_typed_name_is_offered_too():
-    assert [pid for pid, _ in tui.find_providers(CATALOG, "")] == ["anthropic", "openai", "deepseek", "azure"]
-    assert [pid for pid, _ in tui.find_providers(CATALOG, "SEEK")] == ["deepseek", "seek"]
-    assert [pid for pid, _ in tui.find_providers(CATALOG, "deepseek")] == ["deepseek"], (
+    assert [pid for pid, _ in providers_ui.find_providers(CATALOG, "")] == [
+        "anthropic",
+        "openai",
+        "deepseek",
+        "azure",
+    ]
+    assert [pid for pid, _ in providers_ui.find_providers(CATALOG, "SEEK")] == ["deepseek", "seek"]
+    assert [pid for pid, _ in providers_ui.find_providers(CATALOG, "deepseek")] == ["deepseek"], (
         "no second of the same"
     )
-    assert tui.find_providers([], "acme") == [("acme", "use “acme” as the provider's name")]
+    assert providers_ui.find_providers([], "acme") == [("acme", "use “acme” as the provider's name")]
 
 
 def test_arrows_in_the_search_walk_the_list(env):
     async def scenario(app, pilot):
-        app.push_screen(tui.AddProvider(CATALOG))
+        app.push_screen(providers_ui.AddProvider(CATALOG))
         await pilot.pause()
         assert app.screen.picked() == "anthropic"
         await pilot.press("down", "down")
@@ -1463,7 +1468,7 @@ def test_an_import_lists_what_it_brings_and_you_decide_on_what_you_have(env, tmp
         await pilot.press("enter")  # the configuration found where opencode keeps it
         await pilot.pause()
         screen = app.screen
-        assert isinstance(screen, tui.ChooseImport)
+        assert isinstance(screen, providers_ui.ChooseImport)
 
         def rows(kind):
             found = screen.query_one(f"#found-{kind}", SelectionList)
@@ -1493,12 +1498,12 @@ def test_a_file_is_judged_before_you_pick_it(env, tmp_path):
     other.write_text('{"name": "x"}')
     broken = tmp_path / "broken.json"
     broken.write_text('{"provider": {')
-    assert tui.judge(good) == (True, "opencode configuration: 1 provider, 1 MCP server")
-    assert tui.judge(other) == (
+    assert browse.judge(good) == (True, "opencode configuration: 1 provider, 1 MCP server")
+    assert browse.judge(other) == (
         False,
         "JSON, but not an opencode configuration with providers or MCP servers",
     )
-    ok, said = tui.judge(broken)
+    ok, said = browse.judge(broken)
     assert not ok and said.startswith("broken: not JSON")
 
 
@@ -1508,7 +1513,8 @@ def test_the_browser_shows_only_what_can_be_picked(tmp_path):
     for name in ("src", ".config", "node_modules", ".git"):
         (tmp_path / name).mkdir()
     shown = {
-        mode: {p.name for p in tmp_path.iterdir() if tui.shows(mode, p)} for mode in ("json", "folder", "any")
+        mode: {p.name for p in tmp_path.iterdir() if browse.shows(mode, p)}
+        for mode in ("json", "folder", "any")
     }
     assert shown["json"] == {"a.json", "b.jsonc", "src", ".config"}
     assert shown["folder"] == {"src", ".config"}
@@ -1525,10 +1531,10 @@ def test_browsing_picks_an_opencode_configuration_and_not_another_json(env, tmp_
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.Browse("json", "Find it"), picked.append)
+        app.push_screen(browse.Browse("json", "Find it"), picked.append)
         await pilot.pause()
         browser = app.screen
-        tree = browser.query_one("#tree", tui.PathTree)
+        tree = browser.query_one("#tree", browse.PathTree)
         browser.file_picked(DirectoryTree.FileSelected(tree.root, other))
         await pilot.pause()
         assert app.screen is browser, "not an opencode configuration: not picked"
@@ -1581,7 +1587,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         assert any("tasks_dir" in row for row in shown) and any("network pool" in row for row in shown)
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ManageProviders), "the first row is the old k"
+        assert isinstance(app.screen, providers_ui.ManageProviders), "the first row is the old k"
         await pilot.press("escape")
         await pilot.pause()
         # The writer's default model.
@@ -1589,7 +1595,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         app.screen.query_one("#rows", OptionList).highlighted = writer
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseModel)
+        assert isinstance(app.screen, dialogs.ChooseModel)
         await pilot.press("down", "enter")  # the first of deepseek's
         await pilot.pause()
         text = config.read_text()
@@ -1602,7 +1608,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         app.screen.query_one("#rows", OptionList).highlighted = editor
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseEditor)
+        assert isinstance(app.screen, dialogs.ChooseEditor)
         await pilot.press("enter")
         await pilot.pause()
         text = config.read_text()
@@ -1690,7 +1696,7 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         assert load_project("demo").pass_env == ["NPM_TOKEN", "REPO_TOKEN"]
         assert "NPM_TOKEN, REPO_TOKEN" in labels(app)[row]
         await go_to(app, pilot, "editor for o")
-        assert isinstance(app.screen, tui.ChooseEditor)
+        assert isinstance(app.screen, dialogs.ChooseEditor)
         await pilot.press("down", "enter")  # after "the one in config.toml": VS Code
         await pilot.pause()
         assert load_project("demo").ide == "code {path}"
@@ -1760,13 +1766,13 @@ def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env
         await pilot.press("enter")  # the settings' first row: Providers & MCP
         await pilot.pause()
         screen = app.screen
-        assert isinstance(screen, tui.ManageProviders)
+        assert isinstance(screen, providers_ui.ManageProviders)
         assert [(r[1], r[3]) for r in screen.rows] == [("deepseek", True), ("openai", True), ("serena", True)]
         assert "auto: on for a project with 100+ source files" in screen.rows[2][2]
         screen.query_one("#manage").press()
         await pilot.pause()
         manage = app.screen
-        assert isinstance(manage, tui.ManageItems)
+        assert isinstance(manage, providers_ui.ManageItems)
         assert [r[1] for r in manage.rows] == ["deepseek", "openai"], "Serena has its mode, not a tick"
         manage.query_one("#items", SelectionList).deselect(1)  # openai off
         manage.query_one("#serena-mode", Select).value = "off"
@@ -1825,13 +1831,15 @@ def test_a_file_found_by_browsing_goes_on_to_the_import(env, tmp_path):
     chosen = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.ImportSource([]), chosen.append)
+        app.push_screen(providers_ui.ImportSource([]), chosen.append)
         await pilot.pause()
         await pilot.press("enter")  # Browse…
         await pilot.pause()
         browser = app.screen
-        assert isinstance(browser, tui.Browse)
-        browser.post_message(DirectoryTree.FileSelected(browser.query_one("#tree", tui.PathTree).root, good))
+        assert isinstance(browser, browse.Browse)
+        browser.post_message(
+            DirectoryTree.FileSelected(browser.query_one("#tree", browse.PathTree).root, good)
+        )
         await pilot.pause()
         await pilot.pause()
 
@@ -1846,7 +1854,7 @@ def test_the_import_from_adding_a_provider_comes_back_with_what_came(env, tmp_pa
     added = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.AddProvider([]), added.append)
+        app.push_screen(providers_ui.AddProvider([]), added.append)
         await pilot.pause()
         app.screen.query_one("#import").press()
         await pilot.pause()
@@ -1932,7 +1940,7 @@ def test_the_new_task_dialog_shows_every_field_at_once(env, size):
         await pilot.pause()
         await pilot.pause()
         dialog = app.screen
-        assert dialog.query_one(tui.Fields).max_scroll_y == 0, "nothing to scroll: every field is in view"
+        assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "nothing to scroll: every field is in view"
         assert dialog.query_one(".dialog").region.width <= size[0], "the dialog fits the terminal"
         shown = screen_text(app)
         for word in ("Project", "Kind", "Task", "Attach…", "@path", "Plan", "Planner", "Writer", "Create",
@@ -1957,7 +1965,7 @@ def test_lists_in_a_group_stand_a_row_apart_unless_the_terminal_is_short(env, si
         dialog = app.screen
         planner, writer = dialog.query_one("#role-planner").region, dialog.query_one("#role-writer").region
         assert writer.y - planner.y == apart, f"Planner at {planner.y}, Writer at {writer.y}"
-        assert dialog.query_one(tui.Fields).max_scroll_y == 0, "still nothing to scroll"
+        assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "still nothing to scroll"
         assert dialog.query_one("#goal").region.height >= 3
 
     run(scenario, size=size)
@@ -1995,7 +2003,7 @@ def test_the_project_list_ends_with_setting_up_another_project(env):
         await pilot.press("enter")
         await pilot.pause()
         assert "+ set up another project…" in screen_text(app)
-        project.value = tui.NEW_PROJECT
+        project.value = dialogs.NEW_PROJECT
         await pilot.pause()
         assert isinstance(app.screen, NewProject)
 
@@ -2155,7 +2163,7 @@ def test_S_stops_by_force_even_while_a_stop_hangs(env, monkeypatch):
         assert app.check_action("force_stop", ()), "and S is the way out of it"
         await pilot.press("S")
         await pilot.pause()
-        assert isinstance(app.screen, tui.Confirm), "asked once, like s"
+        assert isinstance(app.screen, widgets.Confirm), "asked once, like s"
         await pilot.press("enter")
         for _ in range(20):
             await pilot.pause(0.05)
@@ -2273,7 +2281,7 @@ def test_deleting_a_task_says_what_goes_and_what_stays_and_cancel_comes_first(en
         await pilot.press("x")
         await pilot.pause()
         dialog = app.screen
-        assert isinstance(dialog, tui.DeleteTask)
+        assert isinstance(dialog, dialogs.DeleteTask)
         said = " ".join(str(w.render()) for w in dialog.query(Label))
         assert "Delete demo-1?" in said and "Try the other approach" in said and "$0.20 + $0.00" in said
         assert "Deleted:" in said and "none of its work reaches your repository" in said
@@ -2297,7 +2305,7 @@ def test_an_imported_serena_is_greyed_and_says_it_comes_with_vivibox(env, tmp_pa
     path = tmp_path / "opencode.json"
     path.write_text('{"mcp": {"serena": {"type": "local", "command": ["serena", "start-mcp-server"]}}}')
     (found,) = providers.read_opencode(path, env={}).found
-    label = tui.import_label(found)
+    label = providers_ui.import_label(found)
     assert label.startswith("[dim]") and "comes with vivibox; set its mode in Manage" in label
 
 
@@ -2310,9 +2318,9 @@ def test_a_folder_is_described_before_you_pick_it(env, tmp_path):
     loose.mkdir()
     (loose / "notes.txt").write_text("x")
     demo = load_project("demo").repo
-    assert tui.folder_verdict(empty) == (True, "an empty folder: a new project starts here")
-    assert tui.folder_verdict(loose) == (True, "a folder without git: a repository starts here")
-    assert tui.folder_verdict(demo) == (True, "already the project demo")
+    assert browse.folder_verdict(empty) == (True, "an empty folder: a new project starts here")
+    assert browse.folder_verdict(loose) == (True, "a folder without git: a repository starts here")
+    assert browse.folder_verdict(demo) == (True, "already the project demo")
 
 
 def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypatch):
@@ -2328,7 +2336,7 @@ def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypat
         dialog = app.screen
         dialog.query_one("#attach").press()
         await pilot.pause()
-        assert isinstance(app.screen, tui.Browse) and app.screen.mode == "any"
+        assert isinstance(app.screen, browse.Browse) and app.screen.mode == "any"
         app.screen.dismiss(ticket)
         await pilot.pause()
         assert dialog.query_one("#goal").text == f"Fix it, see @{ticket} "
@@ -2339,13 +2347,13 @@ def test_attach_puts_the_picked_file_in_the_description(env, tmp_path, monkeypat
 def test_the_folder_browser_opens_with_right_and_picks_with_enter(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work" / "shop").mkdir(parents=True)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
+    monkeypatch.setattr(browse, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        app.push_screen(browse.Browse("folder", "Pick"), picked.append)
         await pilot.pause()
-        tree = app.screen.query_one("#tree", tui.PathTree)
+        tree = app.screen.query_one("#tree", browse.PathTree)
         await pilot.press("down")  # work
         await pilot.pause()
         assert tree.cursor_node.data.path == home / "work"
@@ -2364,14 +2372,14 @@ def test_a_click_marks_a_folder_and_select_or_new_folder_act_on_it(env, tmp_path
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
     (home / "zoo").mkdir()
-    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
+    monkeypatch.setattr(browse, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        app.push_screen(browse.Browse("folder", "Pick"), picked.append)
         await pilot.pause()
         browser = app.screen
-        tree = browser.query_one("#tree", tui.PathTree)
+        tree = browser.query_one("#tree", browse.PathTree)
         await pilot.click("#tree", offset=(8, 1))  # the "work" line
         await pilot.pause()
         assert app.screen is browser, "a click picks nothing"
@@ -2388,11 +2396,11 @@ def test_a_click_marks_a_folder_and_select_or_new_folder_act_on_it(env, tmp_path
 def test_select_picks_the_marked_folder(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
+    monkeypatch.setattr(browse, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        app.push_screen(browse.Browse("folder", "Pick"), picked.append)
         await pilot.pause()
         await pilot.click("#tree", offset=(8, 1))
         await pilot.pause()
@@ -2406,11 +2414,11 @@ def test_select_picks_the_marked_folder(env, tmp_path, monkeypatch):
 def test_a_double_click_picks(env, tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
-    monkeypatch.setattr(dialogs, "browse_start", lambda: home)
+    monkeypatch.setattr(browse, "browse_start", lambda: home)
     picked = []
 
     async def scenario(app, pilot):
-        app.push_screen(tui.Browse("folder", "Pick"), picked.append)
+        app.push_screen(browse.Browse("folder", "Pick"), picked.append)
         await pilot.pause()
         await pilot.click("#tree", offset=(8, 1), times=2)
         await pilot.pause()
@@ -2458,7 +2466,7 @@ def test_only_a_destructive_question_has_a_red_button(env, monkeypatch):
         await pilot.press("s")
         assert app.screen.query_one("#yes").variant == "error", "stopping interrupts work"
         await pilot.press("escape")
-        app.push_screen(tui.Confirm("Accept the work?", "Accept"))
+        app.push_screen(widgets.Confirm("Accept the work?", "Accept"))
         await pilot.pause()
         assert app.screen.query_one("#yes").variant == "primary", "accepting is not a warning"
 
@@ -2474,12 +2482,12 @@ def test_an_empty_reply_stays_open_and_says_so(env):
         await pilot.press("r")
         await pilot.press("ctrl+s")
         await pilot.pause()
-        assert isinstance(app.screen, tui.Reply), "nothing was sent, so nothing closed"
+        assert isinstance(app.screen, dialogs.Reply), "nothing was sent, so nothing closed"
         assert any("Write a comment" in str(n.message) for n in app._notifications)
         assert task.read_state().state is State.CHECKPOINT_PLAN
         await pilot.press("escape")
         await pilot.pause()
-        assert not isinstance(app.screen, tui.Reply), "Escape still leaves"
+        assert not isinstance(app.screen, dialogs.Reply), "Escape still leaves"
 
     run(scenario)
 
@@ -2696,7 +2704,7 @@ def test_w_asks_which_conversation_when_the_task_has_two(env, monkeypatch):
         await pilot.pause()
         await pilot.press("w")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseSession)
+        assert isinstance(app.screen, dialogs.ChooseSession)
         options = app.screen.query_one(OptionList)
         shown = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
         assert "writer" in shown[0] and "at work" in shown[0], "the one at work first"
@@ -3035,7 +3043,7 @@ def test_n_on_a_project_row_starts_a_task_in_that_project(env):
         assert app.selected_project() == "shop"
         await pilot.press("n")
         await pilot.pause()
-        assert isinstance(app.screen, tui.NewTask)
+        assert isinstance(app.screen, dialogs.NewTask)
         assert app.screen.query_one("#project", Select).value == "shop"
 
     run(scenario)
@@ -3052,7 +3060,7 @@ def test_a_project_without_tasks_can_be_forgotten_from_its_row(env):
         assert app.check_action("forget_project", ())
         await pilot.press("x")
         await pilot.pause()
-        assert isinstance(app.screen, tui.DeleteTask)
+        assert isinstance(app.screen, dialogs.DeleteTask)
         await pilot.press("left", "enter")  # Cancel has the focus; left is Forget
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -3115,7 +3123,7 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
         assert shown.index("?") == shown.index("q") - 1
         await pilot.press("question_mark")
         await pilot.pause()
-        assert isinstance(app.screen, tui.Help)
+        assert isinstance(app.screen, dialogs.Help)
         text = str(app.screen.query_one("#help").render())
         for key, what in (
             ("i", "set up a project"),
@@ -3344,7 +3352,7 @@ def test_forgetting_a_finished_task_says_the_archive_goes_too(env):
         app.table.move_cursor(row=rows(app).index("demo-0"))
         await pilot.press("x")
         await pilot.pause()
-        assert isinstance(app.screen, tui.DeleteTask)
+        assert isinstance(app.screen, dialogs.DeleteTask)
         assert "archive" in str(app.screen.goes)
         await pilot.press("left", "enter")
         await pilot.pause()
@@ -3364,7 +3372,7 @@ def test_the_view_offers_to_start_the_tasks_that_were_running_before(env, monkey
 
     async def scenario(app, pilot):
         await pilot.pause()
-        assert isinstance(app.screen, tui.Confirm), "asked once, on start"
+        assert isinstance(app.screen, widgets.Confirm), "asked once, on start"
         assert dead.id in app.screen.question and parked.id not in app.screen.question
         assert draft.id not in app.screen.question
         await pilot.press("enter")
@@ -3380,7 +3388,7 @@ def test_the_view_does_not_ask_when_nothing_was_running(env):
 
     async def scenario(app, pilot):
         await pilot.pause()
-        assert not isinstance(app.screen, tui.Confirm)
+        assert not isinstance(app.screen, widgets.Confirm)
 
     run(scenario)
 
@@ -3528,8 +3536,6 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
 
     from textual.screen import ModalScreen
 
-    from vivibox import dialogs
-
     fresh_project(env, "notes")
     (env / "notes" / "package.json").write_text("{}")
 
@@ -3543,13 +3549,14 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         assert app.screen.styles.align == ("center", "middle"), "the project's screen from e, in the middle"
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, tui.ChooseVerify)
+        assert isinstance(app.screen, dialogs.ChooseVerify)
         assert app.screen.styles.align == ("center", "middle"), "the picker from it, in the middle"
 
     run(scenario)
     named = [
         name
-        for name, cls in inspect.getmembers(dialogs, inspect.isclass)
-        if issubclass(cls, ModalScreen) and cls.__module__ == dialogs.__name__ and name in tui.Vivibox.CSS
+        for module in (dialogs, browse, providers_ui, widgets, settings)
+        for name, cls in inspect.getmembers(module, inspect.isclass)
+        if issubclass(cls, ModalScreen) and cls.__module__ == module.__name__ and name in tui.Vivibox.CSS
     ]
     assert not named, f"dialogs named in the CSS instead of one rule on ModalScreen: {named}"

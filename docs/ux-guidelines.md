@@ -1,7 +1,7 @@
 # UX guidelines
 
 Read this before changing anything a person sees: `vivibox/tui.py`, `vivibox/panel.py`,
-`vivibox/dialogs.py`, `vivibox/ui.py`,
+`vivibox/dialogs.py`, `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/ui.py`,
 `vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.

@@ -32,52 +32,21 @@ from textual.widgets import (
 )
 
 from . import actions, code, ide, keys, logs, manual, providers, ui
+from .browse import shown_path
 from .config import ConfigError, config_dir, load_config, load_project
-from .dialogs import (  # noqa: F401
-    HELP,
-    MENTION_AT_CURSOR,
+from .dialogs import (
     NEW_PROJECT,
     NO_PROJECTS,
-    NOTHING_TO_SEND,
-    SERENA_MODE_SAID,
-    SKIPPED,
-    STATUS,
-    AddProvider,
-    Browse,
-    ChooseEditor,
-    ChooseImport,
     ChooseModel,
     ChooseRole,
     ChooseSession,
-    ChooseVerify,
     CommitWork,
-    Confirm,
     DeleteTask,
-    DescriptionArea,
-    Dialog,
-    EdgeTextArea,
-    Fields,
     Help,
-    ImportSource,
-    ManageItems,
-    ManageProviders,
-    NameFolder,
     NewProject,
     NewTask,
-    PathTree,
     Reply,
     ReplyWithCriteria,
-    browse_start,
-    find_providers,
-    folder_verdict,
-    import_label,
-    is_repository,
-    judge,
-    leave_at_edge,
-    provider_rows,
-    row_label,
-    shown_path,
-    shows,
 )
 from .panel import (  # noqa: F401
     CODE_CHANGED,
@@ -127,9 +96,14 @@ from .panel import (  # noqa: F401
     watchable,
 )
 from .plan import PlanError, parse_plan
+from .providers_ui import (
+    ChooseImport,
+    ImportSource,
+)
 from .settings import ProjectSettings, Settings
 from .states import State
 from .task import Task, TaskState, list_tasks
+from .widgets import Confirm
 
 
 class LiveFooter(Footer):

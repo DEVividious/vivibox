@@ -53,6 +53,9 @@ class TaskState:
     # A box: the project's pod with no plan and no agent, for you to work in by hand. Its work
     # comes back the way a task's does.
     box: bool = False
+    # Rounds of review so far, and how the reviewer works on this task ("" for config.toml's mode).
+    reviews: int = 0
+    review_mode: str = ""
 
 
 class Task:
@@ -143,6 +146,11 @@ class Task:
         st = self.read_state()
         st.awaiting_plan = waiting
         st.updated = now()
+        self._write_state(st)
+
+    def set_reviews(self, reviews: int) -> None:
+        st = self.read_state()
+        st.reviews = reviews
         self._write_state(st)
 
     def set_goal(self, goal: str) -> None:

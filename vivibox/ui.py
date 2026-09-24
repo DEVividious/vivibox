@@ -78,12 +78,14 @@ class Spend:
 
     planning: float = 0.0
     implementation: float = 0.0
+    # The reviewer's turns: another prompt and another model, so a figure of its own.
+    review: float = 0.0
     # False for a box, which never plans: one number, not a split whose left side is always zero.
     split: bool = True
 
     @property
     def total(self) -> float:
-        return round(self.planning + self.implementation, 6)
+        return round(self.planning + self.implementation + self.review, 6)
 
     def __bool__(self) -> bool:
         return bool(self.planning or self.implementation)
@@ -91,7 +93,8 @@ class Spend:
     def __str__(self) -> str:
         if not self.split:
             return f"${self.total:.2f}"
-        return f"${self.planning:.2f} + ${self.implementation:.2f}"
+        text = f"${self.planning:.2f} + ${self.implementation:.2f}"
+        return f"{text} + ${self.review:.2f}" if self.review else text
 
 
 def finished_cost(entry: dict) -> str:
@@ -100,19 +103,22 @@ def finished_cost(entry: dict) -> str:
     total = entry.get("cost", 0)
     if "planning" not in entry:
         return f"${total:.2f}"
-    return str(Spend(entry["planning"], round(total - entry["planning"], 6)))
+    review = entry.get("review", 0)
+    return str(Spend(entry["planning"], round(total - entry["planning"] - review, 6), review))
 
 
 def cost(task: Task) -> Spend:
     """What vivibox itself spent on the task, from its turn events. For a box that is only the
     turn that works out how to run the app; what you run in it by hand is on your own keys."""
-    planning = implementation = 0.0
+    planning = implementation = review = 0.0
     for event in task.events():
         if event["type"] != "turn":
             continue
         spent = event["data"].get("cost") or 0
         if event["data"].get("state") in PLANNING_STATES:
             planning += spent
+        elif event["data"].get("state") == str(State.REVIEW):
+            review += spent
         else:
             implementation += spent
     st = task.read_state()
@@ -121,9 +127,11 @@ def cost(task: Task) -> Spend:
     if live := task.live_turn():
         if str(st.state) in PLANNING_STATES:
             planning += live["cost"]
+        elif st.state is State.REVIEW:
+            review += live["cost"]
         else:
             implementation += live["cost"]
-    return Spend(round(planning, 6), round(implementation, 6), split=not st.box)
+    return Spend(round(planning, 6), round(implementation, 6), round(review, 6), split=not st.box)
 
 
 # What the task needs, in words, and the commands for your next step.
@@ -136,7 +144,12 @@ WAITING = {
     ),
     State.APPROVAL_RISKY: ("approve risky files", ["vivibox risky {id}"]),
 }
-WORKING = {State.PLAN: "planning", State.IMPLEMENT: "implementing", State.VERIFY: "verifying"}
+WORKING = {
+    State.PLAN: "planning",
+    State.IMPLEMENT: "implementing",
+    State.VERIFY: "verifying",
+    State.REVIEW: "reviewing",
+}
 
 
 def when_deleted(state: str) -> str:
@@ -187,7 +200,7 @@ def activity(st: TaskState, max_iterations: int) -> str:
     if st.state is State.DONE:
         return "done"
     text = WORKING[st.state]
-    if st.state is not State.PLAN and st.iteration > 1:
+    if st.state in (State.IMPLEMENT, State.VERIFY) and st.iteration > 1:
         text += f" (attempt {st.iteration}/{max_iterations})"
     return text
 

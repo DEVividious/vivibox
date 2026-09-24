@@ -227,3 +227,25 @@ def test_blocked_by_the_environment_says_so(tmp_path):
     assert seen(task, True).status == "verification could not run", (
         "not the agent's failure, and no attempt spent"
     )
+
+
+def test_the_reviewers_turns_are_a_cost_of_their_own(tmp_path):
+    """Another prompt and another model: the review is the third figure, shown only once a task
+    has one, and a finished task keeps it apart in its history line."""
+    task = create_task(tmp_path, "demo", "goal", "")
+    task.event("turn", state="plan", role="planner", cost=0.40, tokens=1)
+    task.event("turn", state="implement", role="writer", cost=0.06, tokens=1)
+    assert ui.cost(task) == ui.Spend(0.4, 0.06) and ui.cost(task).review == 0.0
+    assert str(ui.cost(task)) == "$0.40 + $0.06"
+    task.event("turn", state="review", role="reviewer", cost=0.05, tokens=1)
+    spent = ui.cost(task)
+    assert spent == ui.Spend(0.4, 0.06, 0.05) and spent.total == 0.51
+    assert str(spent) == "$0.40 + $0.06 + $0.05"
+    task.transition(State.CHECKPOINT_PLAN)
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    task.transition(State.REVIEW)
+    task.set_live_turn(0.02, 100, 1)
+    assert ui.cost(task).review == 0.07, "the reviewer's running turn counts as review"
+    assert ui.finished_cost({"cost": 0.51, "planning": 0.4, "review": 0.05}) == "$0.40 + $0.06 + $0.05"
+    assert ui.activity(task.read_state(), 3) == "reviewing"

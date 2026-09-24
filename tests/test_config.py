@@ -191,3 +191,23 @@ def test_cost_limits_are_dollars_per_task_and_none_by_default(tmp_path):
     for bad in ('cost_limit = "2"', "cost_limit = -1", "cost_warning = true"):
         with pytest.raises(ConfigError, match="dollars"):
             load_config(write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[limits]\n{bad}\n' + ROLES))
+
+
+def test_a_reviewer_is_a_role_like_the_others_with_a_mode_and_a_round_limit(tmp_path):
+    config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
+    assert "reviewer" not in config.roles and config.review_mode == "loop" and config.max_reviews == 2
+    text = (
+        'tasks_dir = "/t"\n[limits]\nmax_reviews = 1\n'
+        + ROLES
+        + '[roles.reviewer]\nharness = "opencode"\nmodel = "anthropic/claude-sonnet-5"\nmode = "supervised"\n'
+    )
+    config = load_config(write(tmp_path / "config.toml", text))
+    assert config.roles["reviewer"].model == "anthropic/claude-sonnet-5"
+    assert config.review_mode == "supervised" and config.max_reviews == 1
+    for bad, said in (
+        ('[roles.reviewer]\nharness = "opencode"\nmodel = "m"\nmode = "chatty"\n', "loop, supervised"),
+        ('[roles.reviewer]\nharness = "manual"\nmodel = ""\n', "opencode"),
+        ("[limits]\nmax_reviews = 0\n", "max_reviews"),
+    ):
+        with pytest.raises(ConfigError, match=said):
+            load_config(write(tmp_path / "config.toml", f'tasks_dir = "/t"\n{bad}' + ROLES))

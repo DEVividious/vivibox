@@ -16,6 +16,9 @@ DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 # What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
 NTFY_LEVELS = ("decisions", "all")
 DEFAULT_NTFY_SERVER = "https://ntfy.sh"
+# How the reviewer works: blocking notes go back to the writer by themselves (loop), or every
+# note comes to you (supervised).
+REVIEW_MODES = ("loop", "supervised")
 # A topic is a name: letters, digits, - and _, as ntfy has it.
 NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
@@ -67,6 +70,10 @@ class Config:
     # Dollars a task may cost before you are told, and before it stops for you; 0 is no limit.
     cost_warning: float = 0.0
     cost_limit: float = 0.0
+    # The reviewer, when roles has one: how it works, and how many rounds of blocking notes go
+    # back to the writer before the work comes to you as it is.
+    review_mode: str = "loop"
+    max_reviews: int = 2
     # The ntfy topic the supervisor's messages go to as well ("" for none), on which server, and
     # which of them.
     ntfy: str = ""
@@ -144,6 +151,10 @@ def load_config(base: Path | None = None) -> Config:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise ConfigError(f"{path}: limits.{name} is dollars per task, e.g. 2.5; 0 for none")
         costs[name] = float(value)
+    max_reviews = data.get("limits", {}).get("max_reviews", 2)
+    if not isinstance(max_reviews, int) or max_reviews < 1:
+        raise ConfigError(f"{path}: limits.max_reviews must be an integer >= 1")
+    review_mode = REVIEW_MODES[0]
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -162,6 +173,14 @@ def load_config(base: Path | None = None) -> Config:
                 "claude-code runs on an Anthropic API key (vivibox auth set anthropic). To plan "
                 'with your subscription, use harness = "manual" and plan in your own chat.'
             )
+        if name == "reviewer":
+            if harness != "opencode":
+                raise ConfigError(
+                    f"{path}: roles.reviewer.harness must be opencode: the reviewer reads in a pod"
+                )
+            review_mode = role.get("mode", REVIEW_MODES[0])
+            if review_mode not in REVIEW_MODES:
+                raise ConfigError(f"{path}: roles.reviewer.mode must be one of {', '.join(REVIEW_MODES)}")
         roles[name] = Role(harness, role["model"])
     for needed in ("planner", "writer"):
         if needed not in roles:
@@ -205,6 +224,8 @@ def load_config(base: Path | None = None) -> Config:
         str(parsed),
         verify_timeout=verify_timeout,
         ntfy=ntfy,
+        review_mode=review_mode,
+        max_reviews=max_reviews,
         **costs,
         ntfy_server=ntfy_server.rstrip("/"),
         ntfy_events=ntfy_events,

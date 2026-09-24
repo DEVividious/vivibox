@@ -14,14 +14,13 @@ from . import (
     actions,
     context,
     gate,
+    harness,
     image,
     keys,
     manual,
-    opencode,
     providers,
     repo,
     stats,
-    supervisor,
     timeline,
     ui,
 )
@@ -29,8 +28,8 @@ from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
-from .risky import Approvals
 from .states import State
+from .supervise import cmd_supervise
 from .task import Task, find_task, list_tasks
 
 
@@ -210,62 +209,6 @@ def cmd_rm(args: argparse.Namespace) -> int:
     if worktree := actions.remove(task, project):
         print(f"Deleted the review copy {worktree}.")
     print(f"Deleted {task.id}; a line in the history, and its archive, stay.")
-    return 0
-
-
-def cmd_supervise(args: argparse.Namespace) -> int:
-    config = load_config()
-    task, project = actions.load(args.task)
-    pod = actions.task_pod(task.id)
-    harness = actions.harness_for("writer", pod, task)
-
-    def agent_window(st) -> None:
-        # Your view of the agent, ready once its conversation exists; reopened if you closed it.
-        if session := actions.watchable_session(task, st):
-            actions.agent_view(task, harness.attach_command(session))
-
-    sup = make_supervisor(task, project, pod, config, agent_window)
-    actions.supervising(task)
-    print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
-    agent_window(task.read_state())  # a resumed task already has its session
-    sup.run(on_step=agent_window)
-    return 0
-
-
-def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: None) -> supervisor.Supervisor:
-    """The supervisor as the command line runs it: the gate on the project's commands, your
-    notifications, the review copy. The behavioural tests build the same one and step it."""
-    harness = actions.harness_for("writer", pod, task)
-    planner = actions.harness_for("planner", pod, task)
-    ports = supervisor.Ports(
-        run_gate=lambda t: gate.run_gate(
-            t,
-            pod,
-            actions.verify_commands(t, project),
-            project.risky_extra,
-            project.java,
-            timeout=project.verify_timeout or config.verify_timeout,
-            no_build=project.no_build,
-        ),  # fmt: skip
-        risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
-        notify=lambda task_id, message, kind="": supervisor.notify(
-            task_id, message, config.desktop_notifications, actions.buttons(task, project, config, kind)
-        ),
-        prepare_review=lambda: actions.prepare_review(task, project),
-        save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
-        session_started=agent_window,
-    )
-    return supervisor.Supervisor(
-        task,
-        harness,
-        ports,
-        max_iterations=config.max_iterations,
-        project_verify=project.verify,
-        project_no_build=project.no_build,
-        planner=planner,
-        source=project.repo,
-    )
-    print(f"{task.id} is done.")
     return 0
 
 
@@ -787,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
         gate.GateError,
         keys.KeyStoreError,
         context.ContextError,
-        opencode.HarnessError,
+        harness.HarnessError,
         KeyError,
     ) as e:
         print(f"vivibox: {e.args[0] if e.args else e}", file=sys.stderr)

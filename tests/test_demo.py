@@ -2,7 +2,7 @@
 
 import pytest
 
-from vivibox import actions, opencode, supervisor
+from vivibox import actions, harness, opencode, supervisor
 from vivibox.cli import main
 from vivibox.states import State
 from vivibox.task import find_task
@@ -48,7 +48,7 @@ def answering(monkeypatch, write):
 
     def turn(self, prompt, session="", title="", on_step=None):
         write(prompt, session)
-        return opencode.Turn("ses_demo", True, 0.01, 10, "done")
+        return harness.Turn("ses_demo", True, 0.01, 10, "done")
 
     monkeypatch.setattr(opencode.OpenCode, "turn", turn)
 

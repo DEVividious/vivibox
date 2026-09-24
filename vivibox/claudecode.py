@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 import shlex
 
-from .opencode import HARNESS_MOUNT, INSTRUCTIONS, Turn
+from .harness import Harness, Turn
+from .opencode import HARNESS_MOUNT, INSTRUCTIONS
 from .pod import Pod
 from .secrets import MOUNT
 
@@ -71,9 +72,8 @@ def parse_result(output: str) -> Turn:
     return Turn("", False, 0.0, 0, "", output.strip()[-2000:] or "claude printed nothing")
 
 
-class ClaudeCode:
+class ClaudeCode(Harness):
     name = NAME
-    metered = True
 
     def __init__(self, pod: Pod, model: str):
         self.pod = pod

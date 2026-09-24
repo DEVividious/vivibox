@@ -24,7 +24,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
-from .opencode import HarnessError, Turn
+from .harness import Harness, HarnessError, Turn
 from .plan import HEADING, PlanError, _split_header, parse_plan, without_notes
 from .task import Task
 
@@ -76,11 +76,10 @@ VERIFY_LIST = re.compile(r"verify\s*=\s*(\[[^\]]*\])", re.IGNORECASE)
 HEADER_PROSE = re.compile(r"^header\s*:", re.IGNORECASE)
 
 
-class Manual:
+class Manual(Harness):
     """Stands in the planner's place and runs nothing; the supervisor asks you instead."""
 
     name = NAME
-    metered = True
     manual = True
 
     def turn(self, prompt: str, session: str = "", title: str = "", on_step=None) -> Turn:

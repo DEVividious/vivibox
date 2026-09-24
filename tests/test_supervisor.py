@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from vivibox import brief, gate, supervisor
-from vivibox.opencode import Turn
+from vivibox.harness import Harness, Turn
 from vivibox.risky import Change
 from vivibox.states import State
 from vivibox.task import create_task
@@ -17,7 +17,7 @@ DRAFT = (
 )
 
 
-class FakeHarness:
+class FakeHarness(Harness):
     name = "opencode"
 
     def __init__(self, task, actions=()):
@@ -620,3 +620,20 @@ def test_a_turn_that_keeps_failing_with_time_is_given_up_after_three_retries(tas
     assert waits == [30, 60, 120] and len(harness.prompts) == 4
     st = task.read_state()
     assert st.paused and st.problem == "agent turn failed: connection reset by peer"
+
+
+def test_every_tool_keeps_the_harness_contract():
+    """The supervisor reads the same attributes and calls the same methods on every tool, so it
+    never asks one what it can do: the base class answers for a tool that has no session ahead of
+    a turn (""), is metered, and is not you."""
+    import inspect
+
+    from vivibox import claudecode, manual, opencode
+
+    for tool in (opencode.OpenCode, claudecode.ClaudeCode, manual.Manual):
+        assert issubclass(tool, Harness), tool
+    plain = FakeHarness(None)
+    assert plain.start_session("t") == "" and plain.metered and not plain.manual
+    assert manual.Manual().manual and not opencode.OpenCode.manual
+    source = inspect.getsource(supervisor)
+    assert "hasattr(" not in source and "getattr(" not in source, "the contract says it all"

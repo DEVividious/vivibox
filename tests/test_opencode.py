@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from vivibox import opencode
+from vivibox import harness, opencode
 from vivibox.task import create_task
 
 
@@ -17,7 +17,7 @@ def test_config_references_key_file_never_the_key():
 
 @pytest.mark.parametrize("model", ["deepseek", "/x", ""])
 def test_model_needs_provider(model):
-    with pytest.raises(opencode.HarnessError):
+    with pytest.raises(harness.HarnessError):
         opencode.provider_of(model)
 
 

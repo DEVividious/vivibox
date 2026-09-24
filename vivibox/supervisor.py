@@ -15,10 +15,9 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
 
 from . import brief, gate, manual
-from .opencode import HarnessError, Turn
+from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
 from .states import State, waits_for_user
@@ -75,16 +74,6 @@ def resume_prompt(state: State) -> str:
     A session that survived would go on from a bare "continue"; one that was lost would not know
     what the state asks for."""
     return RESUME_PREFIX + {State.PLAN: PLAN_PROMPT, State.IMPLEMENT: IMPLEMENT_PROMPT}[state]
-
-
-class Harness(Protocol):
-    # The tool's name, for the event log; conversations are kept one per role, not per harness.
-    name: str
-    # False when a turn's reported cost is a list price rather than money spent, as it is on a
-    # subscription. A total that added the two would be neither.
-    metered: bool
-
-    def turn(self, prompt: str, session: str = "", title: str = "", on_step=None) -> Turn: ...
 
 
 @dataclass(frozen=True)
@@ -272,12 +261,12 @@ class Supervisor:
             # The first message of a role's conversation says what the role is and owns.
             prompt = f"{brief.role_text(role)}\n{prompt}"
         title = f"{self.task.id}: {st.goal}"[:80]
-        if not was and hasattr(harness, "start_session"):
+        if not was:
             try:
                 was = harness.start_session(title)
             except HarnessError as e:  # the turn makes its own, as before; only watching waits
                 self.task.event("session_not_started", error=str(e)[:500])
-            else:
+            if was:  # a tool that keeps no session ahead of the turn gives ""
                 self.task.set_session(role, was)
                 self.ports.session_started(self.task.read_state())
         turn = self._attempts(harness, prompt, was, title, st, role)
@@ -288,7 +277,7 @@ class Supervisor:
             state=str(st.state),
             role=role,
             harness=harness.name,
-            metered=getattr(harness, "metered", True),
+            metered=harness.metered,
             ok=turn.ok,
             cost=turn.cost,
             tokens=turn.tokens,
@@ -342,7 +331,7 @@ class Supervisor:
         if (plan := self._your_plan(st)) is not None:
             self._plan_ready(st, plan, yours=True)
             return
-        if getattr(self.planner, "manual", False):
+        if self.planner is not None and self.planner.manual:
             self._plan_manually(st)
             return
         if self._turn(st, next_prompt(self.task, PLAN_PROMPT)) is None:

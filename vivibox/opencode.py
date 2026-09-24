@@ -11,11 +11,10 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from . import brief, providers, repo
+from .harness import Harness, HarnessError, OnStep, Turn
 from .pod import Pod
 from .secrets import MOUNT
 from .task import Task
@@ -29,10 +28,6 @@ INSTRUCTIONS = f"{HARNESS_MOUNT}/instructions.md"
 # Where opencode writes its own log in the pod (its home is /config).
 SERVER_LOG = "/config/.local/share/opencode/log/*.log"
 WITH_PASSWORD = f"OPENCODE_SERVER_PASSWORD=$(cat {MOUNT}/server-password) exec"
-
-
-class HarnessError(Exception):
-    pass
 
 
 def provider_of(model: str) -> str:
@@ -85,19 +80,6 @@ def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple =
 
 
 # The running cost, tokens and step count of a turn, reported as each step of it finishes.
-OnStep = Callable[[float, int, int], None]
-
-
-@dataclass
-class Turn:
-    session: str
-    ok: bool
-    cost: float
-    tokens: int
-    text: str
-    error: str = ""
-
-
 def parse_events(output: str) -> Turn:
     session, cost, tokens, texts, errors = "", 0.0, 0, [], []
     for line in output.splitlines():
@@ -117,7 +99,7 @@ def parse_events(output: str) -> Turn:
     return Turn(session, not errors, round(cost, 6), tokens, "\n".join(texts), "\n".join(errors))
 
 
-class OpenCode:
+class OpenCode(Harness):
     name = NAME
     # A provider key is always billed per token.
     metered = True

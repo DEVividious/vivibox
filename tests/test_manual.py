@@ -6,7 +6,7 @@ import pytest
 
 from vivibox import actions, gate, manual, supervisor, ui
 from vivibox.config import load_config, load_project
-from vivibox.opencode import HarnessError, Turn
+from vivibox.harness import Harness, HarnessError, Turn
 from vivibox.plan import PlanError, parse_plan
 from vivibox.states import State
 from vivibox.task import create_task
@@ -22,7 +22,7 @@ PLAN = (
 )
 
 
-class Writer:
+class Writer(Harness):
     """The writer's harness, which reports on the repository for a chat that cannot see it."""
 
     name = "opencode"

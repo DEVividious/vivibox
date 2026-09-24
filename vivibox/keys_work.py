@@ -4,9 +4,8 @@ timeline and the logs. Mixed into the app in tui.py.
 
 from __future__ import annotations
 
-import subprocess
-
 from . import actions, ide, logs
+from .app_support import in_terminal
 from .config import ConfigError
 from .panel import git_diff
 
@@ -31,7 +30,7 @@ class WorkKeys:
             return
         if ide.is_terminal(command):
             with self.suspend():  # it takes over the terminal, like the plan editor does
-                subprocess.run(ide.command_for(path, command))
+                in_terminal(ide.command_for(path, command))
             self.reload()
             return
         try:
@@ -52,7 +51,7 @@ class WorkKeys:
             self.fail(e)
             return
         with self.suspend():
-            subprocess.run(command)
+            in_terminal(command)
 
     def action_show_log(self) -> None:
         """The timeline, a verification log, or the supervisor's, in your pager: one entry opens
@@ -66,4 +65,4 @@ class WorkKeys:
 
     def read_log(self, command: list[str]) -> None:
         with self.suspend():
-            subprocess.run(command)
+            in_terminal(command)

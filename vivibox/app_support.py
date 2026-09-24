@@ -1,9 +1,12 @@
-"""Two pieces under the view: a footer that redraws while the terminal has no focus, and the
-executor for the thread workers, which the view can leave without waiting for.
+"""Three pieces under the view: a footer that redraws while the terminal has no focus, the
+executor for the thread workers, which the view can leave without waiting for, and the way a
+program that takes over the terminal is run.
 """
 
 from __future__ import annotations
 
+import signal
+import subprocess
 from concurrent.futures import Future, ThreadPoolExecutor
 
 from textual.widgets import Footer
@@ -42,3 +45,15 @@ class LeavingExecutor(ThreadPoolExecutor):
 
     def unfinished(self) -> int:
         return sum(1 for future in self.at_work if not future.done())
+
+
+def in_terminal(command: list[str]) -> None:
+    """A pager, an editor or an IDE, with the terminal to itself. Ctrl-C reaches every process on
+    the terminal, the view waiting behind it too: in less +F it stops following, and it ended the
+    view once you pressed q. A handler that does nothing, not SIG_IGN, which the program would
+    inherit: a handler goes back to the default in the program started."""
+    previous = signal.signal(signal.SIGINT, lambda *_: None)
+    try:
+        subprocess.run(command)
+    finally:
+        signal.signal(signal.SIGINT, previous)

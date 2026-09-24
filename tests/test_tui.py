@@ -3929,3 +3929,16 @@ def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
 
     run(scenario)
 
+
+def test_ctrl_c_in_a_pager_stops_the_pager_not_the_view():
+    """Ctrl-C reaches every process on the terminal. In less +F it stops following, and it must
+    not also end the view waiting behind the pager once you press q."""
+    import sys
+
+    script = (
+        "from vivibox.app_support import in_terminal\n"
+        "in_terminal(['sh', '-c', 'kill -INT $PPID; exit 0'])\n"
+        "print('still here')\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert done.stdout == "still here\n", done.stderr[-300:]

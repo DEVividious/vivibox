@@ -9,13 +9,13 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import actions, code, gate, manual, providers, repo, reviewing, supervisor, timeline, ui
 from . import pod as pod_module
+from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -377,7 +377,7 @@ def project_detail(name: str, tasks: int, problem: str) -> str:
 
 def edit_in_editor(path: Path) -> None:
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano") or "vi"
-    subprocess.run([*editor.split(), str(path)])
+    in_terminal([*editor.split(), str(path)])
 
 
 def project_repos() -> list[Path]:

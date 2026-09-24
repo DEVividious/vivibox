@@ -230,6 +230,13 @@ box without bringing anything back.
 A login you make inside the box, such as `claude`'s, lives in the box's own volume, which vivibox
 never reads or copies, and goes with the box.
 
+### When a turn fails
+
+An error that passes with time (the provider busy or rate limiting, the network gone for a
+moment) is waited out: the turn runs again after half a minute, a minute, then two minutes, and
+the timeline says so. The fourth failure in a row, and any other error, stops the task with the
+reason on its row; `s` starts it again from where it was.
+
 ### Stopping and removing
 
 `vivibox stop <id>` stops a task and keeps its work, and `vivibox start <id>` continues it from

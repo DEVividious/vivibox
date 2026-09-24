@@ -7,6 +7,7 @@ prompt, runs the gate and records every step in the task's event log.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import threading
@@ -173,6 +174,20 @@ def put_question_away(task: Task) -> None:
         path.rename(path.with_name(f"question-answered-{time.strftime('%Y%m%d-%H%M%S')}.md"))
 
 
+# Errors that pass with time: the provider busy or rate limiting, the network gone for a moment.
+TRANSIENT = re.compile(
+    r"\b(429|502|503|504)\b|rate.?limit|too many requests|overloaded|bad gateway|service unavailable"
+    r"|gateway time.?out|timed? ?out|ECONNRESET|ECONNREFUSED|connection (reset|refused)|temporarily",
+    re.IGNORECASE,
+)
+# How long to wait before each retry of a turn; as many retries as there are waits.
+RETRY_WAITS = (30, 60, 120)
+
+
+def transient(error: str) -> bool:
+    return bool(TRANSIENT.search(error))
+
+
 @dataclass
 class Supervisor:
     task: Task
@@ -198,6 +213,8 @@ class Supervisor:
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None
+    # How a retry waits; a test passes something that does not.
+    sleep: Callable[[float], None] = time.sleep
 
     def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -250,11 +267,7 @@ class Supervisor:
             else:
                 self.task.set_session(role, was)
                 self.session_started(self.task.read_state())
-        self.task.event("turn_started", state=str(st.state), role=role)
-        try:
-            turn = harness.turn(prompt, session=was, title=title, on_step=self.task.set_live_turn)
-        finally:
-            self.task.clear_live_turn()  # the turn event is the record from here on
+        turn = self._attempts(harness, prompt, was, title, st, role)
         if turn.session and turn.session != was:
             self.task.set_session(role, turn.session)
         self.task.event(
@@ -274,6 +287,30 @@ class Supervisor:
             return None
         clear_next_prompt(self.task)
         return turn
+
+    def _attempts(
+        self, harness: Harness, prompt: str, session: str, title: str, st: TaskState, role: str
+    ) -> Turn:
+        """The turn, and again after an error that passes with time (the provider busy, the
+        network gone for a moment): half a minute, a minute, then two minutes later. The failure
+        after the last wait is a failure like any other, and the task stops for you."""
+        for wait in RETRY_WAITS:
+            turn = self._one_turn(harness, prompt, session, title, st, role)
+            if turn.ok or not transient(turn.error):
+                return turn
+            self.task.event("turn_retry", wait=wait, error=turn.error[:500])
+            self.notify(self.task.id, f"agent turn failed ({turn.error[:80]}); trying again in {wait} s")
+            self.sleep(wait)
+        return self._one_turn(harness, prompt, session, title, st, role)
+
+    def _one_turn(
+        self, harness: Harness, prompt: str, session: str, title: str, st: TaskState, role: str
+    ) -> Turn:
+        self.task.event("turn_started", state=str(st.state), role=role)
+        try:
+            return harness.turn(prompt, session=session, title=title, on_step=self.task.set_live_turn)
+        finally:
+            self.task.clear_live_turn()  # the turn event is the record from here on
 
     def _checkpoint(self, target: State, reason: str, kind: str = "") -> None:
         # Every checkpoint first checks risky files: you may open the project in IntelliJ at a checkpoint.

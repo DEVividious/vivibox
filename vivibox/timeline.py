@@ -97,6 +97,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
                 text += f"; failed: {data.get('error', '')}"
         elif kind == "gate":
             text = _gate(data)
+        elif kind == "turn_retry":
+            text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":
             text = "stopped" + (f": {data['problem']}" if data.get("problem") else "")
         elif kind == "resumed":

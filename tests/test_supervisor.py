@@ -54,6 +54,7 @@ def make(task, harness, results=(), risky=()):
         max_iterations=2,
         project_verify=["true"],
         notify=lambda _id, msg, kind="": notes.append(msg),
+        sleep=lambda seconds: None,  # a retry's wait, not waited in tests
     )
     return sup, notes
 
@@ -270,9 +271,12 @@ def test_failed_turn_pauses_the_task(task):
         def turn(self, prompt, session="", title="", on_step=None):
             return Turn("", False, 0, 0, "", "APIError: invalid key")
 
+    waits = []
     sup, notes = make(task, Broken(task))
+    sup.sleep = waits.append
     sup.step()
     assert task.read_state().paused and "invalid key" in notes[0]
+    assert waits == [], "a key that is wrong does not pass with time: no retry"
     assert not sup.step()
 
 
@@ -576,3 +580,46 @@ def test_a_turn_leaves_its_running_cost_with_the_task_while_it_runs(task):
     assert kinds.index("turn_started") < kinds.index("turn")
     started = next(e for e in task.events() if e["type"] == "turn_started")
     assert started["data"]["state"] == "plan" and started["data"]["role"]
+
+
+class Flaky(FakeHarness):
+    """Fails with what it is given, once per failure, then plans."""
+
+    def __init__(self, task, failures):
+        super().__init__(task)
+        self.failures = list(failures)
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        self.prompts.append(prompt)
+        if self.failures:
+            return Turn("", False, 0, 0, "", self.failures.pop(0))
+        write_draft(self.task)
+        return Turn("ses_1", True, 0.01, 100, "done")
+
+
+def test_a_turn_is_tried_again_after_an_error_that_passes_with_time(task):
+    """A provider that is busy or a network that hiccups is not a reason to stop a task and wait
+    for you: the turn is tried again, half a minute, a minute, then two minutes later, and the
+    timeline says so. The fourth failure in a row is a failure like any other."""
+    waits = []
+    harness = Flaky(task, ["429 Too Many Requests", "503 Service Unavailable: overloaded"])
+    sup, notes = make(task, harness)
+    sup.sleep = waits.append
+    sup.step()
+    assert waits == [30, 60] and len(harness.prompts) == 3
+    assert not task.read_state().paused and task.read_state().state is State.CHECKPOINT_PLAN
+    retries = [e["data"] for e in task.events() if e["type"] == "turn_retry"]
+    assert [r["wait"] for r in retries] == [30, 60] and "429" in retries[0]["error"]
+    assert sum(e["type"] == "turn" for e in task.events()) == 1, "the turn that went through"
+    assert any("trying again in 30 s" in n for n in notes)
+
+
+def test_a_turn_that_keeps_failing_with_time_is_given_up_after_three_retries(task):
+    waits = []
+    harness = Flaky(task, ["connection reset by peer"] * 5)
+    sup, _ = make(task, harness)
+    sup.sleep = waits.append
+    sup.step()
+    assert waits == [30, 60, 120] and len(harness.prompts) == 4
+    st = task.read_state()
+    assert st.paused and st.problem == "agent turn failed: connection reset by peer"

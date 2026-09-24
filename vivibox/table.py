@@ -16,14 +16,23 @@ from .task import TaskState
 
 class TaskTable:
     # The columns a terminal has room for, narrowest first: task, status and goal always.
-    COLUMNS = ("TASK", "STATUS", "DEMO", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
+    COLUMNS = ("TASK", "STATUS", "DEMO", "CRITERIA", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED", "GOAL")
 
     NARROW = ("TASK", "STATUS", "GOAL")
 
     MEDIUM = ("TASK", "STATUS", "CRITERIA", "UPDATED", "GOAL")
 
     def columns_for(self, width: int) -> tuple[str, ...]:
-        return self.NARROW if width < 100 else self.MEDIUM if width < 130 else self.COLUMNS
+        if width < 100:
+            return self.NARROW
+        if width < 130:
+            return self.MEDIUM
+        # The reviewer's figure only where there is a reviewer: a list without one looks as it did.
+        return (
+            self.COLUMNS
+            if "reviewer" in self.config.roles
+            else tuple(c for c in self.COLUMNS if c != "REVIEW")
+        )
 
     def set_columns(self) -> None:
         wanted = self.columns_for(self.size.width)
@@ -35,7 +44,8 @@ class TaskTable:
         keys = table.add_columns(*wanted)
         by_name = dict(zip(wanted, keys, strict=True))
         self.status_column, self.demo_column = by_name["STATUS"], by_name.get("DEMO")
-        self.cost_column, self.updated_column = by_name.get("COST PLAN + IMPL"), by_name.get("UPDATED")
+        self.plan_column, self.impl_column = by_name.get("PLAN"), by_name.get("IMPL")
+        self.review_column, self.updated_column = by_name.get("REVIEW"), by_name.get("UPDATED")
         self.drawn = ()
 
     def on_resize(self) -> None:
@@ -89,21 +99,22 @@ class TaskTable:
             if folded:
                 continue
             for task, st in own:
-                spent = ui.cost(task)
+                plan, impl, review = ui.cost_cells(ui.cost(task))
                 # During a turn, when the agent last finished a step: the sign it is at work.
                 live = task.live_turn()
                 planned.append((
                     {"TASK": f"  {st.id}", "STATUS": self.status(st), "DEMO": self.demo_cell(st.id),
-                     "CRITERIA": criteria(task), "COST PLAN + IMPL": str(spent) if spent else "-",
+                     "CRITERIA": criteria(task), "PLAN": plan, "IMPL": impl, "REVIEW": review,
                      "CREATED": ui.ago(st.created), "UPDATED": ui.ago(live["at"] if live else st.updated),
                      "GOAL": st.goal},
                     st.id,
                 ))  # fmt: skip
             for entry in done:
+                plan, impl, review = ui.cost_cells(ui.finished_spend(entry))
                 planned.append((
                     {"TASK": f"  {entry['id']}",
                      "STATUS": "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
-                     "DEMO": "-", "CRITERIA": "-", "COST PLAN + IMPL": ui.finished_cost(entry),
+                     "DEMO": "-", "CRITERIA": "-", "PLAN": plan, "IMPL": impl, "REVIEW": review,
                      "CREATED": ui.ago(entry["created"]) if entry.get("created") else "-",
                      "UPDATED": ui.ago(entry["finished"]), "GOAL": entry["title"]},
                     entry["id"],

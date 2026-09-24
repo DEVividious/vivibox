@@ -15,6 +15,8 @@ verify_timeout = 1800
 # Checked before each turn, so a turn may run past the limit by its own cost. Left out: no limit.
 # cost_warning = 1.0
 # cost_limit = 2.0
+# Rounds of a reviewer's blocking notes that go back to the writer before the work comes to you.
+# max_reviews = 2
 
 # One entry per role; planner and writer are both required.
 # harness: "opencode" or "claude-code", which run on an API key, or "manual" for the planner.
@@ -34,6 +36,14 @@ model = "Opus on claude.ai"          # a label for your task list; vivibox runs 
 [roles.writer]
 harness = "opencode"
 model = ""                           # picked in the view the first time you create a task
+
+# A reviewer reads the work after the verification passes, in a container of its own, and its
+# blocking notes go back to the writer (mode = "loop", up to limits.max_reviews rounds) or every
+# note comes to you (mode = "supervised"). Another family of models than the writer's is the point.
+# [roles.reviewer]
+# harness = "opencode"
+# model = "anthropic/claude-sonnet-5"
+# mode = "loop"
 
 [notifications]
 # Desktop notifications (notify-send) when a task waits for you. Messages always appear in the

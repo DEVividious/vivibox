@@ -48,6 +48,7 @@ from .box import (  # noqa: F401
     start_box,
 )
 from .config import (
+    REVIEW_MODES,
     Config,
     ConfigError,
     Project,
@@ -324,11 +325,15 @@ def create(
     kind: str = "feature",
     cwd: Path | None = None,
     roles: dict[str, Choice] | None = None,
+    review_mode: str = "",
 ) -> Task:
     """description: one line, or a whole ticket; it all goes into the plan the agent starts from.
     @path mentions in it are copied into the task (relative ones from cwd). roles: what a role runs
-    on for this task only, as m would set it; config.toml's own choice is no choice at all."""
+    on for this task only, as m would set it; config.toml's own choice is no choice at all.
+    review_mode: how the reviewer works on this task, loop, supervised or none; "" is config.toml's."""
     config = load_config()
+    if review_mode not in ("", *REVIEW_MODES, "none"):
+        raise ConfigError(f"review_mode must be one of {', '.join(REVIEW_MODES)}, none")
     chosen: dict[str, Choice] = {}
     for role, (harness, model) in (roles or {}).items():
         if role not in config.roles:
@@ -357,6 +362,8 @@ def create(
     template = files("vivibox").joinpath("templates/plan-bug.md" if kind == "bug" else "templates/plan.md")
     plan = template.read_text().replace("{{kind}}", kind)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
+    if review_mode and review_mode != config.review_mode:
+        task.set_review_mode(review_mode)
     try:
         described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))

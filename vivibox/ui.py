@@ -97,14 +97,31 @@ class Spend:
         return f"{text} + ${self.review:.2f}" if self.review else text
 
 
-def finished_cost(entry: dict) -> str:
+def money(amount: float) -> str:
+    return f"${amount:.2f}"
+
+
+def finished_spend(entry: dict) -> Spend:
     """A finished task's cost as the list shows a live one; tasks finished before the split was
-    kept show their total."""
+    kept show their total as one figure."""
     total = entry.get("cost", 0)
     if "planning" not in entry:
-        return f"${total:.2f}"
+        return Spend(0.0, total, split=False)
     review = entry.get("review", 0)
-    return str(Spend(entry["planning"], round(total - entry["planning"] - review, 6), review))
+    return Spend(entry["planning"], round(total - entry["planning"] - review, 6), review)
+
+
+def finished_cost(entry: dict) -> str:
+    return str(finished_spend(entry))
+
+
+def cost_cells(spent: Spend | None) -> tuple[str, str, str]:
+    """PLAN, IMPL and REVIEW as the lists show them: one figure each, "-" for nothing; a box's
+    one figure under IMPL."""
+    if not spent:
+        return ("-", "-", "-")
+    plan = money(spent.planning) if spent.split else "-"
+    return (plan, money(spent.implementation), money(spent.review) if spent.review else "-")
 
 
 def cost(task: Task) -> Spend:
@@ -293,7 +310,7 @@ def task_list(
     states = [(task, task.read_state()) for task in tasks]
     seen = [(task, st, view(task, st, running(task), max_iterations)) for task, st in states]
     seen.sort(key=lambda found: found[2].rank)
-    header = ("TASK", "STATUS", "CRITERIA", "COST PLAN + IMPL", "CREATED", "UPDATED", "GOAL")
+    header = ("TASK", "STATUS", "CRITERIA", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED", "GOAL")
     rows = []
     for task, st, shown in seen:
         spent = cost(task)
@@ -302,7 +319,7 @@ def task_list(
                 st.id,
                 shown.status,
                 criteria(task),
-                str(spent) if spent else "-",
+                *cost_cells(spent),
                 ago(st.created, now),
                 ago(st.updated, now),
                 st.goal,
@@ -315,17 +332,18 @@ def task_list(
                 entry["id"],
                 "deleted" if entry.get("deleted") else "done",
                 "-",
-                finished_cost(entry),
+                *cost_cells(finished_spend(entry)),
                 ago(entry["created"], now) if entry.get("created") else "-",
                 ago(entry["finished"], now),
                 entry["title"],
                 "dim" if entry.get("deleted") else "green",
             )
         )
-    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(6)]
+    fixed = len(header) - 1  # every column but the goal, which gets what they leave
+    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(fixed)]
     # Piped output keeps the whole goal, for grep.
-    goal_width = max(width() - sum(widths) - 3 * 6, 20) if style.color else 10_000
-    lines = ["   ".join([*(h.ljust(w) for h, w in zip(header[:6], widths, strict=True)), header[6]])]
+    goal_width = max(width() - sum(widths) - 3 * fixed, 20) if style.color else 10_000
+    lines = ["   ".join([*(h.ljust(w) for h, w in zip(header[:fixed], widths, strict=True)), header[fixed]])]
     for *cells, goal, color in rows:
         padded = [c.ljust(w) for c, w in zip(cells, widths, strict=True)]
         padded[1] = style(padded[1], color)

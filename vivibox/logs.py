@@ -14,7 +14,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList
 
-from . import timeline
+from . import reviewing, timeline
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
@@ -64,6 +64,14 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
     for i, log in enumerate(logs):
         follow = verifying and i == 0
         found.append(Entry(log.name, describe(log), pager_command(log, follow=follow, at_end=not follow)))
+    handoff = task.meta / "handoff"
+    reviews = [
+        (m.group(1), p) for p in handoff.glob("review-*.md") if (m := reviewing.NUMBERED.match(p.name))
+    ]
+    for n, path in sorted(reviews, key=lambda r: int(r[0]), reverse=True):
+        review = reviewing.parse_review(path.read_text())
+        said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
+        found.append(Entry(path.name, said, pager_command(path)))
     supervisor = task.meta / "log" / "supervisor.log"
     if supervisor.exists():
         found.append(

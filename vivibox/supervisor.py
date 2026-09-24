@@ -562,7 +562,7 @@ class Supervisor:
     def _review_due(self, st: TaskState) -> bool:
         """Whether the reviewer reads the work now: once in supervised mode, and in loop mode
         after every green gate until its rounds are used up. Your reply gives it them back."""
-        if self.reviewer is None:
+        if self.reviewer is None or self.review_mode == "none":
             return False
         rounds = self.max_reviews if self.review_mode == "loop" else 1
         return st.reviews < rounds

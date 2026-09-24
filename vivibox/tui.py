@@ -712,7 +712,12 @@ class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, Wo
     def create(self, form: dict) -> None:
         try:
             task = actions.create(
-                form["project"], form["goal"], auto=form["auto"], kind=form["kind"], roles=form.get("roles")
+                form["project"],
+                form["goal"],
+                auto=form["auto"],
+                kind=form["kind"],
+                roles=form.get("roles"),
+                review_mode=form.get("review", ""),
             )
             self.call_from_thread(self.reload)
             for note in actions.context_notes(task):

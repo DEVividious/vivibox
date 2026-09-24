@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import actions, brief, gate, manual, risky, supervisor
+from vivibox import actions, brief, gate, manual, reviewing, risky, supervisor
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
 # The brief each role gets: the common part and its own, as the agent reads them.
@@ -43,7 +43,7 @@ def test_every_check_the_table_names_exists():
     assert len(rows) >= 6, "the table moved or changed its shape"
     for dotted in rows:
         module, *attrs = dotted.split(".")
-        found = {"gate": gate, "risky": risky}[module]
+        found = {"gate": gate, "risky": risky, "reviewing": reviewing}[module]
         for attr in attrs:
             found = getattr(found, attr)
         assert callable(found), dotted

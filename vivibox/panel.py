@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import actions, code, gate, manual, providers, repo, supervisor, timeline, ui
+from . import actions, code, gate, manual, providers, repo, reviewing, supervisor, timeline, ui
 from . import pod as pod_module
 from .config import ConfigError, config_dir, load_project
 from .plan import PlanError, parse_plan
@@ -272,11 +272,29 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         if ui.environment_problem(task):
             return "`g` verify again, once you have fixed it · `r` tell the agent" + watch
         return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
+    if st.state is State.REVIEW:
+        return "wait for the reviewer" + watch
     if st.state is State.VERIFY:
         look = " · `w` look at it as it runs" if watchable(task, st, running) else ""
         log = " · `l` read its log so far" if newest_log(task) else ""
         return "wait for the verification" + look + log
     return "wait" + watch + " · `s` stop"
+
+
+def reviewers_notes(task: Task) -> list[str]:
+    """The newest review, for the final checkpoint: its counts, then the notes as written."""
+    path = reviewing.latest(task)
+    if path is None:
+        return []
+    text = path.read_text()
+    review = reviewing.parse_review(text)
+    n = reviewing.NUMBERED.match(path.name).group(1)
+    return [
+        "",
+        f"**Review {n}:** {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",
+        "",
+        text.rstrip(),
+    ]
 
 
 def gate_failed(task: Task) -> bool:
@@ -531,11 +549,16 @@ def detail(
     """What you need to decide on this task, as markdown."""
     seen = ui.view(task, st, running, max_iterations)
     watch = " Look at the agent with `w`." if watchable(task, st, running) else ""
+    spent = ui.cost(task)
     head = [
         f"### {st.id} · {seen.status}",
         "",
         f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
-        + (f" · cost {ui.cost(task)}" if st.box else f" · planning + implementation {ui.cost(task)}")
+        + (
+            f" · cost {spent}"
+            if st.box
+            else f" · planning + implementation{' + review' if spent.review else ''} {spent}"
+        )
         # During a turn: the cost above grows with it, and this says the agent is still at it.
         + (f" · last step {ui.ago(live['at'])}" if (live := task.live_turn()) else "")
         + "*",
@@ -610,6 +633,7 @@ def detail(
             "",
             f"```\n{stat.rstrip() or 'no changes fetched yet'}\n```",
             *removed_tests(task),
+            *reviewers_notes(task),
         ]
     elif st.state is State.APPROVAL_RISKY:
         try:

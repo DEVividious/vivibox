@@ -149,6 +149,11 @@ class Task:
         st.updated = now()
         self._write_state(st)
 
+    def set_review_mode(self, mode: str) -> None:
+        st = self.read_state()
+        st.review_mode = mode
+        self._write_state(st)
+
     def set_reviews(self, reviews: int) -> None:
         st = self.read_state()
         st.reviews = reviews

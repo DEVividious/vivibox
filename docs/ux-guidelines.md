@@ -43,6 +43,7 @@ Status labels, the only ones allowed:
 | manual planner, no plan yet | `plan it yourself` | Waiting for you |
 | implementing; from the second attempt `(attempt n/N)` follows | `implementing` | Working |
 | verification running | `verifying` | Working |
+| the reviewer reading the work | `reviewing` | Working |
 | risky files changed | `approve risky files` | Waiting for you |
 | blocked on the agent's question | `agent asks` | Waiting for you |
 | blocked with every attempt used | `verification failed N×` | Waiting for you |

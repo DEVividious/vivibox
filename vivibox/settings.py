@@ -17,7 +17,7 @@ from textual.containers import Vertical
 from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
-from . import actions, configfile, ide, ui
+from . import actions, configfile, ide, opencode, ui
 from . import init as project_init
 from .config import (
     DEFAULT_NTFY_SERVER,
@@ -26,6 +26,7 @@ from .config import (
     NTFY_LEVELS,
     NTFY_TOPIC,
     RESERVED_ENV,
+    REVIEW_MODES,
     ConfigError,
     config_dir,
     load_config,
@@ -173,6 +174,17 @@ class Settings(Rows):
                 )
                 for name in sorted(config.roles)
             ),
+            *(
+                [("review mode", config.review_mode, "review_mode")]
+                if "reviewer" in config.roles
+                else [
+                    (
+                        "reviewer",
+                        "none: Enter picks a model, on another family than the writer",
+                        "add-reviewer",
+                    )
+                ]
+            ),
             ("Review", "", None),
             (
                 "editor for o",
@@ -186,6 +198,11 @@ class Settings(Rows):
             ("Limits", "", None),
             ("max_iterations", str(config.max_iterations), "max_iterations"),
             ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
+            *(
+                [("max_reviews", str(config.max_reviews), "max_reviews")]
+                if "reviewer" in config.roles
+                else []
+            ),
             (
                 "cost_warning",
                 f"${config.cost_warning:.2f}" if config.cost_warning else "none",
@@ -290,12 +307,39 @@ class Settings(Rows):
             level = NTFY_LEVELS[(NTFY_LEVELS.index(config.ntfy_events) + 1) % len(NTFY_LEVELS)]
             said = "the start and what the desktop gets" if level == NTFY_LEVELS[0] else "every stage too"
             self.write("ntfy_events", level, "notifications", f"ntfy gets {level}: {said}.")
-        elif key in ("max_iterations", "verify_timeout"):
+        elif key == "add-reviewer":
+            offered = [(opencode.NAME, m) for models in (self.app.available or {}).values() for m in models]
+            if not offered:
+                self.say(
+                    "No models to pick from yet: add a provider first, or put [roles.reviewer] in "
+                    "config.toml."
+                )
+                return
+
+            def picked(choice) -> None:
+                if choice is None or not choice[1]:
+                    return
+                configfile.set_value(config_path(), "harness", choice[0], "roles.reviewer")
+                configfile.set_value(config_path(), "mode", REVIEW_MODES[0], "roles.reviewer")
+                self.write(
+                    "model", choice[1], "roles.reviewer", f"reviewer on {choice[1]}, mode {REVIEW_MODES[0]}."
+                )
+
+            self.app.push_screen(
+                ChooseModel("reviewer", offered, None, offered[0], self.app.available), picked
+            )
+        elif key == "review_mode":
+            mode = REVIEW_MODES[(REVIEW_MODES.index(config.review_mode) + 1) % len(REVIEW_MODES)]
+            said = "blocking notes go back to the writer" if mode == "loop" else "every note comes to you"
+            self.write("mode", mode, "roles.reviewer", f"review mode {mode}: {said}.")
+        elif key in ("max_iterations", "verify_timeout", "max_reviews"):
             prompts = {
                 "max_iterations": "Verification failures the writer may fix on its own before it stops:",
                 "verify_timeout": "Seconds one verification command may take:",
+                "max_reviews": "Rounds of blocking notes sent back to the writer before the work is yours:",
             }
-            now = config.max_iterations if key == "max_iterations" else config.verify_timeout
+            now = {"max_iterations": config.max_iterations, "verify_timeout": config.verify_timeout,
+                   "max_reviews": config.max_reviews}[key]  # fmt: skip
 
             def typed(value: str | None) -> None:
                 if value is None:

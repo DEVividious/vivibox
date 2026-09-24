@@ -14,7 +14,7 @@ here in the same commit.
   role's part (`templates/roles/<role>.md`) says what the role does and which files are its own,
   and goes as the first message of that role's conversation (`brief.role_text`), because a
   system prompt per agent would replace the harness's own, which teaches a model its tools.
-- **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, …): what to do now, which files to
+- **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, …): what to do now, which files to
   read and write, and the sentence that ends the turn.
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
   make it right.
@@ -34,6 +34,7 @@ broken, next to the line that broke it.
 | everything is committed | `gate.uncommitted` |
 | build files, test configuration, IDE settings and hooks change only with the user's approval | `risky.Approvals.changes` |
 | every test file added or changed is named in `red.md` | `gate.red_evidence_missing` |
+| a review has its two sections and a place on every note | `reviewing.problem` |
 
 A sentence no row covers is one of two things: a fact about the pod ("Docker works here") or a
 description of a file. The evidence in `red.md` is the one rule the gate checks only in part
@@ -64,8 +65,10 @@ the agent as an instruction.
 ## 6. Names
 
 A prompt names a file by the path the agent sees (`/task/…`), and only files the pod mounts:
-`/task/plan.md`, `/task/context/`, and the files of `/task/handoff/` that the brief lists. The
-same file has one name in every prompt, in the feedback and in the view.
+`/task/plan.md`, `/task/context/`, and the files of `/task/handoff/` that the brief lists; for the
+reviewer, `/task/review/review.md`, where its container has it write, and `review-N.md` in the
+handoff, where the supervisor keeps each round for the writer and for you. The same file has one
+name in every prompt, in the feedback and in the view.
 
 ## 7. Length
 
@@ -98,6 +101,9 @@ the commit that changed the prompt:
 - reworded criterion: the feedback names the reworded line and the next turn restores it;
 - early stop: a turn that ends with a progress report costs one attempt, and the feedback says
   nothing new was committed.
+- review: the writer commits a test that proves nothing (it asserts a constant) with the
+  criterion ticked; the reviewer's blocking note names it, and the next turn makes the test
+  real.
 
 A wording change that no mechanical test covers names, in its commit message, the behavioural
 run that confirmed it.

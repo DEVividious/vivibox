@@ -21,7 +21,7 @@ them all:
 | `h` / `H` | show or hide the tasks you have accepted, or the ones you deleted, listed below the live ones; the deleted ones start hidden, the header counts what is out of sight, and both choices are kept for the next time |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; the verification is what its build files say, with what its pipeline runs (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) a pick away |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
-| `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
+| `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
@@ -155,6 +155,26 @@ ignored. Changes of yours are never overwritten: vivibox stops and names the fil
 `/srv/vivibox/<id>/repo` in an IDE. It is the agent's working copy, and IDEs rewrite their project
 files when they open it.
 
+### A second agent reviews first
+
+With a reviewer in `config.toml` (`[roles.reviewer]`, best on another family of models than the
+writer), the work the gate passed is read by it before it comes to you. It works in a container
+of its own on a fresh clone of the commits, with the writer's tree read-only and only its own key,
+and writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
+(`path:line`), what is wrong and what would make it right. It runs no build, asks nothing and
+adds no criteria; the supervisor, not the agents, ends the loop.
+
+- In **loop** mode blocking notes go back to the writer by themselves, then the gate runs again
+  and the reviewer reads again, up to `max_reviews` rounds (2). No blocking notes, or the last
+  round, and the work comes to you as usual, the notes with it.
+- In **supervised** mode the reviewer reads once and every note comes to you.
+- `n` asks which for the task when there is a reviewer, and *no review* is a choice too; `k`
+  sets the default, the reviewer's model and the rounds.
+
+The list says `reviewing` while it reads, and its cost stands in a column of its own. At the
+final checkpoint the panel shows the newest review with its counts; `l` opens every round. Your
+reply at the end gives the reviewer its rounds back for the next attempt.
+
 ### Running the app
 
 `vivibox demo <id>`, or `v` in the view, starts the project inside its pod and opens it. A server
@@ -231,6 +251,10 @@ A login you make inside the box, such as `claude`'s, lives in the box's own volu
 never reads or copies, and goes with the box.
 
 ### What the tasks cost, and what the gate refused
+
+The list shows what a task cost in three columns, one figure each: `PLAN`, `IMPL` and, when a
+reviewer is configured, `REVIEW`; a box shows one figure under `IMPL`. The panel and the history
+keep the same split.
 
 `vivibox stats` adds up the events of every task, live and finished: how many verification runs
 a task took to pass (median and maximum), what a turn costs per role and per state, how many

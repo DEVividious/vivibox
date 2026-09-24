@@ -52,6 +52,14 @@ view). `ntfy_server` is ntfy.sh unless you run your own; a token, when the topic
 stage after that (implementing, verifying) to the decisions. The three rows are under `k` as well, and a change there
 reaches a running task from its next message.
 
+A third role, `[roles.reviewer]`, reads the work after a green gate (docs/tasks.md, *A second
+agent reviews first*). It runs through opencode on a model of your choice; another family than
+the writer's is what makes the review worth its cost. `mode` is `loop` (blocking notes go back to
+the writer by themselves) or `supervised` (every note comes to you), and `limits.max_reviews` (2)
+is how many rounds go back before the work comes to you as it is. Under `k` the reviewer's row
+adds one when there is none, and *review mode* and `max_reviews` sit with the roles and the
+limits.
+
 `config.toml` also holds the limits: `max_iterations`, how many verification failures the
 writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one
 verification command may take (1800) before it is stopped and the task waits for you as on any

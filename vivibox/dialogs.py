@@ -585,6 +585,15 @@ class NewTask(Dialog):
                                 options, value=configured, allow_blank=False, compact=True,
                                 id=f"role-{name}", classes="model",
                             )  # fmt: skip
+                    if "reviewer" in config.roles:
+                        with Horizontal(classes="row gap"):
+                            yield Label("Review", classes="key")
+                            yield Select(
+                                [("Blocking notes go back to the writer by themselves (loop)", "loop"),
+                                 ("Every note comes to me (supervised)", "supervised"),
+                                 ("No review for this task", "none")],
+                                value=config.review_mode, allow_blank=False, compact=True, id="review",
+                            )  # fmt: skip
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
@@ -606,6 +615,7 @@ class NewTask(Dialog):
                 "auto": self.query_one("#plan", Select).value == "auto",
                 "draft": self.query_one("#plan", Select).value == "draft",
                 "roles": {s.id.removeprefix("role-"): s.value for s in self.query(".model").results(Select)},
+                "review": self.query_one("#review", Select).value if self.query("#review") else "",
             }
         )
 

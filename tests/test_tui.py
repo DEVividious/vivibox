@@ -880,9 +880,9 @@ def test_the_list_says_when_you_asked_for_a_task_not_only_when_it_last_moved(env
         app.reload()
         row = app.table.get_row(task.id)
         # Not ui.ago() recomputed here: that races the minute boundary and says nothing extra.
-        assert row[5] == "just now", "CREATED, and the task was made a moment ago"
-        assert row[6] == "just now", "UPDATED"
-        assert [str(c.label) for c in app.table.columns.values()][5] == "CREATED"
+        assert row[6] == "just now", "CREATED, and the task was made a moment ago"
+        assert row[7] == "just now", "UPDATED"
+        assert [str(c.label) for c in app.table.columns.values()][6] == "CREATED"
 
     run(scenario)
 
@@ -903,8 +903,8 @@ def test_a_finished_task_keeps_when_you_asked_for_it(env):
     async def scenario(app, pilot):
         app.show_done = True
         app.reload()
-        assert app.table.get_row("demo-9")[5] == "just now"
-        assert app.table.get_row("demo-8")[5] == "-"
+        assert app.table.get_row("demo-9")[6] == "just now"
+        assert app.table.get_row("demo-8")[6] == "-"
 
     run(scenario)
 
@@ -1082,11 +1082,12 @@ def test_the_running_turns_cost_and_last_step_show_in_the_row_and_the_panel(env,
     async def scenario(app, pilot):
         app.reload()
         await pilot.pause()
-        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.00"
+        assert str(app.table.get_cell(task.id, app.plan_column)) == "$0.10"
+        assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.00"
         task.set_live_turn(0.04, 400, 3)
         app.reload()
         await pilot.pause()
-        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.04", "the turn so far"
+        assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04", "the turn so far"
         assert str(app.table.get_cell(task.id, app.updated_column)) == "just now"
         await pilot.press("d")
         await pilot.pause()
@@ -1094,7 +1095,7 @@ def test_the_running_turns_cost_and_last_step_show_in_the_row_and_the_panel(env,
         task.clear_live_turn()
         app.reload()
         await pilot.pause()
-        assert str(app.table.get_cell(task.id, app.cost_column)) == "$0.10 + $0.00"
+        assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.00"
         assert "last step" not in app.shown
 
     run(scenario)
@@ -3186,7 +3187,7 @@ def test_a_wide_terminal_has_every_column(env):
     async def scenario(app, pilot):
         app.reload()
         await pilot.pause()
-        assert len(app.table.columns) == 8
+        assert len(app.table.columns) == 9, "PLAN and IMPL apart; REVIEW only with a reviewer"
 
     run(scenario, size=(140, 40))
 
@@ -3699,3 +3700,190 @@ def test_the_settings_list_grows_with_the_terminal_and_fits_a_short_one(env):
 
     run(tall, size=(140, 60))
     run(short, size=(140, 24))
+
+
+# --- the reviewer in the view ------------------------------------------------------------------
+
+
+def with_reviewer(env, mode="loop"):
+    config = env / "config" / "config.toml"
+    config.write_text(
+        config.read_text()
+        + f'[roles.reviewer]\nharness = "opencode"\nmodel = "other/strong"\nmode = "{mode}"\n'
+    )
+
+
+def test_the_cost_is_three_columns_and_review_shows_only_with_a_reviewer(env, monkeypatch):
+    """PLAN, IMPL and REVIEW, one figure each, instead of a sum to read in one cell; the third
+    column only when a reviewer is configured, so a list without one looks as it did."""
+    task = implementing()
+    task.event("turn", state="plan", role="planner", cost=0.10, tokens=1)
+    task.event("turn", state="implement", role="writer", cost=0.04, tokens=1)
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: False)
+
+    async def without(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.columns == (
+            "TASK",
+            "STATUS",
+            "DEMO",
+            "CRITERIA",
+            "PLAN",
+            "IMPL",
+            "CREATED",
+            "UPDATED",
+            "GOAL",
+        )
+        assert str(app.table.get_cell(task.id, app.plan_column)) == "$0.10"
+        assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04"
+
+    run(without)
+    with_reviewer(env)
+    task.event("turn", state="review", role="reviewer", cost=0.02, tokens=1)
+
+    async def with_(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert "REVIEW" in app.columns and app.columns.index("REVIEW") == app.columns.index("IMPL") + 1
+        assert str(app.table.get_cell(task.id, app.review_column)) == "$0.02"
+        assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04", (
+            "the review is not implementation"
+        )
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        app.action_details()  # a second app in one test gets no keys from the pilot
+        assert "planning + implementation + review $0.10 + $0.04 + $0.02" in app.shown
+
+    run(with_)
+
+
+def test_a_finished_task_keeps_its_review_cost_apart(env):
+    from vivibox.review import history_path
+
+    with_reviewer(env)
+    entry = {"id": "demo-9", "project": "demo", "title": "Done one", "cost": 0.16, "planning": 0.1,
+             "review": 0.02, "created": now(), "finished": now(), "commit": "abc"}  # fmt: skip
+    history_path().parent.mkdir(parents=True, exist_ok=True)
+    history_path().write_text(json.dumps(entry) + "\n")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert str(app.table.get_cell("demo-9", app.plan_column)) == "$0.10"
+        assert str(app.table.get_cell("demo-9", app.impl_column)) == "$0.04"
+        assert str(app.table.get_cell("demo-9", app.review_column)) == "$0.02"
+
+    run(scenario)
+
+
+def test_the_final_checkpoint_shows_the_reviewers_notes_and_l_opens_them(env, monkeypatch):
+    from vivibox import logs, reviewing
+
+    task = implementing()
+    task.transition(State.VERIFY)
+    task.transition(State.REVIEW)
+    reviewing.keep(task, 1, "# Review 1\n\n## Blocking\n\n- [ ] a.py:1 — wrong\n\n## Not blocking\n")
+    task.event("review", round=1, blocking=1, not_blocking=0, problem="")
+    task.set_reviews(1)
+    task.transition(State.CHECKPOINT_FINAL, reason="review 1: 1 blocking note")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    monkeypatch.setattr(actions, "changed_files", lambda task, project: "a.py | 1 +")
+    monkeypatch.setattr(tui.Vivibox, "read_log", lambda self, command: None)
+    monkeypatch.setenv("PAGER", "less")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.press("d")
+        await pilot.pause()
+        assert "**Review 1:** 1 blocking, 0 not blocking" in app.shown and "a.py:1 — wrong" in app.shown
+        await pilot.press("l")
+        await pilot.pause()
+        assert isinstance(app.screen, logs.ChooseLog)
+        labels = [(e.label, e.said) for e in app.screen.found]
+        assert ("review-1.md", "review 1 · 1 blocking · 0 not blocking") in labels
+
+    run(scenario)
+
+
+def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monkeypatch):
+    with_reviewer(env, mode="loop")
+    calls = []
+
+    def create(project, goal, auto=False, kind="feature", roles=None, review_mode=""):
+        calls.append((roles, review_mode))
+        return new_task(goal)  # goes through the same create again, so the first call is the view's
+
+    monkeypatch.setattr(actions, "create", create)
+    monkeypatch.setattr(actions, "start", lambda task_id, resume=False, on_step=None: "m")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Add divide")
+        review = app.screen.query_one("#review", Select)
+        assert review.value == "loop", "config.toml's mode, ready to keep or change"
+        assert app.screen.query_one("#role-reviewer", Select).value == (OC, "other/strong")
+        review.value = "supervised"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert calls[0][1] == "supervised" and "reviewer" in calls[0][0]
+
+    run(scenario)
+
+
+def test_without_a_reviewer_n_does_not_ask(env, monkeypatch):
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert not app.screen.query("#review"), "nothing to choose"
+
+    run(scenario)
+
+
+def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
+    config = env / "config" / "config.toml"
+
+    def labels(app) -> list[str]:
+        options = app.screen.query_one("#rows", OptionList)
+        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+    def row(app, name: str) -> str:
+        return next(text for text in labels(app) if name in text)
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("k")
+        await pilot.pause()
+        assert "none" in row(app, "reviewer") and not any("review mode" in r for r in labels(app))
+        reviewer = next(i for i, text in enumerate(labels(app)) if text.strip().startswith("reviewer"))
+        app.screen.query_one("#rows", OptionList).highlighted = reviewer
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, dialogs.ChooseModel)
+        await pilot.press("enter")  # the first model offered
+        await pilot.pause()
+        text = config.read_text()
+        assert "[roles.reviewer]" in text and 'model = "deepseek/deepseek-v4-flash"' in text
+        assert "deepseek-v4-flash" in row(app, "reviewer") and "loop" in row(app, "review mode")
+        mode = next(i for i, text in enumerate(labels(app)) if "review mode" in text)
+        app.screen.query_one("#rows", OptionList).highlighted = mode
+        await pilot.press("enter")
+        await pilot.pause()
+        assert 'mode = "supervised"' in config.read_text() and "supervised" in row(app, "review mode")
+        rounds = next(i for i, text in enumerate(labels(app)) if "max_reviews" in text)
+        app.screen.query_one("#rows", OptionList).highlighted = rounds
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Ask)
+        app.screen.query_one(Input).value = "3"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "max_reviews = 3" in config.read_text() and "3" in row(app, "max_reviews")
+
+    run(scenario)

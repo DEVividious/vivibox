@@ -72,10 +72,9 @@ def test_list_is_a_table_with_waiting_tasks_first(tmp_path):
         "TASK",
         "STATUS",
         "CRITERIA",
-        "COST",
         "PLAN",
-        "+",
         "IMPL",
+        "REVIEW",
         "CREATED",
         "UPDATED",
         "GOAL",
@@ -84,7 +83,7 @@ def test_list_is_a_table_with_waiting_tasks_first(tmp_path):
     assert (
         lines[2].startswith("demo-2")
         and "implementing (attempt 2/3)" in lines[2]
-        and "$0.00 + $0.25" in lines[2]
+        and "$0.00   $0.25   -" in lines[2]
     )
     assert lines[3].startswith("demo-3") and "stopped" in lines[3]
     assert lines[1].index("0/1") == lines[3].index("0/1"), "columns line up"

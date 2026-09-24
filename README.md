@@ -42,7 +42,7 @@ MCP servers you already use. Keys go to vivibox's own key store, never into conf
    named in its red evidence. A red gate sends the agent back, up to a limit; then the task
    waits for you. A gate that could not run at all (no Docker, no network, a token expired)
    waits for you at once, and `g` runs it again once you have fixed it.
-5. The work waits for you as a review copy: `o` opens it in your IDE as uncommitted changes,
+5. A reviewer on another model reads the work first, when you set one up. Then it waits for you as a review copy: `o` opens it in your IDE as uncommitted changes,
    `v` runs the app in the pod, `a` accepts it into your checkout, `r` asks for changes.
 
 Desktop notifications, or ntfy on your phone, say when a task waits for you, and the view lists

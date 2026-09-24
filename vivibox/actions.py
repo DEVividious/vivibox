@@ -127,6 +127,7 @@ from .roles import (  # noqa: F401
     models_cache,
     models_offered,
     needs_provider,
+    not_offered,
     parse_choice,
     provider_catalog,
     provider_keys,

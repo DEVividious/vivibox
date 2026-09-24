@@ -1256,7 +1256,9 @@ class Vivibox(App):
             offered = actions.choices(role, config, self.available)
             configured = actions.configured_choice(config, role)
             self.push_screen(
-                ChooseModel(role, offered, configured, self.current_choice(task, role, config)),
+                ChooseModel(
+                    role, offered, configured, self.current_choice(task, role, config), self.available
+                ),
                 lambda choice: self.set_choice(task, role, choice, config),
             )
 

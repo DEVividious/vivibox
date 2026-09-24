@@ -1722,6 +1722,32 @@ def test_o_opens_with_the_editor_the_repository_points_at(env, monkeypatch):
     run(scenario)
 
 
+def test_a_configured_model_the_provider_no_longer_offers_is_marked(env):
+    """config.toml's own choice is always on the list, so a retired model stays visible; it says
+    so, in the settings row and in the picker, so the person picks its successor."""
+    config = env / "config" / "config.toml"
+    config.write_text(config.read_text().replace('model = "m"', 'model = "deepseek/deepseek-v4-flash"'))
+    app_available = {"deepseek": ["deepseek/deepseek-flash", "deepseek/deepseek-v4-pro"]}
+
+    async def scenario(app, pilot):
+        app.available = app_available
+        await pilot.press("k")
+        await pilot.pause()
+        options = app.screen.query_one("#rows", OptionList)
+        rows = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        writer = next(i for i, row in enumerate(rows) if row.strip().startswith("writer"))
+        assert "not offered now" in rows[writer]
+        options.highlighted = writer
+        await pilot.press("enter")
+        await pilot.pause()
+        picker = app.screen.query_one(OptionList)
+        labels = [str(picker.get_option_at_index(i).prompt) for i in range(picker.option_count)]
+        assert labels[0].startswith("deepseek/deepseek-v4-flash") and "not offered" in labels[0]
+        assert not any("not offered" in label for label in labels[1:]), "the provider's own are fine"
+
+    run(scenario)
+
+
 def test_k_lists_providers_and_mcp_and_manage_turns_them_off_or_removes_them(env):
     from vivibox import keys, providers
 

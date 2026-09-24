@@ -549,15 +549,17 @@ class ChooseModel(ModalScreen["actions.Choice | None"]):
     """What one role runs on, from what you can run: planning yourself, or a model of a provider
     you have a key for. None leaves it alone; config.toml's own choice gives the role back to it."""
 
-    def __init__(self, role: str, offered: list, configured, current):
+    def __init__(self, role: str, offered: list, configured, current, available: dict | None = None):
         super().__init__()
         self.role, self.offered, self.configured, self.current = role, offered, configured, current
+        self.available = available
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(f"Run {self.role} on:")
             labels = [
-                actions.choice_label(c, self.configured) + ("  ← now" if c == self.current else "")
+                actions.choice_label(c, self.configured, self.available)
+                + ("  ← now" if c == self.current else "")
                 for c in self.offered
             ]
             yield OptionList(*labels, id="models")

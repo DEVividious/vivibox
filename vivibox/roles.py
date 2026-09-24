@@ -221,7 +221,19 @@ def configured_choice(config: Config, role_name: str) -> Choice:
     return role.harness, role.model if role.harness != manual.NAME else ""
 
 
-def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
+def not_offered(choice: Choice, available: dict[str, list[str]] | None) -> bool:
+    """A model config.toml or a task names that its provider's list no longer has: retired, or
+    mistyped. Only when the list could be read; an empty one says nothing."""
+    harness, model = choice
+    if harness != opencode.NAME or "/" not in model or not available:
+        return False
+    listed = available.get(opencode.provider_of(model)) or []
+    return bool(listed) and model not in listed
+
+
+def choice_label(
+    choice: Choice, config_choice: Choice | None = None, available: dict[str, list[str]] | None = None
+) -> str:
     harness, model = choice
     if not model and harness != manual.NAME:
         return "no model yet: pick one below"
@@ -230,7 +242,9 @@ def choice_label(choice: Choice, config_choice: Choice | None = None) -> str:
         text += " (Claude Code)"
     # config.toml's own choice. Named after the file it read "you, in your own chat · config.toml",
     # as if the chat were in the file.
-    return text + ("  (default)" if choice == config_choice else "")
+    text += "  (default)" if choice == config_choice else ""
+    # Still offered here because a file names it; a task on it would not start.
+    return text + ("  (not offered now)" if not_offered(choice, available) else "")
 
 
 def parse_choice(text: str) -> Choice:

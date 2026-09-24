@@ -159,7 +159,13 @@ class Settings(Rows):
             ("providers & MCP", f"{len(on)} on: {', '.join(on)}" if on else "none yet", "providers"),
             ("Roles, by default", "", None),
             *(
-                (name, actions.choice_label(actions.configured_choice(config, name)), f"role:{name}")
+                (
+                    name,
+                    actions.choice_label(
+                        actions.configured_choice(config, name), available=self.app.available
+                    ),
+                    f"role:{name}",
+                )
                 for name in sorted(config.roles)
             ),
             ("Review", "", None),
@@ -215,7 +221,9 @@ class Settings(Rows):
                     f"{role} runs on {actions.choice_label(choice)} by default.",
                 )
 
-            self.app.push_screen(ChooseModel(role, offered, configured, configured), picked)
+            self.app.push_screen(
+                ChooseModel(role, offered, configured, configured, self.app.available), picked
+            )
         elif key == "editor":
             found = ide.candidates()
             if not found:

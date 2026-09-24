@@ -13,6 +13,8 @@ from pathlib import Path
 HARNESSES = ("opencode", "claude-code", "manual")
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
+# What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
+NTFY_LEVELS = ("decisions", "all")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
 TASK_NETWORK_BITS = 28
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
@@ -59,6 +61,9 @@ class Config:
     # Seconds one verification command may take before it is stopped and counted as a failure of
     # the environment, not of the code.
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
+    # The ntfy topic the supervisor's messages go to as well ("" for none), and which of them.
+    ntfy: str = ""
+    ntfy_events: str = "decisions"
 
 
 @dataclass(frozen=True)
@@ -150,9 +155,18 @@ def load_config(base: Path | None = None) -> Config:
                 f"{path}: missing role '{needed}'. Planning and writing are chosen separately so "
                 "the model that decides need not be the model that types."
             )
-    desktop = data.get("notifications", {}).get("desktop", True)
+    notifications = data.get("notifications", {})
+    desktop = notifications.get("desktop", True)
     if not isinstance(desktop, bool):
         raise ConfigError(f"{path}: notifications.desktop must be true or false")
+    ntfy = notifications.get("ntfy", "")
+    if not isinstance(ntfy, str) or (ntfy and not ntfy.startswith(("https://", "http://"))):
+        raise ConfigError(
+            f'{path}: notifications.ntfy must be a topic\'s address, e.g. "https://ntfy.sh/<topic>"'
+        )
+    ntfy_events = notifications.get("ntfy_events", NTFY_LEVELS[0])
+    if ntfy_events not in NTFY_LEVELS:
+        raise ConfigError(f"{path}: notifications.ntfy_events must be one of {', '.join(NTFY_LEVELS)}")
     ide = data.get("review", {}).get("ide", "")
     if not isinstance(ide, str):
         raise ConfigError(f'{path}: review.ide must be a command, e.g. "idea"')
@@ -167,7 +181,17 @@ def load_config(base: Path | None = None) -> Config:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
         )
-    return Config(tasks_dir, max_iterations, roles, desktop, ide, str(parsed), verify_timeout=verify_timeout)
+    return Config(
+        tasks_dir,
+        max_iterations,
+        roles,
+        desktop,
+        ide,
+        str(parsed),
+        verify_timeout=verify_timeout,
+        ntfy=ntfy,
+        ntfy_events=ntfy_events,
+    )
 
 
 def _host_service(text: str, where: Path) -> HostService:

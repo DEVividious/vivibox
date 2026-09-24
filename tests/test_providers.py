@@ -348,3 +348,17 @@ def test_a_model_list_cached_before_retired_models_were_dropped_is_read_again(en
     assert actions.available_models() == {"deepseek": ["deepseek/deepseek-flash"]}
     assert asked == ["deepseek"], "the old list is not trusted"
     assert actions.available_models() == {"deepseek": ["deepseek/deepseek-flash"]} and asked == ["deepseek"]
+
+
+def test_the_ntfy_token_is_a_key_but_not_a_providers(source, monkeypatch):
+    """It sits in the key store like a provider's key, so vivibox auth set ntfy keeps it, but no
+    model list, no box and no task is asked for it."""
+    from vivibox import box, keys
+
+    assert providers.is_provider_key("deepseek") and not providers.is_provider_key("mcp.company.token")
+    assert not providers.is_provider_key(keys.NTFY)
+    keys.set_key("deepseek", "k1")
+    keys.set_key(keys.NTFY, "tk")
+    assert set(keys.list_keys()) == {"deepseek", keys.NTFY}
+    monkeypatch.setattr(providers, "enabled", lambda kind, name: True)
+    assert box.box_providers(None) == ["deepseek"]

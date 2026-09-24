@@ -68,7 +68,7 @@ def box_providers(task: Task) -> list[str]:
     return [
         name
         for name in keys.list_keys()
-        if providers.enabled(providers.PROVIDER, name) and not providers.is_mcp_secret(name)
+        if providers.enabled(providers.PROVIDER, name) and providers.is_provider_key(name)
     ]
 
 

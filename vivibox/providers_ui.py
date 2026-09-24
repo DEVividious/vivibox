@@ -148,7 +148,7 @@ def provider_rows() -> list[tuple[str, str, str, bool]]:
     """Your providers and MCP servers, and vivibox's own: (kind, name, what it is, whether it is on)."""
     stored, defined = keys.list_keys(), providers.load()
     rows = []
-    for name in sorted({n for n in stored if not providers.is_mcp_secret(n)} | set(defined)):
+    for name in sorted({n for n in stored if providers.is_provider_key(n)} | set(defined)):
         key = (
             f"key {stored[name]}"
             if name in stored

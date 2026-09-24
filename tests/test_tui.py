@@ -3569,3 +3569,49 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         if issubclass(cls, ModalScreen) and cls.__module__ == module.__name__ and name in stylesheet
     ]
     assert not named, f"dialogs named in the CSS instead of one rule on ModalScreen: {named}"
+
+
+def test_k_sets_the_ntfy_topic_and_what_goes_there(env):
+    """Two rows under notifications: the topic's address, asked on one line and checked, and what
+    goes there, a toggle between the desktop's messages and every stage."""
+    config = env / "config" / "config.toml"
+    config.write_text(
+        'tasks_dir = "' + str(env / "tasks") + '"\n\n[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n\n[notifications]\n# Kept.\ndesktop = true\n'
+    )
+
+    def labels(app) -> list[str]:
+        options = app.screen.query_one("#rows", OptionList)
+        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+    async def scenario(app, pilot):
+        await pilot.press("k")
+        await pilot.pause()
+        topic = next(i for i, row in enumerate(labels(app)) if "ntfy topic" in row)
+        assert "off" in labels(app)[topic]
+        app.screen.query_one("#rows", OptionList).highlighted = topic
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Ask)
+        app.screen.query_one(Input).value = "my-topic"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "ntfy =" not in config.read_text(), "a bare name is refused: the address is asked for"
+        assert isinstance(app.screen, settings.Settings)
+        await pilot.press("enter")  # the row again
+        await pilot.pause()
+        app.screen.query_one(Input).value = "https://ntfy.sh/a-name-nobody-guesses"
+        await pilot.press("enter")
+        await pilot.pause()
+        text = config.read_text()
+        assert 'ntfy = "https://ntfy.sh/a-name-nobody-guesses"' in text and "# Kept." in text
+        assert "a-name-nobody-guesses" in labels(app)[topic]
+        events = next(i for i, row in enumerate(labels(app)) if "ntfy events" in row)
+        assert "decisions" in labels(app)[events]
+        app.screen.query_one("#rows", OptionList).highlighted = events
+        await pilot.press("enter")
+        await pilot.pause()
+        assert 'ntfy_events = "all"' in config.read_text() and "all" in labels(app)[events]
+        assert app.config.ntfy_events == "all", "the running view reads the file again"
+
+    run(scenario)

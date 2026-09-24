@@ -20,6 +20,10 @@ class KeyStoreError(Exception):
     pass
 
 
+# The key store entry that holds the ntfy access token: a secret, but not a provider's key.
+NTFY = "ntfy"
+
+
 def store() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(base) / "vivibox" / "keys"

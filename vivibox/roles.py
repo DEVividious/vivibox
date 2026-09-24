@@ -163,7 +163,7 @@ def available_models(refresh: bool = False) -> dict[str, list[str]]:
     found = {name: listed for name, listed in providers.models().items() if listed and on(name)}
     now_ = time.time()
     for provider in keys.list_keys():
-        if provider in found or not on(provider) or providers.is_mcp_secret(provider):
+        if provider in found or not on(provider) or not providers.is_provider_key(provider):
             continue
         entry = cached.get(provider) or {}
         # A list kept from before retired models were dropped may still name one: read again.

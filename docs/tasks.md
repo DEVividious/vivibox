@@ -61,8 +61,8 @@ the files of one task may take up to 20 MB.
 **Bugs** get a plan that starts by reproducing the bug in a failing test and finding its cause
 before any fix; features and other tasks get the usual plan.
 
-Desktop notifications tell you when a task waits for you, so you can leave the view closed. In the
-view itself a task that starts to wait rings the terminal's bell, and the window's title counts
+Desktop notifications tell you when a task waits for you, so you can leave the view closed, and
+[ntfy](configure.md) carries the same to your phone. In the view itself a task that starts to wait rings the terminal's bell, and the window's title counts
 those waiting. After a reboot the view offers to start the tasks that were running. Their
 buttons (**Show plan**, **Accept plan**, **Open in idea**) cover the common steps too.
 

@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import argparse
 
-from . import actions, gate, supervisor
-from .config import load_config
+from . import actions, gate, keys, ntfy, supervisor
+from .config import Config, load_config
 from .risky import Approvals
+from .states import waits_for_user
 from .task import Task
 
 
@@ -23,15 +24,48 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         if session := actions.watchable_session(task, st):
             actions.agent_view(task, harness.attach_command(session))
 
-    sup = make_supervisor(task, project, pod, config, agent_window)
+    channel = channel_for(config)
+    stages = ntfy.Stages(channel) if channel else None
+
+    def stepped(st) -> None:
+        agent_window(st)
+        if stages:
+            stages.seen(st)
+
+    sup = make_supervisor(task, project, pod, config, agent_window, channel)
     actions.supervising(task)
     print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
-    agent_window(task.read_state())  # a resumed task already has its session
-    sup.run(on_step=agent_window)
+    stepped(task.read_state())  # a resumed task already has its session
+    sup.run(on_step=stepped)
     return 0
 
 
-def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: None) -> supervisor.Supervisor:
+def channel_for(config: Config, get_key=keys.get_key, stored=keys.list_keys) -> ntfy.Channel | None:
+    """The ntfy topic config.toml names, with its token from the key store when there is one."""
+    if not config.ntfy:
+        return None
+    token = get_key(ntfy.TOKEN) if ntfy.TOKEN in stored() else ""
+    return ntfy.Channel(config.ntfy, config.ntfy_events, token)
+
+
+def notifier(task: Task, project, config: Config, channel: ntfy.Channel | None):
+    """Where the supervisor's messages go: its window and the desktop, and the ntfy topic when
+    there is one, at a priority that says whether the task now waits for you or has stopped."""
+
+    def notify(task_id: str, message: str, kind: str = "") -> None:
+        supervisor.notify(
+            task_id, message, config.desktop_notifications, actions.buttons(task, project, config, kind)
+        )
+        if channel:
+            st = task.read_state()
+            channel.decision(task_id, message, waiting=waits_for_user(st.state), trouble=st.paused)
+
+    return notify
+
+
+def make_supervisor(
+    task: Task, project, pod, config, agent_window=lambda st: None, channel: ntfy.Channel | None = None
+) -> supervisor.Supervisor:
     """The supervisor as the command line runs it: the gate on the project's commands, your
     notifications, the review copy. The behavioural tests build the same one and step it."""
     harness = actions.harness_for("writer", pod, task)
@@ -47,9 +81,7 @@ def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: No
             no_build=project.no_build,
         ),  # fmt: skip
         risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
-        notify=lambda task_id, message, kind="": supervisor.notify(
-            task_id, message, config.desktop_notifications, actions.buttons(task, project, config, kind)
-        ),
+        notify=notifier(task, project, config, channel),
         prepare_review=lambda: actions.prepare_review(task, project),
         save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
         session_started=agent_window,
@@ -64,5 +96,3 @@ def make_supervisor(task: Task, project, pod, config, agent_window=lambda st: No
         planner=planner,
         source=project.repo,
     )
-    print(f"{task.id} is done.")
-    return 0

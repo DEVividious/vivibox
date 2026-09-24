@@ -28,6 +28,7 @@ from . import init as project_init
 from .config import ConfigError, config_dir, load_config
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
+from .providers import is_provider_key
 from .states import State
 from .supervise import cmd_supervise
 from .task import Task, find_task, list_tasks
@@ -513,7 +514,7 @@ def cmd_auth(args: argparse.Namespace) -> int:
 
 def cmd_models(args: argparse.Namespace) -> int:
     """Asks opencode which models it knows for the providers you have keys for. Display only."""
-    providers = [args.provider] if args.provider else list(keys.list_keys())
+    providers = [args.provider] if args.provider else list(filter(is_provider_key, keys.list_keys()))
     if not providers:
         raise keys.KeyStoreError("no keys yet; add one with: vivibox auth set <provider>")
     env = []

@@ -19,7 +19,16 @@ from textual.widgets.option_list import Option
 
 from . import actions, configfile, ide, ui
 from . import init as project_init
-from .config import ENV_NAME, JAVA, RESERVED_ENV, ConfigError, config_dir, load_config, load_project
+from .config import (
+    ENV_NAME,
+    JAVA,
+    NTFY_LEVELS,
+    RESERVED_ENV,
+    ConfigError,
+    config_dir,
+    load_config,
+    load_project,
+)
 from .dialogs import ChooseEditor, ChooseModel, ChooseVerify
 from .panel import edit_in_editor
 from .providers_ui import ManageProviders, provider_rows
@@ -169,6 +178,8 @@ class Settings(Rows):
                 "editor",
             ),
             ("desktop notifications", "on" if config.desktop_notifications else "off", "notifications"),
+            ("ntfy topic", config.ntfy or "off", "ntfy"),
+            ("ntfy events", config.ntfy_events, "ntfy_events"),
             ("Limits", "", None),
             ("max_iterations", str(config.max_iterations), "max_iterations"),
             ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
@@ -230,6 +241,28 @@ class Settings(Rows):
         elif key == "notifications":
             on = not config.desktop_notifications
             self.write("desktop", on, "notifications", f"Desktop notifications {'on' if on else 'off'}.")
+        elif key == "ntfy":
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                if value and not value.startswith(("https://", "http://")):
+                    self.say("The topic's address starts with https://, e.g. https://ntfy.sh/<topic>.")
+                    return
+                self.write("ntfy", value, "notifications", f"ntfy {'on' if value else 'off'}.")
+
+            self.app.push_screen(
+                Ask(
+                    "Address of the ntfy topic the supervisor's messages go to (empty turns it off):",
+                    config.ntfy,
+                    "Pick a name nobody guesses. A token, if the topic needs one: vivibox auth set ntfy",
+                ),
+                typed,
+            )
+        elif key == "ntfy_events":
+            level = NTFY_LEVELS[(NTFY_LEVELS.index(config.ntfy_events) + 1) % len(NTFY_LEVELS)]
+            said = "what the desktop gets" if level == NTFY_LEVELS[0] else "every stage of a task too"
+            self.write("ntfy_events", level, "notifications", f"ntfy gets {level}: {said}.")
         elif key in ("max_iterations", "verify_timeout"):
             prompts = {
                 "max_iterations": "Verification failures the writer may fix on its own before it stops:",

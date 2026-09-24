@@ -183,6 +183,11 @@ def is_mcp_secret(name: str) -> bool:
     return name.startswith("mcp.")
 
 
+def is_provider_key(name: str) -> bool:
+    """A key store entry that is a provider's key: not an MCP server's secret, not the ntfy token."""
+    return not is_mcp_secret(name) and name != keys.NTFY
+
+
 def mcp_secrets() -> list[str]:
     """The key store entries the MCP servers read in a task's pod."""
     return sorted(set(MOUNTED.findall(json.dumps(task_mcp()))))

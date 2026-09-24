@@ -45,8 +45,8 @@ MCP servers you already use. Keys go to vivibox's own key store, never into conf
 5. The work waits for you as a review copy: `o` opens it in your IDE as uncommitted changes,
    `v` runs the app in the pod, `a` accepts it into your checkout, `r` asks for changes.
 
-Desktop notifications say when a task waits for you, and the view lists your projects with
-their tasks under them, the ones waiting for you first. Everything the view does is also a command
+Desktop notifications, or ntfy on your phone, say when a task waits for you, and the view lists
+your projects with their tasks under them, the ones waiting for you first. Everything the view does is also a command
 (`vivibox new`, `accept`, `reply`, `status`…), and planning can happen in your own chat instead of
 on an API key. All of it: [docs/tasks.md](docs/tasks.md).
 

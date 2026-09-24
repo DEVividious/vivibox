@@ -175,7 +175,9 @@ ENVIRONMENT = re.compile(
 # modules ends with its summary, dozens of lines below the test that could not pull an image.
 ENVIRONMENT_ANYWHERE = re.compile(
     r"certificate signed by unknown authority|tls: failed to verify certificate|\bx509: "
-    r"|No space left on device",
+    r"|No space left on device"
+    # Testcontainers could not pull a test's image; Docker Hub's pull rate limit.
+    r"|Can't get Docker image|\btoomanyrequests\b",
     re.IGNORECASE,
 )
 ENVIRONMENT_TAIL = 60

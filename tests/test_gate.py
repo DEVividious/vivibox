@@ -763,3 +763,24 @@ def test_the_log_ends_with_a_summary_that_names_the_first_trouble_line(task):
         f"{at}\n# npm run e2e: not run\n"
     )
     assert gate.first_trouble(["$ x", "fine", "[exit 0 after 1 s]"], "x") == 0
+
+
+def test_an_image_testcontainers_cannot_get_deep_in_a_maven_log_is_of_the_environment(task):
+    """Testcontainers could not pull the image a test needs (a registry the network does not reach,
+    a rate limit): nothing the agent commits changes that, and in a many-module build the line is
+    far from the end. Seen on a work laptop with quay.io/minio/minio."""
+    gate.accept_plan(task, ["true"])
+    pulled = (
+        "Caused by: org.testcontainers.containers.ContainerFetchException: Can't get Docker image:"
+        " RemoteDockerImage(imageName=quay.io/minio/minio:latest, imagePullPolicy=DefaultPullPolicy())"
+    )
+    summary = "\n".join(f"[INFO] module-{i} ........... SUCCESS [  0.1 s]" for i in range(80))
+    said = f"[ERROR] StorageIT.puts:20\n{pulled}\n[INFO] Reactor Summary:\n{summary}\n[INFO] BUILD FAILURE"
+    result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
+    assert "quay.io/minio/minio" in result.environment
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "no attempt of the agent's spent"
+    rate = "toomanyrequests: You have reached your pull rate limit."
+    result = gate.run_gate(
+        task, FakePod(fail={"mvn -B verify"}, output=f"{rate}\n{summary}"), ["mvn -B verify"], []
+    )
+    assert "pull rate limit" in result.environment

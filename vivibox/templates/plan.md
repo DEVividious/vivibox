@@ -7,12 +7,6 @@ summary = ""
 # false when there is nothing to build or test in this task. A CI definition (.github/workflows,
 # .gitlab-ci.yml, Jenkinsfile) says how the project is built, when there is one.
 verify = []
-# code-only: code, unit and integration tests, Testcontainers.
-# full-system: also needs the local system described by the skills below.
-mode = "code-only"
-requires_skills = []
-# supervised: stop at checkpoints. loop: writer and reviewer iterate until done.
-collab = "supervised"
 +++
 
 # Goal

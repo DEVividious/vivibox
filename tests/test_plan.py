@@ -22,8 +22,6 @@ mode = "code-only"
 
 def test_parses_header_and_criteria():
     plan = parse_plan(PLAN)
-    assert plan.mode == "code-only"
-    assert plan.collab == "supervised"
     assert [c.text for c in plan.criteria] == [
         "endpoint returns 200",
         "test covers the error path",
@@ -35,21 +33,21 @@ def test_parses_header_and_criteria():
 def test_packaged_template_is_valid():
     from importlib.resources import files
 
-    plan = parse_plan(
-        files("vivibox").joinpath("templates/plan.md").read_text().replace("{{kind}}", "feature")
+    text = files("vivibox").joinpath("templates/plan.md").read_text().replace("{{kind}}", "feature")
+    plan = parse_plan(text)
+    assert plan.kind == "feature" and not plan.verify and not plan.no_build
+    assert not any(f"{name} =" in text for name in ("mode", "requires_skills", "collab")), (
+        "nothing reads them"
     )
-    assert plan.mode == "code-only"
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "# no header",
-        "+++\nmode = 'code-only'\n",
-        '+++\nmode = "other"\n+++\n',
-        '+++\nmode = "full-system"\n+++\n',
-        '+++\ncollab = "free"\n+++\n',
-        "+++\nmode = \n+++\n",
+        "+++\nkind = 'feature'\n",
+        '+++\nkind = "other kind"\n+++\n',
+        "+++\nkind = \n+++\n",
     ],
 )
 def test_rejects_invalid_plan(text):
@@ -57,9 +55,14 @@ def test_rejects_invalid_plan(text):
         parse_plan(text)
 
 
-def test_full_system_with_skill():
-    plan = parse_plan('+++\nmode = "full-system"\nrequires_skills = ["local-system"]\n+++\n')
-    assert plan.requires_skills == ["local-system"]
+def test_a_plan_with_the_retired_fields_still_parses():
+    """mode, requires_skills and collab were in every plan's header from the start, parsed and
+    checked, and nothing read them. They are gone from the template; a plan that still has them,
+    with any value, is not refused for it."""
+    plan = parse_plan('+++\nmode = "full-system"\nrequires_skills = ["local-system"]\ncollab = "free"\n+++\n')
+    assert plan.kind == "feature" and plan.criteria == []
+    for field_name in ("mode", "requires_skills", "collab"):
+        assert not hasattr(plan, field_name), f"{field_name} is not a field of a plan any more"
 
 
 def test_body_is_the_plan_without_what_the_agent_works_from():

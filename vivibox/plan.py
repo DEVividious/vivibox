@@ -6,9 +6,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 
-MODES = ("code-only", "full-system")
 KINDS = ("feature", "bug", "other")
-COLLAB = ("supervised", "loop")
 CRITERIA_HEADING = "Acceptance criteria"
 HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
 MAX_SUMMARY = 100
@@ -25,11 +23,14 @@ class Criterion:
     done: bool
 
 
+# Header fields older plans have that nothing reads any more: accepted and ignored, not refused.
+# (mode and requires_skills come back with skills, collab with a reviewer loop, each with the code
+# that reads it.)
+RETIRED = ("mode", "requires_skills", "collab")
+
+
 @dataclass(frozen=True)
 class Plan:
-    mode: str
-    collab: str
-    requires_skills: list[str]
     criteria: list[Criterion] = field(default_factory=list)
     kind: str = "feature"
     # One line naming what the task does, written by the agent when it plans; shown in your list.
@@ -115,17 +116,6 @@ def parse_plan(text: str) -> Plan:
         data = tomllib.loads(header)
     except tomllib.TOMLDecodeError as e:
         raise PlanError(f"Plan header: {e}") from None
-    mode = data.get("mode", "code-only")
-    if mode not in MODES:
-        raise PlanError(f"mode must be one of {MODES}")
-    collab = data.get("collab", "supervised")
-    if collab not in COLLAB:
-        raise PlanError(f"collab must be one of {COLLAB}")
-    skills = data.get("requires_skills", [])
-    if not isinstance(skills, list) or not all(isinstance(s, str) and s for s in skills):
-        raise PlanError("requires_skills must be a list of names")
-    if mode == "full-system" and not skills:
-        raise PlanError("mode = 'full-system' requires at least one skill in requires_skills")
     kind = data.get("kind", "feature")
     if kind not in KINDS:
         raise PlanError(f"kind must be one of {KINDS}")
@@ -138,4 +128,4 @@ def parse_plan(text: str) -> Plan:
     verify = [] if no_build else verify
     if not isinstance(verify, list) or not all(isinstance(c, str) and c.strip() for c in verify):
         raise PlanError("verify must be a list of commands, or false when there is nothing to build")
-    return Plan(mode, collab, skills, _criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify, no_build)
+    return Plan(_criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify, no_build)

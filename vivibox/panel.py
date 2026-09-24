@@ -306,19 +306,29 @@ def view_state_path() -> Path:
     return actions.history_path().with_name("view.json")
 
 
-def load_collapsed() -> set[str]:
-    """The projects you folded away; a choice of yours, so it outlives the view."""
+def load_view() -> dict:
+    """Your choices about the list, the ones that outlive the view: the projects you folded away,
+    whether the tasks you accepted or deleted are shown."""
     try:
-        return set(json.loads(view_state_path().read_text()).get("collapsed", []))
+        return json.loads(view_state_path().read_text())
     except (OSError, ValueError):
-        return set()
+        return {}
 
 
-def save_collapsed(names: set[str]) -> None:
+def save_view(**choices) -> None:
+    state = {**load_view(), **choices}
     path = view_state_path()
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"collapsed": sorted(names)}) + "\n")
+        path.write_text(json.dumps(state) + "\n")
+
+
+def load_collapsed() -> set[str]:
+    return set(load_view().get("collapsed", []))
+
+
+def save_collapsed(names: set[str]) -> None:
+    save_view(collapsed=sorted(names))
 
 
 def project_detail(name: str, tasks: int, problem: str) -> str:
@@ -380,7 +390,7 @@ def deleted_detail(entry: dict) -> str:
             "",
             f"Deleted{f' {when}' if when else ''}; its files and its work went with it.",
             "",
-            "Press `x` to delete it from the history, `h` to hide finished tasks.",
+            "Press `x` to delete it from the history, `H` to hide deleted tasks.",
         ]
     )
 
@@ -420,7 +430,7 @@ def finished_detail(entry: dict) -> str:
             f"Its work is {where}, from commit `{entry['commit']}`.",
             "",
             *delivered,
-            "Press `x` to delete it from the history, `h` to hide finished tasks.",
+            "Press `x` to delete it from the history, `h` to hide accepted tasks.",
             "",
             *archived,
         ]

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 
@@ -484,6 +485,46 @@ def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
         assert rows(app) == ["demo", "demo-1"], "hiding finished tasks leaves the live ones"
 
     run(scenario)
+
+
+def test_accepted_and_deleted_tasks_are_shown_or_hidden_separately_and_the_choice_is_kept(env):
+    """h is for the tasks you accepted, H for the ones you deleted; the deleted ones start hidden,
+    since they are the ones you rarely look at. The header says how many of each are out of sight,
+    and both choices outlive the view, like a folded project."""
+    task = new_task("Task")
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    kept = {"project": "demo", "cost": 0.1, "commit": "abc", "branch": "", "conflicts": [], "finished": now()}
+    actions.history_path().write_text(
+        json.dumps({"id": "demo-0", "title": "Accepted", **kept})
+        + "\n"
+        + json.dumps({"id": "demo-5", "title": "Thrown away", "deleted": "planning", **kept})
+        + "\n"
+    )
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id, "demo-0"], "deleted tasks start hidden"
+        assert "1 deleted hidden" in app.sub_title and "done hidden" not in app.sub_title
+        await pilot.press("H")
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id, "demo-5", "demo-0"] and "hidden" not in app.sub_title
+        await pilot.press("h")
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id, "demo-5"] and "1 done hidden" in app.sub_title
+        app.table.move_cursor(row=2)
+        await pilot.press("d")
+        await pilot.pause()
+        assert "`H` to hide deleted tasks" in app.shown
+
+    run(scenario)
+
+    async def again(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo", task.id, "demo-5"], "both choices are remembered"
+
+    run(again)
 
 
 def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
@@ -1870,6 +1911,9 @@ def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch)
     assert actions.demo_from_history("demo") == ""
 
     async def scenario(app, pilot):
+        app.show_deleted = True  # hidden to start with; H shows them
+        app.reload()
+        app.table.move_cursor(row=1)
         await pilot.pause()
         assert "deleted" in str(app.table.get_cell("demo-1", app.status_column))
         await pilot.press("d")
@@ -2558,7 +2602,7 @@ def test_a_collapsed_project_keeps_saying_what_waits_and_stays_collapsed(env):
         assert rows(app) == ["demo", waiting.id, "demo-2"]
 
     run(scenario)
-    assert tui.load_collapsed() == set()
+    assert tui.load_view().get("collapsed", []) == []
 
 
 def test_collapsing_is_remembered_across_views(env):
@@ -2698,7 +2742,8 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
         for key, what in (
             ("i", "set up a project"),
             ("k", "Providers & MCP"),
-            ("h", "finished"),
+            ("h", "accepted"),
+            ("H", "deleted"),
             ("g", "verif"),
         ):
             assert key in text and what.lower() in text.lower()

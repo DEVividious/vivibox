@@ -105,7 +105,7 @@ from .panel import (  # noqa: F401
     git_diff,
     keys_for,
     last_gate,
-    load_collapsed,
+    load_view,
     log_command,
     newest_log,
     next_steps,
@@ -120,6 +120,7 @@ from .panel import (  # noqa: F401
     read,
     removed_tests,
     save_collapsed,
+    save_view,
     ticked_at,
     verification_running,
     view_state_path,
@@ -250,7 +251,8 @@ class Vivibox(App):
         Binding("x", "forget_project", "Forget"),
         Binding("n", "new", "New"),
         Binding("i", "new_project", "New project", show=False),
-        Binding("h", "toggle_done", "Show/hide done", show=False),
+        Binding("h", "toggle_done", "Show/hide accepted", show=False),
+        Binding("H", "toggle_deleted", "Show/hide deleted", show=False),
         Binding("k", "providers", "Providers & MCP", show=False),
         Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
@@ -265,9 +267,15 @@ class Vivibox(App):
         self.drawn: tuple = ()
         self.pairs: list[tuple[Task, TaskState]] = []
         self.done: list[dict] = []
-        self.show_done = True
-        self.has_done = False
-        self.collapsed = load_collapsed()
+        view = load_view()
+        # The ones you deleted start hidden: they are the ones you rarely look at again.
+        self.show_done = view.get("show_done", True)
+        self.show_deleted = view.get("show_deleted", False)
+        # What the history holds of each kind, so h and H are offered only when they would show something.
+        self.has_done = self.has_deleted = False
+        # How many of each kind are out of sight now: the header says so.
+        self.hidden: dict[str, int] = {}
+        self.collapsed = set(view.get("collapsed", []))
         # Every project by name, with why its tasks could not start; refreshed with the tasks.
         self.problems: dict[str, str] = {}
         # Tasks whose demo is being started or worked out, and what it is doing: shown as working.
@@ -450,11 +458,14 @@ class Vivibox(App):
             tasks,
             pods,
             self.show_done,
+            self.show_deleted,
             self.selected_id(),
             len(self.done),
             tuple(sorted(self.problems.items())),
             tuple(sorted(self.collapsed)),
             self.has_done,
+            self.has_deleted,
+            tuple(sorted(self.hidden.items())),
             tuple(sorted(self.starting.items())),
         )
 
@@ -470,11 +481,17 @@ class Vivibox(App):
         }
         self.pairs = pairs = sorted(pairs, key=lambda p: self.views[p[1].id].rank)
         live = {st.id for _, st in pairs}
-        self.done = [e for e in actions.history() if e["id"] not in live] if self.show_done else []
+        kept = [e for e in actions.history() if e["id"] not in live]
+        shown = lambda e: self.show_deleted if e.get("deleted") else self.show_done  # noqa: E731
+        self.done = [e for e in kept if shown(e)]
+        self.hidden = {}
+        for entry in kept:
+            if not shown(entry):
+                kind = "deleted" if entry.get("deleted") else "done"
+                self.hidden[kind] = self.hidden.get(kind, 0) + 1
+        self.has_done = any(not e.get("deleted") for e in kept)
+        self.has_deleted = any(e.get("deleted") for e in kept)
         self.problems = {name: actions.project_problem(name) for name in projects()}
-        # A stat, not a read: whether h has any finished task to show.
-        kept = actions.history_path()
-        self.has_done = kept.is_file() and kept.stat().st_size > 0
         now = self.snapshot()
         if now == self.drawn:
             self.look_at_pods([st.id for _, st in pairs])
@@ -624,6 +641,8 @@ class Vivibox(App):
         parts = [f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you"]
         if self.working:
             parts.append(f"{self.working} working")
+        # What h and H keep out of sight, so a list that looks short is not a surprise.
+        parts += [f"{count} {kind} hidden" for kind, count in sorted(self.hidden.items())]
         if self.code_changed:
             parts.append(CODE_CHANGED)
         self.sub_title = " · ".join(parts)
@@ -711,6 +730,12 @@ class Vivibox(App):
 
     def action_toggle_done(self) -> None:
         self.show_done = not self.show_done
+        save_view(show_done=self.show_done)
+        self.reload()
+
+    def action_toggle_deleted(self) -> None:
+        self.show_deleted = not self.show_deleted
+        save_view(show_deleted=self.show_deleted)
         self.reload()
 
     def finished_entry(self, task_id: str | None) -> dict | None:
@@ -778,6 +803,8 @@ class Vivibox(App):
             return bool(projects()) or (self.is_mounted and not self.panel.has_class("hidden"))
         if action == "toggle_done":
             return self.has_done
+        if action == "toggle_deleted":
+            return self.has_deleted
         if action not in TASK_ACTIONS:  # quit, and moving focus in dialogs
             return True
         pick = self.selected()

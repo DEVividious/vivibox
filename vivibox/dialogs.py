@@ -1388,7 +1388,8 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]Anywhere[/b]
   i     set up a project
   k     providers & MCP
-  h     show or hide finished tasks
+  h     show or hide the tasks you accepted
+  H     show or hide the tasks you deleted (hidden to start with)
   q     quit
 """
 

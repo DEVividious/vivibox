@@ -20,10 +20,10 @@ def made_now(pod, state="exited"):
     from vivibox.pod import CA_LABEL, ca_digest
 
     cmd = pod.sidecar_command()
-    pod.runner.states["vivibox-shop-1-dind"] = state
-    pod.runner.cmds["vivibox-shop-1-dind"] = ["-c", cmd[-1]]
-    pod.runner.binds["vivibox-shop-1-dind"] = binds(cmd)
-    pod.runner.labels["vivibox-shop-1-dind"] = {"vivibox.task": "shop-1", CA_LABEL: ca_digest()}
+    pod.runner.states[pod.sidecar] = state
+    pod.runner.cmds[pod.sidecar] = ["-c", cmd[-1]]
+    pod.runner.binds[pod.sidecar] = binds(cmd)
+    pod.runner.labels[pod.sidecar] = {"vivibox.task": pod.task_id, CA_LABEL: ca_digest()}
 
 
 class FakeDocker:
@@ -65,6 +65,8 @@ class FakeDocker:
             self.labels[cmd[4]] = dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "--label")
         elif cmd[:3] == ["docker", "rm", "-f"]:
             self.states.pop(cmd[3], None)
+        elif cmd[:2] == ["docker", "stop"] and cmd[-1] in self.states:
+            self.states[cmd[-1]] = "exited"
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
             out = "127.0.0.1\tlocalhost\n172.20.0.1\thost.docker.internal\n"
         elif cmd[:2] == ["docker", "exec"] and "cmdline" in cmd[-1]:
@@ -239,6 +241,37 @@ def test_restarted_sidecar_gets_a_new_agent(pod):
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent")
     assert pod.runner.find("docker", "start", "vivibox-shop-1-dind")
     assert not pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind"), "its script is current"
+
+
+def test_a_task_started_again_passes_what_its_project_passes_now(env, tmp_path, monkeypatch):
+    """A task started before its project passed any variables: after a stop and a start its agent
+    has them, the names as the project gives them now, by name for docker to take from vivibox's
+    environment."""
+    from functools import partial
+
+    from vivibox import actions, image
+    from vivibox.cli import main
+
+    docker = FakeDocker()
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=docker))
+    monkeypatch.setattr(image, "env", lambda ref: {})
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    before = actions.task_pod("demo-1")
+    made_now(before, state="running")
+    docker.states[before.agent] = "running"
+    before.down()
+
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text() + 'pass_env = ["AWS_SESSION_TOKEN", "AWS_ACCOUNT_ID"]\n')
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "s3cr3t-token")
+    monkeypatch.setenv("AWS_ACCOUNT_ID", "123456789012")
+    actions.task_pod("demo-1").up(timeout=1)
+
+    made = docker.find("docker", "run", "-d", "--name", before.agent)
+    assert made, "the agent is made again, with what the project passes now"
+    passed = [made[-1][i + 1] for i, arg in enumerate(made[-1]) if arg == "-e"]
+    assert "AWS_SESSION_TOKEN" in passed and "AWS_ACCOUNT_ID" in passed
 
 
 def test_a_stopped_sidecar_made_by_an_older_vivibox_is_made_again(pod):

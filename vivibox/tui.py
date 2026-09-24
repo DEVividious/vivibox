@@ -244,6 +244,7 @@ class Vivibox(App):
         Binding("s", "start_task", "Start"),
         Binding("s", "stop_task", "Stop"),
         Binding("s", "stop_pod", "Stop pod"),
+        Binding("S", "force_stop", "Force stop", show=False),
         Binding("m", "models", "Model", show=False),
         Binding("x", "remove", "Delete"),
         Binding("e", "edit_project", "Edit project"),
@@ -1318,6 +1319,19 @@ class Vivibox(App):
             lambda yes: yes and self.stop(task.id),
         )
 
+    def action_force_stop(self) -> None:
+        """For a stop that hangs (a container that ignores it, a supervisor stuck in docker) or a
+        start that never ends: kill both, at once. Asked once, since S is one Shift away from s."""
+        task, _ = self.selected()
+        self.push_screen(
+            Confirm(
+                f"Stop {task.id} by force? The turn under way is lost; its work on disk is kept.",
+                "Stop by force",
+                destructive=True,
+            ),
+            lambda yes: yes and self.stop(task.id, force=True),
+        )
+
     def action_help(self) -> None:
         self.push_screen(Help())
 
@@ -1333,12 +1347,13 @@ class Vivibox(App):
         self.call_from_thread(self.busy_with, task_id, "")
 
     @work(thread=True)
-    def stop(self, task_id: str) -> None:
+    def stop(self, task_id: str, force: bool = False) -> None:
         # Taking the pod down takes a while; without this the row looked as if nothing happened.
+        # A forced stop runs beside a stop that hangs; that one is left to finish on its own.
         self.call_from_thread(self.busy_with, task_id, "stopping…")
         try:
-            actions.stop(actions.load(task_id)[0])
-            self.call_from_thread(self.notify, f"{task_id} stopped.")
+            actions.stop(actions.load(task_id)[0], force=force)
+            self.call_from_thread(self.notify, f"{task_id} stopped{' by force' if force else ''}.")
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.busy_with, task_id, "")

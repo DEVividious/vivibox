@@ -1375,6 +1375,7 @@ HELP = """[b]Your decisions[/b], on the selected task
   l     the newest log in your pager: followed while the verification runs,
         else opened at its end
   s     stop the task, or start it again
+  S     stop it by force when s hangs; the turn under way is lost
   m     what each role runs on, for this task
   x     delete the task; on a finished one, its line in the history
 

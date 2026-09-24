@@ -495,20 +495,32 @@ def start_supervisor(task: Task) -> None:
     (task.meta / SUPERVISOR_PID).write_text(str(p.pid))
 
 
-def stop_supervisor(task: Task) -> None:
+def stop_supervisor(task: Task, force: bool = False) -> None:
     if supervisor_running(task):
         pid = int((task.meta / SUPERVISOR_PID).read_text())
         # Its own process group: the agent turn it runs goes too.
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(pid, signal.SIGTERM)
+            os.killpg(pid, signal.SIGKILL if force else signal.SIGTERM)
     tmux("kill-session", "-t", tmux_session(task.id))
 
 
-def stop(task: Task) -> None:
-    stop_supervisor(task)
-    task_pod(task.id).down()
+FORCED = "stopped by force"
+
+
+def stop(task: Task, force: bool = False) -> None:
+    """Stops the task and keeps its work. A stop asks the supervisor to finish and waits for the
+    containers; force kills both instead, for a container that ignores the stop or a supervisor
+    stuck in docker. The turn under way is lost then; the task's files are on the host."""
+    stop_supervisor(task, force=force)
+    pod = task_pod(task.id)
+    if force:
+        pod.kill()
+    else:
+        pod.down()
     secrets.remove(task.id)
-    if not task.read_state().paused:
+    if force:
+        task.set_paused(True, problem=FORCED)
+    elif not task.read_state().paused:
         task.set_paused(True)
 
 

@@ -1819,7 +1819,7 @@ def test_stopping_and_starting_show_in_the_status_until_done(env, monkeypatch):
     task = new_task()
     release = threading.Event()
 
-    def slow_stop(t):
+    def slow_stop(t, force=False):
         release.wait(5)
         t.set_paused(True)
 
@@ -1874,6 +1874,58 @@ def test_starting_says_which_step_it_is_at(env, monkeypatch):
         assert "starting the pod…" in str(app.table.get_cell(task.id, app.status_column))
         release.set()
         await worker.wait()
+
+    run(scenario)
+
+
+def test_S_stops_by_force_even_while_a_stop_hangs(env, monkeypatch):
+    """s takes the pod down and waits for it; when the container ignores the stop or the supervisor
+    hangs, the row says "stopping…" for good and s is off. S is on whenever the task is not done,
+    asks once, and kills; the hanging step is left to finish on its own."""
+    import threading
+
+    task = new_task()
+    task.event("started", model="m")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    release = threading.Event()
+    stops = []
+
+    def stop(t, force=False):  # what actions.stop does, with the stop hanging until released
+        stops.append(force)
+        if force:
+            t.set_paused(True, problem="stopped by force")
+            return
+        release.wait(5)
+        if not t.read_state().paused:
+            t.set_paused(True)
+
+    monkeypatch.setattr(actions, "stop", stop)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert app.check_action("stop_task", ()) and app.check_action("force_stop", ())
+        hung = app.stop(task.id)
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if task.id in app.starting:
+                break
+        assert not app.check_action("stop_task", ()), "a stop is under way"
+        assert app.check_action("force_stop", ()), "and S is the way out of it"
+        await pilot.press("S")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.Confirm), "asked once, like s"
+        await pilot.press("enter")
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if len(stops) == 2:
+                break
+        release.set()
+        await hung.wait()
+        await pilot.pause()
+        assert stops == [False, True]
+        assert "stopped by force" in str(app.table.get_cell(task.id, app.status_column))
+        assert app.check_action("start_task", ()), "and s starts it again"
 
     run(scenario)
 

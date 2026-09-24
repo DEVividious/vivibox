@@ -441,7 +441,7 @@ WAITING_ONLY = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.CHECKPOINT_
 # The keys that act on the selected task; the rest of the view's keys are always there.
 TASK_ACTIONS = (
     "accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch", "start_task", "stop_task",
-    "stop_pod", "remove", "demo", "demo_stop", "models", "copy_prompt", "copy_prompt_cli",
+    "stop_pod", "force_stop", "remove", "demo", "demo_stop", "models", "copy_prompt", "copy_prompt_cli",
     "verify_again", "show_log", "show_diff", "enter_box",
 )  # fmt: skip
 
@@ -462,6 +462,8 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
             "accept": open_,
             "start_task": st.paused and not busy,
             "stop_task": open_,
+            # Whatever is under way: a stop that hangs on the container is what it is for.
+            "force_stop": True,
             "remove": True,
             "demo": open_,
             "demo_stop": demo_running,
@@ -492,6 +494,9 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
         "start_task": st.state is not State.DONE and not at_work and not busy,
         "stop_task": at_work and st.state not in WAITING_ONLY and not busy,
         "stop_pod": at_work and st.state in WAITING_ONLY and not busy,
+        # Whenever the task is not done, busy or not: a start or a stop that hangs on docker, or a
+        # supervisor that is gone while its pod is up, is what it is for.
+        "force_stop": st.state is not State.DONE,
         "remove": True,
         # Once the work is back with you, not while the agent builds in the same tree. Running
         # it again while it runs is a restart, which is what you want after a change.

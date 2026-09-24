@@ -48,6 +48,7 @@ Status labels, the only ones allowed:
 | blocked by something outside the code (Docker, network, a credential, the time limit); no attempt spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |
 | stopped by the person | `stopped` | Stopped |
+| stopped by force (`S`), the turn under way lost | `stopped by force` | Waiting for you |
 | the agent's turn failed | `agent turn failed` | Waiting for you |
 | the supervisor hit an error | `stopped on an error` | Waiting for you |
 | a start failed | `could not start` | Waiting for you |

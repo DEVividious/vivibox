@@ -150,8 +150,9 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 def cmd_stop(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
-    actions.stop(task)
-    print(f"Stopped {task.id}; its work and history are kept. Continue with 'vivibox start {task.id}'.")
+    actions.stop(task, force=args.force)
+    lost = " by force; the turn under way is lost," if args.force else ";"
+    print(f"Stopped {task.id}{lost} its work and history are kept. Continue with 'vivibox start {task.id}'.")
     return 0
 
 
@@ -632,6 +633,11 @@ def parser() -> argparse.ArgumentParser:
         p_ = sub.add_parser(name, help=text)
         p_.add_argument("task", help="task id")
         p_.set_defaults(func=func)
+        if name == "stop":
+            p_.add_argument(
+                "--force", action="store_true",
+                help="kill the supervisor and the containers instead of waiting; the turn under way is lost",
+            )  # fmt: skip
     accept = sub.add_parser(
         "accept", help="accept the plan, or the finished work: it lands in your checkout, uncommitted"
     )

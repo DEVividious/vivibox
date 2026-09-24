@@ -34,6 +34,7 @@ them all:
 | `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on, and once both have a conversation, the one you pick; while the verification runs, its log as it is written; Ctrl-q brings you back (Esc in the agent's window interrupts the agent) |
 | `m` | what a role runs on for this task: another model, or planning it yourself; applies from the next start |
 | `s` | stop a task, or start it again from where it was |
+| `S` | stop it by force, whenever it is not done: for a stop or a start that hangs on the container or on Docker; the supervisor and the containers are killed, the turn under way is lost, the work on disk is kept, and the task says `stopped by force` until you start it again |
 | `x` | delete a task without accepting it, after saying what goes and what stays; on a finished one, its line in the history |
 | `b` | on a project's row: open a box, the project's pod for you to work in by hand, with your keys, the tools and opencode to run yourself, and no agent of its own; in a box, `w` is a shell and `a` closes it for review |
 
@@ -231,7 +232,9 @@ never reads or copies, and goes with the box.
 ### Stopping and removing
 
 `vivibox stop <id>` stops a task and keeps its work, and `vivibox start <id>` continues it from
-where it was (`resume` is the same command). `vivibox delete <id>` (or `rm`) deletes a task you do
+where it was (`resume` is the same command). `vivibox stop <id> --force` (`S` in the view) kills the
+supervisor and the containers instead of waiting for them, for a stop that hangs; the turn under
+way is lost, the work on disk is kept. `vivibox delete <id>` (or `rm`) deletes a task you do
 not want, without accepting it; a line in the history and its archive stay. Task numbers are never
 reused, so a removed task's branch is never overwritten.
 

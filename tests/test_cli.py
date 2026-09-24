@@ -220,6 +220,37 @@ def test_stop_pauses_and_rm_removes_everything(env, capsys, monkeypatch, tmp_pat
     assert "No tasks." not in out and "demo-1" in out and "deleted" in out, "the history, as in the view"
 
 
+def test_a_forced_stop_kills_the_supervisor_and_the_pod_and_says_so(env, capsys, monkeypatch, tmp_path):
+    """s asks nicely and waits; --force (S in the view) kills the supervisor's process group and
+    the containers, for when the container ignores the stop or the supervisor hangs in docker.
+    The turn under way is lost; the task's files are on the host. The task says it was forced."""
+    import signal
+
+    from vivibox import actions, secrets
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    (task.meta / actions.SUPERVISOR_PID).write_text("4242")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    signals, killed, removed = [], [], []
+    monkeypatch.setattr(actions.os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
+    monkeypatch.setattr(
+        actions, "task_pod", lambda task_id: type("P", (), {"kill": lambda self: killed.append(task_id)})()
+    )
+    monkeypatch.setattr(secrets, "remove", lambda task_id: removed.append(task_id))
+
+    assert main(["stop", "demo-1", "--force"]) == 0
+    assert signals == [(4242, signal.SIGKILL)] and killed == ["demo-1"] and removed == ["demo-1"]
+    st = task.read_state()
+    assert st.paused and st.problem == "stopped by force"
+    out = capsys.readouterr().out
+    assert "by force" in out and "vivibox start demo-1" in out
+
+
 def test_rm_asks_first(env, monkeypatch):
     from vivibox.config import load_config
     from vivibox.task import find_task

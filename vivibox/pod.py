@@ -607,6 +607,10 @@ class Pod:
         for name in (self.agent, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
+    def kill(self) -> None:
+        """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
+        self._run("docker", "kill", self.agent, self.sidecar, check=False)
+
     def gate_up(self) -> None:
         """A fresh container with a fresh clone of the task branch: only committed work is verified."""
         if self.gate_dir is None:

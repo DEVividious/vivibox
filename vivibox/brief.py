@@ -11,7 +11,7 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
-ROLES = ("planner", "writer")
+ROLES = ("planner", "writer", "reviewer")
 
 
 def _template(name: str) -> str:

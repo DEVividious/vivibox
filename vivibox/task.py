@@ -76,9 +76,10 @@ class Task:
         return self.root / "repo"
 
     def reset_iterations(self) -> None:
-        """After your decision the agent gets a fresh iteration budget."""
+        """After your decision the agent gets a fresh iteration budget, and the reviewer its rounds."""
         st = self.read_state()
         st.iteration = 1
+        st.reviews = 0
         self._write_state(st)
 
     def set_session(self, role: str, session: str) -> None:

@@ -105,6 +105,11 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = "started again"
         elif kind == "cost_warning":
             text = f"cost ${data.get('spent', 0):.2f}, past the warning of ${data.get('warning', 0):.2f}"
+        elif kind == "review" and "round" in data:
+            n, b, o = data.get("round"), data.get("blocking", 0), data.get("not_blocking", 0)
+            text = f"review {n}: {b} blocking, {o} not blocking" + (
+                f"; unreadable: {p}" if (p := data.get("problem")) else ""
+            )
         elif kind == "review":
             text = "work fetched for your review"
         elif kind == "risky_approved":

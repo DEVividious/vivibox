@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, manual, ui
+from . import brief, gate, manual, reviewing, ui
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
@@ -54,6 +54,26 @@ FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md:
 failed and quotes the lines that say why (the whole output is in /task/handoff/verify.log). Fix
 what it names and commit. End the turn when that is done, or, if the cause is outside the code,
 when you have written it to /task/handoff/question.md."""
+
+REVIEW_PROMPT = """The verification passed: the build and the tests are green, do not run them.
+Read /task/plan.md, /task/handoff/criteria.md, /task/handoff/red.md and /task/handoff/comments.md,
+then the work itself: `git diff {base}..HEAD` in the repository you are in. Write
+/task/review/review.md with two sections. Under "## Blocking": what keeps the work from being
+what the plan says, or from proving it: a test that cannot fail, a criterion ticked but not met,
+behaviour the plan rules out. Under "## Not blocking": the rest. Each note is one line,
+"path:line — what is wrong and what would make it right"; a section may be empty. Do not report
+what the verification already checks: commits, ticks, switched-off tests, red evidence named.
+End the turn when the review is written."""
+
+REVIEW_REPAIR_PROMPT = """The review in /task/review/review.md is not one the orchestrator can
+read: {problem}. Rewrite it with the two sections, "## Blocking" and "## Not blocking", and a
+place (path:line) on every note. End the turn when it is rewritten."""
+
+REVIEW_FIX_PROMPT = """The reviewer read your work. Read the newest /task/handoff/review-N.md (N is
+the round): fix every note under Blocking, commit, and keep the ticks in /task/handoff/criteria.md
+true. Where you disagree, say why in one paragraph in /task/handoff/review-N-reply.md instead.
+End the turn when that is done and committed, or when a question is in
+/task/handoff/question.md."""
 
 COMMENT_PROMPT = """The user replied. Read the newest entry in /task/handoff/comments.md and do
 what it asks. End the turn when that is done and committed, or when you have written a new
@@ -150,6 +170,13 @@ def accept_plan(
     task.transition(State.IMPLEMENT, reason=reason)
 
 
+def _read(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
 def question(task: Task) -> str | None:
     path = task.meta / "handoff" / QUESTION
     text = path.read_text().strip() if path.exists() else ""
@@ -195,6 +222,9 @@ class Ports:
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None
+    # The reviewer's container: up, with the directory its review is written to; and down.
+    review_up: Callable[[], Path] = lambda: Path()
+    review_down: Callable[[], None] = lambda: None
     # How a retry waits; a test passes something that does not.
     sleep: Callable[[float], None] = time.sleep
 
@@ -218,13 +248,24 @@ class Supervisor:
     # Dollars the task may cost before you are told, and before it stops for you; 0 is no limit.
     cost_warning: float = 0.0
     cost_limit: float = 0.0
+    # The reviewer, when there is one: reads the work after a green gate. loop sends its blocking
+    # notes back to the writer, up to max_reviews rounds; supervised reviews once, for you.
+    reviewer: Harness | None = None
+    review_mode: str = "loop"
+    max_reviews: int = 2
+    # The gate's result the review followed, for the message that ends the task's work.
+    last_gate: gate.GateResult | None = None
 
     def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
         is worth a different model, and sometimes a different tool, from the one that types."""
+        if state is State.REVIEW:
+            return "reviewer"
         return "planner" if state is State.PLAN and self.planner else "writer"
 
     def harness_of(self, role: str) -> Harness:
+        if role == "reviewer" and self.reviewer:
+            return self.reviewer
         return self.planner if role == "planner" and self.planner else self.harness
 
     def step(self) -> bool:
@@ -237,7 +278,12 @@ class Supervisor:
             return False
         if st.state in (State.PLAN, State.IMPLEMENT) and self._past_the_limit():
             return False
-        handlers = {State.PLAN: self._plan, State.IMPLEMENT: self._implement, State.VERIFY: self._verify}
+        handlers = {
+            State.PLAN: self._plan,
+            State.IMPLEMENT: self._implement,
+            State.VERIFY: self._verify,
+            State.REVIEW: self._review,
+        }
         handlers[st.state](st)
         return True
 
@@ -501,6 +547,9 @@ class Supervisor:
         elif target is State.CHECKPOINT_BLOCKED:
             self.task.transition(target, reason="verification still failing")
             self.ports.notify(self.task.id, f"verification still failing after {st.iteration} attempts")
+        elif self._review_due(st):
+            self.last_gate = result
+            self.task.transition(State.REVIEW, reason="verification passed")
         elif target is State.APPROVAL_RISKY:
             self.task.transition(target, reason="verification passed", then=str(State.CHECKPOINT_FINAL))
             self.ports.notify(
@@ -509,6 +558,58 @@ class Supervisor:
         else:
             self.task.transition(target, reason="verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
+
+    def _review_due(self, st: TaskState) -> bool:
+        """Whether the reviewer reads the work now: once in supervised mode, and in loop mode
+        after every green gate until its rounds are used up. Your reply gives it them back."""
+        if self.reviewer is None:
+            return False
+        rounds = self.max_reviews if self.review_mode == "loop" else 1
+        return st.reviews < rounds
+
+    def _review(self, st: TaskState) -> None:
+        """The reviewer's round: a fresh container and a fresh conversation, its review kept as
+        handoff/review-N.md. Blocking notes go back to the writer while rounds are left; the last
+        round, or none, and the work goes on to you with the notes."""
+        n = st.reviews + 1
+        out = self.ports.review_up()
+        try:
+            self.task.set_session("reviewer", "")  # the last round's server is gone with its container
+            st = self.task.read_state()
+            if self._turn(st, REVIEW_PROMPT.format(base=st.base_commit), role="reviewer") is None:
+                return
+            text = _read(out / "review.md")
+            if problem := reviewing.problem(text):
+                if self._turn(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
+                    return
+                text = _read(out / "review.md")
+        finally:
+            self.ports.review_down()
+        reviewing.keep(self.task, n, text)
+        self.task.set_reviews(n)
+        problem = reviewing.problem(text)
+        review = reviewing.parse_review(text) if not problem else reviewing.Review()
+        blocking, others = len(review.blocking), len(review.not_blocking)
+        self.task.event("review", round=n, blocking=blocking, not_blocking=others, problem=problem)
+        if blocking and self.review_mode == "loop" and n < self.max_reviews:
+            set_next_prompt(self.task, REVIEW_FIX_PROMPT)
+            self.task.transition(State.IMPLEMENT, reason=f"review {n}: {blocking} blocking")
+            print(
+                f"[{time.strftime('%H:%M:%S')}] review {n}: {blocking} blocking, back to the writer",
+                flush=True,
+            )
+            return
+        if problem:
+            said = f"review {n} unreadable ({problem})"
+        elif blocking:
+            said = (
+                f"review {n}: {blocking} blocking note{'s' if blocking != 1 else ''}, {others} not blocking"
+            )
+        else:
+            said = f"review {n}: no blocking notes, {others} not blocking"
+        self._checkpoint(
+            State.CHECKPOINT_FINAL, f"{self._review_message(self.last_gate)}; {said}", kind="review"
+        )
 
     def _review_message(self, result: gate.GateResult | None = None) -> str:
         # Tests that went missing are said here, not to the agent, which would put them back.

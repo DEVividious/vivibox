@@ -28,11 +28,11 @@ TURN_PROMPTS = {
 MAX_BRIEF_WORDS = 800
 MAX_PROMPT_WORDS = 160
 # The files of /task the pod mounts for the agent (actions.task_pod), by the names the brief gives.
-MOUNTED = {"/task/plan.md", "/task/context", "/task/harness"} | {
+MOUNTED = {"/task/plan.md", "/task/context", "/task/harness", "/task/review/review.md"} | {
     f"/task/handoff/{name}"
     for name in (
         "plan-draft.md", "criteria.md", "red.md", "question.md", "comments.md", "verify-feedback.md",
-        "verify.log", "context.md", "demo.md", "demo-question.md",
+        "verify.log", "context.md", "demo.md", "demo-question.md", "review-N.md", "review-N-reply.md",
     )
 }  # fmt: skip
 TASK_PATH = re.compile(r"/task/[\w./-]*[\w/]")

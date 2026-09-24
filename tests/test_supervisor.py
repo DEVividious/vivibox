@@ -686,3 +686,134 @@ def test_the_cost_warning_is_said_once_and_the_task_goes_on(task):
 
 def turns(task) -> int:
     return sum(1 for e in task.events() if e["type"] == "turn")
+
+
+# --- the reviewer -----------------------------------------------------------------------------
+
+CLEAN = "# Review\n\n## Blocking\n\n## Not blocking\n\n- calc.py:3 — the docstring still says adds\n"
+BLOCKING = (
+    "# Review\n\n## Blocking\n\n- [ ] test_calc.py:20 — asserts True, proves nothing\n\n## Not blocking\n"
+)
+
+
+class FakeReviewer(FakeHarness):
+    """Writes what it is told to, one text per turn, where the review container would."""
+
+    name = "opencode"
+
+    def __init__(self, task, out, texts):
+        super().__init__(task)
+        self.out, self.texts = out, list(texts)
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        self.prompts.append(prompt)
+        if self.texts:
+            (self.out / "review.md").write_text(self.texts.pop(0))
+        return Turn("rev_1", True, 0.05, 100, "done")
+
+
+def reviewed(task, tmp_path, texts, results=(), mode="loop", max_reviews=2):
+    """A task at verify with the plan accepted, a gate that passes, and a reviewer that answers
+    with the texts, one per round. Returns the supervisor, the notes and the reviewer."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    (task.meta / gate.ACCEPTED_PLAN).write_text("+++\n+++\n")
+    out = tmp_path / "review-out"
+    out.mkdir()
+    reviewer = FakeReviewer(task, out, texts)
+    sup, notes = make(task, FakeHarness(task), results=results or [gate_result(True)] * 3)
+    sup.reviewer, sup.review_mode, sup.max_reviews = reviewer, mode, max_reviews
+    lifecycle = []
+    sup.ports.review_up = lambda: lifecycle.append("up") or out
+    sup.ports.review_down = lambda: lifecycle.append("down")
+    sup.lifecycle = lifecycle
+    return sup, notes, reviewer
+
+
+def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_through(task, tmp_path):
+    """Gate green, then the reviewer; a blocking note is a turn for the writer with the review to
+    read, then the gate again, then the reviewer again; no blocking notes, and the work is yours."""
+    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING, CLEAN])
+    sup.step()  # implement
+    sup.step()  # verify: passes, so the reviewer is next
+    assert task.read_state().state is State.REVIEW
+    sup.step()  # the review: one blocking note
+    st = task.read_state()
+    assert st.state is State.IMPLEMENT and st.reviews == 1
+    assert (task.meta / "handoff" / "review-1.md").read_text() == BLOCKING
+    assert sup.lifecycle == ["up", "down"], "the review container lives for the turn"
+    assert "git diff" in reviewer.prompts[0] and "/task/review/review.md" in reviewer.prompts[0]
+    sup.step()  # the writer, told to fix the notes
+    assert sup.harness.prompts[-1] == supervisor.REVIEW_FIX_PROMPT
+    sup.step()  # verify
+    sup.step()  # the review: clean
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
+    assert notes[-1].startswith("work ready for your review") and "review 2: no blocking notes" in notes[-1]
+    assert [e["data"] for e in task.events() if e["type"] == "review"] == [
+        {"round": 1, "blocking": 1, "not_blocking": 0, "problem": ""},
+        {"round": 2, "blocking": 0, "not_blocking": 1, "problem": ""},
+    ]
+    assert st.sessions.get("reviewer") == "rev_1"
+
+
+def test_the_last_round_sends_the_work_to_you_with_its_notes_open(task, tmp_path):
+    sup, notes, _ = reviewed(task, tmp_path, [BLOCKING, BLOCKING], max_reviews=2)
+    for _ in range(3):  # implement, verify, review 1
+        sup.step()
+    for _ in range(3):  # implement with the notes, verify, review 2
+        sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
+    assert "review 2: 1 blocking note" in notes[-1]
+    assert not sup.step(), "no third round: the rest is yours"
+
+
+def test_supervised_mode_reviews_once_and_leaves_every_note_to_you(task, tmp_path):
+    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING], mode="supervised")
+    for _ in range(3):
+        sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 1
+    assert "review 1: 1 blocking note" in notes[-1] and len(reviewer.prompts) == 1
+
+
+def test_a_review_that_is_not_one_is_sent_back_once_then_left_to_you(task, tmp_path):
+    """Like a plan draft that is not a plan: one turn to fix it, and if that fails too the work
+    goes to you with the text as it is, said to be unreadable."""
+    sup, notes, reviewer = reviewed(task, tmp_path, ["Looks good to me.", "Still just prose."])
+    for _ in range(3):
+        sup.step()
+    assert len(reviewer.prompts) == 2 and "## Blocking" in reviewer.prompts[1], "told what is missing"
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 1
+    assert "review 1 unreadable" in notes[-1]
+    assert (task.meta / "handoff" / "review-1.md").read_text() == "Still just prose.\n", "kept for you"
+    assert [e["data"]["problem"] for e in task.events() if e["type"] == "review"] == [
+        "the section ## Blocking is missing"
+    ]
+
+
+def test_each_round_is_a_fresh_conversation_in_a_fresh_container(task, tmp_path):
+    """The container is made anew for every round, so the last round's session is gone; the
+    reviewer starts a conversation each time and gets its brief each time."""
+    sup, _, reviewer = reviewed(task, tmp_path, [BLOCKING, CLEAN])
+    for _ in range(6):
+        sup.step()
+    assert all(p.startswith(brief.role_text("reviewer")) for p in reviewer.prompts)
+
+
+def test_without_a_reviewer_a_green_gate_goes_to_you_as_before(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    (task.meta / gate.ACCEPTED_PLAN).write_text("+++\n+++\n")
+    sup, notes = make(task, FakeHarness(task), results=[gate_result(True)])
+    sup.step()
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_FINAL and task.read_state().reviews == 0
+
+
+def test_your_reply_at_the_end_gives_the_reviewer_its_rounds_back(task, tmp_path):
+    task.set_reviews(2)
+    task.reset_iterations()
+    assert task.read_state().reviews == 0

@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from . import actions, gate, keys, ntfy, supervisor
+from . import actions, gate, keys, ntfy, reviewing, supervisor
 from .config import Config, ConfigError, load_config
 from .risky import Approvals
 from .states import waits_for_user
@@ -94,6 +94,9 @@ def make_supervisor(
     current: the settings as they are at each message; the ones given, unless told otherwise."""
     harness = actions.harness_for("writer", pod, task)
     planner = actions.harness_for("planner", pod, task)
+    reviewer = (
+        actions.harness_for("reviewer", pod.review_side(), task) if "reviewer" in config.roles else None
+    )
     ports = supervisor.Ports(
         run_gate=lambda t: gate.run_gate(
             t,
@@ -109,6 +112,8 @@ def make_supervisor(
         prepare_review=lambda: actions.prepare_review(task, project),
         save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
         session_started=agent_window,
+        review_up=lambda: reviewing.up(task, pod, config),
+        review_down=pod.review_down,
     )
     return supervisor.Supervisor(
         task,
@@ -117,6 +122,9 @@ def make_supervisor(
         max_iterations=config.max_iterations,
         cost_warning=config.cost_warning,
         cost_limit=config.cost_limit,
+        reviewer=reviewer,
+        review_mode=task.read_state().review_mode or config.review_mode,
+        max_reviews=config.max_reviews,
         project_verify=project.verify,
         project_no_build=project.no_build,
         planner=planner,

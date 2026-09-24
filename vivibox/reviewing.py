@@ -8,11 +8,18 @@ one comes back to the reviewer once, like a plan draft that is not a plan.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import brief, opencode, providers, repo, roles, secrets
+from .config import Config
+from .pod import Mount, Pod
 from .task import Task
+
+# Where the reviewer writes, in its container: outside the handoff, which it only reads.
+MOUNT = "/task/review"
 
 BLOCKING, NOT_BLOCKING = "## Blocking", "## Not blocking"
 # A note names where: a path, a colon, a line number, then what is wrong.
@@ -69,3 +76,30 @@ def latest(task: Task) -> Path | None:
     handoff = task.meta / "handoff"
     found = [(int(m.group(1)), p) for p in handoff.glob("review-*.md") if (m := NUMBERED.match(p.name))]
     return max(found)[1] if found else None
+
+
+def up(task: Task, pod: Pod, config: Config) -> Path:
+    """The reviewer's container, ready for a turn: a fresh clone, the reviewer's own key and
+    harness files, the task's files to read, and the directory its review goes to, returned."""
+    role = roles.role_of(task, "reviewer", config)
+    provider = opencode.provider_of(role.model)
+    needed = ([] if providers.keyless(provider) else [provider]) + providers.mcp_secrets()
+    runtime = secrets.prepare(f"{task.id}-review", needed)
+    pod.review_fresh()
+    harness = pod.review_dir / "harness"
+    harness.mkdir()
+    branch = repo.branch_name(task.id)
+    (harness / "instructions.md").write_text(brief.common(task.id, pod.review_src, branch))
+    (harness / "opencode.json").write_text(
+        json.dumps(opencode.config(role.model, (), task.repo), indent=2) + "\n"
+    )
+    out = pod.review_dir / "out"
+    out.mkdir()
+    mounts = [
+        Mount(str(task.meta), "/task", read_only=True),
+        Mount(str(harness), opencode.HARNESS_MOUNT, read_only=True),
+        Mount(str(out), MOUNT),
+        Mount(str(runtime), secrets.MOUNT, read_only=True),
+    ]
+    pod.review_start(mounts, {"OPENCODE_CONFIG": opencode.CONFIG})
+    return out

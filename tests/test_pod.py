@@ -478,3 +478,37 @@ def test_the_leftovers_script_holds_no_null_byte():
     assert "\0" not in pod_module.LEFTOVERS
     parsed = subprocess.run(["sh", "-n", "-c", pod_module.LEFTOVERS], capture_output=True, text=True)
     assert parsed.returncode == 0, parsed.stderr
+
+
+def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod, tmp_path):
+    """The reviewer works where the gate works, on a clone of the commits, with the writer's tree
+    read-only, and without the build's means: no Docker socket, no caches, no build variables.
+    Its own secrets and harness files come as the mounts the caller gives."""
+    pod.review_dir = tmp_path / "review"
+    pod.passed_env.append("REPO_TOKEN")
+    mounts = [Mount("/srv/x/.task", "/task", read_only=True), Mount(str(tmp_path / "out"), "/task/review")]
+    cmd = pod.review_command(mounts, {"OPENCODE_CONFIG": "/task/harness/opencode.json"})
+    assert cmd[:5] == ["docker", "run", "-d", "--name", "vivibox-shop-1-review"]
+    assert f"{pod.repo}:{pod.repo}:ro" in cmd and f"{pod.review_dir}:{pod.review_dir}" in cmd
+    assert "/srv/x/.task:/task:ro" in cmd and f"{tmp_path / 'out'}:/task/review" in cmd
+    joined = " ".join(cmd)
+    assert SOCKET_DIR not in joined and "vivibox-cache-" not in joined and "REPO_TOKEN" not in joined
+    assert "OPENCODE_CONFIG=/task/harness/opencode.json" in cmd
+    assert "--read-only" in cmd and "--cap-drop" in cmd and f"container:{pod.sidecar}" in cmd
+    assert cmd[cmd.index("-w") + 1] == pod.review_src, "commands run in the clone"
+
+    pod.review_fresh()
+    assert (pod.review_dir / "src").is_dir() and not any((pod.review_dir / "src").iterdir())
+    pod.review_start(mounts, {})
+    clone = pod.runner.find("docker", "exec", "-w", str(pod.review_dir), pod.review, "git", "clone")
+    assert clone and clone[0][-2:] == [str(pod.repo), pod.review_src]
+    side = pod.review_side()
+    assert side.agent == pod.review and side.task_id == pod.task_id
+    side.exec("opencode", "--version")
+    assert pod.runner.find("docker", "exec", pod.review, "opencode", "--version")
+    side.exec_detached("bash", "-c", "serve")
+    assert pod.runner.find("docker", "exec", "-d", pod.review, "bash")
+    pod.review_down()
+    assert pod.runner.find("docker", "rm", "-f", pod.review)
+    pod.remove()
+    assert any(pod.review in c for c in pod.runner.find("docker", "rm", "-f")), "gone with the pod"

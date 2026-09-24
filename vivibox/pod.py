@@ -243,6 +243,8 @@ class Pod:
     passed_env: list[str] = field(default_factory=list)
     # Where the gate builds a fresh clone of the committed work; outside anything the agent can write.
     gate_dir: Path | None = None
+    # Where the reviewer reads its own fresh clone, with its harness files and its review beside it.
+    review_dir: Path | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
     network_pool: str = DEFAULT_NETWORK_POOL
     runner: Runner = run
@@ -264,6 +266,14 @@ class Pod:
     @property
     def gate_src(self) -> str:
         return f"{self.gate_dir}/src"
+
+    @property
+    def review(self) -> str:
+        return f"vivibox-{self.task_id}-review"
+
+    @property
+    def review_src(self) -> str:
+        return f"{self.review_dir}/src"
 
     @property
     def network(self) -> str:
@@ -522,6 +532,28 @@ class Pod:
             self.image, "sleep", "infinity",
         ]  # fmt: skip
 
+    def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
+        """The reviewer's container: a fresh clone like the gate's, with the writer's tree read-only
+        and without the build's means, since it reads and runs nothing: no Docker socket, no build
+        caches, no variables of the build. Its own secrets and harness files come as mounts."""
+        all_mounts = [
+            Mount(str(self.repo), str(self.repo), read_only=True),
+            Mount(str(self.review_dir), str(self.review_dir)),
+            *ca_mounts(),
+            *mounts,
+        ]
+        return [
+            "docker", "run", "-d", "--name", self.review,
+            "--label", f"vivibox.task={self.task_id}",
+            "--network", f"container:{self.sidecar}",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--read-only", "--tmpfs", "/tmp:exec,mode=1777", "--tmpfs", "/config:exec,mode=1777",
+            *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
+            *(arg for m in all_mounts for arg in ("-v", m.arg())),
+            "-w", self.review_src,
+            self.image, "sleep", "infinity",
+        ]  # fmt: skip
+
     def passed_values(self) -> list[str]:
         """The values of the passed variables, for keeping them out of logs."""
         return [v for name in self.passed_env if len(v := os.environ.get(name, "")) >= 4]
@@ -660,9 +692,31 @@ class Pod:
     def gate_down(self) -> None:
         self._run("docker", "rm", "-f", self.gate, check=False)
 
+    def review_fresh(self) -> None:
+        """An empty review directory with the clone's place in it, before the caller puts the
+        reviewer's files beside it; the container from the last round, if any, goes first."""
+        if self.review_dir is None:
+            raise PodError("the pod has no review directory")
+        self.review_down()
+        shutil.rmtree(self.review_dir, ignore_errors=True)
+        (self.review_dir / "src").mkdir(parents=True)
+
+    def review_start(self, mounts: list[Mount], env: dict[str, str]) -> None:
+        """The reviewer's container, with a fresh clone of the task branch in it."""
+        self._run(*self.review_command(mounts, env))
+        self._run("docker", "exec", "-w", str(self.review_dir), self.review, "git", "clone", "--quiet",
+                  "--no-hardlinks", str(self.repo), self.review_src)  # fmt: skip
+
+    def review_down(self) -> None:
+        self._run("docker", "rm", "-f", self.review, check=False)
+
+    def review_side(self) -> ContainerSide:
+        """The review container as a harness talks to it."""
+        return ContainerSide(self, self.review)
+
     def remove(self) -> None:
         """Removes containers and the task's volumes. Shared caches stay."""
-        self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, check=False)
+        self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
         self._run(
             "docker", "volume", "rm", *self.volumes.values(), f"vivibox-{self.task_id}-config", check=False
         )
@@ -725,3 +779,27 @@ class Pod:
             "--pool", self.network_pool, *(("--mtu", str(mtu)) if mtu < ETHERNET_MTU else ()),
             *self.firewall_targets(),
         )  # fmt: skip
+
+
+@dataclass
+class ContainerSide:
+    """One container of the pod, as a harness talks to it: the same calls as on the agent
+    container, aimed at another one, under the name the harness knows the container by."""
+
+    pod: Pod
+    agent: str
+
+    @property
+    def task_id(self) -> str:
+        return self.pod.task_id
+
+    def exec(self, *cmd: str, check: bool = True) -> subprocess.CompletedProcess:
+        return self.pod._run("docker", "exec", self.agent, *cmd, check=check)
+
+    def exec_detached(self, *cmd: str) -> None:
+        self.pod._run("docker", "exec", "-d", self.agent, *cmd)
+
+    def stream(self, *cmd: str) -> subprocess.Popen:
+        return self.pod.popen(
+            ["docker", "exec", self.agent, *cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )

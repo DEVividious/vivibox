@@ -330,3 +330,21 @@ def test_a_start_on_a_retired_model_says_so_and_what_to_pick(env, monkeypatch):
     assert actions.model_missing(retired, None, {"deepseek": []}) == "", (
         "a list that could not be read blocks nothing"
     )
+
+
+def test_a_model_list_cached_before_retired_models_were_dropped_is_read_again(env, monkeypatch):
+    import json
+    import time
+
+    from vivibox import actions, keys, roles
+
+    keys.set_key("deepseek", "sk")
+    path = roles.models_cache()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stale = {"deepseek": {"at": time.time(), "models": ["deepseek/deepseek-v4-flash"]}}
+    path.write_text(json.dumps(stale))
+    asked = []
+    monkeypatch.setattr(roles, "provider_models", lambda p: asked.append(p) or ["deepseek/deepseek-flash"])
+    assert actions.available_models() == {"deepseek": ["deepseek/deepseek-flash"]}
+    assert asked == ["deepseek"], "the old list is not trusted"
+    assert actions.available_models() == {"deepseek": ["deepseek/deepseek-flash"]} and asked == ["deepseek"]

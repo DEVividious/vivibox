@@ -166,7 +166,13 @@ def available_models(refresh: bool = False) -> dict[str, list[str]]:
         if provider in found or not on(provider) or providers.is_mcp_secret(provider):
             continue
         entry = cached.get(provider) or {}
-        if not refresh and entry.get("models") and now_ - entry.get("at", 0) < MODELS_CACHE_SECONDS:
+        # A list kept from before retired models were dropped may still name one: read again.
+        fresh = (
+            entry.get("models")
+            and entry.get("retired_dropped")
+            and now_ - entry.get("at", 0) < MODELS_CACHE_SECONDS
+        )
+        if not refresh and fresh:
             found[provider] = entry["models"]
             continue
         try:
@@ -175,7 +181,7 @@ def available_models(refresh: bool = False) -> dict[str, list[str]]:
             listed = []
         found[provider] = listed or entry.get("models") or []
         if listed:
-            cached[provider] = {"at": now_, "models": listed}
+            cached[provider] = {"at": now_, "models": listed, "retired_dropped": True}
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(cached, indent=2) + "\n")

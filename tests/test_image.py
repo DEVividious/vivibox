@@ -117,3 +117,13 @@ def test_what_a_task_installs_is_kept_apart_from_what_maven_downloads():
     assert "/cache/m2/installed" in text
     writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
     assert "m2/installed" in writable.command
+
+
+def test_a_build_cache_hit_leaves_the_modules_files_in_place():
+    """With lazyRestore the extension marks a module built and leaves its target/ empty until
+    asked, and whatever reads the jar there fails: the next module, a packaging plugin."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    args = text[text.index('MAVEN_ARGS="') :].split('"')[1]
+    assert "-Dmaven.build.cache.lazyRestore=false" in args

@@ -123,7 +123,9 @@ clone while the plan is made, and the writer's first turn waits for them, so the
 module it changes instead of everything. Their output is under `l`; a failure is on the task's
 timeline and the task goes on without it. A stop and a start do not run them again, unless the stop
 cut them short. Maven keeps what a task installs apart from other tasks: modules one task installs
-never reach another task's build, while what Maven downloads is shared.
+never reach another task's build, while what Maven downloads is shared. With Maven's build cache
+extension, the verification keeps a cache of its own: a later attempt reuses what an earlier one
+built from the committed work, never what the agent built.
 
 `pass_env` is for what a build reads from its environment, such as a package registry token that a
 settings file in the repository refers to (`${env.REPO_TOKEN}` in Maven's settings.xml). The agent

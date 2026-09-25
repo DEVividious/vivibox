@@ -206,6 +206,23 @@ def test_the_preparation_runs_in_the_background_and_says_how_it_ended(env):
     assert agent(env, "cat /tmp/prep.exit").stdout.strip() == "1", "the failing command's code"
 
 
+def test_the_gates_build_cache_is_its_own_and_outlives_a_verification(env):
+    pod = env["pod"]
+    agent(env, "touch /cache/build-cache/from-the-writer")
+    pod.gate_up()
+    try:
+        assert gate(env, "test -e /cache/build-cache/from-the-writer", check=False).returncode != 0
+        gate(env, "touch /cache/build-cache/from-the-gate")
+    finally:
+        pod.gate_down()
+    pod.gate_up()
+    try:
+        assert gate(env, "test -e /cache/build-cache/from-the-gate", check=False).returncode == 0
+    finally:
+        pod.gate_down()
+        agent(env, "rm -f /cache/build-cache/from-the-writer")
+
+
 def test_a_sidecar_just_made_is_not_outdated(env):
     """Docker keeps the mounts as given, so what up() compares them with is what inspect returns."""
     assert not env["pod"]._outdated_sidecar()

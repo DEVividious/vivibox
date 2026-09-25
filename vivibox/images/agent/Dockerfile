@@ -75,9 +75,11 @@ RUN groupadd -o -g "${GID}" agent \
 # The split puts what Maven downloads under cached/, shared, and what a build installs under
 # installed/, where each task mounts a volume of its own: one task's unfinished modules never reach
 # another's build. A fresh volume takes its owner from the image, hence the directory above.
+# lazyRestore is off: on a build cache hit the extension would leave the module's target/ empty
+# until asked, and whatever reads the jar there, the next module or a packaging plugin, fails.
 ENV HOME=/config \
     MAVEN_CONFIG= \
-    MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true" \
+    MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true -Dmaven.build.cache.lazyRestore=false" \
     MAVEN_OPTS="-Dmaven.repo.local=/cache/m2" \
     GRADLE_USER_HOME=/cache/gradle \
     npm_config_cache=/cache/npm \

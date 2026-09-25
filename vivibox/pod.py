@@ -206,6 +206,8 @@ class Pod:
             # What Maven installs, the task's own modules; kept apart from the shared downloads.
             "installed": f"vivibox-{self.task_id}-installed",
             "gate-installed": f"vivibox-{self.task_id}-gate-installed",
+            # The gate's own build cache: what it built from committed work, for its next attempt.
+            "gate-build-cache": f"vivibox-{self.task_id}-gate-build-cache",
         }
 
     def _run(
@@ -452,7 +454,10 @@ class Pod:
             Mount(self.volumes["socket"], SOCKET_DIR),
             Mount(str(self.repo), str(self.repo), read_only=True),
             Mount(str(self.gate_dir), str(self.gate_dir)),
-            *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
+            # Not the build cache the writer fills: a hit there would skip a module's build and
+            # tests on the writer's word.
+            *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items() if name != "build-cache"),
+            Mount(self.volumes["gate-build-cache"], CACHES["build-cache"]),
             Mount(self.volumes["gate-installed"], INSTALLED),
             *ca_mounts(),
         ]

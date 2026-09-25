@@ -140,8 +140,21 @@ def test_mavens_build_cache_has_a_volume_of_its_own(pod):
     """The Maven build cache extension keeps its cache beside the local repository, /cache/build-cache.
     Only the volumes are writable in the pod, so without one of its own every module logged a
     read-only file system and the build ran without the cache, slowly."""
-    for command in (pod.agent_command(), pod.gate_command()):
-        assert "vivibox-cache-build-cache:/cache/build-cache" in command
+    assert "vivibox-cache-build-cache:/cache/build-cache" in pod.agent_command()
+
+
+def test_the_gate_reuses_only_what_it_built_itself(pod, tmp_path):
+    """A hit in the build cache skips a module's build and its tests, taking what was stored as is.
+    What the writer stored, the gate does not trust; what the gate built from committed work, a
+    later attempt of the same task may reuse: a volume of its own, kept between verifications."""
+    pod.gate_dir = tmp_path / "gate"
+    gate = pod.gate_command()
+    assert "vivibox-shop-1-gate-build-cache:/cache/build-cache" in gate
+    assert not any(arg.startswith("vivibox-cache-build-cache:") for arg in gate)
+    pod.gate_up()
+    assert not any("vivibox-shop-1-gate-build-cache" in c for c in pod.runner.find("docker", "volume", "rm"))
+    pod.remove()
+    assert "vivibox-shop-1-gate-build-cache" in pod.runner.find("docker", "volume", "rm")[-1]
 
 
 def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):

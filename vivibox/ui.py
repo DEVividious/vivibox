@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import prepare
 from .states import State
 from .task import Task, TaskState
 
@@ -293,6 +294,9 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
         if any(e["type"] == "started" for e in task.events()):
             return TaskView("not running", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
         return TaskView("not started", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
+    if st.state is State.IMPLEMENT and prepare.underway(task):
+        # The writer's turn waits for the project's preparation; nobody implements yet.
+        return TaskView("preparing", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
     return TaskView(activity(st, max_iterations), WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
 
 

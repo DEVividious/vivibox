@@ -42,6 +42,7 @@ Status labels, the only ones allowed:
 | plan ready | `review the plan` | Waiting for you |
 | manual planner, no plan yet | `plan it yourself` | Waiting for you |
 | implementing; from the second attempt `(attempt n/N)` follows | `implementing` | Working |
+| the project's preparation running, the writer's first turn waiting for it | `preparing` | Working |
 | verification running | `verifying` | Working |
 | the reviewer reading the work | `reviewing` | Working |
 | risky files changed | `approve risky files` | Waiting for you |

@@ -73,12 +73,23 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
         said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
         found.append(Entry(path.name, said, pager_command(path)))
     prepared = handoff / prepare.LOG
+    preparing = prepare.underway(task)
     if prepared.exists():
         code = prepare.ending(task)
-        how = "running or cut short" if code is None else "passed" if code == 0 else f"failed, exit {code}"
+        how = (
+            "running"
+            if preparing
+            else "cut short"
+            if code is None
+            else "passed"
+            if code == 0
+            else f"failed, exit {code}"
+        )
         lines = prepared.read_text(errors="replace").count("\n")
         said = f"the project's preparation · {how} · {lines} lines"
-        found.append(Entry(prepare.LOG, said, pager_command(prepared, at_end=True)))
+        found.append(
+            Entry(prepare.LOG, said, pager_command(prepared, follow=preparing, at_end=not preparing))
+        )
     supervisor = task.meta / "log" / "supervisor.log"
     if supervisor.exists():
         found.append(
@@ -88,6 +99,8 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
                 pager_command(supervisor, at_end=True),
             )
         )
+    if preparing and st.state is State.IMPLEMENT and prepared.exists():
+        return found, next(i for i, e in enumerate(found) if e.label == prepare.LOG)
     return found, 1 if verifying and logs else 0
 
 

@@ -32,6 +32,13 @@ def ending(task: Task) -> int | None:
         return None
 
 
+def underway(task: Task) -> bool:
+    """Whether a run started and has not ended, from the task's files alone, for the view: the last
+    word on it is its start, and no ending is written."""
+    said = [e["type"] for e in task.events() if e["type"] in ("prepare_started", "prepared")]
+    return bool(said) and said[-1] == "prepare_started" and ending(task) is None
+
+
 def status(task: Task, pod: Preparing) -> str:
     """ "done", "failed", "running", or "" when it never ran or a stop cut it short."""
     code = ending(task)

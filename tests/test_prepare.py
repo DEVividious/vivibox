@@ -129,3 +129,47 @@ def test_a_task_and_a_box_start_the_preparation_once_their_pod_is_up(env, monkey
     with pytest.raises(PodError, match="enough"):
         box.start_box("demo-1")
     assert order == ["up", "java", ("prepare", [INSTALL])]
+
+
+def test_while_it_runs_the_task_says_preparing_not_implementing(task):
+    """The writer waits for it, so "implementing" said something that was not happening."""
+    from vivibox import ui
+    from vivibox.states import State
+
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    pod = FakePod(task)
+    prepare.begin(task, project(INSTALL), pod)
+    shown = ui.view(task, task.read_state(), True, 3)
+    assert (shown.status, shown.group) == ("preparing", ui.WORKS)
+    pod.finish(0)
+    assert ui.view(task, task.read_state(), True, 3).status == "implementing"
+
+
+def test_while_it_plans_the_task_says_planning(task):
+    from vivibox import ui
+
+    prepare.begin(task, project(INSTALL), FakePod(task))
+    assert ui.view(task, task.read_state(), True, 3).status == "planning"
+
+
+def test_l_follows_the_preparation_while_it_runs_and_starts_on_it(task, monkeypatch):
+    from vivibox import logs
+    from vivibox.states import State
+
+    monkeypatch.setenv("PAGER", "less")
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    pod = FakePod(task)
+    prepare.begin(task, project(INSTALL), pod)
+    log = task.meta / "handoff" / prepare.LOG
+    log.write_text("[INFO] Building\n")
+    found, start = logs.entries(task, task.read_state(), running=True)
+    assert found[start].label == "prepare.log", "the cursor on what is being written"
+    assert found[start].command == ["less", "+F", str(log)], "followed as it is written"
+    assert found[start].said == "the project's preparation · running · 1 lines"
+    pod.finish(0)
+    found, start = logs.entries(task, task.read_state(), running=True)
+    assert start == 0
+    entry = next(e for e in found if e.label == "prepare.log")
+    assert entry.command == ["less", "+G", str(log)]

@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from . import brief, providers, repo
+from . import brief, progress, providers, repo
 from .harness import Harness, HarnessError, OnStep, Turn
 from .pod import Pod
 from .secrets import MOUNT
@@ -106,8 +106,9 @@ class OpenCode(Harness):
     # A provider key is always billed per token.
     metered = True
 
-    def __init__(self, pod: Pod, model: str = "", port: int = PORT):
+    def __init__(self, pod: Pod, model: str = "", port: int = PORT, task: Task | None = None):
         self.pod = pod
+        self.task = task
         # Sent with every turn. The server has one model in its config, the writer's, and a planner
         # on another model would otherwise plan on the writer's without anything saying so.
         self.model = model
@@ -209,6 +210,8 @@ class OpenCode(Harness):
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if self.task is not None:
+                progress.record(self.task, event)
             if event.get("type") == "step_finish":
                 part = event.get("part") or {}
                 cost = round(cost + float(part.get("cost") or 0), 6)

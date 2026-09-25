@@ -43,7 +43,13 @@ def cmd_new(args: argparse.Namespace) -> int:
             raise ConfigError(f"--model {pair}: expected role=model, e.g. writer=deepseek/deepseek-v4-pro")
         roles[role.strip()] = actions.parse_choice(model)
     task = actions.create(
-        args.project, description, auto=args.auto, kind=args.kind, roles=roles, no_build=args.no_build
+        args.project,
+        description,
+        auto=args.auto,
+        kind=args.kind,
+        roles=roles,
+        no_build=args.no_build,
+        base_ref=args.base,
     )
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     for note in actions.context_notes(task):
@@ -562,6 +568,7 @@ def parser() -> argparse.ArgumentParser:
     init.set_defaults(func=cmd_init)
 
     new = sub.add_parser("new", help="create a task and its plan")
+    new.add_argument("--base", default="", help="start from this branch or ref (default: current HEAD)")
     new.add_argument("project", help="project name (~/.config/vivibox/projects/<name>.toml)")
     new.add_argument(
         "goal",

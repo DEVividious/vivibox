@@ -64,6 +64,9 @@ Status labels, the only ones allowed:
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock
 (`ui.clock`), never cut out of a UTC timestamp.
 
+A person's stop also takes precedence at a checkpoint, including `verification could not run`.
+The panel keeps the verification error and offers start; starting returns to the same decision.
+
 ## 3. Keys
 
 - A key is a verb and the selected row is its object: `e` edits, `x` deletes, `o` opens in the
@@ -107,6 +110,11 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   never a fixed number of lines.
 - A list that opens over the form (a select) is framed and has a background of its own: bare, it
   ends right above the next row, whose value reads as one more of its options.
+- The new task's Branch field opens a searchable list of locally known branches. Current is
+  first. Selecting another branch changes the task's base, without switching the person's checkout.
+- The proposed commit is prepared with the review copy and visible before acceptance. It describes
+  actual commits, without copying the acceptance checklist. Once the work is applied, the separate
+  commit dialog opens while the pod is cleaned up; accepting shows `accepting…` until it finishes.
 
 ## 5. Errors
 
@@ -147,6 +155,10 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
   `tests/test_ux_rules.py`, and a test of its label, its way out and its footer keys.
 - An error path gets a test of its three parts, and that it is still shown after a refresh.
 - A success message gets a test that the effect happened.
+
+The writer's OpenCode todos appear as "Writer's steps" during implementation. An item whose
+text exactly matches an accepted criterion also updates its checkbox; unrelated or reworded
+steps never satisfy acceptance criteria. The verification still reads the saved checklist.
 
 ## Known gaps
 

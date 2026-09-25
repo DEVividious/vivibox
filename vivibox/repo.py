@@ -102,20 +102,37 @@ def _fingerprint(repo: Path) -> dict[str, str]:
     return result
 
 
-def prepare(source: Path, repo: Path, task_id: str, meta: Path) -> str:
+def branches(source: Path) -> list[tuple[str, str]]:
+    """Branches already known locally. Current first; no network or checkout changes."""
+    current = git("symbolic-ref", "--quiet", "HEAD", cwd=source, check=False).stdout.strip()
+    label = current.removeprefix("refs/heads/") or "detached HEAD"
+    found = git(
+        "for-each-ref", "--format=%(refname)%00%(symref)", "refs/heads", "refs/remotes", cwd=source
+    ).stdout
+    choices = []
+    for line in found.splitlines():
+        ref, _, symbolic = line.partition("\0")
+        if not symbolic and ref != current:
+            name = ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+            choices.append((name, ref))
+    return [(f"Current ({label})", "HEAD"), *sorted(choices, key=lambda c: c[0].casefold())]
+
+
+def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = "") -> str:
     """Clones source into repo on a new task branch. Returns the base commit."""
     if (source / ".gitattributes").exists() and "filter=lfs" in (source / ".gitattributes").read_text():
         raise RepoError("Git LFS repositories are not supported yet")
     origin = git("remote", "get-url", "origin", cwd=source, check=False).stdout.strip()
+    base = git("rev-parse", "--verify", "--end-of-options", f"{base_ref or 'HEAD'}^{{commit}}",
+               cwd=source).stdout.strip()  # fmt: skip
     # --no-hardlinks: the agent must not be able to modify objects shared with your repository.
-    git("clone", "--quiet", "--no-hardlinks", str(source), str(repo))
+    git("clone", "--quiet", "--no-hardlinks", "--no-checkout", str(source), str(repo))
+    git("switch", "--quiet", "-c", branch_name(task_id), base, cwd=repo)
     git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo)
     if origin:
         git("remote", "set-url", "origin", origin, cwd=repo)
     else:
         git("remote", "remove", "origin", cwd=repo)
-    git("switch", "--quiet", "-c", branch_name(task_id), cwd=repo)
-    base = git("rev-parse", "HEAD", cwd=repo).stdout.strip()
     for d in git_dirs(repo):
         _sanitize(d)
     # What tools in the pod write into the repository and nobody means to commit: Serena's project

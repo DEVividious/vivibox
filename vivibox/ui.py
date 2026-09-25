@@ -201,6 +201,8 @@ def why_blocked(task: Task) -> Path | None:
 def group(st: TaskState) -> str:
     if st.state is State.DONE:
         return "Done"
+    if st.paused and not st.problem:
+        return "Stopped"
     if st.state in WAITING:
         return "Waiting for you"
     return "Stopped" if st.paused else "Working"
@@ -230,6 +232,8 @@ def activity(st: TaskState, max_iterations: int) -> str:
 
 
 def next_commands(st: TaskState) -> list[str]:
+    if st.paused and st.state is not State.DONE:
+        return [f"vivibox start {st.id}"]
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return [c.format(id=st.id) for c in AWAITING_PLAN[1]]
     if st.state in WAITING:
@@ -277,6 +281,11 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
         return TaskView(
             "box open", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}", f"vivibox accept {st.id}")
         )
+    if st.paused:
+        if st.problem:
+            what, _, why = st.problem.partition(": ")
+            return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))
+        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
     if st.box and st.state in WAITING:
         # Nobody in a box to reply to; its work is yours to accept or to delete.
         commands = tuple(c for c in next_commands(st) if "reply" not in c)
@@ -294,8 +303,6 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     if st.problem:
         what, _, why = st.problem.partition(": ")
         return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))
-    if st.paused:
-        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
     if not running:
         if any(e["type"] == "started" for e in task.events()):
             return TaskView("not running", WAITS, IDLE, commands=(f"vivibox start {st.id}",))

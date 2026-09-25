@@ -333,6 +333,7 @@ def create(
     roles: dict[str, Choice] | None = None,
     review_mode: str = "",
     no_build: bool = False,
+    base_ref: str = "",
 ) -> Task:
     """no_build: nothing to build or test in this task (research, a ticket analysis): verify = false
     in its plan, for this task only.
@@ -378,11 +379,12 @@ def create(
     try:
         described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))
-        base = repo.prepare(project.repo, task.repo, task.id, task.meta)
+        base = repo.prepare(project.repo, task.repo, task.id, task.meta, base_ref=base_ref)
     except BaseException:
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     task.set_base_commit(base)
+    task.event("base", ref=base_ref or "HEAD", commit=base)
     if found.notes:  # what the agent sees differs from what you have: said once, kept with the task
         task.event("context", notes=found.notes)
     for role, (harness, model) in list(chosen.items()):

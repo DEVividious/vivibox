@@ -133,7 +133,7 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     assert (source / "one.txt").exists() and git("status", "--porcelain") == "A  one.txt\n"
     assert prompts[0].startswith("[Y]es"), "the message is shown above the question"
     shown = capsys.readouterr().out
-    assert "with this message?\n\n  Goal\n\n  - " in shown, "the suggestion: subject, then a list"
+    assert "with this message?\n\n  Add one.txt" in shown
     assert not task.root.exists() and "vivibox/demo-1" not in git("branch", "--list")
     git("commit", "-q", "-m", "Mine")
 
@@ -146,7 +146,7 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     assert main(["accept", "demo-2"]) == 0
     assert git("log", "-1", "--format=%s").strip() == "Add two" and git("status", "--porcelain") == ""
-    assert git("log", "-1", "--format=%b").startswith("- "), "editing the subject keeps the list"
+    assert not git("log", "-1", "--format=%b").strip(), "one change needs no checklist body"
 
     # --branch keeps the old way, for pull requests.
     assert main(["new", "demo", "Goal", "--draft"]) == 0
@@ -158,9 +158,7 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
 
 
 def test_the_suggested_commit_message_is_a_subject_and_a_list(env):
-    """A message the way a history is kept: the subject says what the task set out to do, at most
-    72 characters; a list follows, of the agent's commit subjects when it made several (the gate
-    checked them), else of the criteria the work met. Never a signature."""
+    """Use actual changes, with further commit subjects as bullets and no acceptance checklist."""
     import subprocess
 
     from vivibox import actions
@@ -179,11 +177,11 @@ def test_the_suggested_commit_message_is_a_subject_and_a_list(env):
 
     message = actions.suggested_message(source, base, head, goal, criteria)
     subject, blank, *points = message.splitlines()
-    assert len(subject) <= 72 and subject.startswith("Reject expired cards at checkout, so that")
-    assert blank == "" and points == ["- Add one.txt", "- Add two.txt"], "the agent's commits, oldest first"
+    assert subject == "Add one.txt"
+    assert blank == "" and points == ["- Add two.txt"], "the agent's commits, oldest first"
 
     single = actions.suggested_message(source, git("rev-parse", "HEAD~1").strip(), head, goal, criteria)
-    assert single.splitlines()[2:] == ["- An expired card is refused"], "one commit: criteria, no signature"
+    assert single == "Add two.txt", "one commit: its subject, without criteria or signature"
     assert actions.suggested_message(source, head, head, "Fix the build.", []) == "Fix the build"
 
 

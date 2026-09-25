@@ -13,7 +13,20 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import actions, code, gate, manual, providers, repo, reviewing, supervisor, timeline, ui
+from . import (
+    actions,
+    code,
+    gate,
+    manual,
+    progress,
+    providers,
+    repo,
+    review,
+    reviewing,
+    supervisor,
+    timeline,
+    ui,
+)
 from . import pod as pod_module
 from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
@@ -96,12 +109,16 @@ class PodView:
         return out
 
 
-def ticked_at(task: Task) -> float:
-    """When the agent last touched its checklist. Cheap enough to ask on every refresh."""
-    try:
-        return (task.meta / "handoff" / gate.CRITERIA_FILE).stat().st_mtime
-    except OSError:
-        return 0.0
+def ticked_at(task: Task) -> tuple:
+    """Checklist and live todos can change without a state transition."""
+    changed = []
+    for path in (task.meta / "handoff" / gate.CRITERIA_FILE, task.meta / progress.FILE):
+        try:
+            stat = path.stat()
+            changed.append((stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size))
+        except OSError:
+            changed.append(None)
+    return tuple(changed)
 
 
 def live_at(task: Task) -> float:
@@ -695,6 +712,18 @@ def detail(
                 f"{k}={v}" for k, v in e["data"].items() if k in ("current", "reason", "passed", "cost")
             )
             for e in events
+        ]
+    if st.state is State.CHECKPOINT_FINAL and (message := review.proposed_message(task).get("message")):
+        body += ["", "#### Proposed commit", "", f"```text\n{message}\n```"]
+    if st.state is State.IMPLEMENT and (todos := progress.read(task)):
+        marks = {"completed": "☑", "in_progress": "→", "pending": "☐", "cancelled": "—"}
+        body += [
+            "",
+            "#### Writer's steps",
+            "",
+            "Its working list; acceptance criteria are listed separately.",
+            "",
+            *(f"- {marks[t['status']]} {t['content']}" for t in todos),
         ]
     return "\n".join(head + body)
 

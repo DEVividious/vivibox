@@ -95,7 +95,7 @@ def test_review_fetches_the_agents_commit(task, capsys):
     assert log.stdout.strip() == "Add hello"
 
 
-def test_verify_runs_in_the_agent_container(task, capsys):
+def test_verify_checks_the_committed_work(task, capsys):
     from vivibox import gate
     from vivibox.task import Task
 
@@ -106,7 +106,7 @@ def test_verify_runs_in_the_agent_container(task, capsys):
     checklist.write_text(checklist.read_text().replace("- [ ]", "- [x]"))
     assert main(["verify", "repocheck-1"]) == 0
     log = sorted((t.meta / "log").glob("verify-*.log"))[-1].read_text()
-    assert "[exit 0]" in log
+    assert "[exit 0 after " in log and "# test -f hello.txt: ok after " in log
 
 
 def test_deleting_git_dir_leaves_protected_files(task):

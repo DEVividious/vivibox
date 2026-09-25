@@ -496,13 +496,14 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
 
     @work(thread=True)
     def finish(self, task_id: str) -> None:
+        self.call_from_thread(self.busy_with, task_id, "accepting…")
         try:
             task, project = actions.load(task_id)
-            done = actions.finish(task, project)
+            actions.finish(task, project, on_ready=lambda done: self.call_from_thread(self.finished, done))
         except Exception as e:
             self.call_from_thread(self.fail, e)
-            return
-        self.call_from_thread(self.finished, done)
+        finally:
+            self.call_from_thread(self.busy_with, task_id, "")
 
     def finished(self, done: actions.Finished) -> None:
         self.reload()
@@ -693,6 +694,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
                 roles=form.get("roles"),
                 review_mode=form.get("review", ""),
                 no_build=form.get("no_build", False),
+                base_ref=form.get("base_ref", ""),
             )
             self.call_from_thread(self.reload)
             for note in actions.context_notes(task):

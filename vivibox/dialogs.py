@@ -436,6 +436,7 @@ class NewTask(Dialog):
         self.preselect = preselect
         # The models of the providers you have keys for; None while the view is still asking.
         self.available = available
+        self.base_ref = "HEAD"
 
     def compose(self) -> ComposeResult:
         names = panel.projects()
@@ -458,6 +459,9 @@ class NewTask(Dialog):
                              ("Other: refactoring, tests, upkeep", "other")],
                             value="feature", allow_blank=False, compact=True, id="kind",
                         )  # fmt: skip
+                    with Horizontal(classes="row"):
+                        yield Label("Branch", classes="key")
+                        yield Button("Current (HEAD)…", compact=True, id="base-ref")
                     with Horizontal(classes="row", id="build-row"):
                         yield Label("Build", classes="key")
                         yield Checkbox(
@@ -517,6 +521,12 @@ class NewTask(Dialog):
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "base-ref":
+            from .branches import BranchPicker
+
+            source = load_project(str(self.query_one("#project", Select).value)).repo
+            self.app.push_screen(BranchPicker(source, self.base_ref), self.branch_chosen)
+            return
         if event.button.id == "attach":
             self.app.push_screen(Browse(ANY, "Attach a file or a folder for the agent"), self.attach)
             return
@@ -533,6 +543,7 @@ class NewTask(Dialog):
                 "roles": {s.id.removeprefix("role-"): s.value for s in self.query(".model").results(Select)},
                 "review": self.query_one("#review", Select).value if self.query("#review") else "",
                 "no_build": self.query_one("#no-build", Checkbox).value,
+                "base_ref": self.base_ref,
             }
         )
 
@@ -575,8 +586,15 @@ class NewTask(Dialog):
     def for_project(self, name: str) -> None:
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
         self.query_one("#kind-row").display = not actions.empty_project(name)
+        self.base_ref = "HEAD"
+        self.query_one("#base-ref", Button).label = "Current (HEAD)…"
         with contextlib.suppress(ConfigError):
             self.query_one("#goal", DescriptionArea).repo = load_project(name).repo
+
+    def branch_chosen(self, choice: tuple[str, str] | None) -> None:
+        if choice:
+            label, self.base_ref = choice
+            self.query_one("#base-ref", Button).label = label + "…"
 
     def attach(self, path: Path | None) -> None:
         """The picked file or folder as an @mention, where the cursor is in the description."""

@@ -341,7 +341,7 @@ def test_accepting_the_work_offers_a_commit(env):
         # The repository is on its main branch, so leaving it uncommitted is the focused choice.
         assert app.screen.focused.id == "later"
         message = app.screen.query_one("#message", TextArea)
-        assert message.text.startswith("Goal\n\n- "), "the suggestion: subject, a blank line, a list"
+        assert message.text == "Add one"
         message.focus()
         await pilot.press("end", *" now")
         await pilot.press("ctrl+s")  # a multi-line field: ctrl+s submits, like every other one
@@ -349,7 +349,7 @@ def test_accepting_the_work_offers_a_commit(env):
 
     run(scenario)
     log = subprocess.run(["git", "log", "-1", "--format=%s%n%b"], cwd=source, capture_output=True, text=True)
-    assert log.stdout.startswith("Goal now\n- ") and (source / "one.txt").exists()
+    assert log.stdout.strip() == "Add one now" and (source / "one.txt").exists()
     assert not task.root.exists()
 
 
@@ -2224,7 +2224,7 @@ def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""
     expected = ["goal", "attach", "plan", "role-planner", "role-writer", "create", "cancel",
-                "project", "kind", "no-build", "goal"]  # fmt: skip
+                "project", "kind", "base-ref", "no-build", "goal"]  # fmt: skip
     with_code("demo")
 
     async def scenario(app, pilot):
@@ -4013,7 +4013,9 @@ def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monk
     with_reviewer(env, mode="loop")
     calls = []
 
-    def create(project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False):
+    def create(
+        project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False, base_ref=""
+    ):
         calls.append((roles, review_mode))
         return new_task(goal)  # goes through the same create again, so the first call is the view's
 

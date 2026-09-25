@@ -40,6 +40,7 @@ DataTable { height: 1fr; }
 .form .hint { width: 1fr; color: $text-muted; }
 .form .row > Select, .form .row > TextArea { width: 1fr; }
 .form .row > Button { margin: 0 2 0 0; min-width: 9; }
+.form #base-ref { width: 1fr; }
 .form .buttons > .keys { width: auto; padding: 1 0; }
 .form Select > SelectCurrent { background: $boost; }
 /* An open list is framed and set apart: bare, it ended right above the next row, whose value read

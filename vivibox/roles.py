@@ -276,7 +276,7 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
         return claudecode.ClaudeCode(pod, role.model)
     if role_name == "reviewer":
         return opencode.OpenCode(pod, role.model, port=opencode.REVIEW_PORT)
-    return opencode.OpenCode(pod, role.model)
+    return opencode.OpenCode(pod, role.model, task=task if role_name == "writer" else None)
 
 
 def provider_keys(config: Config, task: Task | None = None) -> list[str]:

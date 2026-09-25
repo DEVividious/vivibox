@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +41,7 @@ def fetch_work(task: Task, project: Project) -> str:
 def prepare_review(task: Task, project: Project) -> Path:
     """The review copy: the agent's work as uncommitted changes, next to your untouched checkout."""
     commit = fetch_work(task, project)
+    prepare_message(task, project.repo, commit)
     path = repo.update_review_worktree(project.repo, task.root, commit, task.read_state().base_commit)
     task.event("review", commit=commit, path=str(path))
     return path
@@ -205,7 +207,12 @@ class Finished:
     proposed: str = ""
 
 
-def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
+def finish(
+    task: Task,
+    project: Project,
+    branch_only: bool = False,
+    on_ready: Callable[[Finished], None] | None = None,
+) -> Finished:
     """Accepted work lands in your checkout as uncommitted changes, or with branch_only as a branch.
     Everything else of the task goes. Committing is a separate step: commit_work."""
     copy = repo.review_worktree_path(project.repo, task.root)
@@ -219,7 +226,7 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
     spent = ui.cost(task)
     criteria = accepted_criteria(task)
     # A box's "Work in the box" is not a message for your history: that one is yours to write.
-    message = "" if st.box else suggested_message(project.repo, st.base_commit, commit, st.goal, criteria)
+    message = "" if st.box else prepare_message(task, project.repo, commit)
     done = Finished(task.id, project.repo, spent, message)
     done.criteria = criteria
     done.created = st.created
@@ -236,24 +243,50 @@ def finish(task: Task, project: Project, branch_only: bool = False) -> Finished:
             done.status = repo.git("status", "--short", "--untracked-files=no", cwd=project.repo).stdout
     task.transition(State.DONE, reason="accepted")
     remember(done, project, commit)
-    actions.remove(task, project, accepted=True)
+    try:
+        if on_ready:
+            on_ready(done)
+    finally:
+        actions.remove(task, project, accepted=True)
     return done
 
 
 def suggested_message(source: Path, base: str, commit: str, goal: str, criteria: list[str] = ()) -> str:
-    """A commit message the way a history is kept: a subject of at most 72 characters saying what
-    the task set out to do (the plan's summary, once there is one), then a list: the agent's commit
-    subjects when it made several (the gate checked them), else the criteria the work met. A line
-    that reads like a signature is left out."""
+    """Describe the actual commits, never copy the acceptance checklist or truncate a ticket."""
     log = repo.git("log", "--reverse", "--format=%s", f"{base}..{commit}", cwd=source).stdout
-    subjects = log.splitlines()
-    first = goal.strip().splitlines()[0].strip().rstrip(".") if goal.strip() else ""
-    subject = ui.shorten(first, gate.MAX_SUBJECT)
-    points = subjects if len(subjects) > 1 else list(criteria)
-    points = [p.strip() for p in points if p.strip() and not gate.AI_MARKERS.search(p)]
-    if not points:
-        return subject
-    return subject + "\n\n" + "\n".join(f"- {p}" for p in points)
+    subjects = list(
+        dict.fromkeys(p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p))
+    )
+    first = subjects[0] if subjects else goal.strip().partition("\n")[0].rstrip(".")
+    if not first or len(first) > gate.MAX_SUBJECT:
+        first = "Update project"
+    points = [p for p in subjects if p != first]
+    return first + ("\n\n" + "\n".join(f"- {p}" for p in points) if points else "")
+
+
+MESSAGE_FILE = "commit-message.json"
+
+
+def proposed_message(task: Task) -> dict:
+    try:
+        value = json.loads((task.meta / MESSAGE_FILE).read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def prepare_message(task: Task, source: Path, commit: str) -> str:
+    """Cache against both ends of the diff; a later writer's commit replaces the proposal."""
+    st = task.read_state()
+    kept = proposed_message(task)
+    if kept.get("base") == st.base_commit and kept.get("commit") == commit:
+        return kept["message"]
+    message = suggested_message(source, st.base_commit, commit, st.goal)
+    path = task.meta / MESSAGE_FILE
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"base": st.base_commit, "commit": commit, "message": message}) + "\n")
+    temporary.replace(path)
+    return message
 
 
 def apply_work(source: Path, task_id: str, commit: str) -> list[str]:

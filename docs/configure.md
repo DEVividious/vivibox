@@ -131,7 +131,10 @@ timeline and the task goes on without it. A stop and a start do not run them aga
 cut them short. Maven keeps what a task installs apart from other tasks: modules one task installs
 never reach another task's build, while what Maven downloads is shared. With Maven's build cache
 extension, the verification keeps a cache of its own: a later attempt reuses what an earlier one
-built from the committed work, never what the agent built.
+built from the committed work, never what the agent built. The agent itself builds without that
+cache (`maven.build.cache.enabled=false` in its `MAVEN_OPTS`): a cache hit would replay only the
+phases after the one an earlier command reached, skipping what `initialize` sets for the tests,
+such as Mockito's agent path, and the test JVM would not start.
 
 `pass_env` is for what a build reads from its environment, such as a package registry token that a
 settings file in the repository refers to (`${env.REPO_TOKEN}` in Maven's settings.xml). The agent

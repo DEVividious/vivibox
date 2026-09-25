@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -432,7 +433,8 @@ def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
     pod.passed_env = ["ACME_KEY"]
     agent, gate = pod.agent_command(), pod.gate_command()
     env = lambda cmd: {cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-e"}  # noqa: E731
-    assert env(gate) == env(agent), "the gate's environment drifted from the agent's"
+    maven = lambda vars: {v for v in vars if v.startswith("MAVEN_OPTS=")}  # noqa: E731
+    assert env(gate) - maven(env(gate)) == env(agent) - maven(env(agent)), "the gate's environment drifted"
     assert any(e.startswith("DOCKER_HOST=unix://") for e in env(gate))
     socket = [m for m in agent if m.endswith(f":{SOCKET_DIR}")]
     assert socket and socket[0] in gate, "the daemon's socket, from the same volume"
@@ -453,6 +455,23 @@ def test_testcontainers_in_the_pod_runs_the_ryuk_that_removes_images_by_id(pod, 
     pod.passed_env = ["TESTCONTAINERS_RYUK_CONTAINER_IMAGE"]
     for cmd in (pod.agent_command(), pod.gate_command()):
         assert fixed not in cmd and "TESTCONTAINERS_RYUK_CONTAINER_IMAGE" in cmd, "the project's own"
+
+
+def test_the_agent_builds_without_the_maven_build_cache_and_the_gate_keeps_its_own(pod, tmp_path):
+    """The work laptop's case: the writer's build restored a module from the cache up to the phase an earlier
+    command had reached and ran only the later phases, without `initialize`, so Failsafe got
+    `-javaagent:${org.mockito:mockito-core:jar}` unresolved and its JVM died. The gate's cache holds
+    whole verifications only, so it stays (ADR-0023)."""
+    from importlib.resources import files
+
+    from vivibox.pod import AGENT_MAVEN_OPTS
+
+    dockerfile = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    image_opts = re.search(r'MAVEN_OPTS="([^"]*)"', dockerfile).group(1)
+    assert f"{image_opts} -Dmaven.build.cache.enabled=false" == AGENT_MAVEN_OPTS, "the image's, plus one"
+    pod.gate_dir = tmp_path / "gate"
+    assert f"MAVEN_OPTS={AGENT_MAVEN_OPTS}" in pod.agent_command()
+    assert not any(arg.startswith("MAVEN_OPTS=") for arg in pod.gate_command()), "the image's stay"
 
 
 def test_the_pod_trusts_the_authorities_the_host_trusts(pod, tmp_path, monkeypatch):

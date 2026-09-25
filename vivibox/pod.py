@@ -61,6 +61,13 @@ CACHES = {
 # Where Maven's split local repository puts what a build installs: a volume per task, over the
 # shared /cache/m2, so one task's unfinished modules never reach another's build.
 INSTALLED = "/cache/m2/installed"
+# The agent's Maven: the image's options, and no build cache. A hit there restores a module up to
+# the phase an earlier command reached (the agent builds with `test`, `package`, `-DskipTests` by
+# turns) and runs only the later phases, without `initialize`: what that phase sets for the tests
+# (Mockito's agent path from dependency:properties, jacoco's argLine) is missing, and the forked
+# JVM dies. The gate keeps its cache: it holds whole verifications only (ADR-0023). Every Maven a
+# wrapper may fetch reads MAVEN_OPTS, and the extension reads system properties.
+AGENT_MAVEN_OPTS = "-Dmaven.repo.local=/cache/m2 -Dmaven.build.cache.enabled=false"
 # The preparation's process, in the agent's /tmp: gone with the container, as the process is.
 PREPARE_PID = "/tmp/vivibox-prepare.pid"
 HOST_GATEWAY = "host.docker.internal"
@@ -454,6 +461,7 @@ class Pod:
             *self.docker_env(),
             # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
             "-e", "HUSKY=0",
+            "-e", f"MAVEN_OPTS={AGENT_MAVEN_OPTS}",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
             *(arg for name in self.passed_env for arg in ("-e", name)),
             *(arg for m in mounts for arg in ("-v", m.arg())),

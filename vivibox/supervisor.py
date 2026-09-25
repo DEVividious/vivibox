@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import brief, gate, manual, reviewing, ui
+from .config import Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
@@ -251,6 +252,8 @@ class Supervisor:
     project_no_build: bool = False
     # The project's preparation, which ran before the writer's first turn; that turn is told of it.
     prepared: list[str] = field(default_factory=list)
+    # The project file as it is now, read at every step; None keeps the fields above as given.
+    current_project: Callable[[], Project] | None = None
     # The role that plans. None means the writer plans too, which is what a caller with one harness
     # gets; the command line always passes both, because the config always names both.
     planner: Harness | None = None
@@ -283,6 +286,9 @@ class Supervisor:
 
     def step(self) -> bool:
         """Does one unit of work. False when there is nothing to do until you act."""
+        if self.current_project:
+            p = self.current_project()
+            self.project_verify, self.project_no_build, self.prepared = p.verify, p.no_build, p.prepare
         st = self.task.read_state()
         if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
             self._watch_answer()

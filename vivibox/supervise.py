@@ -8,7 +8,7 @@ import argparse
 from collections.abc import Callable
 
 from . import actions, gate, keys, ntfy, prepare, reviewing, supervisor
-from .config import Config, ConfigError, load_config
+from .config import Config, ConfigError, Project, load_config, load_project
 from .risky import Approvals
 from .states import waits_for_user
 from .task import Task
@@ -97,24 +97,37 @@ def make_supervisor(
     reviewer = (
         actions.harness_for("reviewer", pod.review_side(), task) if "reviewer" in config.roles else None
     )
-    ports = supervisor.Ports(
-        run_gate=lambda t: gate.run_gate(
+
+    def now() -> Project:
+        """The project file as it is now: what you change under e reaches the next verification
+        and the next turn, without a stop and a start. The one given while the file cannot be read."""
+        try:
+            return load_project(project.name)
+        except (ConfigError, OSError):
+            return project
+
+    def run_gate(t: Task) -> gate.GateResult:
+        p = now()
+        return gate.run_gate(
             t,
             pod,
-            actions.verify_commands(t, project),
-            project.risky_extra,
-            project.java,
-            timeout=project.verify_timeout or config.verify_timeout,
-            no_build=project.no_build,
-        ),  # fmt: skip
-        risky_changes=lambda: Approvals(task.meta, task.repo, project.risky_extra).changes(),
+            actions.verify_commands(t, p),
+            p.risky_extra,
+            p.java,
+            timeout=p.verify_timeout or config.verify_timeout,
+            no_build=p.no_build,
+        )
+
+    ports = supervisor.Ports(
+        run_gate=run_gate,
+        risky_changes=lambda: Approvals(task.meta, task.repo, now().risky_extra).changes(),
         notify=notifier(task, project, current or (lambda: config)),
-        prepare_review=lambda: actions.prepare_review(task, project),
-        save_verify=lambda commands, no_build: actions.save_verify(project, commands, no_build),
+        prepare_review=lambda: actions.prepare_review(task, now()),
+        save_verify=lambda commands, no_build: actions.save_verify(now(), commands, no_build),
         session_started=agent_window,
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,
-        preparing=lambda: prepare.waiting(task, project, pod),
+        preparing=lambda: prepare.waiting(task, now(), pod),
     )
     return supervisor.Supervisor(
         task,
@@ -131,4 +144,5 @@ def make_supervisor(
         prepared=project.prepare,
         planner=planner,
         source=project.repo,
+        current_project=now,
     )

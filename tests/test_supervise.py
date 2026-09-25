@@ -110,3 +110,41 @@ def test_the_supervisor_asks_the_pod_whether_the_projects_preparation_still_runs
     sup = supervise.make_supervisor(task, project, Pod(), config())
     assert sup.prepared == ["mvn -B install"]
     assert sup.ports.preparing(), "the writer waits while it runs"
+
+
+def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, monkeypatch):
+    """The supervisor read the project file once, at its start: a verify command or a
+    preparation set under e waited for a stop and a start."""
+    from vivibox import gate
+    from vivibox.cli import main
+    from vivibox.config import load_project
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(supervise.load_config().tasks_dir, "demo-1")
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    ran = []
+    monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands))
+
+    class Pod:
+        def prepare_running(self):
+            return True
+
+        def review_down(self):
+            pass
+
+        def review_side(self):
+            return self
+
+    sup = supervise.make_supervisor(task, load_project("demo"), Pod(), config())
+    assert not sup.ports.preparing(), "nothing to prepare yet"
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(
+        path.read_text().replace('verify = ["true"]', 'verify = ["npm test"]') + 'prepare = ["npm ci"]\n'
+    )
+    assert sup.ports.preparing(), "the preparation set since"
+    sup.ports.run_gate(task)
+    assert ran == [["npm test"]]
+    task.set_paused(True)  # a step with nothing to do still reads the file
+    assert not sup.step()
+    assert sup.project_verify == ["npm test"] and sup.prepared == ["npm ci"]

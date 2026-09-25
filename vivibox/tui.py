@@ -692,6 +692,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
                 kind=form["kind"],
                 roles=form.get("roles"),
                 review_mode=form.get("review", ""),
+                no_build=form.get("no_build", False),
             )
             self.call_from_thread(self.reload)
             for note in actions.context_notes(task):

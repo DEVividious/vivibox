@@ -16,6 +16,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     Input,
     Label,
     OptionList,
@@ -457,6 +458,12 @@ class NewTask(Dialog):
                              ("Other: refactoring, tests, upkeep", "other")],
                             value="feature", allow_blank=False, compact=True, id="kind",
                         )  # fmt: skip
+                    with Horizontal(classes="row", id="build-row"):
+                        yield Label("Build", classes="key")
+                        yield Checkbox(
+                            "Nothing to build or test: research, a ticket analysis",
+                            compact=True, id="no-build",
+                        )  # fmt: skip
                     suggestions = OptionList(id="suggestions")
                     suggestions.display = False
                     with Horizontal(classes="row", id="task-row"):
@@ -525,6 +532,7 @@ class NewTask(Dialog):
                 "draft": self.query_one("#plan", Select).value == "draft",
                 "roles": {s.id.removeprefix("role-"): s.value for s in self.query(".model").results(Select)},
                 "review": self.query_one("#review", Select).value if self.query("#review") else "",
+                "no_build": self.query_one("#no-build", Checkbox).value,
             }
         )
 

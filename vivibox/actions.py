@@ -332,8 +332,11 @@ def create(
     cwd: Path | None = None,
     roles: dict[str, Choice] | None = None,
     review_mode: str = "",
+    no_build: bool = False,
 ) -> Task:
-    """description: one line, or a whole ticket; it all goes into the plan the agent starts from.
+    """no_build: nothing to build or test in this task (research, a ticket analysis): verify = false
+    in its plan, for this task only.
+    description: one line, or a whole ticket; it all goes into the plan the agent starts from.
     @path mentions in it are copied into the task (relative ones from cwd). roles: what a role runs
     on for this task only, as m would set it; config.toml's own choice is no choice at all.
     review_mode: how the reviewer works on this task, loop, supervised or none; "" is config.toml's."""
@@ -367,6 +370,8 @@ def create(
     found = context.resolve(description, cwd or Path.cwd(), repo=project.repo)
     template = files("vivibox").joinpath("templates/plan-bug.md" if kind == "bug" else "templates/plan.md")
     plan = template.read_text().replace("{{kind}}", kind)
+    if no_build:
+        plan = plan.replace("\nverify = []\n", "\nverify = false\n", 1)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
     if review_mode and review_mode != config.review_mode:
         task.set_review_mode(review_mode)
@@ -650,7 +655,10 @@ def save_verify(project: Project, commands: list[str], no_build: bool = False) -
 
 
 def verify_commands(task: Task, project: Project) -> list[str]:
-    """The project's commands; for a project with none, the one this task's writer proposed."""
+    """The project's commands; for a project with none, the one this task's writer proposed. None
+    for a task made with nothing to build, whatever the project builds for its other tasks."""
+    if proposal.nothing_to_build(task):
+        return []
     if project.verify or not proposal.asked(task, project):
         return project.verify
     return [found] if (found := proposal.proposed(task)) else []

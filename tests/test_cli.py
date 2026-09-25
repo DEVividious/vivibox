@@ -833,3 +833,11 @@ def test_accept_names_the_writers_command_and_where_to_keep_it(env, capsys, monk
     assert main(["accept", task.id]) == 0
     out = capsys.readouterr().out
     assert "proposed `npm ci && npm test`" in out and "demo.toml" in out
+
+
+def test_new_takes_a_task_with_nothing_to_build(env):
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Analyse PAY-123", "--no-build", "--draft"]) == 0
+    assert "verify = false" in find_task(load_config().tasks_dir, "demo-1").plan_path.read_text()

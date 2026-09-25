@@ -20,7 +20,7 @@ them all:
 | `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` / `H` | show or hide the tasks you have accepted, or the ones you deleted, listed below the live ones; the deleted ones start hidden, the header counts what is out of sight, and both choices are kept for the next time |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; its verification is a command you type, or left to the first task's writer, with what its build files and pipeline (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) run in its notes |
-| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
+| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the verification then checks the criteria and the commits only), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
 | `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
@@ -74,6 +74,7 @@ vivibox new myproject "Add unit tests for OrderValidator"
 vivibox new myproject - < ticket.md   # a longer description, from a file
 vivibox new myproject --kind bug "Expired cards pass validation, see @~/tickets/PAY-123.md"
 vivibox new myproject --model planner=deepseek/deepseek-v4-pro "Port the importer to streams"
+vivibox new myproject --no-build "Find out why PAY-123 happens; answer in the handoff"
 vivibox accept myproject-1            # the work lands in your checkout; commit it with the suggested message?
 vivibox accept myproject-1 --branch   # or put it on branch vivibox/myproject-1, e.g. for a pull request
 vivibox status                        # all tasks, the ones waiting for you first

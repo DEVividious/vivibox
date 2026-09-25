@@ -416,6 +416,33 @@ def test_the_writers_command_left_alone_keeps_the_project_asking(env):
     assert load_project("demo").verify == [], "the next task's writer proposes again"
 
 
+def test_a_task_with_nothing_to_build_is_said_so_when_it_is_made(env, monkeypatch):
+    """A ticket to analyse, facts to gather: nothing to build, and you know it before the planner
+    does. The box puts verify = false in the task's plan; the project keeps building the rest."""
+    from vivibox import proposal
+
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: task_id)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        app.screen.query_one("#goal", TextArea).text = "Analyse PAY-123"
+        box = app.screen.query_one("#no-build", Checkbox)
+        assert not box.value and "nothing to build" in str(box.label).lower()
+        box.value = True
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    run(scenario)
+    task = find_task(load_config().tasks_dir, "demo-1")
+    assert "verify = false" in task.plan_path.read_text()
+    at_plan_checkpoint(task)
+    gate.accept_plan(task)
+    assert proposal.nothing_to_build(task) and actions.verify_commands(task, load_project("demo")) == []
+    assert load_project("demo").verify == ["true"], "the project builds its other tasks as ever"
+
+
 def test_a_task_can_be_a_whole_ticket(env):
     from vivibox import actions
 
@@ -2173,7 +2200,7 @@ def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""
     expected = ["goal", "attach", "plan", "role-planner", "role-writer", "create", "cancel",
-                "project", "kind", "goal"]  # fmt: skip
+                "project", "kind", "no-build", "goal"]  # fmt: skip
     with_code("demo")
 
     async def scenario(app, pilot):
@@ -3962,7 +3989,7 @@ def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monk
     with_reviewer(env, mode="loop")
     calls = []
 
-    def create(project, goal, auto=False, kind="feature", roles=None, review_mode=""):
+    def create(project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False):
         calls.append((roles, review_mode))
         return new_task(goal)  # goes through the same create again, so the first call is the view's
 

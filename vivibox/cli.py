@@ -42,7 +42,9 @@ def cmd_new(args: argparse.Namespace) -> int:
         if not sep or not model.strip():
             raise ConfigError(f"--model {pair}: expected role=model, e.g. writer=deepseek/deepseek-v4-pro")
         roles[role.strip()] = actions.parse_choice(model)
-    task = actions.create(args.project, description, auto=args.auto, kind=args.kind, roles=roles)
+    task = actions.create(
+        args.project, description, auto=args.auto, kind=args.kind, roles=roles, no_build=args.no_build
+    )
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     for note in actions.context_notes(task):
         print(f"Note: {note}")
@@ -576,6 +578,11 @@ def parser() -> argparse.ArgumentParser:
     )
     new.add_argument(
         "--auto", action="store_true", help="accept the agent's plan without stopping; you review the work"
+    )
+    new.add_argument(
+        "--no-build",
+        action="store_true",
+        help="nothing to build or test in this task: research, a ticket analysis",
     )
     new.add_argument(
         "--model",

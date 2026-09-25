@@ -18,7 +18,6 @@ from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from . import actions, configfile, ide, opencode, ui
-from . import init as project_init
 from .config import (
     DEFAULT_NTFY_SERVER,
     ENV_NAME,
@@ -32,9 +31,10 @@ from .config import (
     load_config,
     load_project,
 )
-from .dialogs import ChooseEditor, ChooseModel, ChooseVerify
+from .dialogs import ChooseEditor, ChooseModel
 from .panel import edit_in_editor
 from .providers_ui import ManageProviders, provider_rows
+from .verify_ui import AskVerify
 from .widgets import Dialog, EdgeTextArea
 
 # A row: what it is called, what it is now, and the key Enter acts on; None for a heading or a
@@ -397,7 +397,7 @@ class ProjectSettings(Rows):
         elif project.verify:
             verify = ", ".join(project.verify)
         else:
-            verify = "the first plan you accept decides"
+            verify = actions.WRITER_PROPOSES
         machine = config.ide or Settings.found_editor()
         return [
             (
@@ -440,22 +440,11 @@ class ProjectSettings(Rows):
                 if not choice:
                     return
                 actions.save_verify(project, choice["verify"], choice["no_build"])
-                how = (
-                    actions.NO_BUILD if choice["no_build"] else ", ".join(f"`{c}`" for c in choice["verify"])
-                )
+                how = ", ".join(f"`{c}`" for c in choice["verify"]) or actions.WRITER_PROPOSES
                 self.changed()
                 self.say(f"{self.project_name} is verified from now on: {how}")
 
-            self.app.push_screen(
-                ChooseVerify(
-                    self.project_name,
-                    project.verify,
-                    project.no_build,
-                    project_init.candidates(project.repo),
-                    offer_file=False,
-                ),
-                chosen,
-            )
+            self.app.push_screen(AskVerify(self.project_name, project.verify, project.no_build), chosen)
         elif key == "demo":
             self.app.push_screen(
                 AskLines(

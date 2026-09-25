@@ -26,7 +26,8 @@ def gradle_project(path: Path, gradle: str, source: str) -> Path:
 )
 def test_gradle_projects_get_a_jdk_their_gradle_runs_on(tmp_path, gradle, source, java):
     found = init.detect(gradle_project(tmp_path / "shop", gradle, source))
-    assert found.verify == ["bash gradlew test --no-daemon --console=plain"]
+    assert found.verify == [], "a note, never the verification"
+    assert "gradlew runs: bash gradlew test --no-daemon --console=plain" in found.notes
     assert found.java == java
 
 
@@ -36,12 +37,13 @@ def test_maven_and_npm(tmp_path):
     (maven / "pom.xml").write_text(
         "<properties><maven.compiler.release>17</maven.compiler.release></properties>"
     )
-    assert init.detect(maven).verify == ["bash mvnw -B verify"]
+    assert init.detect(maven).verify == [] and "mvnw runs: bash mvnw -B verify" in init.detect(maven).notes
     assert init.detect(maven).java == "", "Java 21 builds code written for 17"
     web = make_repo(tmp_path / "Web_App")
     (web / "package.json").write_text("{}")
     found = init.detect(web)
-    assert found.verify == ["npm ci && npm test"] and found.name == "web-app"
+    assert found.verify == [] and found.name == "web-app"
+    assert "package.json runs: npm ci && npm test" in found.notes
 
 
 YARN = "yarn install --immutable && yarn test"
@@ -67,7 +69,7 @@ def test_node_projects_are_tested_with_their_own_package_manager(tmp_path, packa
     (web / "package.json").write_text(package)
     for name, text in files.items():
         (web / name).write_text(text)
-    assert init.detect(web).verify == [verify]
+    assert init.candidates(web)[0] == (verify, "package.json")
 
 
 def test_init_writes_the_project_once(env, tmp_path, capsys):
@@ -123,7 +125,7 @@ def test_a_project_from_scratch_gets_its_command_from_the_first_plan(env, tmp_pa
 
 
 def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
-    """What the picker offers: one command per build file that names it, the detected one first."""
+    """What a new project is told: one command per build file that names it, as a note."""
     (tmp_path / "mvnw").write_text("")
     (tmp_path / "package.json").write_text("{}")
     assert init.candidates(tmp_path) == [
@@ -131,7 +133,7 @@ def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
         ("npm ci && npm test", "package.json"),
     ]
     found = init.detect(tmp_path)
-    assert found.verify == ["bash mvnw -B verify"] and found.source == "mvnw"
+    assert found.verify == [] and found.source == "mvnw"
     assert init.candidates(tmp_path / "nowhere") == []
 
 
@@ -189,7 +191,7 @@ def test_the_ci_definition_says_how_the_project_is_built(tmp_path):
     found = init.candidates(tmp_path)
     assert found[0] == ("bash mvnw -B verify", "mvnw") and found[1:] == init.ci_commands(tmp_path)
     detected = init.detect(tmp_path)
-    assert detected.verify == ["bash mvnw -B verify"]
+    assert detected.verify == []
     assert any("ci.yml runs: bash mvnw --batch-mode verify -Pintegration" in n for n in detected.notes)
 
 

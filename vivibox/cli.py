@@ -72,7 +72,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if args.verify:
         found.verify = [args.verify]
     if not found.verify:
-        found.notes.append("no build found; the first plan you accept sets how to build and test it")
+        found.notes.append(f"verification: {actions.WRITER_PROPOSES}; --verify sets it now")
     print(f"Project {name} for {found.repo}:")
     for note in found.notes:
         print(f"  - {note}")

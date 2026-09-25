@@ -25,9 +25,9 @@ from textual.widgets import (
 )
 
 from . import actions, context, ide, panel
-from . import init as project_init
 from .browse import ANY, FOLDER, Browse, shown_path
 from .config import ConfigError, load_config, load_project
+from .verify_ui import AskVerify
 from .widgets import Dialog, EdgeTextArea, Fields, leave_at_edge
 
 NO_PROJECTS = """No projects yet, so your agents are sitting idle.
@@ -232,8 +232,8 @@ NEW_PROJECT = "+ set up another project…"
 
 class NewProject(Dialog):
     """A repository vivibox does not know yet, or a folder where one should start. How to build and
-    test it is detected from its build files, with what its pipeline runs a pick away, or left to
-    the first plan you accept."""
+    test it is yours to type, or left to the first task's writer, who proposes the command it ran;
+    what the build files name is only a note."""
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -268,8 +268,7 @@ class NewProject(Dialog):
         found = actions.propose_project(where)
         root = actions.git_root(where)
         self.taken = actions.project_at(root) if root else ""
-        self.candidates = project_init.candidates(root or where)
-        self.verify, self.source, self.no_build = list(found.verify), found.source, False
+        self.verify, self.no_build = list(found.verify), False
         name = self.query_one("#name", Input)
         name.value = self.taken or found.name
         name.disabled = bool(self.taken)
@@ -285,22 +284,13 @@ class NewProject(Dialog):
         self.query_one("#create", Button).label = "Open a task" if self.taken else "Set up"
 
     def show_verify(self) -> None:
-        if self.no_build:
-            how = actions.NO_BUILD
-        elif self.verify:
-            how = f"{escape(self.verify[0])}  [dim]from {escape(self.source)}[/]"
-        else:
-            how = "the first plan you accept decides"
+        how = escape(" && ".join(self.verify)) if self.verify else actions.WRITER_PROPOSES
         self.query_one("#verify", Label).update(how)
 
     def pick_verify(self, choice: dict) -> None:
-        if not choice:
-            return
-        self.verify, self.no_build = choice["verify"], choice["no_build"]
-        self.source = (
-            dict((c, s) for c, s in self.candidates).get(self.verify[0], "you") if self.verify else ""
-        )
-        self.show_verify()
+        if choice:
+            self.verify, self.no_build = choice["verify"], choice["no_build"]
+            self.show_verify()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -308,8 +298,7 @@ class NewProject(Dialog):
             self.app.push_screen(Browse(FOLDER, "Pick the project's folder"), self.use_folder)
         elif event.button.id == "change":
             name = self.query_one("#name", Input).value.strip() or "this project"
-            picker = ChooseVerify(name, self.verify, self.no_build, self.candidates, exists=False)
-            self.app.push_screen(picker, self.pick_verify)
+            self.app.push_screen(AskVerify(name, self.verify, self.no_build), self.pick_verify)
         elif event.button.id != "create":
             self.dismiss({})
         elif self.taken:
@@ -323,86 +312,6 @@ class NewProject(Dialog):
     @on(Input.Submitted)
     def submitted(self) -> None:
         self.query_one("#create", Button).press()
-
-    def key_escape(self) -> None:
-        self.dismiss({})
-
-
-class ChooseVerify(ModalScreen[dict]):
-    """How a project is verified: a command its build files or its pipeline name, no build, one of
-    your own, or the file itself for the rest of it. Before the project exists (from i), the file
-    is not offered, and leaving it to the first plan is. It opens on what is set now, marked, so
-    Enter keeps it. Arrows pick, Enter takes, Escape leaves it as it is."""
-
-    EDIT = "edit the project file in your editor, for pass_env and host services too…"
-    PLAN_DECIDES = "leave it to the first plan you accept"
-    NOW = "  ← now"
-
-    def __init__(
-        self,
-        name: str,
-        verify: list[str],
-        no_build: bool,
-        candidates: list[tuple[str, str]],
-        exists: bool = True,
-        offer_file: bool | None = None,
-    ):
-        super().__init__()
-        self.project_name, self.verify, self.no_build = name, verify, no_build
-        self.candidates, self.exists = candidates, exists
-        # The file as a row, unless the caller (the project's screen) has one of its own.
-        self.offer_file = exists if offer_file is None else offer_file
-
-    def rows(self) -> list[tuple[str, dict]]:
-        """Each choice as its label and what taking it means, the current one marked. A command of
-        your own, from the file or typed in, is a row of its own; undecided is a row when it is
-        what the project is at."""
-        rows: list[tuple[str, dict]] = [
-            (f"{escape(c)}  [dim]from {escape(source)}[/]", {"verify": [c], "no_build": False})
-            for c, source in self.candidates
-        ]
-        if self.verify and self.verify[0] not in {c for c, _ in self.candidates}:
-            source = "the project file" if self.exists else "you"
-            rows.append(
-                (
-                    f"{escape(self.verify[0])}  [dim]from {source}[/]",
-                    {"verify": self.verify, "no_build": False},
-                )
-            )
-        rows.append((escape(actions.NO_BUILD), {"verify": [], "no_build": True}))
-        undecided = not self.verify and not self.no_build
-        if not self.exists or undecided:
-            rows.append((self.PLAN_DECIDES, {"verify": [], "no_build": False}))
-        if self.offer_file:
-            rows.append((self.EDIT, {"edit": True}))
-        return [(label + (self.NOW if choice == self.now() else ""), choice) for label, choice in rows]
-
-    def now(self) -> dict:
-        return {"verify": self.verify, "no_build": self.no_build}
-
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label(f"How {self.project_name} is verified:")
-            yield OptionList(*(label for label, _ in self.rows()), id="choices")
-            with Horizontal(classes="role"):
-                yield Label("Other")
-                yield Input(placeholder="a command of your own; Enter takes it", id="other")
-
-    def on_mount(self) -> None:
-        options = self.query_one(OptionList)
-        options.highlighted = next(
-            (i for i, (_, choice) in enumerate(self.rows()) if choice == self.now()), 0
-        )
-        options.focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.rows()[event.option_index][1])
-
-    @on(Input.Submitted)
-    def typed(self, event: Input.Submitted) -> None:
-        if command := event.value.strip():
-            self.dismiss({"verify": [command], "no_build": False})
 
     def key_escape(self) -> None:
         self.dismiss({})

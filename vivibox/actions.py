@@ -641,6 +641,8 @@ def import_plan(task: Task, answer: str | None = None) -> str:
 
 # What a project with nothing to build or test is told, and told about, in one wording.
 NO_BUILD = "no build: the verification checks the criteria and the commits only"
+# What an empty verification means, wherever it is shown.
+WRITER_PROPOSES = "the next task's writer proposes it, for you to accept"
 
 
 def save_verify(project: Project, commands: list[str], no_build: bool = False) -> None:

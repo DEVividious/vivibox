@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from conftest import make_repo
-from textual.widgets import Input, Label, OptionList, Select, SelectionList, TextArea
+from textual.widgets import Checkbox, Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
 from vivibox import (
@@ -30,6 +30,7 @@ from vivibox.probe import Listener
 from vivibox.states import State
 from vivibox.task import find_task, now
 from vivibox.tui import Vivibox
+from vivibox.verify_ui import AskVerify
 
 OC = "opencode"
 AVAILABLE = {"deepseek": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]}
@@ -210,63 +211,67 @@ def test_a_plan_without_a_build_is_accepted_without_a_word_about_the_project(env
     assert not load_project("notes").no_build and load_project("notes").verify == []
 
 
-def options_now(app) -> int:
-    return app.screen.query_one(OptionList).highlighted
-
-
-def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch):
-    """The commands the build files name, no build, or one of your own; the file itself last."""
+def test_e_asks_how_a_project_is_verified_as_one_line_or_the_writers_proposal(env, monkeypatch):
+    """One field with the command as it is now, Enter saves it, as prepare does; the box leaves it
+    to the next task's writer, who proposes the command it ran. No list of guesses."""
     from vivibox.config import load_project
+    from vivibox.verify_ui import AskVerify
 
     fresh_project(env, "notes")
     (env / "notes" / "package.json").write_text("{}")
-    opened = []
-    # The editor takes the terminal over (App.suspend), which Pilot cannot do: the call is checked.
-    monkeypatch.setattr(tui.Vivibox, "edit_project_file", lambda self: opened.append(self.project_file()))
 
-    async def scenario(app, pilot):
-        app.reload()
+    async def open_it(app, pilot):
         app.table.move_cursor(row=rows(app).index("notes"))
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
-        assert isinstance(app.screen, settings.ProjectSettings), "the project's screen: verification second"
-        await pilot.press("down", "enter")
+        assert isinstance(app.screen, settings.ProjectSettings)
+        await pilot.press("down", "enter")  # the second row: the verification
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.ChooseVerify)
-        shown = [str(app.screen.query_one(OptionList).get_option_at_index(i).prompt)
-                 for i in range(app.screen.query_one(OptionList).option_count)]  # fmt: skip
-        assert "npm ci && npm test" in shown[0] and "package.json" in shown[0]
-        assert any("no build" in s for s in shown) and not any("edit the project file" in s for s in shown)
-        assert "first plan" in shown[options_now(app)], "undecided so far: the cursor says so"
-        await pilot.press("home", "enter")  # the first: what package.json names
+        assert isinstance(app.screen, AskVerify)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await open_it(app, pilot)
+        assert app.screen.query_one(Input).value == "", "nothing guessed from package.json"
+        assert app.screen.query_one(Checkbox).value, "empty: the writer proposes it"
+        app.screen.query_one(Input).value = "npm ci && npm run check"
+        await pilot.press("enter")
         await pilot.pause()
-        assert load_project("notes").verify == ["npm ci && npm test"]
+        assert load_project("notes").verify == ["npm ci && npm run check"]
         assert isinstance(app.screen, settings.ProjectSettings), "back on the project's screen"
         await pilot.press("enter")
         await pilot.pause()
-        await pilot.press("down", "enter")  # no build
+        assert app.screen.query_one(Input).value == "npm ci && npm run check"
+        assert not app.screen.query_one(Checkbox).value
+        app.screen.query_one(Checkbox).value = True
         await pilot.pause()
-        assert load_project("notes").no_build and load_project("notes").verify == []
-        await pilot.press("enter")
-        await pilot.pause()
-        app.screen.query_one("#other", Input).value = "make check"
-        await pilot.press("tab", "enter")
-        await pilot.pause()
-        assert load_project("notes").verify == ["make check"]
-        await pilot.press("end", "enter")  # the last row: the file itself
-        await pilot.pause()
-        assert opened == [env / "config" / "projects" / "notes.toml"]
+        assert load_project("notes").verify == [] and not load_project("notes").no_build
+        assert isinstance(app.screen, settings.ProjectSettings), "the box is taken at once"
 
     run(scenario)
+    path = env / "config" / "projects" / "notes.toml"
+    path.write_text(path.read_text().replace("verify = []", "verify = false"))
+
+    async def no_build(app, pilot):
+        app.reload()
+        await open_it(app, pilot)
+        assert not app.screen.query_one(Checkbox).value
+        assert "nothing to build" in " ".join(screen_text(app).replace("█", " ").split())
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("notes").no_build, "Enter on nothing leaves the file as it says"
+
+    from ux import screen_text
+
+    run(no_build)
 
 
-def test_the_new_project_dialog_says_where_the_command_comes_from_and_lets_you_pick(
-    env, tmp_path, monkeypatch
-):
-    """What the build file says is the default; what the CI definition runs is a pick away, so
-    the verification here is the pipeline's, not a guess."""
+def test_a_new_project_leaves_its_verification_to_you_or_to_the_first_writer(env, tmp_path, monkeypatch):
+    """What the build files and the pipeline name is a note: the pipeline builds with more than
+    they say, and a guess that builds the wrong thing passes."""
     from vivibox.config import load_project
+    from vivibox.verify_ui import AskVerify
 
     repo = tmp_path / "shop"
     make_repo(repo)
@@ -281,109 +286,21 @@ def test_the_new_project_dialog_says_where_the_command_comes_from_and_lets_you_p
     async def scenario(app, pilot):
         await pilot.press("i")
         await pilot.pause()
-        shown = str(app.screen.query_one("#verify", Label).render())
-        assert "bash mvnw -B verify" in shown and "from mvnw" in shown
+        assert str(app.screen.query_one("#verify", Label).render()) == actions.WRITER_PROPOSES
+        notes = str(app.screen.query_one("#notes", Label).render())
+        assert "mvnw runs: bash mvnw -B verify" in notes and "ci.yml runs" in notes
         app.screen.query_one("#change").press()
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.ChooseVerify)
-        options = app.screen.query_one(OptionList)
-        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
-        assert "ci.yml" in labels[1] and not any("edit the project file" in s for s in labels), "no file yet"
-        assert any("first plan" in s for s in labels), "or leave it to the plan, as before"
-        await pilot.press("down", "enter")
+        assert isinstance(app.screen, AskVerify)
+        app.screen.query_one(Input).value = "bash mvnw -B verify -Pit -f pom.xml"
+        await pilot.press("enter")
         await pilot.pause()
-        shown = str(app.screen.query_one("#verify", Label).render())
-        assert "verify -Pit" in shown and "ci.yml" in shown
+        assert "-Pit -f pom.xml" in str(app.screen.query_one("#verify", Label).render())
         app.screen.query_one("#create").press()
         await pilot.pause()
 
     run(scenario)
-    assert load_project("shop").verify == ["bash mvnw --batch-mode verify -Pit"]
-
-
-def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeypatch):
-    """The cursor is on the current choice, marked, so Enter changes nothing and the arrows say
-    what the alternatives are: from i on an empty folder, from e on a command of your own."""
-    from vivibox.config import load_project
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(browse, "browse_start", lambda: tmp_path)
-
-    def current(app):
-        options = app.screen.query_one(OptionList)
-        return str(options.get_option_at_index(options.highlighted).prompt)
-
-    async def scenario(app, pilot):
-        await pilot.press("i")
-        await pilot.pause()
-        app.screen.query_one("#browse").press()
-        await pilot.pause()
-        app.screen.query_one("#new-folder").press()
-        await pilot.pause()
-        await pilot.press(*"notes", "enter")
-        await pilot.pause()
-        app.screen.query_one("#change").press()
-        await pilot.pause()
-        assert "first plan" in current(app) and "← now" in current(app)
-        await pilot.press("enter")
-        await pilot.pause()
-        assert "first plan" in str(app.screen.query_one("#verify", Label).render()), "Enter keeps it"
-        app.screen.query_one("#change").press()
-        await pilot.pause()
-        await pilot.press("up", "enter")  # the one above: no build
-        await pilot.pause()
-        assert "no build" in str(app.screen.query_one("#verify", Label).render())
-        app.screen.query_one("#create").press()
-        await pilot.pause()
-        await pilot.press("escape")  # the new project's first task: not now
-        await pilot.pause()
-        actions.save_verify(load_project("notes"), ["make check"])
-        app.reload()
-        app.table.move_cursor(row=rows(app).index("notes"))
-        await pilot.pause()
-        await pilot.press("e")
-        await pilot.pause()
-        await pilot.press("down", "enter")  # the project's screen: its second row is the verification
-        await pilot.pause()
-        assert isinstance(app.screen, dialogs.ChooseVerify)
-        assert "make check" in current(app) and "← now" in current(app), "a command of your own, too"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert load_project("notes").verify == ["make check"], "Enter keeps it"
-
-    run(scenario)
-
-
-def test_a_project_from_scratch_can_be_set_up_with_no_build(env, tmp_path, monkeypatch):
-    from vivibox.config import load_project
-
-    fresh = tmp_path / "notes"
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(browse, "browse_start", lambda: tmp_path)
-
-    async def scenario(app, pilot):
-        await pilot.press("i")
-        await pilot.pause()
-        app.screen.query_one("#browse").press()
-        await pilot.pause()
-        app.screen.query_one("#new-folder").press()
-        await pilot.pause()
-        await pilot.press(*"notes", "enter")
-        await pilot.pause()
-        assert "first plan" in str(app.screen.query_one("#verify", Label).render())
-        app.screen.query_one("#change").press()
-        await pilot.pause()
-        options = app.screen.query_one(OptionList)
-        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
-        options.highlighted = labels.index(next(s for s in labels if "no build" in s))
-        await pilot.press("enter")
-        await pilot.pause()
-        assert "no build" in str(app.screen.query_one("#verify", Label).render())
-        app.screen.query_one("#create").press()
-        await pilot.pause()
-
-    run(scenario)
-    assert load_project("notes").no_build and (fresh / ".git").is_dir()
+    assert load_project("shop").verify == ["bash mvnw -B verify -Pit -f pom.xml"]
 
 
 def test_reply_sends_your_comment(env):
@@ -3730,8 +3647,8 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         assert app.screen.styles.align == ("center", "middle"), "the project's screen from e, in the middle"
         await pilot.press("down", "enter")
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.ChooseVerify)
-        assert app.screen.styles.align == ("center", "middle"), "the picker from it, in the middle"
+        assert isinstance(app.screen, AskVerify)
+        assert app.screen.styles.align == ("center", "middle"), "the verification from it, in the middle"
 
     run(scenario)
     stylesheet = Path(tui.__file__).with_name(tui.Vivibox.CSS_PATH).read_text()

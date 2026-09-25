@@ -123,12 +123,9 @@ def package_manager(repo: Path) -> str:
     return "npm"
 
 
-BUILD_FILES = ("gradlew", "build.gradle.kts", "build.gradle", "mvnw", "pom.xml", "package.json")
-
-
 def candidates(repo: Path) -> list[tuple[str, str]]:
-    """Every command the project's build files call for, each with the file it comes from, the
-    one detect() picks first. What a picker offers; detection takes the first."""
+    """Every command the project's build files and its pipeline call for, each with the file it
+    comes from: notes for a new project, never its verification."""
     found = []
     if (repo / "gradlew").exists():
         # bash: the wrapper is often committed without its executable bit.
@@ -228,8 +225,11 @@ def detect(repo: Path) -> Detected:
     found.demo = detect_demo(repo)
     level = source_level(repo)
     newest = IMAGE_JAVA
+    # What the build files name is a note, never the verification: a pipeline often builds with
+    # more than they say (a profile, -f pom.xml), and a guess that builds the wrong thing passes.
+    # An empty verification has the next task's writer propose the command it ran.
     if options := candidates(repo):
-        found.verify, found.source = [options[0][0]], options[0][1]
+        found.source = options[0][1]
     if found.source == "gradlew":
         if version := gradle_version(repo):
             newest = newest_jdk_for_gradle(version)
@@ -237,9 +237,8 @@ def detect(repo: Path) -> Detected:
                 found.notes.append(f"Gradle {version[0]}.{version[1]} does not run on Java {IMAGE_JAVA}.")
     elif found.source.startswith("build.gradle"):
         found.notes.append("No Gradle wrapper: the image's Gradle is used.")
-    for command, source in options[1:]:
-        if source not in BUILD_FILES:
-            found.notes.append(f"{source} runs: {command}")
+    for command, source in options:
+        found.notes.append(f"{source} runs: {command}")
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.

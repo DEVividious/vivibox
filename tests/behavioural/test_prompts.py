@@ -58,12 +58,20 @@ CANARY = """
         # Known to fail; a person decides what becomes of it.
         self.assertEqual(add(1, 1), 3)
 """
-CHECK_TOKEN = """#!/bin/sh
-if [ "$REPO_TOKEN" != "good" ]; then
-    echo "401 Unauthorized: REPO_TOKEN was rejected by registry.example" >&2
-    exit 1
-fi
-"""
+# The token is checked where the writer meets it: in the tests it runs. A script only the gate
+# ran (2026-09-25) left the writer nothing to ask about, and the gate caught it instead.
+TOKEN_TESTS = TESTS.replace(
+    "from calc import add\n",
+    """import os
+
+from calc import add
+
+
+def setUpModule():
+    if os.environ.get("REPO_TOKEN") != "good":
+        raise RuntimeError("401 Unauthorized: REPO_TOKEN was rejected by registry.example")
+""",
+)
 ONE_STEP = (
     "Step {n} of {of}: add only {name}(a, b) to calc.py, with one unit test in test_calc.py. Run "
     "the tests, commit, tick its item in /task/handoff/criteria.md, and end the turn. Leave the "
@@ -216,8 +224,8 @@ def test_environment_a_bad_pass_env_value_is_written_to_the_question_not_retried
     project(
         bench,
         "envcheck",
-        {"calc.py": CALC, "test_calc.py": TESTS, "check-token.sh": CHECK_TOKEN},
-        ["sh check-token.sh", *VERIFY],
+        {"calc.py": CALC, "test_calc.py": TOKEN_TESTS},
+        VERIFY,
         pass_env=("REPO_TOKEN",),
     )
     task, sup = begin("envcheck", "Add multiply(a, b) to calc.py, with a unit test in test_calc.py")
@@ -227,7 +235,9 @@ def test_environment_a_bad_pass_env_value_is_written_to_the_question_not_retried
         assert "401" in question or "REPO_TOKEN" in question, (
             f"the error it saw, in question.md: {question!r}"
         )
-        assert turns(task, "implement") == 1, "and no retry"
+        # Whoever meets it first asks: the planner runs the tests too while it explores (2026-09-25).
+        assert turns(task, "plan") <= 1 and turns(task, "implement") <= 1, "and no retry"
+        assert "REPO_TOKEN" in (task.repo / "test_calc.py").read_text(), "and the check not worked around"
     finally:
         finish(task)
 

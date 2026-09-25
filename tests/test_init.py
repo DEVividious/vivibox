@@ -219,3 +219,42 @@ def test_gitlab_jenkins_and_bitbucket_definitions_are_read_too(tmp_path):
         ("pnpm install --frozen-lockfile && pnpm test", "bitbucket-pipelines.yml"),
     ]
     assert init.ci_commands(tmp_path / "nowhere") == []
+
+
+def test_what_maven_adds_by_itself_is_said_in_the_notes(tmp_path):
+    """On a work laptop the command built somewhere else without -f pom.xml, and the build cache left modules
+    without their jars: both were in .mvn, where nobody looks while typing the command."""
+    (tmp_path / "mvnw").write_text("")
+    (tmp_path / ".mvn").mkdir()
+    (tmp_path / ".mvn" / "maven.config").write_text("-f backend/pom.xml\n-pl app\n")
+    (tmp_path / ".mvn" / "extensions.xml").write_text(
+        "<extensions><extension><groupId>org.apache.maven.extensions</groupId>"
+        "<artifactId>maven-build-cache-extension</artifactId></extension></extensions>"
+    )
+    notes = init.detect(tmp_path).notes
+    assert ".mvn/maven.config adds to every mvn run: -f backend/pom.xml -pl app" in notes
+    assert ".mvn/extensions.xml turns the Maven Build Cache on" in notes
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "pom.xml").write_text("<project/>")
+    assert not any(".mvn" in n for n in init.detect(plain).notes)
+
+
+def test_a_pipelines_variables_are_filled_in_so_the_note_says_what_ci_runs(tmp_path):
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text(
+        "env:\n  MAVEN_EXTRA_ARGS: -Pintegration -DskipITs\n"
+        "jobs:\n  build:\n    env:\n      PROFILE: 'fast'\n    steps:\n"
+        "      - run: ./mvnw --batch-mode verify $MAVEN_EXTRA_ARGS\n"
+        "      - run: ./mvnw -P${PROFILE} test ${{ env.MAVEN_EXTRA_ARGS }}\n"
+        "      - run: ./mvnw verify -Dos=${{ matrix.os }}\n"
+    )
+    assert [c for c, _ in init.ci_commands(tmp_path)] == [
+        "bash mvnw --batch-mode verify -Pintegration -DskipITs",
+        "bash mvnw -Pfast test -Pintegration -DskipITs",
+    ], "a matrix value is not known, so that step stays out"
+    (tmp_path / ".gitlab-ci.yml").write_text(
+        "variables:\n  GRADLE_OPTS: --offline\ntest:\n  script:\n    - ./gradlew test $GRADLE_OPTS $UNKNOWN\n"
+    )
+    assert ("bash gradlew test --offline $UNKNOWN", ".gitlab-ci.yml") in init.ci_commands(tmp_path)

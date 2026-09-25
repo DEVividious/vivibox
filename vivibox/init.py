@@ -159,6 +159,32 @@ SH_STEP = re.compile(
     r"\bsh\s*\(?\s*(?:'''(.*?)'''|" + '"""(.*?)"""' + r"|'([^'\n]*)'|" + r'"([^"\n]*)")', re.DOTALL
 )
 MAX_CI = 6
+# A pipeline's own variables, so a note says what it runs: env: of a workflow, a job or a step,
+# variables: of GitLab, Bitbucket or Azure. One map a file; a name set twice keeps the last.
+ENV_BLOCK = re.compile(r"^(\s*)(?:env|variables):\s*$")
+ENV_PAIR = re.compile(r"^\s*([A-Za-z_]\w*):\s*(.*?)\s*$")
+VARIABLE = re.compile(r"\$\{\{\s*env\.(\w+)\s*\}\}|\$\{(\w+)\}|\$(\w+)")
+
+
+def _yaml_env(text: str) -> dict[str, str]:
+    lines, env, i = text.splitlines(), {}, 0
+    while i < len(lines):
+        m = ENV_BLOCK.match(lines[i])
+        i += 1
+        if not m:
+            continue
+        indent = len(m.group(1))
+        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent):
+            if pair := ENV_PAIR.match(lines[i]):
+                env[pair.group(1)] = pair.group(2).strip("'\"")
+            i += 1
+    return env
+
+
+def _expand(line: str, env: dict[str, str]) -> str:
+    """The line with the variables the file sets filled in; the others left as they are."""
+    filled = VARIABLE.sub(lambda m: env.get(next(filter(None, m.groups())), m.group(0)), line)
+    return " ".join(filled.split())
 
 
 def _yaml_steps(text: str) -> list[list[str]]:
@@ -212,12 +238,24 @@ def ci_commands(repo: Path) -> list[tuple[str, str]]:
         if path.name == "Jenkinsfile":
             steps = [next(filter(None, groups)).splitlines() for groups in SH_STEP.findall(text)]
         else:
-            steps = _yaml_steps(text)
+            env = _yaml_env(text)
+            steps = [[_expand(line, env) for line in step] for step in _yaml_steps(text)]
         for step in steps:
             command = _build_command(step)
             if command and command not in {c for c, _ in found}:
                 found.append((command, str(path.relative_to(repo))))
     return found[:MAX_CI]
+
+
+def maven_notes(repo: Path) -> list[str]:
+    """What Maven adds to every run by itself, from .mvn, where nobody looks while typing the
+    command: its own -f or -pl, and the build cache."""
+    notes = []
+    if config := _read(repo / ".mvn" / "maven.config").split():
+        notes.append(f".mvn/maven.config adds to every mvn run: {' '.join(config)}")
+    if "maven-build-cache-extension" in _read(repo / ".mvn" / "extensions.xml"):
+        notes.append(".mvn/extensions.xml turns the Maven Build Cache on")
+    return notes
 
 
 def detect(repo: Path) -> Detected:
@@ -239,6 +277,7 @@ def detect(repo: Path) -> Detected:
         found.notes.append("No Gradle wrapper: the image's Gradle is used.")
     for command, source in options:
         found.notes.append(f"{source} runs: {command}")
+    found.notes += maven_notes(repo)
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.

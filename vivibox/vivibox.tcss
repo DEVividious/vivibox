@@ -8,7 +8,7 @@ DataTable { height: 1fr; }
 #empty { height: 1fr; padding: 2 4; color: $text-muted; }
 #detail { height: 60%; border-top: solid $primary; padding: 0 1; }
 #detail.hidden { display: none; }
-.dialog { width: 90; height: auto; max-height: 90%; border: thick $primary; background: $surface;
+.dialog { width: 90; max-width: 100%; height: auto; max-height: 90%; border: thick $primary; background: $surface;
           padding: 1 2; }
 .dialog.help { width: 76; }
 .dialog TextArea { height: 8; }

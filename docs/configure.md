@@ -104,8 +104,8 @@ toolchain a task needs. A project that wants different versions, or another lang
 own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
 before it reaches your checkout.
 
-`e` on the project's row opens its settings: the verification, how `v` runs it, what a new task
-runs first, its JDK, the variables its build needs from your shell, and the editor for its review
+`e` on the project's row opens its settings: what a new task runs first, the verification, how `v`
+runs it, its JDK, the variables its build needs from your shell, and the editor for its review
 copies, each written to the file alone with the comments kept. The last row opens the file itself, for services on your
 host the agent may reach and for extra risky patterns:
 

@@ -77,6 +77,40 @@ def test_lists_tasks_waiting_for_you_first(env, monkeypatch):
     run(scenario)
 
 
+def test_prepare_is_one_line_saved_with_enter_and_its_words_are_all_on_the_screen(env):
+    """Its question and its hint used to end at the dialog's edge, "(ctrl+s saves)" with them, so
+    nothing said how to save; Enter saves, like the other one-line rows."""
+    from ux import screen_text
+
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text() + 'prepare = ["npm ci", "npm run build"]\n')
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo"))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, settings.Ask)
+        assert app.screen.query_one(Input).value == "npm ci && npm run build"
+        shown = " ".join(screen_text(app).replace("█", " ").split())
+        assert "the writer's first turn waits for it" in shown and "Empty: nothing." in shown
+        app.screen.query_one(Input).value = "bash mvnw -B install -DskipTests"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").prepare == ["bash mvnw -B install -DskipTests"]
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").prepare == []
+
+    run(scenario, size=(80, 24))
+
+
 def test_accept_the_plan_with_a(env):
     task = new_task()
     at_plan_checkpoint(task)
@@ -165,8 +199,8 @@ def test_e_on_a_project_row_picks_how_it_is_verified(env, tmp_path, monkeypatch)
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
-        assert isinstance(app.screen, settings.ProjectSettings), "the project's screen: verification first"
-        await pilot.press("enter")
+        assert isinstance(app.screen, settings.ProjectSettings), "the project's screen: verification second"
+        await pilot.press("down", "enter")
         await pilot.pause()
         assert isinstance(app.screen, dialogs.ChooseVerify)
         shown = [str(app.screen.query_one(OptionList).get_option_at_index(i).prompt)
@@ -278,7 +312,7 @@ def test_the_verification_picker_opens_on_what_is_set_now(env, tmp_path, monkeyp
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
-        await pilot.press("enter")  # the project's screen: its first row is the verification
+        await pilot.press("down", "enter")  # the project's screen: its second row is the verification
         await pilot.pause()
         assert isinstance(app.screen, dialogs.ChooseVerify)
         assert "make check" in current(app) and "← now" in current(app), "a command of your own, too"
@@ -1766,19 +1800,14 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.press("e")
         await pilot.pause()
         assert isinstance(app.screen, settings.ProjectSettings)
-        assert labels(app)[0].strip().startswith("verification") and "true" in labels(app)[0]
+        assert labels(app)[0].strip().startswith("prepare"), "what a new task does first, first"
+        assert labels(app)[1].strip().startswith("verification") and "true" in labels(app)[1]
         await go_to(app, pilot, "run it")
         assert isinstance(app.screen, settings.AskLines)
         app.screen.query_one(TextArea).text = "npm install\nnpm start\n"
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert load_project("demo").demo == ["npm install", "npm start"] and "# Mine." in path.read_text()
-        await go_to(app, pilot, "prepare, once per task")
-        assert isinstance(app.screen, settings.AskLines)
-        app.screen.query_one(TextArea).text = "bash mvnw -B install -DskipTests\n"
-        await pilot.press("ctrl+s")
-        await pilot.pause()
-        assert load_project("demo").prepare == ["bash mvnw -B install -DskipTests"]
         await go_to(app, pilot, "java")
         app.screen.query_one(Input).value = "17"
         await pilot.press("enter")
@@ -3647,7 +3676,7 @@ def test_every_dialog_opens_in_the_middle_of_the_screen(env, tmp_path, monkeypat
         await pilot.pause()
         assert isinstance(app.screen, settings.ProjectSettings)
         assert app.screen.styles.align == ("center", "middle"), "the project's screen from e, in the middle"
-        await pilot.press("enter")
+        await pilot.press("down", "enter")
         await pilot.pause()
         assert isinstance(app.screen, dialogs.ChooseVerify)
         assert app.screen.styles.align == ("center", "middle"), "the picker from it, in the middle"

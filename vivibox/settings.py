@@ -51,10 +51,10 @@ class Ask(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.prompt)
+            yield Label(self.prompt, classes="wrap")
             yield Input(self.value, id="value")
             if self.hint:
-                yield Label(self.hint, classes="files")
+                yield Label(self.hint, classes="files wrap")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -76,10 +76,10 @@ class AskLines(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"{self.prompt} (ctrl+s saves)")
+            yield Label(f"{self.prompt} (ctrl+s saves)", classes="wrap")
             yield EdgeTextArea("\n".join(self.lines), id="lines")
             if self.hint:
-                yield Label(self.hint, classes="files")
+                yield Label(self.hint, classes="files wrap")
 
     def on_mount(self) -> None:
         self.query_one(TextArea).focus()
@@ -400,16 +400,16 @@ class ProjectSettings(Rows):
             verify = "the first plan you accept decides"
         machine = config.ide or Settings.found_editor()
         return [
+            (
+                "prepare, once per task",
+                " && ".join(project.prepare) or "nothing; the writer builds what it needs",
+                "prepare",
+            ),
             ("verification", verify, "verify"),
             (
                 "run it, for v",
                 ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
                 "demo",
-            ),
-            (
-                "prepare, once per task",
-                ", ".join(project.prepare) or "nothing; the writer builds what it needs",
-                "prepare",
             ),
             ("java", project.java or "21, the image's", "java"),
             ("pass_env", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
@@ -469,19 +469,22 @@ class ProjectSettings(Rows):
                 ),
             )
         elif key == "prepare":
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                self.write(
+                    "prepare", [value] if value else [], f"a new task runs first: {value or 'nothing'}"
+                )
+
             self.app.push_screen(
-                AskLines(
+                Ask(
                     f"What to run once in a new task's clone of {self.project_name} while the plan is"
-                    " made, one command per line; the writer's first turn waits for it",
-                    project.prepare,
+                    " made; the writer's first turn waits for it:",
+                    " && ".join(project.prepare),
                     "E.g. a build without tests, so the writer builds one module at a time. Empty: nothing.",
                 ),
-                lambda lines: (
-                    lines is not None
-                    and self.write(
-                        "prepare", lines, f"a new task runs first: {', '.join(lines) or 'nothing'}"
-                    )
-                ),
+                typed,
             )
         elif key == "java":
 

@@ -37,6 +37,33 @@ def test_a_review_without_the_sections_or_without_places_is_refused():
     assert reviewing.problem("## Blocking\n\n- [ ] src/x.py:4 — off by one\n\n## Not blocking\n") == ""
 
 
+# What a reviewer on deepseek-flash wrote in the behavioural run of 2026-09-25: one line a note,
+# "path:line — …", as REVIEW_PROMPT asks, and no "- " in front. Read as no notes at all, it let
+# the work through with three blocking ones.
+AS_ASKED = """## Blocking
+
+test_calc.py:10 — `test_subtract` asserts `assertTrue(True)`, a tautology that can never fail.
+test_calc.py:6 — the import still reads `from calc import add`, so `subtract` is never imported.
+red.md — the red evidence records only "AssertionError" with no expected vs actual values.
+
+## Not blocking
+
+"""
+
+
+def test_a_note_is_a_line_of_its_section_as_the_prompt_asks_with_or_without_a_list_mark():
+    review = reviewing.parse_review(AS_ASKED)
+    assert len(review.blocking) == 3 and review.blocking[0].startswith("test_calc.py:10 — ")
+    assert review.not_blocking == []
+    assert "red.md" in reviewing.problem(AS_ASKED), "a note without its line: the reviewer rewrites it"
+    marked = "## Blocking\n\n* a.py:1 — x\n1. b.py:2 — y\n- [x] c.py:3 — z\n\n## Not blocking\n\nNone.\n"
+    assert reviewing.parse_review(marked).blocking == ["a.py:1 — x", "b.py:2 — y", "c.py:3 — z"]
+    assert reviewing.parse_review(marked).not_blocking == [], "None. is an empty section"
+    wrapped = "## Blocking\n\n- a.py:1 — a long note\n  that goes on\n\n## Not blocking\n"
+    assert reviewing.parse_review(wrapped).blocking == ["a.py:1 — a long note that goes on"]
+    assert reviewing.problem(wrapped) == ""
+
+
 def test_reviews_are_numbered_and_the_newest_is_found(tmp_path):
     task = create_task(tmp_path, "demo", "goal", "")
     assert reviewing.latest(task) is None

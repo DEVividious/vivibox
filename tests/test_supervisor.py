@@ -793,6 +793,18 @@ def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_t
     assert st.sessions.get("reviewer") == "rev_1"
 
 
+def test_blocking_notes_written_as_the_prompt_asks_go_back_to_the_writer(task, tmp_path):
+    """One line a note, "path:line — …", no list mark: what a reviewer on deepseek-flash wrote in
+    the behavioural run of 2026-09-25. Read as no notes, the work went to you with them open."""
+    plain = "## Blocking\n\ntest_calc.py:10 — test_subtract asserts assertTrue(True)\n\n## Not blocking\n"
+    sup, notes, _ = reviewed(task, tmp_path, [plain])
+    for _ in range(3):  # implement, verify, review
+        sup.step()
+    st = task.read_state()
+    assert st.state is State.IMPLEMENT, f"back to the writer, not to you: {notes}"
+    assert [e["data"]["blocking"] for e in task.events() if e["type"] == "review"] == [1]
+
+
 def test_the_last_round_sends_the_work_to_you_with_its_notes_open(task, tmp_path):
     sup, notes, _ = reviewed(task, tmp_path, [BLOCKING, BLOCKING], max_reviews=2)
     for _ in range(3):  # implement, verify, review 1

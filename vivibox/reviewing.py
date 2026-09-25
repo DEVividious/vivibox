@@ -24,7 +24,12 @@ MOUNT = "/task/review"
 BLOCKING, NOT_BLOCKING = "## Blocking", "## Not blocking"
 # A note names where: a path, a colon, a line number, then what is wrong.
 PLACE = re.compile(r"^\S+:\d+\b")
-NOTE = re.compile(r"^\s*-\s*(?:\[[ xX]\]\s*)?(.*\S)\s*$")
+# A note is a line of its section, as REVIEW_PROMPT asks: "path:line — …". A list mark in front
+# (-, *, 1.) and a checkbox are taken off; a reviewer that left them out was read as having
+# written nothing, and its blocking notes let the work through.
+MARK = re.compile(r"^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?")
+# What a reviewer writes under a section it leaves empty.
+EMPTY = re.compile(r"^[(_*]*(?:none|nothing|n/a|-)[.)_*]*$", re.IGNORECASE)
 FILE = "review-{n}.md"
 NUMBERED = re.compile(r"^review-(\d+)\.md$")
 
@@ -38,17 +43,21 @@ class Review:
 def parse_review(text: str) -> Review:
     review, section = Review(), None
     for line in text.splitlines():
-        heading = line.strip()
-        if heading.startswith("#"):
+        stripped = line.strip()
+        if stripped.startswith("#"):
             section = (
                 review.blocking
-                if heading.lower() == BLOCKING.lower()
+                if stripped.lower() == BLOCKING.lower()
                 else review.not_blocking
-                if heading.lower() == NOT_BLOCKING.lower()
+                if stripped.lower() == NOT_BLOCKING.lower()
                 else None
             )
-        elif section is not None and (m := NOTE.match(line)):
-            section.append(m.group(1))
+        elif section is None or not stripped or EMPTY.match(stripped):
+            continue
+        elif line[:1].isspace() and section and not MARK.match(stripped):
+            section[-1] += " " + stripped  # a note wrapped onto the next line
+        elif note := MARK.sub("", stripped):
+            section.append(note)
     return review
 
 

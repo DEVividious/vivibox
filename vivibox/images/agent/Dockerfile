@@ -62,6 +62,7 @@ RUN mkdir -p /etc/mise \
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \
  && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack /cache/build-cache \
+    /cache/m2/installed \
  && chown -R agent:agent /config /cache
 
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.
@@ -71,9 +72,12 @@ RUN groupadd -o -g "${GID}" agent \
 # Maven the mvnw wrapper of a project may fetch, older ones included; a build that fell back to
 # $HOME/.m2 left the gate, whose home is fresh, without what the writer had built.
 # The file-lock settings let parallel builds share one local repository (needs Maven >= 3.9).
+# The split puts what Maven downloads under cached/, shared, and what a build installs under
+# installed/, where each task mounts a volume of its own: one task's unfinished modules never reach
+# another's build. A fresh volume takes its owner from the image, hence the directory above.
 ENV HOME=/config \
     MAVEN_CONFIG= \
-    MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav" \
+    MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true" \
     MAVEN_OPTS="-Dmaven.repo.local=/cache/m2" \
     GRADLE_USER_HOME=/cache/gradle \
     npm_config_cache=/cache/npm \

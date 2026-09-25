@@ -103,3 +103,17 @@ def test_the_shared_maven_repository_is_set_for_every_maven_a_wrapper_may_fetch(
     assert 'MAVEN_ARGS="-Dmaven.repo.local=/cache/m2' in text, "3.9's own way stays, with the file locks"
     checks = image.checks(1000, 1000)
     assert any("$MAVEN_OPTS" in check.command for check in checks), "the image check covers it"
+
+
+def test_what_a_task_installs_is_kept_apart_from_what_maven_downloads():
+    """Maven 3.9 splits its local repository: downloads under cached/, shared by every task, and
+    what a build installs under installed/, where each task mounts a volume of its own. A fresh
+    volume takes its owner from the image, so the image has the directory, the agent's."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    args = text[text.index('MAVEN_ARGS="') :].split('"')[1]
+    assert "-Daether.enhancedLocalRepository.split=true" in args
+    assert "/cache/m2/installed" in text
+    writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
+    assert "m2/installed" in writable.command

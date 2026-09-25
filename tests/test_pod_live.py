@@ -180,6 +180,18 @@ def test_maven_build_with_testcontainers(env):
     assert agent(env, "ls /cache/m2/org/testcontainers").stdout.strip(), "the shared Maven cache is used"
 
 
+def test_what_the_agent_installs_the_gate_does_not_see(env):
+    result = agent(env, "mvn -B -q -f app/pom.xml install -DskipTests", check=False)
+    assert result.returncode == 0, result.stdout[-3000:]
+    assert agent(env, "ls /cache/m2/installed/podcheck/pod-check/1.0").stdout.strip()
+    assert agent(env, "ls /cache/m2/cached/org/testcontainers").stdout.strip(), "downloads stay shared"
+    env["pod"].gate_up()
+    try:
+        assert gate(env, "ls /cache/m2/installed/podcheck", check=False).returncode != 0
+    finally:
+        env["pod"].gate_down()
+
+
 def test_a_sidecar_just_made_is_not_outdated(env):
     """Docker keeps the mounts as given, so what up() compares them with is what inspect returns."""
     assert not env["pod"]._outdated_sidecar()

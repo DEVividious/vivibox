@@ -53,6 +53,9 @@ CACHES = {
     # Maven's build cache extension puts its cache beside the local repository, /cache/m2.
     "build-cache": "/cache/build-cache",
 }
+# Where Maven's split local repository puts what a build installs: a volume per task, over the
+# shared /cache/m2, so one task's unfinished modules never reach another's build.
+INSTALLED = "/cache/m2/installed"
 HOST_GATEWAY = "host.docker.internal"
 # The host's trust store, shared with the pod: a registry or a proxy the host trusts through an
 # authority of its own (corporate TLS inspection) is trusted in the pod the same way. The daemon
@@ -195,7 +198,13 @@ class Pod:
 
     @property
     def volumes(self) -> dict[str, str]:
-        return {"docker": f"vivibox-{self.task_id}-docker", "socket": f"vivibox-{self.task_id}-socket"}
+        return {
+            "docker": f"vivibox-{self.task_id}-docker",
+            "socket": f"vivibox-{self.task_id}-socket",
+            # What Maven installs, the task's own modules; kept apart from the shared downloads.
+            "installed": f"vivibox-{self.task_id}-installed",
+            "gate-installed": f"vivibox-{self.task_id}-gate-installed",
+        }
 
     def _run(
         self, *cmd: str, check: bool = True, timeout: float | None = None
@@ -398,6 +407,7 @@ class Pod:
             Mount(str(self.repo), str(self.repo)),
             Mount(f"vivibox-{self.task_id}-config", "/config"),
             *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
+            Mount(self.volumes["installed"], INSTALLED),
             *ca_mounts(),
             *self.agent_mounts,
         ]
@@ -427,6 +437,7 @@ class Pod:
             Mount(str(self.repo), str(self.repo), read_only=True),
             Mount(str(self.gate_dir), str(self.gate_dir)),
             *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
+            Mount(self.volumes["gate-installed"], INSTALLED),
             *ca_mounts(),
         ]
         return [
@@ -565,6 +576,8 @@ class Pod:
         if self.gate_dir is None:
             raise PodError("the pod has no gate directory")
         self.gate_down()
+        # Nothing a gate before it installed: the gate builds the whole reactor from its clone.
+        self._run("docker", "volume", "rm", "-f", self.volumes["gate-installed"], check=False)
         shutil.rmtree(self.gate_dir, ignore_errors=True)
         self.gate_dir.mkdir(parents=True)
         self._run(*self.gate_command())

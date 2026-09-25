@@ -309,6 +309,21 @@ def test_remove_keeps_shared_caches(pod):
     assert not any(v.startswith("vivibox-cache-") for v in removed)
 
 
+def test_what_a_task_installs_stays_in_a_volume_of_its_own(pod, tmp_path):
+    """Modules one task installs, its unfinished work in them, never reach another task's build;
+    the gate starts from an empty one every time, and both go with the task."""
+    pod.gate_dir = tmp_path / "gate"
+    assert "vivibox-shop-1-installed:/cache/m2/installed" in pod.agent_command()
+    assert "vivibox-shop-1-gate-installed:/cache/m2/installed" in pod.gate_command()
+    pod.gate_up()
+    calls = pod.runner.calls
+    emptied = calls.index(["docker", "volume", "rm", "-f", "vivibox-shop-1-gate-installed"])
+    assert emptied < calls.index(pod.runner.find("docker", "run", "-d", "--name", pod.gate)[0])
+    pod.remove()
+    removed = pod.runner.find("docker", "volume", "rm")[-1]
+    assert "vivibox-shop-1-installed" in removed and "vivibox-shop-1-gate-installed" in removed
+
+
 def test_gate_container_sees_only_committed_work(pod, tmp_path):
     pod.gate_dir = tmp_path / "gate"
     pod.agent_mounts.append(Mount("/srv/vivibox/shop-1/.task/handoff", "/task/handoff"))

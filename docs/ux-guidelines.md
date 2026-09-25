@@ -105,6 +105,8 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 - A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall
   one it shows everything, on a short one it scrolls. Its height is a share of the screen (`vh`),
   never a fixed number of lines.
+- A list that opens over the form (a select) is framed and has a background of its own: bare, it
+  ends right above the next row, whose value reads as one more of its options.
 
 ## 5. Errors
 

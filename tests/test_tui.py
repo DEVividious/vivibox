@@ -2196,6 +2196,30 @@ def test_the_project_list_ends_with_setting_up_another_project(env):
     run(scenario)
 
 
+@pytest.mark.parametrize("size", [(80, 24), (140, 40)])
+def test_an_open_list_in_the_new_task_form_is_framed_apart_from_the_rows_under_it(env, size):
+    """Open, the plan's list ended right above the writer's row, and the writer's model read as
+    one more of its options: the open list is framed, its last option above the frame's end."""
+    from ux import screen_text
+
+    with_code("demo")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        app.screen.query_one("#plan", Select).focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        lines = screen_text(app).splitlines()
+        last = next(i for i, line in enumerate(lines) if "--draft" in line)
+        assert "╰" in lines[last + 1], "the frame closes under the last option"
+        top = next(i for i, line in enumerate(lines) if "╭" in line)
+        assert top < last and "Stop for my review" in lines[top + 1]
+
+    run(scenario, size=size)
+
+
 def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""

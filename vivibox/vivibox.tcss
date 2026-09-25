@@ -42,6 +42,9 @@ DataTable { height: 1fr; }
 .form .row > Button { margin: 0 2 0 0; min-width: 9; }
 .form .buttons > .keys { width: auto; padding: 1 0; }
 .form Select > SelectCurrent { background: $boost; }
+/* An open list is framed and set apart: bare, it ended right above the next row, whose value read
+   as one more of its options. */
+.form Select > SelectOverlay.-textual-compact { border: round $accent !important; background: $panel; }
 /* Focus is one signal: the focused control's text as the cursor block, as on a button. */
 .form Select:focus > SelectCurrent > Static#label {
     color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;

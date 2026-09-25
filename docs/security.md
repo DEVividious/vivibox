@@ -28,6 +28,10 @@ Each task gets a pod: an unprivileged agent container and a Docker daemon in a s
 under [Sysbox](https://github.com/nestybox/sysbox). The agent container runs as your UID with every
 capability dropped, `no-new-privileges` and a read-only root filesystem; it writes only to the task's
 clone, its home and `/tmp`. The Docker socket lives in a volume the two share and never on your host.
+Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would pick
+(`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
+after a test, and the pod's daemon then loses the image another test is still pulling, at random. A
+project that needs another Ryuk passes the variable in `pass_env`.
 A firewall in the pod's network namespace blocks your host and every private network, except the
 services you list per project; DNS and the internet are open. When the host reaches the internet
 through a tunnel smaller than Ethernet (a VPN such as Cloudflare WARP), the firewall clamps TCP MSS in

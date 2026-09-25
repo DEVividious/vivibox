@@ -39,6 +39,11 @@ from .probe import (
 )
 
 DIND_IMAGE = "docker:29.8.1-dind"
+# The Ryuk Testcontainers runs in the pod, over the one a project's library would pick. Ryuk before
+# 0.10 prunes images when it cleans up after a test, and the daemon in the sidecar (Docker 29,
+# containerd image store) then loses the image another test is still pulling: "failed to extract
+# layer", at random, on the work laptop's case (moby/moby#53321). This one removes what it made, by ID.
+RYUK_IMAGE = "testcontainers/ryuk:0.12.0"
 SOCKET_DIR = "/run/vivibox-docker"
 SOCKET = f"{SOCKET_DIR}/docker.sock"
 FIREWALL = "/usr/local/libexec/vivibox-netns"
@@ -419,6 +424,17 @@ class Pod:
             "--entrypoint", "sh", DIND_IMAGE, "-c", daemon,
         ]  # fmt: skip
 
+    def docker_env(self) -> list[str]:
+        """How the agent and the gate reach the sidecar's daemon, and what Testcontainers runs on
+        it. A project that passes a variable of these itself (`pass_env`) keeps its own value."""
+        fixed = {
+            "DOCKER_HOST": f"unix://{SOCKET}",
+            "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE": SOCKET,
+            "TESTCONTAINERS_HOST_OVERRIDE": "localhost",
+            "TESTCONTAINERS_RYUK_CONTAINER_IMAGE": RYUK_IMAGE,
+        }
+        return [arg for k, v in fixed.items() if k not in self.passed_env for arg in ("-e", f"{k}={v}")]
+
     def agent_command(self) -> list[str]:
         mounts = [
             Mount(self.volumes["socket"], SOCKET_DIR),
@@ -435,9 +451,7 @@ class Pod:
             "--network", f"container:{self.sidecar}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--read-only", "--tmpfs", "/tmp:exec,mode=1777",
-            "-e", f"DOCKER_HOST=unix://{SOCKET}",
-            "-e", f"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE={SOCKET}",
-            "-e", "TESTCONTAINERS_HOST_OVERRIDE=localhost",
+            *self.docker_env(),
             # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
             "-e", "HUSKY=0",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
@@ -467,9 +481,7 @@ class Pod:
             "--network", f"container:{self.sidecar}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--read-only", "--tmpfs", "/tmp:exec,mode=1777", "--tmpfs", "/config:exec,mode=1777",
-            "-e", f"DOCKER_HOST=unix://{SOCKET}",
-            "-e", f"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE={SOCKET}",
-            "-e", "TESTCONTAINERS_HOST_OVERRIDE=localhost",
+            *self.docker_env(),
             "-e", "HUSKY=0",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
             *(arg for name in self.passed_env for arg in ("-e", name)),

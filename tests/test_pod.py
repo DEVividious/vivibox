@@ -438,6 +438,23 @@ def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
     assert socket and socket[0] in gate, "the daemon's socket, from the same volume"
 
 
+def test_testcontainers_in_the_pod_runs_the_ryuk_that_removes_images_by_id(pod, tmp_path):
+    """The work laptop's case: a project's Testcontainers brought Ryuk 0.7.0, which prunes images when it
+    cleans up, and the pod's daemon lost the image another test was pulling at that moment
+    ("failed to extract layer"). The agent and the gate name the newer Ryuk, over what the project's
+    library would pick; a project that passes the variable itself keeps its own."""
+    from vivibox.pod import RYUK_IMAGE
+
+    pod.gate_dir = tmp_path / "gate"
+    fixed = f"TESTCONTAINERS_RYUK_CONTAINER_IMAGE={RYUK_IMAGE}"
+    assert RYUK_IMAGE.startswith("testcontainers/ryuk:")
+    for cmd in (pod.agent_command(), pod.gate_command()):
+        assert fixed in cmd, cmd[:5]
+    pod.passed_env = ["TESTCONTAINERS_RYUK_CONTAINER_IMAGE"]
+    for cmd in (pod.agent_command(), pod.gate_command()):
+        assert fixed not in cmd and "TESTCONTAINERS_RYUK_CONTAINER_IMAGE" in cmd, "the project's own"
+
+
 def test_the_pod_trusts_the_authorities_the_host_trusts(pod, tmp_path, monkeypatch):
     """The work laptop's case: the host pulls an image the pod's daemon could not, "x509: certificate signed
     by unknown authority". The authority was in the host's trust store and in no container's."""

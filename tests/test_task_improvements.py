@@ -94,7 +94,7 @@ def test_proposal_refreshes_after_a_writer_fix_and_is_reused_on_accept(env, monk
     git(task.repo, "commit", "-am", "Keep the input order")
     review.prepare_review(task, project)
     message = review.proposed_message(task)["message"]
-    assert message == "Handle empty input\n\n- Keep the input order"
+    assert message == "Keep the input order\n\n- Handle empty input"
 
     def unexpected(*args, **kwargs):
         raise AssertionError("accept must reuse the prepared message for these commits")
@@ -164,7 +164,7 @@ def test_stopping_a_blocked_task_is_visible_and_keeps_the_reason(env):
     task.set_paused(True)
     seen = ui.view(task, task.read_state(), False, 3)
     assert (seen.status, seen.group) == ("stopped", "Stopped")
-    assert seen.commands == (f"vivibox start {task.id}",)
+    assert seen.commands[0] == f"vivibox start {task.id}"
     shown = panel.detail(task, task.read_state(), 3, running=False, pod=panel.PodView())
     assert "Cannot connect to Docker" in shown
     assert "`s` start" in shown

@@ -36,6 +36,7 @@ class BranchPicker(Dialog):
         self.source, self.selected = source, selected
         self.choices: list[tuple[str, str]] = []
         self.offered: list[tuple[str, str]] = []
+        self.ready = False
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -70,10 +71,13 @@ class BranchPicker(Dialog):
         if not self.is_mounted:
             return
         self.choices = choices
+        self.ready = True
         self.filter()
 
     @on(Input.Changed, "#branch-query")
     def filter(self) -> None:
+        if not self.ready:
+            return
         found = matches(self.choices, self.query_one(Input).value)
         self.offered = found[:100]
         options = self.query_one(OptionList)

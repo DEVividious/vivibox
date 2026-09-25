@@ -71,7 +71,7 @@ def test_other_sessions_and_reworded_todos_cannot_complete_criteria(env):
     assert gate.missing_criteria(task) == ["errors are tested"]
 
 
-def test_reopening_a_todo_refreshes_progress_without_losing_writer_notes(env):
+def test_reopening_a_todo_preserves_verified_criteria_and_writer_notes(env):
     task = writer_task()
     path = task.meta / "handoff" / gate.CRITERIA_FILE
     path.write_text(path.read_text() + "\n## Evidence\n\nA note from the writer.\n")
@@ -81,7 +81,8 @@ def test_reopening_a_todo_refreshes_progress_without_losing_writer_notes(env):
     assert panel.ticked_at(task) != before
     assert panel.criteria(task) == "1/2"
     progress.record(task, event([{**todo, "status": "in_progress"}]))
-    assert panel.criteria(task) == "0/2"
+    assert panel.criteria(task) == "1/2"
+    assert progress.read(task)[0]["status"] == "in_progress"
     assert path.read_text().endswith("## Evidence\n\nA note from the writer.\n")
     task.set_session("writer", "ses_new")
     assert progress.read(task) == [], "a replaced writer session starts without stale steps"

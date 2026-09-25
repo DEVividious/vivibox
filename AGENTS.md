@@ -3,7 +3,8 @@
 - Before changing anything a person sees (the view: `vivibox/tui.py`, `vivibox/table.py`,
   `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`; the dialogs: `vivibox/dialogs.py`,
   `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`,
-  `vivibox/widgets.py`; `vivibox/cli.py`, notification texts, the README), read `docs/ux-guidelines.md`.
+  `vivibox/widgets.py`, `vivibox/branches.py`; `vivibox/cli.py`, notification texts, the README), read
+  `docs/ux-guidelines.md`.
   `tests/test_ux_rules.py` enforces its mechanical rules.
 - Before changing anything an agent reads (the prompts in `vivibox/supervisor.py`, `vivibox/manual.py`
   and `vivibox/demo.py`, `vivibox/templates/`, the gate's feedback in `vivibox/gate.py`), read

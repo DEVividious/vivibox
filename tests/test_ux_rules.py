@@ -11,6 +11,7 @@ from test_tui import at_plan_checkpoint, implementing, new_task, rows
 from vivibox import (
     actions,
     box,
+    branches,
     browse,
     dialogs,
     logs,
@@ -99,6 +100,13 @@ def situations(env):
     final.transition(State.VERIFY)
     final.transition(State.CHECKPOINT_FINAL)
     found.append((final, True))
+    for state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.APPROVAL_RISKY):
+        stopped_review = implementing(f"stopped pod with {state.name.lower()}")
+        st = stopped_review.read_state()
+        st.state = state
+        stopped_review._write_state(st)
+        stopped_review.set_paused(True)
+        found.append((stopped_review, False))
     stopped = implementing("stopped")
     stopped.set_paused(True)
     found.append((stopped, False))
@@ -178,7 +186,7 @@ def test_help_fits_in_eighty_columns_without_wrapping():
 def test_a_dialog_has_at_most_one_primary_button():
     """One primary button per dialog (§4), checked in the source: a class at a time, in every
     module that defines a screen."""
-    for module in (tui, dialogs, browse, providers_ui, widgets, settings, logs):
+    for module in (tui, dialogs, branches, browse, providers_ui, widgets, settings, logs):
         source = Path(module.__file__).read_text()
         for chunk in source.split("\nclass ")[1:]:
             name = chunk.split("(")[0].split(":")[0]

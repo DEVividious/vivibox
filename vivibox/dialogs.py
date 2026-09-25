@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from rich.markup import escape
-from textual import events, on
+from textual import events, on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
@@ -25,7 +25,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from . import actions, context, ide, panel
+from . import actions, context, ide, panel, repo
 from .browse import ANY, FOLDER, Browse, shown_path
 from .config import ConfigError, load_config, load_project
 from .verify_ui import AskVerify
@@ -461,7 +461,7 @@ class NewTask(Dialog):
                         )  # fmt: skip
                     with Horizontal(classes="row"):
                         yield Label("Branch", classes="key")
-                        yield Button("Current (HEAD)…", compact=True, id="base-ref")
+                        yield Button("Current…", compact=True, id="base-ref")
                     with Horizontal(classes="row", id="build-row"):
                         yield Label("Build", classes="key")
                         yield Checkbox(
@@ -587,9 +587,26 @@ class NewTask(Dialog):
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
         self.query_one("#kind-row").display = not actions.empty_project(name)
         self.base_ref = "HEAD"
-        self.query_one("#base-ref", Button).label = "Current (HEAD)…"
+        self.query_one("#base-ref", Button).label = "Current…"
         with contextlib.suppress(ConfigError):
             self.query_one("#goal", DescriptionArea).repo = load_project(name).repo
+            self.load_current_branch(name, load_project(name).repo)
+
+    @work(thread=True, exclusive=True, group="current-branch")
+    def load_current_branch(self, project: str, source: Path) -> None:
+        try:
+            label = actions.current_branch(source)
+        except repo.RepoError:
+            return  # opening the picker shows the repository error and how to return
+        self.app.call_from_thread(self.current_branch_loaded, project, label)
+
+    def current_branch_loaded(self, project: str, label: str) -> None:
+        if (
+            self.is_mounted
+            and self.base_ref == "HEAD"
+            and self.query_one("#project", Select).value == project
+        ):
+            self.query_one("#base-ref", Button).label = f"Current ({label})…"
 
     def branch_chosen(self, choice: tuple[str, str] | None) -> None:
         if choice:

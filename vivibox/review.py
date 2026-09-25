@@ -236,7 +236,7 @@ def finish(
     if branch_only:
         done.branch = repo.create_branch(project.repo, task.id, commit)
     else:
-        done.conflicts = apply_work(project.repo, task.id, commit)
+        done.conflicts = apply_work(project.repo, task.id, commit, st.base_commit)
         if done.conflicts:
             done.branch = repo.branch_name(task.id)
         else:
@@ -254,13 +254,11 @@ def finish(
 def suggested_message(source: Path, base: str, commit: str, goal: str, criteria: list[str] = ()) -> str:
     """Describe the actual commits, never copy the acceptance checklist or truncate a ticket."""
     log = repo.git("log", "--reverse", "--format=%s", f"{base}..{commit}", cwd=source).stdout
-    subjects = list(
-        dict.fromkeys(p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p))
-    )
-    first = subjects[0] if subjects else goal.strip().partition("\n")[0].rstrip(".")
+    subjects = [p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p)]
+    first = subjects[-1] if subjects else goal.strip().partition("\n")[0].rstrip(".")
     if not first or len(first) > gate.MAX_SUBJECT:
         first = "Update project"
-    points = [p for p in subjects if p != first]
+    points = list(dict.fromkeys(p for p in subjects if p != first))
     return first + ("\n\n" + "\n".join(f"- {p}" for p in points) if points else "")
 
 
@@ -289,9 +287,16 @@ def prepare_message(task: Task, source: Path, commit: str) -> str:
     return message
 
 
-def apply_work(source: Path, task_id: str, commit: str) -> list[str]:
+def apply_work(source: Path, task_id: str, commit: str, base: str) -> list[str]:
     """Stages the task's work in your checkout, on top of whatever your branch is at. Returns the files
     that conflict; those are left for you to resolve, with the work kept on a branch as well."""
+    if repo.git("merge-base", "--is-ancestor", base, "HEAD", cwd=source, check=False).returncode != 0:
+        raise gate.GateError(
+            f"cannot apply {task_id}: this checkout does not contain the task's base {base[:10]}; "
+            "merging would also bring in changes outside the reviewed work. "
+            f"Switch to a branch containing that base, or keep the work on its own branch: "
+            f"vivibox accept {task_id} --branch"
+        )
     if repo.git("diff", "--cached", "--quiet", cwd=source, check=False).returncode != 0:
         raise gate.GateError(f"{source} has staged changes; commit or unstage them first, or use --branch")
     p = repo.git("merge", "--squash", "--no-commit", commit, cwd=source, check=False)

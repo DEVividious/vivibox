@@ -198,10 +198,14 @@ def why_blocked(task: Task) -> Path | None:
     return next((p for p in (handoff / "question.md", handoff / "verify-feedback.md") if p.exists()), None)
 
 
+# At these checkpoints stopping the pod leaves the person's review decision in place.
+POD_ONLY_STOP = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.APPROVAL_RISKY}
+
+
 def group(st: TaskState) -> str:
     if st.state is State.DONE:
         return "Done"
-    if st.paused and not st.problem:
+    if st.paused and not st.problem and st.state not in POD_ONLY_STOP:
         return "Stopped"
     if st.state in WAITING:
         return "Waiting for you"
@@ -232,8 +236,9 @@ def activity(st: TaskState, max_iterations: int) -> str:
 
 
 def next_commands(st: TaskState) -> list[str]:
-    if st.paused and st.state is not State.DONE:
-        return [f"vivibox start {st.id}"]
+    if st.paused and st.state not in POD_ONLY_STOP and st.state is not State.DONE:
+        decisions = WAITING[st.state][1] if st.state is State.CHECKPOINT_BLOCKED else []
+        return [f"vivibox start {st.id}", *(c.format(id=st.id) for c in decisions)]
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return [c.format(id=st.id) for c in AWAITING_PLAN[1]]
     if st.state in WAITING:
@@ -281,11 +286,11 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
         return TaskView(
             "box open", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}", f"vivibox accept {st.id}")
         )
-    if st.paused:
+    if st.paused and st.state not in POD_ONLY_STOP:
         if st.problem:
             what, _, why = st.problem.partition(": ")
             return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))
-        return TaskView("stopped", STOPPED, PARKED, commands=(f"vivibox start {st.id}",))
+        return TaskView("stopped", STOPPED, PARKED, commands=tuple(next_commands(st)))
     if st.box and st.state in WAITING:
         # Nobody in a box to reply to; its work is yours to accept or to delete.
         commands = tuple(c for c in next_commands(st) if "reply" not in c)

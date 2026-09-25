@@ -274,6 +274,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if seen.status in ("not started",):
         return "`e` write the plan yourself · `s` start"
     if seen.status in ("stopped", "not running"):
+        if st.state is State.CHECKPOINT_BLOCKED:
+            return "`s` start · `g` verify again, once you have fixed it · `r` tell the agent"
         return "`s` start; it goes on from where it was"
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return "`c` copy the prompt for a browser · `C` for a CLI · `e` paste the plan"

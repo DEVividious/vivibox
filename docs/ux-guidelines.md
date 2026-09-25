@@ -2,7 +2,8 @@
 
 Read this before changing anything a person sees: the view (`vivibox/tui.py`, `vivibox/table.py`,
 `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
-`vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`),
+`vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
+`vivibox/branches.py`),
 `vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.
@@ -64,8 +65,10 @@ Status labels, the only ones allowed:
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock
 (`ui.clock`), never cut out of a UTC timestamp.
 
-A person's stop also takes precedence at a checkpoint, including `verification could not run`.
-The panel keeps the verification error and offers start; starting returns to the same decision.
+Stopping a blocked task, including `verification could not run`, shows `stopped`. The panel keeps
+the error and offers start, reply and verification again. At plan review, work review and risky-file
+approval, stopping just the pod keeps the decision visible in Waiting for you; the next decision
+starts the pod when needed.
 
 ## 3. Keys
 
@@ -112,8 +115,14 @@ The panel keeps the verification error and offers start; starting returns to the
   ends right above the next row, whose value reads as one more of its options.
 - The new task's Branch field opens a searchable list of locally known branches. Current is
   first. Selecting another branch changes the task's base, without switching the person's checkout.
+  The field names the current branch before the list opens. Loading and errors stay visible while
+  typing; only a completed lookup can say there are no matches.
+  Acceptance into the checkout requires that it contain the task's base commit. Otherwise it
+  refuses without applying changes and offers switching to a branch containing that base or
+  `vivibox accept <id> --branch`, so changes outside the review cannot slip into the checkout.
 - The proposed commit is prepared with the review copy and visible before acceptance. It describes
-  actual commits, without copying the acceptance checklist. Once the work is applied, the separate
+  actual commits, using the latest subject with earlier changes as bullets, without copying the
+  acceptance checklist. Once the work is applied, the separate
   commit dialog opens while the pod is cleaned up; accepting shows `accepting…` until it finishes.
 
 ## 5. Errors
@@ -157,8 +166,9 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 - A success message gets a test that the effect happened.
 
 The writer's OpenCode todos appear as "Writer's steps" during implementation. An item whose
-text exactly matches an accepted criterion also updates its checkbox; unrelated or reworded
-steps never satisfy acceptance criteria. The verification still reads the saved checklist.
+text exactly matches an accepted criterion can mark its checkbox complete; unrelated or reworded
+steps never satisfy acceptance criteria. Pending, reopened or cancelled todos never clear verified
+criteria. The writer can clear a checkbox in the checklist itself; verification still reads that file.
 
 ## Known gaps
 

@@ -177,8 +177,8 @@ def test_the_suggested_commit_message_is_a_subject_and_a_list(env):
 
     message = actions.suggested_message(source, base, head, goal, criteria)
     subject, blank, *points = message.splitlines()
-    assert subject == "Add one.txt"
-    assert blank == "" and points == ["- Add two.txt"], "the agent's commits, oldest first"
+    assert subject == "Add two.txt"
+    assert blank == "" and points == ["- Add one.txt"], "earlier changes form the body"
 
     single = actions.suggested_message(source, git("rev-parse", "HEAD~1").strip(), head, goal, criteria)
     assert single == "Add two.txt", "one commit: its subject, without criteria or signature"

@@ -292,7 +292,8 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         self.views = {
             st.id: ui.view(task, st, st.id in self.running, self.config.max_iterations) for task, st in pairs
         }
-        self.pairs = pairs = sorted(pairs, key=lambda p: self.views[p[1].id].rank)
+        # A row keeps its place whatever its task does: newest first, by number, not by state.
+        self.pairs = pairs = sorted(pairs, key=lambda p: ui.task_number(p[1].id), reverse=True)
         live = {st.id for _, st in pairs}
         known = projects()
         self.take_history(live, known)

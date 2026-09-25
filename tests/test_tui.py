@@ -77,6 +77,37 @@ def test_lists_tasks_waiting_for_you_first(env, monkeypatch):
     run(scenario)
 
 
+def test_a_projects_tasks_keep_their_place_newest_first_whatever_they_do(env, monkeypatch):
+    """A row that moves when its task changes state is a row you lose, or press a key on by
+    mistake: the order is the tasks' numbers, newest first, the finished ones under the live ones.
+    What waits for you says so by its colour, the project's count and where the cursor starts."""
+    tasks = [new_task(f"Task {n}") for n in range(1, 11)]
+    for task in tasks:
+        task.set_paused(True)  # stopped, by you: nothing of theirs waits
+    at_plan_checkpoint(tasks[2])
+    tasks[2].set_paused(False)
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    kept = {"project": "demo", "cost": 0.1, "commit": "abc", "branch": "", "conflicts": [], "finished": now()}
+    actions.history_path().write_text(
+        json.dumps({"id": "demo-12", "title": "Accepted later", **kept})
+        + "\n"
+        + json.dumps({"id": "demo-11", "title": "Accepted last", **kept})
+        + "\n"
+    )
+    live = [f"demo-{n}" for n in range(10, 0, -1)]
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert rows(app) == ["demo", *live, "demo-12", "demo-11"], "by number: demo-10 before demo-9"
+        assert app.selected_id() == "demo-3", "the cursor starts on what waits for you"
+        at_plan_checkpoint(tasks[6])
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo", *live, "demo-12", "demo-11"], "a task that starts to wait stays put"
+
+    run(scenario)
+
+
 def test_prepare_is_one_line_saved_with_enter_and_its_words_are_all_on_the_screen(env):
     """Its question and its hint used to end at the dialog's edge, "(ctrl+s saves)" with them, so
     nothing said how to save; Enter saves, like the other one-line rows."""
@@ -3135,7 +3166,7 @@ def test_a_collapsed_project_keeps_saying_what_waits_and_stays_collapsed(env):
         assert rows(app) == ["demo"], "a refresh does not unfold it"
         await pilot.press("enter")
         await pilot.pause()
-        assert rows(app) == ["demo", waiting.id, "demo-2"]
+        assert rows(app) == ["demo", "demo-2", waiting.id], "newest first"
 
     run(scenario)
     assert panel.load_view().get("collapsed", []) == []

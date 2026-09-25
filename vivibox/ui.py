@@ -210,6 +210,12 @@ def group(st: TaskState) -> str:
 AWAITING_PLAN = ("plan it yourself", ["vivibox plan prompt {id}", "vivibox plan import {id}"])
 
 
+def task_number(task_id: str) -> int:
+    """demo-10 is 10: compared as text it would come before demo-9."""
+    _, _, number = task_id.rpartition("-")
+    return int(number) if number.isdigit() else 0
+
+
 def activity(st: TaskState, max_iterations: int) -> str:
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return AWAITING_PLAN[0]

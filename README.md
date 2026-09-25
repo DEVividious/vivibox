@@ -11,7 +11,7 @@ gate it cannot bypass builds and tests its commits on a fresh clone before you a
 You decide at checkpoints. The agent plans, you accept the plan, the agent implements, the gate
 checks, you review and accept. Everything else runs on its own.
 
-![The vivibox view: tasks waiting for you first, the selected task's review below](docs/img/view.svg)
+![The vivibox view: projects with their tasks, the selected task's review below](docs/img/view.svg)
 
 ## Install
 
@@ -46,7 +46,8 @@ MCP servers you already use. Keys go to vivibox's own key store, never into conf
    `v` runs the app in the pod, `a` accepts it into your checkout, `r` asks for changes.
 
 Desktop notifications, or ntfy on your phone, say when a task waits for you, and the view lists
-your projects with their tasks under them, the ones waiting for you first. Everything the view does is also a command
+your projects with their tasks under them, newest first, and the cursor on what waits for you.
+Everything the view does is also a command
 (`vivibox new`, `accept`, `reply`, `status`…), and planning can happen in your own chat instead of
 on an API key. All of it: [docs/tasks.md](docs/tasks.md).
 

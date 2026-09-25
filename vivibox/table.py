@@ -58,7 +58,7 @@ class TaskTable:
         # A forgotten project's history goes with it: with no project, the view is as it starts.
         kept = [e for e in actions.history() if e["id"] not in live and e.get("project") in known]
         shown = lambda e: self.show_deleted if e.get("deleted") else self.show_done  # noqa: E731
-        self.done = [e for e in kept if shown(e)]
+        self.done = sorted((e for e in kept if shown(e)), key=lambda e: ui.task_number(e["id"]), reverse=True)
         self.hidden = {}
         for entry in kept:
             if not shown(entry):
@@ -157,11 +157,13 @@ class TaskTable:
         empty.update("" if ids else NO_PROJECTS)
         if selected in ids:
             table.move_cursor(row=ids.index(selected))
-        elif ids:
-            # The first task waiting for you; a project row is a heading, not what you came for.
-            first = next((i for i, key in enumerate(ids) if not key.startswith(PROJECT_ROW)), 0)
-            table.move_cursor(row=first)
         waiting_now = {st.id for _, st in pairs if self.views[st.id].group == "Waiting for you"}
+        if selected not in ids and ids:
+            # The first task waiting for you, else the first task; a project row is a heading,
+            # not what you came for.
+            tasks = [i for i, key in enumerate(ids) if not key.startswith(PROJECT_ROW)]
+            first = next((i for i in tasks if ids[i] in waiting_now), tasks[0] if tasks else 0)
+            table.move_cursor(row=first)
         # A task that starts to wait for you rings the bell, once: the sign you can hear from
         # another window when the desktop's notifications are off.
         if self.waiting_ids is not None and waiting_now - self.waiting_ids:

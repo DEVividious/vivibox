@@ -82,9 +82,10 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
   footer fits. A key named in any text is a key the footer offers at that moment: ask the same
   function that enables the key (`watchable`, `check_action`), never repeat its condition.
 - The list is projects with their tasks under them. Enter on a project folds or unfolds it, and
-  that choice is kept. A folded project's status says how many tasks wait; projects with a task
-  waiting come first, and so do those tasks within a project; the cursor starts on the first task
-  waiting. A project's own problem (a variable it passes that is not set, a repository that is
+  that choice is kept. A folded project's status says how many tasks wait, and projects with a
+  task waiting come first. Within a project a row keeps its place whatever its task does: newest
+  first by number, the finished ones under the live ones. What waits says so by its colour and the
+  project's count, and the cursor starts on the first task waiting. A project's own problem (a variable it passes that is not set, a repository that is
   gone) is its status, before any task is created.
 
 ## 4. Dialogs

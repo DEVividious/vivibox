@@ -353,6 +353,69 @@ def test_accepting_the_work_offers_a_commit(env):
     assert not task.root.exists()
 
 
+def done_with_a_proposal(env, command="npm ci && npm test"):
+    """A task at review in a project with no command, its writer having proposed one."""
+    from vivibox import proposal
+
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(path.read_text().replace('verify = ["true"]', "verify = []"))
+    task = new_task()
+    (task.repo / "one.txt").write_text("x\n")
+    for args in (
+        ["add", "one.txt"],
+        ["-c", "user.name=A", "-c", "user.email=a@b", "commit", "-qm", "Add one"],
+    ):
+        subprocess.run(["git", *args], cwd=task.repo, check=True, capture_output=True)
+    at_plan_checkpoint(task)
+    gate.accept_plan(task)
+    (task.meta / "handoff" / proposal.PROPOSAL).write_text(f"`{command}`\n")
+    for state in (State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
+        task.transition(state)
+    return task
+
+
+def test_the_writers_command_is_a_decision_of_its_own_after_the_work(env):
+    """First the work, as ever; then, on its own, the command the writer proposed, in the field
+    e shows: Enter keeps it for the project, and the next task is verified with it."""
+    done_with_a_proposal(env)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await pilot.press("right", "left", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert isinstance(app.screen, CommitWork), "the work first"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, AskVerify), "then the command, on its own"
+        assert app.screen.query_one(Input).value == "npm ci && npm test"
+        assert "proposes" in app.screen.heading
+        await pilot.press("enter")
+        await pilot.pause()
+
+    run(scenario)
+    assert load_project("demo").verify == ["npm ci && npm test"]
+
+
+def test_the_writers_command_left_alone_keeps_the_project_asking(env):
+    done_with_a_proposal(env)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await pilot.press("right", "left", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+
+    run(scenario)
+    assert load_project("demo").verify == [], "the next task's writer proposes again"
+
+
 def test_a_task_can_be_a_whole_ticket(env):
     from vivibox import actions
 

@@ -823,3 +823,13 @@ def test_one_start_or_stop_of_a_task_at_a_time_from_however_many_views(env, monk
             actions.stop(task)
         actions.stop(task, force=True)
         assert killed == ["demo-1"]
+
+
+def test_accept_names_the_writers_command_and_where_to_keep_it(env, capsys, monkeypatch):
+    from test_tui import done_with_a_proposal
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    task = done_with_a_proposal(env)
+    assert main(["accept", task.id]) == 0
+    out = capsys.readouterr().out
+    assert "proposed `npm ci && npm test`" in out and "demo.toml" in out

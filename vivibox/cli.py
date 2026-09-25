@@ -25,7 +25,7 @@ from . import (
     ui,
 )
 from . import init as project_init
-from .config import ConfigError, config_dir, load_config
+from .config import ConfigError, config_dir, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
 from .providers import is_provider_key
@@ -234,6 +234,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
     elif st.state is State.CHECKPOINT_FINAL:
         done = actions.finish(task, project, branch_only=args.branch)
         report_finished(done)
+        offer_command(done)
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; nothing to accept (use 'vivibox reply')")
     return 0
@@ -251,6 +252,19 @@ def report_finished(done: actions.Finished) -> None:
         print(f"{done.task_id} is done ({done.cost}). Uncommitted in {done.source} ({branch}):")
         print(done.status, end="")
         offer_commit(done.source, done.message, branch)
+
+
+def offer_command(done: actions.Finished) -> None:
+    """The command the writer proposed, after the work: a question of its own."""
+    if not done.proposed or load_project(done.project).verify:
+        return
+    print(f"\nThe writer of {done.task_id} proposed `{done.proposed}` to verify {done.project} with.")
+    if sys.stdin.isatty() and input("Keep it for the project? [y/N] ").strip().lower() in ("y", "yes"):
+        actions.save_verify(load_project(done.project), [done.proposed])
+        print(f"{done.project} is verified with it from now on.")
+        return
+    where = config_dir() / "projects" / f"{done.project}.toml"
+    print(f'To keep it: e on the project in the view, or verify = ["{done.proposed}"] in {where}')
 
 
 def offer_commit(source: Path, message: str, branch: str) -> None:

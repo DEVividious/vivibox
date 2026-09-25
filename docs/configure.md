@@ -104,9 +104,9 @@ toolchain a task needs. A project that wants different versions, or another lang
 own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
 before it reaches your checkout.
 
-`e` on the project's row opens its settings: the verification, how `v` runs it, its JDK, the
-variables its build needs from your shell, and the editor for its review copies, each written to
-the file alone with the comments kept. The last row opens the file itself, for services on your
+`e` on the project's row opens its settings: the verification, how `v` runs it, what a new task
+runs first, its JDK, the variables its build needs from your shell, and the editor for its review
+copies, each written to the file alone with the comments kept. The last row opens the file itself, for services on your
 host the agent may reach and for extra risky patterns:
 
 ```toml
@@ -115,7 +115,15 @@ verify = ["bash gradlew test --no-daemon --console=plain"]
 java = "17"                                     # empty for Java 21
 host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
+prepare = ["bash mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
 ```
+
+`prepare` is for a project whose whole build takes long: the commands run once in a new task's
+clone while the plan is made, and the writer's first turn waits for them, so the writer builds the
+module it changes instead of everything. Their output is under `l`; a failure is on the task's
+timeline and the task goes on without it. A stop and a start do not run them again, unless the stop
+cut them short. Maven keeps what a task installs apart from other tasks: modules one task installs
+never reach another task's build, while what Maven downloads is shared.
 
 `pass_env` is for what a build reads from its environment, such as a package registry token that a
 settings file in the repository refers to (`${env.REPO_TOKEN}` in Maven's settings.xml). The agent

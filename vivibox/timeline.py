@@ -103,6 +103,14 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = "stopped" + (f": {data['problem']}" if data.get("problem") else "")
         elif kind == "resumed":
             text = "started again"
+        elif kind == "prepare_started":
+            text = f"preparing: {', '.join(data.get('commands') or [])}"
+        elif kind == "prepared":
+            text = (
+                "prepared"
+                if data.get("ok")
+                else f"preparation failed, exit {data.get('code')}; its output is under l"
+            )
         elif kind == "cost_warning":
             text = f"cost ${data.get('spent', 0):.2f}, past the warning of ${data.get('warning', 0):.2f}"
         elif kind == "review" and "round" in data:

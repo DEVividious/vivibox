@@ -192,6 +192,20 @@ def test_what_the_agent_installs_the_gate_does_not_see(env):
         env["pod"].gate_down()
 
 
+def test_the_preparation_runs_in_the_background_and_says_how_it_ended(env):
+    import time
+
+    pod = env["pod"]
+    pod.prepare_start(["sleep 2", "pwd > /tmp/prep.where", "false"], "/tmp/prep.log", "/tmp/prep.exit")
+    assert pod.prepare_running(), "the exec that started it is over, the commands are not"
+    deadline = time.monotonic() + 30
+    while pod.prepare_running() and time.monotonic() < deadline:
+        time.sleep(0.5)
+    assert not pod.prepare_running()
+    assert agent(env, "cat /tmp/prep.where").stdout.strip() == str(env["repo"]), "in the clone"
+    assert agent(env, "cat /tmp/prep.exit").stdout.strip() == "1", "the failing command's code"
+
+
 def test_a_sidecar_just_made_is_not_outdated(env):
     """Docker keeps the mounts as given, so what up() compares them with is what inspect returns."""
     assert not env["pod"]._outdated_sidecar()

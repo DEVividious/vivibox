@@ -1773,6 +1773,12 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert load_project("demo").demo == ["npm install", "npm start"] and "# Mine." in path.read_text()
+        await go_to(app, pilot, "prepare, once per task")
+        assert isinstance(app.screen, settings.AskLines)
+        app.screen.query_one(TextArea).text = "bash mvnw -B install -DskipTests\n"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert load_project("demo").prepare == ["bash mvnw -B install -DskipTests"]
         await go_to(app, pilot, "java")
         app.screen.query_one(Input).value = "17"
         await pilot.press("enter")

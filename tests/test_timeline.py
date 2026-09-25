@@ -51,3 +51,14 @@ def test_the_cost_warning_and_the_limit_read_as_money(tmp_path):
     said = [what for _, what in timeline.entries(task)]
     assert "cost $1.50, past the warning of $1.00" in said
     assert "stopped: cost limit reached: $2.10 of $2.00" in said
+
+
+def test_the_preparation_says_what_runs_and_how_it_ended(tmp_path):
+    task = create_task(tmp_path, "demo", "Add health endpoint", "")
+    task.event("prepare_started", commands=["bash mvnw -B install -DskipTests"])
+    task.event("prepared", ok=False, code=1)
+    said = [what for _, what in timeline.entries(task)]
+    assert "preparing: bash mvnw -B install -DskipTests" in said
+    assert "preparation failed, exit 1; its output is under l" in said
+    task.event("prepared", ok=True, code=0)
+    assert [what for _, what in timeline.entries(task)][-1] == "prepared"

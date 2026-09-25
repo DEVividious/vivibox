@@ -164,6 +164,31 @@ def test_invalid_draft_still_stops_for_you(task):
     assert task.read_state().state is State.CHECKPOINT_PLAN and "no valid plan draft" in notes[0]
 
 
+def test_the_writer_waits_for_the_projects_preparation(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    harness, waits, slept = FakeHarness(task), [True, False], []
+    ports = supervisor.Ports(
+        run_gate=lambda t: gate_result(False),
+        risky_changes=lambda: [],
+        notify=lambda _id, msg, kind="": None,
+        sleep=slept.append,
+        preparing=lambda: waits.pop(0) if waits else False,
+    )
+    sup = supervisor.Supervisor(
+        task, harness, ports, max_iterations=2, project_verify=["true"], prepared=["mvn -B install"]
+    )
+    assert sup.step()
+    assert harness.prompts == [] and slept == [supervisor.PREPARE_POLL]
+    assert task.read_state().state is State.IMPLEMENT
+    sup.step()
+    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(supervisor.IMPLEMENT_PROMPT)
+    assert "`mvn -B install`" in harness.prompts[0] and "/task/handoff/prepare.log" in harness.prompts[0]
+    sup.step()  # the verification fails: the feedback turn is not told again
+    sup.step()
+    assert "prepare.log" not in harness.prompts[-1] and harness.prompts[-1] == supervisor.FEEDBACK_PROMPT
+
+
 def test_question_during_implementation_blocks(task):
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         task.transition(s)

@@ -39,7 +39,8 @@ them all:
 | `b` | on a project's row: open a box, the project's pod for you to work in by hand, with your keys, the tools and opencode to run yourself, and no agent of its own; in a box, `w` is a shell and `a` closes it for review |
 
 On a project's row: `n` starts a task in it, `e` opens its settings, one row each: how it is
-verified (a command its build files name, no build, or one of your own), how `v` runs it, its JDK,
+verified (a command its build files name, no build, or one of your own), how `v` runs it, what a
+new task runs first (`prepare`), its JDK,
 what its build needs from your shell (`pass_env`), the editor for its review copies, and last its
 file for `host_services` and `risky_extra`; `o` opens its repository in your IDE, and `x` forgets
 it once it has no tasks; the repository stays.

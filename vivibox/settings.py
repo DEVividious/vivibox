@@ -406,6 +406,11 @@ class ProjectSettings(Rows):
                 ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
                 "demo",
             ),
+            (
+                "prepare, once per task",
+                ", ".join(project.prepare) or "nothing; the writer builds what it needs",
+                "prepare",
+            ),
             ("java", project.java or "21, the image's", "java"),
             ("pass_env", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
             (
@@ -461,6 +466,21 @@ class ProjectSettings(Rows):
                 lambda lines: (
                     lines is not None
                     and self.write("demo", lines, f"v runs: {', '.join(lines) or 'worked out'}")
+                ),
+            )
+        elif key == "prepare":
+            self.app.push_screen(
+                AskLines(
+                    f"What to run once in a new task's clone of {self.project_name} while the plan is"
+                    " made, one command per line; the writer's first turn waits for it",
+                    project.prepare,
+                    "E.g. a build without tests, so the writer builds one module at a time. Empty: nothing.",
+                ),
+                lambda lines: (
+                    lines is not None
+                    and self.write(
+                        "prepare", lines, f"a new task runs first: {', '.join(lines) or 'nothing'}"
+                    )
                 ),
             )
         elif key == "java":

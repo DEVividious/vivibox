@@ -29,6 +29,7 @@ from . import (
     image,
     manual,
     opencode,
+    prepare,
     providers,
     repo,
     reviewing,
@@ -470,6 +471,7 @@ def _start(
     if project.java:
         on_step(f"installing Java {project.java}…")
     toolchain.ensure(pod, project.java)
+    prepare.begin(task, project, pod)
     on_step("starting opencode…")
     harness = opencode.OpenCode(pod)
     if changed:

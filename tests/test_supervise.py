@@ -86,3 +86,27 @@ def test_a_topic_set_while_the_task_runs_gets_the_next_message(tmp_path, monkeyp
     current = supervise.live_config(start)
     assert current() is start, "unreadable for a moment: the settings the supervisor started with"
     assert current().ntfy == "", "readable again: what the file says now"
+
+
+def test_the_supervisor_asks_the_pod_whether_the_projects_preparation_still_runs(tmp_path, monkeypatch):
+    from vivibox.config import Project
+
+    task = create_task(tmp_path, "demo", "Add health endpoint", TEMPLATE)
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+
+    class Pod:
+        running = True
+
+        def prepare_running(self):
+            return self.running
+
+        def review_down(self):
+            pass
+
+        def review_side(self):
+            return self
+
+    project = Project("demo", tmp_path, ["true"], prepare=["mvn -B install"])
+    sup = supervise.make_supervisor(task, project, Pod(), config())
+    assert sup.prepared == ["mvn -B install"]
+    assert sup.ports.preparing(), "the writer waits while it runs"

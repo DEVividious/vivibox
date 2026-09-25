@@ -14,6 +14,7 @@ from . import (
     image,
     keys,
     opencode,
+    prepare,
     providers,
     repo,
     secrets,
@@ -87,6 +88,7 @@ def start_box(task_id: str) -> None:
     opencode.prepare(task, model, project.verify, used)
     pod.up()
     toolchain.ensure(pod, project.java)
+    prepare.begin(task, project, pod)
     if task.read_state().paused:
         task.set_paused(False)
     task.event("started", model="you")

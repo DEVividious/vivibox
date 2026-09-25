@@ -88,6 +88,13 @@ is already done, then go on with this:
 
 """
 
+# Before the first implementing turn of a project that is prepared (Project.prepare): what ran, so
+# the writer builds on it instead of building everything again, and where to look when it failed.
+PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in the repository, so what it
+built and installed is there; its output is in /task/handoff/prepare.log.
+
+"""
+
 
 def resume_prompt(state: State) -> str:
     """After a stop or a crash: the state's own prompt again, behind a word about the interruption.
@@ -198,6 +205,8 @@ TRANSIENT = re.compile(
 )
 # How long to wait before each retry of a turn; as many retries as there are waits.
 RETRY_WAITS = (30, 60, 120)
+# Seconds between looks at a preparation the writer waits for.
+PREPARE_POLL = 15
 
 
 def transient(error: str) -> bool:
@@ -225,6 +234,8 @@ class Ports:
     # The reviewer's container: up, with the directory its review is written to; and down.
     review_up: Callable[[], Path] = lambda: Path()
     review_down: Callable[[], None] = lambda: None
+    # True while the project's preparation runs, which the writer's turn waits for.
+    preparing: Callable[[], bool] = lambda: False
     # How a retry waits; a test passes something that does not.
     sleep: Callable[[float], None] = time.sleep
 
@@ -238,6 +249,8 @@ class Supervisor:
     # The project's verify commands, and whether it has nothing to build.
     project_verify: list[str] = field(default_factory=list)
     project_no_build: bool = False
+    # The project's preparation, which ran before the writer's first turn; that turn is told of it.
+    prepared: list[str] = field(default_factory=list)
     # The role that plans. None means the writer plans too, which is what a caller with one harness
     # gets; the command line always passes both, because the config always names both.
     planner: Harness | None = None
@@ -521,7 +534,13 @@ class Supervisor:
         )
 
     def _implement(self, st: TaskState) -> None:
-        if self._turn(st, next_prompt(self.task, IMPLEMENT_PROMPT)) is None:
+        if self.ports.preparing():
+            self.ports.sleep(PREPARE_POLL)
+            return
+        prompt = next_prompt(self.task, IMPLEMENT_PROMPT)
+        if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
+            prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
+        if self._turn(st, prompt) is None:
             return
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")

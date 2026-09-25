@@ -74,6 +74,16 @@ def test_a_project_passes_variables_from_your_shell(tmp_path):
     assert load_project("old", base.parent).pass_env == []
 
 
+def test_a_project_may_be_prepared_before_the_writer_starts(tmp_path):
+    base = write(
+        tmp_path / "projects" / "shop.toml",
+        'repo = "/r"\nverify = ["x"]\nprepare = ["bash mvnw -B install -DskipTests"]\n',
+    )
+    assert load_project("shop", base.parent).prepare == ["bash mvnw -B install -DskipTests"]
+    base = write(tmp_path / "projects" / "old.toml", 'repo = "/r"\nverify = ["x"]\n')
+    assert load_project("old", base.parent).prepare == []
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -82,6 +92,8 @@ def test_a_project_passes_variables_from_your_shell(tmp_path):
         'repo = "/r"\nverify = ["x"]\npass_env = ["TOKEN=abc"]\n',
         'repo = "/r"\nverify = ["x"]\npass_env = "TOKEN"\n',
         'repo = "/r"\nverify = ["x"]\npass_env = ["DOCKER_HOST"]\n',
+        'repo = "/r"\nverify = ["x"]\nprepare = "mvn install"\n',
+        'repo = "/r"\nverify = ["x"]\nprepare = [" "]\n',
     ],
 )
 def test_rejects_invalid_project(tmp_path, text):

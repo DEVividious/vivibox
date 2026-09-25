@@ -14,7 +14,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList
 
-from . import reviewing, timeline
+from . import prepare, reviewing, timeline
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
@@ -72,6 +72,13 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
         review = reviewing.parse_review(path.read_text())
         said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
         found.append(Entry(path.name, said, pager_command(path)))
+    prepared = handoff / prepare.LOG
+    if prepared.exists():
+        code = prepare.ending(task)
+        how = "running or cut short" if code is None else "passed" if code == 0 else f"failed, exit {code}"
+        lines = prepared.read_text(errors="replace").count("\n")
+        said = f"the project's preparation · {how} · {lines} lines"
+        found.append(Entry(prepare.LOG, said, pager_command(prepared, at_end=True)))
     supervisor = task.meta / "log" / "supervisor.log"
     if supervisor.exists():
         found.append(

@@ -56,6 +56,8 @@ CACHES = {
 # Where Maven's split local repository puts what a build installs: a volume per task, over the
 # shared /cache/m2, so one task's unfinished modules never reach another's build.
 INSTALLED = "/cache/m2/installed"
+# The preparation's process, in the agent's /tmp: gone with the container, as the process is.
+PREPARE_PID = "/tmp/vivibox-prepare.pid"
 HOST_GATEWAY = "host.docker.internal"
 # The host's trust store, shared with the pod: a registry or a proxy the host trusts through an
 # authority of its own (corporate TLS inspection) is trusted in the pod the same way. The daemon
@@ -334,6 +336,20 @@ class Pod:
     def demo_stop(self) -> None:
         """Kills the whole process group: a build tool starting a server leaves children behind."""
         self._run("docker", "exec", self.agent, "sh", "-c", DEMO_KILL, check=False)
+
+    def prepare_start(self, commands: Sequence[str], log: str, exit_file: str) -> None:
+        """Runs a project's preparation in the clone, in the background like the app: it outlives
+        the exec that started it, and says how it ended in exit_file, which goes first."""
+        script = f"({' && '.join(commands)}); echo $? > {exit_file}"
+        started = (
+            f"rm -f {exit_file}; setsid sh -c {shlex.quote(script)} > {log} 2>&1 < /dev/null &"
+            f" echo $! > {PREPARE_PID}"
+        )
+        self._run("docker", "exec", "-d", "-w", str(self.repo), self.agent, "sh", "-c", started)
+
+    def prepare_running(self) -> bool:
+        alive = f'test -f {PREPARE_PID} && kill -0 "$(cat {PREPARE_PID})" 2>/dev/null'
+        return self._run("docker", "exec", self.agent, "sh", "-c", alive, check=False).returncode == 0
 
     def demo_log(self, lines: int = 20) -> str:
         found = self._run("docker", "exec", self.agent, "tail", "-n", str(lines), DEMO_LOG, check=False)

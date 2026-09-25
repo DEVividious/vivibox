@@ -324,6 +324,20 @@ def test_what_a_task_installs_stays_in_a_volume_of_its_own(pod, tmp_path):
     assert "vivibox-shop-1-installed" in removed and "vivibox-shop-1-gate-installed" in removed
 
 
+def test_the_preparation_runs_in_the_clone_and_outlives_the_exec_that_started_it(pod):
+    pod.prepare_start(["npm ci", "npm run build"], "/task/handoff/prepare.log", "/task/handoff/prepare.exit")
+    started = pod.runner.find("docker", "exec", "-d", "-w", str(pod.repo), pod.agent)
+    assert started, "in the clone, in the background"
+    script = started[0][-1]
+    assert "setsid" in script and "npm ci && npm run build" in script
+    assert "> /task/handoff/prepare.log" in script and "> /task/handoff/prepare.exit" in script
+    assert script.index("rm -f /task/handoff/prepare.exit") < script.index("setsid"), "no old ending"
+    pod.runner.alive = True
+    assert pod.prepare_running()
+    pod.runner.alive = False
+    assert not pod.prepare_running()
+
+
 def test_gate_container_sees_only_committed_work(pod, tmp_path):
     pod.gate_dir = tmp_path / "gate"
     pod.agent_mounts.append(Mount("/srv/vivibox/shop-1/.task/handoff", "/task/handoff"))

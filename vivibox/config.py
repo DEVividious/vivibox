@@ -107,6 +107,9 @@ class Project:
     verify_timeout: int = 0
     # There is nothing to build or test here (verify = false): the gate checks the rest.
     no_build: bool = False
+    # Commands run once in a task's clone while the plan is made, e.g. an install without tests, so
+    # the writer builds one module instead of the whole project; its first turn waits for them.
+    prepare: list[str] = field(default_factory=list)
 
 
 def config_dir() -> Path:
@@ -264,6 +267,9 @@ def load_project(name: str, base: Path | None = None) -> Project:
     demo = data.get("demo", [])
     if not isinstance(demo, list) or not all(isinstance(c, str) and c.strip() for c in demo):
         raise ConfigError(f'{path}: demo must be a list of commands, e.g. ["npm run dev"]')
+    prepare = data.get("prepare", [])
+    if not isinstance(prepare, list) or not all(isinstance(c, str) and c.strip() for c in prepare):
+        raise ConfigError(f'{path}: prepare must be a list of commands, e.g. ["mvn -B install -DskipTests"]')
     pass_env = data.get("pass_env", [])
     if not isinstance(pass_env, list) or not all(isinstance(n, str) and ENV_NAME.match(n) for n in pass_env):
         raise ConfigError(f'{path}: pass_env must be a list of variable names, e.g. ["NPM_TOKEN"]')
@@ -273,5 +279,6 @@ def load_project(name: str, base: Path | None = None) -> Project:
     if not isinstance(verify_timeout, int) or verify_timeout < 0:
         raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
     return Project(
-        name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build
-    )
+        name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build,
+        prepare,
+    )  # fmt: skip

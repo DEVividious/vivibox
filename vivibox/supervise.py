@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from . import actions, gate, keys, ntfy, reviewing, supervisor
+from . import actions, gate, keys, ntfy, prepare, reviewing, supervisor
 from .config import Config, ConfigError, load_config
 from .risky import Approvals
 from .states import waits_for_user
@@ -114,6 +114,7 @@ def make_supervisor(
         session_started=agent_window,
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,
+        preparing=lambda: prepare.waiting(task, project, pod),
     )
     return supervisor.Supervisor(
         task,
@@ -127,6 +128,7 @@ def make_supervisor(
         max_reviews=config.max_reviews,
         project_verify=project.verify,
         project_no_build=project.no_build,
+        prepared=project.prepare,
         planner=planner,
         source=project.repo,
     )

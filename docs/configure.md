@@ -82,7 +82,9 @@ Either way vivibox reads the build files and proposes a project. The verificatio
 type, or left empty: the next task's writer, who builds the project while it works, then writes
 the command it ran to `/task/handoff/verify-proposal.md`, and the task is verified with that. A
 writer that proposes none leaves the task waiting for you with "verification could not run", no
-attempt spent. Once you have accepted the work, the proposal is a decision of its own: the same
+attempt spent. So does a command that runs a file the repository's commits do not have (`./mvnw`
+after a move to Gradle, a wrapper never committed): the task waits for you to change it under `e`.
+Once you have accepted the work, the proposal is a decision of its own: the same
 field as under `e`, the command in it, Enter keeps it for the project, Escape leaves it empty. A
 plan with `verify = false` runs no build in its task and settles nothing: when the task leaves
 build files behind, its panel names the command they call for. A repository

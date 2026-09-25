@@ -208,7 +208,7 @@ def test_hidden_characters_fail_the_gate(task):
 
 
 def test_gate_before_plan_acceptance_is_a_baseline_check(task):
-    result = gate.run_gate(task, FakePod(), ["./gradlew test"], [])
+    result = gate.run_gate(task, FakePod(), ["make check"], [])
     assert [c.ok for c in result.commands] == [True]
     assert not result.passed and result.missing_criteria == ["(the plan is not accepted yet)"]
 
@@ -792,3 +792,40 @@ def test_an_image_testcontainers_cannot_get_deep_in_a_maven_log_is_of_the_enviro
         task, FakePod(fail={"mvn -B verify"}, output=f"{rate}\n{summary}"), ["mvn -B verify"], []
     )
     assert "pull rate limit" in result.environment
+
+
+@pytest.mark.parametrize(
+    "command,missing",
+    [
+        ("./mvnw -B verify -f pom.xml", "mvnw"),
+        ("bash gradlew test --no-daemon", "gradlew"),
+        ("npm ci && sh scripts/check.sh", "scripts/check.sh"),
+        ("cd app && ./mvnw verify", "app/mvnw"),
+    ],
+)
+def test_a_command_that_runs_a_file_the_repository_does_not_have_waits_for_you(task, command, missing):
+    """The project moved from Maven to Gradle, or the wrapper was never committed: the build would
+    fail with "not found", and an attempt would go on something the code cannot fix. Said as it is,
+    for you, with no container made for it."""
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, [command], [])
+    assert pod.commands == [], "nothing built"
+    assert missing in result.environment and "does not have" in result.environment
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
+    assert missing in result.log.read_text()
+
+
+def test_a_file_the_command_runs_is_looked_for_where_the_command_runs_it(task):
+    (task.repo / "app").mkdir()
+    (task.repo / "app" / "mvnw").write_text("#!/bin/sh\n")
+    (task.repo / "gradlew").write_text("#!/bin/sh\n")
+    commit(task.repo, "Wrappers")
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    for command in ("cd app && ./mvnw verify", "bash gradlew test", "npm test", "mvn -B verify"):
+        assert gate.missing_program(task.repo, [command]) == "", command
+    (task.repo / "stray").write_text("uncommitted\n")
+    assert "stray" in gate.missing_program(task.repo, ["sh stray"]), "only what is committed counts"

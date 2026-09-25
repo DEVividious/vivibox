@@ -25,7 +25,9 @@ And a turn that committed nothing gets the last build's result again instead of 
 from __future__ import annotations
 
 import difflib
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -473,6 +475,42 @@ def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bo
     return True
 
 
+# A command runs a file of the repository when it starts with ./ or hands one to a shell.
+SHELLS = {"bash", "sh"}
+
+
+def missing_program(repo_dir: Path, commands: list[str]) -> str:
+    """The first file a command runs from the repository that its commits do not have, as the
+    reason verification cannot run; "" when every one is there. The build would fail on "not
+    found" (a project moved from Maven to Gradle, a wrapper never committed), and an attempt of
+    the agent's would go on what the code cannot fix. Programs of the image are not looked for."""
+    for command in commands:
+        cwd = ""
+        for segment in re.split(r"&&|\|\||;|\|", command):
+            try:
+                words = shlex.split(segment)
+            except ValueError:
+                break
+            if not words:
+                continue
+            if words[0] == "cd" and len(words) > 1:
+                cwd = os.path.normpath(os.path.join(cwd, words[1]))
+                continue
+            shell = words[0] in SHELLS
+            program = words[1] if shell and len(words) > 1 else words[0]
+            if not (shell or program.startswith("./")) or program.startswith(("-", "/")):
+                continue
+            path = os.path.normpath(os.path.join(cwd, program))
+            if path.startswith(".."):
+                continue
+            if repo.git("cat-file", "-e", f"HEAD:{path}", cwd=repo_dir, check=False).returncode != 0:
+                return (
+                    f"`{command}` runs {path}, which the repository does not have in its commits; "
+                    "change the command under e on the project"
+                )
+    return ""
+
+
 def run_gate(
     task: Task,
     pod: Pod,
@@ -505,6 +543,9 @@ def run_gate(
     elif not commands and no_command:
         log.write_text(f"# commit {head}: the build was not run: {no_command}\n")
         result.environment = no_command
+    elif missing := missing_program(task.repo, commands):
+        log.write_text(f"# commit {head}: the build was not run: {missing}\n")
+        result.environment = missing
     elif not commands:
         # A project with no build: the criteria and the commits are checked, and no clone or
         # container is made for nothing to run.

@@ -5,6 +5,7 @@ task logic of its own, and neither prints or asks from here.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import re
 import shlex
@@ -398,6 +399,24 @@ def context_notes(task: Task) -> list[str]:
     return [n for e in task.events() if e["type"] == "context" for n in e["data"].get("notes", [])]
 
 
+# Held while a task starts or stops: one at a time, whichever view or command asks.
+START_LOCK = "start.lock"
+
+
+@contextlib.contextmanager
+def one_at_a_time(task: Task):
+    """A second view that starts or stops the same task is told, instead of making the same pod
+    twice. The lock goes with the process that holds it, so a crash leaves nothing behind."""
+    with (task.meta / START_LOCK).open("a") as held:
+        try:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise PodError(
+                f"{task.id}: a start or a stop is under way elsewhere; wait for it, or stop it by force (S)"
+            ) from None
+        yield
+
+
 def start(
     task_id: str,
     resume: bool = False,
@@ -410,14 +429,15 @@ def start(
     runs, for a row to say what a slow start is doing. supervise=False brings everything up and
     leaves the supervising to the caller (the behavioural tests drive the supervisor themselves)."""
     task, _ = load(task_id)
-    try:
-        if task.read_state().box:
-            start_box(task_id)
-            return "you"
-        return _start(task_id, resume, on_step, supervise)
-    except Exception as e:
-        task.set_problem(f"could not start: {e.args[0] if e.args else e}")
-        raise
+    with one_at_a_time(task):
+        try:
+            if task.read_state().box:
+                start_box(task_id)
+                return "you"
+            return _start(task_id, resume, on_step, supervise)
+        except Exception as e:
+            task.set_problem(f"could not start: {e.args[0] if e.args else e}")
+            raise
 
 
 def needs_start(task: Task) -> bool:
@@ -543,12 +563,13 @@ def stop(task: Task, force: bool = False) -> None:
     """Stops the task and keeps its work. A stop asks the supervisor to finish and waits for the
     containers; force kills both instead, for a container that ignores the stop or a supervisor
     stuck in docker. The turn under way is lost then; the task's files are on the host."""
-    stop_supervisor(task, force=force)
-    pod = task_pod(task.id)
-    if force:
-        pod.kill()
-    else:
-        pod.down()
+    with contextlib.nullcontext() if force else one_at_a_time(task):
+        stop_supervisor(task, force=force)
+        pod = task_pod(task.id)
+        if force:
+            pod.kill()
+        else:
+            pod.down()
     secrets.remove(task.id)
     reviewing.forget(task.id)
     if force:

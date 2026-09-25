@@ -189,14 +189,12 @@ def test_entering_a_box_whose_pod_went_down_brings_the_pod_up_first(env, monkeyp
     """The shell is a docker exec in the pod's container: into a stopped one it ends at once, and
     tmux said only "no sessions"."""
     task = actions.open_box("demo")
-    actions.boxes_started.clear()
     pod = DownPod()
     monkeypatch.setattr(actions, "task_pod", lambda task_id: pod)
-    monkeypatch.setattr(box, "start_box", lambda task_id: actions.boxes_started.append(task_id))
     monkeypatch.setattr(actions, "agent_view", lambda task, command: None)
     assert not box.box_pod_running(task.id)
     box.box_shell_command(task.id)
-    assert actions.boxes_started == [task.id]
+    assert actions.started == [task.id], "started the way any start is, one at a time"
     pod.up = True
     box.box_shell_command(task.id)
-    assert actions.boxes_started == [task.id], "a pod that runs is left as it is"
+    assert actions.started == [task.id], "a pod that runs is left as it is"

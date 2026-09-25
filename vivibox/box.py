@@ -106,7 +106,7 @@ def box_shell_command(task_id: str) -> list[str]:
     if task.read_state().paused:
         raise PodError(f"{task_id} is stopped; start it again with: vivibox start {task_id}")
     if not box_pod_running(task_id):
-        start_box(task_id)
+        actions.start(task_id)  # one start at a time, like any other
     pod = actions.task_pod(task_id)
     actions.agent_view(task, ["docker", "exec", "-it", "-w", str(task.repo), pod.agent, "bash", "-l"])
     return [*actions.TMUX, "attach-session", "-t", actions.tmux_session(task_id)]

@@ -791,3 +791,32 @@ def test_timeline_prints_what_happened_one_line_each(env, capsys):
     assert out[0] == "# demo-1: Goal" and out[2].endswith("created: Goal")
     assert any(line.endswith("planner turn: $0.12, 1200 tokens, 0 s") for line in out)
     assert out[-1].endswith("→ review the plan (plan ready)")
+
+
+@pytest.mark.real_start
+def test_one_start_or_stop_of_a_task_at_a_time_from_however_many_views(env, monkeypatch):
+    """Two views on one machine: a start from each would make the same pod twice, and Docker
+    refuses the second container by its name. The second is told, and leaves the task as it is;
+    a stop by force is for exactly a start or a stop that hangs, so it is never held back."""
+    import fcntl
+
+    from vivibox import actions
+    from vivibox.config import load_config
+    from vivibox.pod import PodError
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    killed = []
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {
+        "kill": lambda self: killed.append(task_id), "down": lambda self: None})())  # fmt: skip
+    monkeypatch.setattr(actions.secrets, "remove", lambda task_id: None)
+    with (task.meta / actions.START_LOCK).open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        with pytest.raises(PodError, match="under way elsewhere"):
+            actions.start("demo-1")
+        assert task.read_state().problem == "", "the other view's start is not a failed one"
+        with pytest.raises(PodError, match="under way elsewhere"):
+            actions.stop(task)
+        actions.stop(task, force=True)
+        assert killed == ["demo-1"]

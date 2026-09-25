@@ -50,7 +50,7 @@ class BoxKeys:
         first, off the loop and with the row saying so, then the shell."""
         self.call_from_thread(self.busy_with, task_id, "starting the pod…")
         try:
-            actions.start_box(task_id)
+            actions.start(task_id)
         except Exception as e:
             self.call_from_thread(self.fail, e)
             self.call_from_thread(self.busy_with, task_id, "")

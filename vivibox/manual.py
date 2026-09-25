@@ -45,7 +45,7 @@ anything in the repository and do not plan the task. End the turn when context.m
 # Asking a chat to reproduce a TOML header after an hour of discussion got it back as a line of
 # prose, so the chat is asked only for what it decides, and asked last, where it is still read.
 FORMAT = """When I say the plan is final, {deliver} It starts with a line
-"Summary: <one sentence of at most 100 characters naming what the task does>"{verify}, then the
+"Summary: <one sentence of at most 100 characters naming what the task does>", then the
 sections of the plan above as markdown headings, with each acceptance criterion as a "- [ ]" line
 that can be checked. Keep the first criterion as it is. The comments in the plan are guidance for
 you; leave them out."""
@@ -60,10 +60,6 @@ anything on the way, so the plan must say everything, and each criterion must be
 DECIDED = """Already decided, not for the plan: the agent keeps red.md and its checklist of criteria in
 its own handoff folder, and the task's kind and mode are set. The gate builds and tests the project
 with {verify}."""
-VERIFY_LINE = (
-    ', then a line "Verify: <the command that builds and tests the project once the plan is'
-    ' carried out>", e.g. Verify: npm test'
-)
 # Four backticks: a plan quotes code in blocks of three, which would end a block of three early.
 WHOLE_PLAN = "answer with the whole plan in one code block fenced with ````markdown, nothing else in it."
 
@@ -107,8 +103,6 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
     context = task.meta / "handoff" / CONTEXT
     found = context.read_text().strip() if context.exists() else ""
     attached = _attachments(task)
-    # A new project has no command yet, so the chat is asked for one; otherwise the project's stands.
-    verify = "" if project_verify else VERIFY_LINE
 
     web = [
         "Plan a software task with me. You cannot see the repository; what an agent found in it is",
@@ -129,9 +123,9 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
         )
     web += ["# What is in the repository", "", found, ""]
     decided = DECIDED.format(
-        verify=f"`{' && '.join(project_verify)}`" if project_verify else "the command the plan names"
+        verify=f"`{' && '.join(project_verify)}`" if project_verify else "the command the agent proposes"
     )
-    web += ["# When the plan is final", "", decided, "", FORMAT.format(deliver=WHOLE_PLAN, verify=verify), ""]
+    web += ["# When the plan is final", "", decided, "", FORMAT.format(deliver=WHOLE_PLAN), ""]
 
     answer = task.meta / ANSWER
     cli = [
@@ -149,10 +143,7 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
         "",
         decided,
         "",
-        FORMAT.format(
-            deliver=f"write the whole plan to {answer} with your file tool, not to the screen.",
-            verify=verify,
-        ),
+        FORMAT.format(deliver=f"write the whole plan to {answer} with your file tool, not to the screen."),
         "",
     ]
     return "\n".join(web), "\n".join(cli)

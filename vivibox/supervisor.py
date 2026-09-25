@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, manual, reviewing, ui
+from . import brief, gate, manual, proposal, reviewing, ui
 from .config import Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
@@ -32,9 +32,7 @@ QUESTION = "question.md"
 PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
 /task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
 - keep the header between the +++ lines, except: set summary to one line of at most 100
-  characters naming what the task does, and, if verify is empty, set it to the command that
-  builds and tests this project once the plan is done, a new product's too, e.g.
-  verify = ["npm test"]; verify = false only when there will never be a build;
+  characters naming what the task does;
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
   check" with concrete "- [ ]" items, each checkable by reading or running code; keep the
   first item;
@@ -93,6 +91,16 @@ is already done, then go on with this:
 # the writer builds on it instead of building everything again, and where to look when it failed.
 PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in the repository, so what it
 built and installed is there; its output is in /task/handoff/prepare.log.
+
+"""
+
+# Before the first implementing turn of a task whose project has no verification command: the
+# writer, who runs the build anyway, says what builds and tests it; the gate verifies the task with
+# that, and you decide on its own whether the project keeps it.
+PROPOSE_PREFIX = """No command verifies this project yet. When the work is done, write the one command
+that builds the project and runs its tests, as you ran it, on one line in
+/task/handoff/verify-proposal.md: the orchestrator verifies your work with it, and the user
+decides whether the project keeps it.
 
 """
 
@@ -161,15 +169,9 @@ def clear_next_prompt(task: Task) -> None:
     (task.meta / NEXT_PROMPT).unlink(missing_ok=True)
 
 
-def accept_plan(
-    task: Task, reason: str, project_verify=(), save_verify=None, project_no_build: bool = False
-) -> None:
+def accept_plan(task: Task, reason: str) -> None:
     """Freezes the plan and its criteria, and sends the agent on to implementation."""
-    plan = gate.accept_plan(task, project_verify, project_no_build)
-    if plan.verify and not (project_verify or project_no_build) and save_verify:
-        save_verify(plan.verify, False)  # the new project now knows how it is verified
-    # verify = false in a plan holds for this task only: a new product's first plan finds an empty
-    # repository, and the build the writer makes is for the next plan to name.
+    gate.accept_plan(task)
     # A question asked while planning is answered by the plan you accepted; left where it is, the
     # first turn of implementation would end on it as a new question.
     put_question_away(task)
@@ -227,8 +229,6 @@ class Ports:
     notify: Callable[..., None] = lambda task_id, message, kind="": notify(task_id, message)
     # Fetches the work into your repository and updates the review copy; returns the copy's path.
     prepare_review: Callable[[], Path | None] = lambda: None
-    # Where to keep the verify commands a plan brings for a new project.
-    save_verify: Callable[[list[str], bool], None] = lambda commands, no_build: None
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None
@@ -458,7 +458,7 @@ class Supervisor:
             return None
         try:
             plan = parse_plan(self.task.plan_path.read_text())
-            gate.check_plan(plan, self.project_verify)
+            gate.check_plan(plan)
         except (OSError, PlanError, gate.GateError):
             return None
         return plan
@@ -470,13 +470,7 @@ class Supervisor:
             # Through the plan checkpoint, so the event log reads the same as when you accept.
             self.task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
             try:
-                accept_plan(
-                    self.task,
-                    "plan accepted automatically",
-                    self.project_verify,
-                    self.ports.save_verify,
-                    self.project_no_build,
-                )
+                accept_plan(self.task, "plan accepted automatically")
                 print(f"[{time.strftime('%H:%M:%S')}] plan accepted automatically", flush=True)
             except gate.GateError as e:
                 self.ports.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
@@ -493,7 +487,7 @@ class Supervisor:
         draft = self.task.meta / "handoff" / "plan-draft.md"
         try:
             plan = parse_plan(draft.read_text())
-            gate.check_plan(plan, self.project_verify)
+            gate.check_plan(plan)
         except (OSError, PlanError, gate.GateError) as e:
             return None, str(e)
         return plan, ""
@@ -546,12 +540,19 @@ class Supervisor:
         prompt = next_prompt(self.task, IMPLEMENT_PROMPT)
         if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
+        if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
+            prompt = PROPOSE_PREFIX + prompt
         if self._turn(st, prompt) is None:
             return
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
             return
         self.task.transition(State.VERIFY)
+
+    def _asks_for_command(self) -> bool:
+        """The project has no command, and neither it nor the task says there is nothing to build."""
+        nothing = self.project_no_build or proposal.nothing_to_build(self.task)
+        return not self.project_verify and not nothing
 
     def _verify(self, st: TaskState) -> None:
         result = self.ports.run_gate(self.task)

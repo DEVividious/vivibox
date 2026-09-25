@@ -116,6 +116,7 @@ def make_supervisor(
             p.java,
             timeout=p.verify_timeout or config.verify_timeout,
             no_build=p.no_build,
+            no_command=actions.missing_command(t, p),
         )
 
     ports = supervisor.Ports(
@@ -123,7 +124,6 @@ def make_supervisor(
         risky_changes=lambda: Approvals(task.meta, task.repo, now().risky_extra).changes(),
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
-        save_verify=lambda commands, no_build: actions.save_verify(now(), commands, no_build),
         session_started=agent_window,
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,

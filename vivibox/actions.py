@@ -31,6 +31,7 @@ from . import (
     manual,
     opencode,
     prepare,
+    proposal,
     providers,
     repo,
     reviewing,
@@ -79,7 +80,7 @@ from .demo import (  # noqa: F401
     use_instruction,
     write_instruction,
 )
-from .plan import KINDS, PlanError, parse_plan
+from .plan import KINDS
 from .pod import Mount, Pod, PodError
 from .projects import (  # noqa: F401
     GROUNDWORK,
@@ -605,13 +606,7 @@ def accept_plan(task: Task, project: Project) -> None:
         raise gate.GateError(f"{task.id} has no plan waiting for you")
     if st.awaiting_plan:
         raise gate.GateError(f"{task.id} has no plan yet; bring yours in with: vivibox plan import {task.id}")
-    supervisor.accept_plan(
-        task,
-        "plan accepted",
-        project.verify,
-        lambda commands, no_build: save_verify(project, commands, no_build),
-        project.no_build,
-    )
+    supervisor.accept_plan(task, "plan accepted")
 
 
 def plan_prompt(task: Task, cli: bool = False) -> str:
@@ -655,24 +650,21 @@ def save_verify(project: Project, commands: list[str], no_build: bool = False) -
 
 
 def verify_commands(task: Task, project: Project) -> list[str]:
-    """The project's commands, or the ones the plan you accepted brought for a new project."""
-    accepted = task.meta / gate.ACCEPTED_PLAN
-    if project.verify or project.no_build or not accepted.exists():
+    """The project's commands; for a project with none, the one this task's writer proposed."""
+    if project.verify or not proposal.asked(task, project):
         return project.verify
-    return parse_plan(accepted.read_text()).verify
+    return [found] if (found := proposal.proposed(task)) else []
 
 
-def verify_from_plan(task: Task, project: Project) -> str:
-    """What accepting this plan settles for the project from now on, for you to see first: the
-    command it sets, in backticks. "" when the project has that settled already, or the plan sets
-    nothing; verify = false in a plan holds for the one task and settles nothing."""
-    if project.verify or project.no_build:
+def missing_command(task: Task, project: Project) -> str:
+    """Why this task has no command to be verified with when it should: its writer proposed none.
+    "" when it has one, or has nothing to build."""
+    if verify_commands(task, project) or not proposal.asked(task, project):
         return ""
-    try:
-        plan = parse_plan(task.plan_path.read_text())
-    except PlanError:
-        return ""
-    return ", ".join(f"`{c}`" for c in plan.verify)
+    return (
+        f"the writer proposed no command in /task/handoff/{proposal.PROPOSAL} and {project.name} has "
+        "none; set one under e on the project"
+    )
 
 
 def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:

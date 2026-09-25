@@ -228,11 +228,8 @@ def cmd_accept(args: argparse.Namespace) -> int:
         else:
             print(f"{task.id} closed; it changed risky files: vivibox risky {task.id}")
     elif st.state is State.CHECKPOINT_PLAN:
-        settles = actions.verify_from_plan(task, project)
         actions.accept_plan(task, project)
         print(f"Plan accepted; {task.id} moves on to implementation.")
-        if settles:
-            print(f"Verification of {project.name} from now on: {settles}")
         carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
         done = actions.finish(task, project, branch_only=args.branch)
@@ -343,6 +340,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     result = gate.run_gate(
         task, pod, commands, project.risky_extra, project.java,
         timeout=project.verify_timeout or config.verify_timeout, no_build=project.no_build,
+        no_command=actions.missing_command(task, project),
     )  # fmt: skip
     for command, source in result.build_files:
         print(f"NOTE  {source} names `{command}`, and the project runs nothing yet: set verify in its file")

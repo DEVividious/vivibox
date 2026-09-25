@@ -78,12 +78,14 @@ vivibox init
 vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the repository too
 ```
 
-Either way vivibox reads the build files and proposes a project. For a repository that has no code
-yet, leave the command empty: the first plan you accept that names a command sets how the project
-is built and tested, and vivibox keeps it for the next task; accepting that plan shows you the
-command first. A plan with `verify = false` runs no build in its task and settles nothing: a new
-product's first task has nothing to build until the writer makes it, and when the task leaves
-build files behind, its panel names the command they call for and where to pick it. A repository
+Either way vivibox reads the build files and proposes a project. The verification is a command you
+type, or left empty: the next task's writer, who builds the project while it works, then writes
+the command it ran to `/task/handoff/verify-proposal.md`, and the task is verified with that. A
+writer that proposes none leaves the task waiting for you with "verification could not run", no
+attempt spent. Once you have accepted the work, the proposal is a decision of its own: the same
+field as under `e`, the command in it, Enter keeps it for the project, Escape leaves it empty. A
+plan with `verify = false` runs no build in its task and settles nothing: when the task leaves
+build files behind, its panel names the command they call for. A repository
 with nothing to build or test ever (documents, configuration) says so with `verify = false` in the
 project file: the verification then checks the criteria and the commits only. In the view, `e` on
 the project's row shows the command as it is, one line that Enter saves, and a box that leaves it

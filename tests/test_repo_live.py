@@ -97,12 +97,11 @@ def test_review_fetches_the_agents_commit(task, capsys):
 
 def test_verify_runs_in_the_agent_container(task, capsys):
     from vivibox import gate
-    from vivibox.config import load_project
     from vivibox.task import Task
 
     t = Task(task["repo"].parent)
     t.plan_path.write_text(t.plan_path.read_text().replace(gate.PLACEHOLDER, "hello.txt exists"))
-    gate.accept_plan(t, load_project("repocheck").verify)
+    gate.accept_plan(t)
     checklist = t.meta / "handoff" / gate.CRITERIA_FILE
     checklist.write_text(checklist.read_text().replace("- [ ]", "- [x]"))
     assert main(["verify", "repocheck-1"]) == 0

@@ -85,7 +85,7 @@ def test_accept_plan_rejects_template_placeholder(tmp_path):
 
 
 def test_criteria_come_from_the_accepted_plan(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     assert gate.missing_criteria(task) == ["endpoint returns 200", "error path is tested"]
     tick(task, "endpoint returns 200")
     assert gate.missing_criteria(task) == ["error path is tested"]
@@ -120,7 +120,7 @@ def test_commit_rules(task, message, problem):
 
 
 def test_gate_passes_when_everything_is_done(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     commit(task.repo, "Add health endpoint")
     pod = FakePod()
@@ -135,7 +135,7 @@ def test_gate_passes_when_everything_is_done(task):
 
 
 def test_gate_stops_at_first_failing_command_and_writes_feedback(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     result = gate.run_gate(task, FakePod(fail={"lint"}), ["lint", "test"], [])
     assert [c.command for c in result.commands] == ["lint"]
     assert not result.passed
@@ -147,7 +147,7 @@ def test_gate_stops_at_first_failing_command_and_writes_feedback(task):
 
 
 def test_risky_changes_go_to_approval_not_back_to_the_agent(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "pom.xml").write_text("<project/>")
     git(task.repo, "add", "pom.xml")
@@ -158,7 +158,7 @@ def test_risky_changes_go_to_approval_not_back_to_the_agent(task):
 
 
 def test_gate_refuses_tampered_git_files(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     subprocess.run(["git", "config", "core.fsmonitor", "x"], cwd=task.repo, check=True)
     with pytest.raises(repo.RepoError):
         gate.run_gate(task, FakePod(), ["true"], [])
@@ -198,7 +198,7 @@ def test_existing_hidden_characters_are_not_reported(tmp_path):
 
 
 def test_hidden_characters_fail_the_gate(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "Main.java").write_text("x‮y\n")
     result = gate.run_gate(task, FakePod(), ["true"], [])
@@ -214,7 +214,7 @@ def test_gate_before_plan_acceptance_is_a_baseline_check(task):
 
 
 def test_uncommitted_changes_fail_the_gate(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "Forgotten.java").write_text("class Forgotten {}\n")
     pod = FakePod()
@@ -224,12 +224,22 @@ def test_uncommitted_changes_fail_the_gate(task):
     assert "Not committed" in gate.feedback(result)
 
 
-def test_a_plan_must_say_how_to_test_a_project_that_has_no_command(task):
-    with pytest.raises(gate.GateError, match="builds and tests it"):
-        gate.accept_plan(task)
-    text = task.plan_path.read_text().replace("+++\n", '+++\nverify = ["npm test"]\n', 1)
-    task.plan_path.write_text(text)
-    assert gate.accept_plan(task).verify == ["npm test"]
+def test_a_plan_is_accepted_without_a_word_on_how_the_project_is_built(task):
+    """The writer proposes that, once it has built the project, for you to accept on its own."""
+    assert gate.accept_plan(task).verify == []
+
+
+def test_a_task_its_writer_proposed_no_command_for_waits_for_you_without_a_build(task):
+    """The project has no command and the writer wrote none: nothing to verify with. That is no
+    fault of the code, so no attempt is spent, and the log says why nothing ran."""
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, [], [], no_command="the writer proposed no command")
+    assert pod.commands == [] and result.environment == "the writer proposed no command"
+    assert "the writer proposed no command" in result.log.read_text()
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
 
 
 def test_a_criterion_the_agent_wrapped_still_counts_as_ticked(tmp_path):
@@ -243,7 +253,7 @@ def test_a_criterion_the_agent_wrapped_still_counts_as_ticked(tmp_path):
     )
     plan = PLAN.replace("- [ ] error path is tested", f"- [ ] {long_one}")
     t = create_task(tmp_path / "tasks", "demo", "goal", plan)
-    gate.accept_plan(t, ["true"])
+    gate.accept_plan(t)
     (t.meta / "handoff" / gate.CRITERIA_FILE).write_text(
         "# Acceptance criteria\n\n"
         "- [x] endpoint returns 200\n"
@@ -255,7 +265,7 @@ def test_a_criterion_the_agent_wrapped_still_counts_as_ticked(tmp_path):
 
 
 def test_the_log_hides_the_values_of_passed_variables(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     pod = FakePod(output="GET https://repo/?token=s3cr3t-token 401\n", passed=["s3cr3t-token"])
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     log = result.log.read_text()
@@ -276,7 +286,7 @@ def test_the_log_hides_the_values_of_passed_variables(task):
     ],
 )
 def test_a_switched_off_test_fails_the_gate(task, path, text):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / path).parent.mkdir(parents=True, exist_ok=True)
     (task.repo / path).write_text(f"{text}\n")
@@ -309,7 +319,7 @@ def implementing(task):
 
 
 def test_the_feedback_quotes_what_the_build_said(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     noise = "\n".join(f"[INFO] Downloading artifact {i}" for i in range(200))
     said = "[ERROR] ShopIT.pays_out:42 expected 81.2 but was 0\n[INFO] BUILD FAILURE"
     result = gate.run_gate(
@@ -322,7 +332,7 @@ def test_the_feedback_quotes_what_the_build_said(task):
 
 
 def test_a_reworded_criterion_is_named_in_the_feedback(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     path = task.meta / "handoff" / gate.CRITERIA_FILE
     path.write_text(path.read_text().replace("- [ ] endpoint returns 200", "- [x] endpoint returns HTTP 200"))
     tick(task, "error path is tested")
@@ -341,7 +351,7 @@ def test_the_feedback_lists_at_most_twenty_uncommitted_files(task):
 
 
 def test_nothing_new_committed_reuses_the_last_build(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     implementing(task)
     pod = FakePod(fail={"npm test"}, output="[ERROR] expected 1 but was 2")
     first = gate.run_gate(task, pod, ["npm ci", "npm test"], [])
@@ -358,7 +368,7 @@ def test_nothing_new_committed_reuses_the_last_build(task):
 
 
 def test_a_new_commit_or_a_changed_command_builds_again(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     implementing(task)
     pod = FakePod(fail={"npm test"})
     gate.run_gate(task, pod, ["npm test"], [])
@@ -374,7 +384,7 @@ def test_a_new_commit_or_a_changed_command_builds_again(task):
 
 
 def test_verifying_again_after_you_fixed_something_builds_again(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     implementing(task)
     pod = FakePod(fail={"npm test"})
     gate.run_gate(task, pod, ["npm test"], [])
@@ -386,7 +396,7 @@ def test_verifying_again_after_you_fixed_something_builds_again(task):
 
 @pytest.mark.parametrize("leave", ["uncommitted", "switched off"])
 def test_what_makes_a_build_meaningless_is_reported_before_it_is_built(task, leave):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     if leave == "uncommitted":
         (task.repo / "Forgotten.java").write_text("class Forgotten {}\n")
@@ -433,7 +443,7 @@ def test_a_log_excerpt_keeps_what_went_wrong():
     ],
 )
 def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     commit(task.repo, "Add health endpoint")
     result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
@@ -443,7 +453,7 @@ def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):
 
 
 def test_a_failing_test_is_a_failure_of_the_code(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     said = (
         "[ERROR] ShopIT.pays_out:42 expected 81.2 but was 0\n"
         "AssertionError: connection was refused by the stub\n[INFO] BUILD FAILURE"
@@ -465,7 +475,7 @@ class SlowPod(FakePod):
 
 
 def test_a_command_that_does_not_finish_in_time_is_a_failure_of_the_environment(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     result = gate.run_gate(task, SlowPod(), ["npm test"], [], timeout=5)
     assert [c.ok for c in result.commands] == [False] and "5 s" in result.environment
     log = result.log.read_text()
@@ -503,7 +513,7 @@ class WatchedPod(FakePod):
 def test_the_log_is_written_while_the_command_runs(task):
     """What there is to look at during a verification is its log, so a line the build printed
     is in the log before the build is over, not once the command has returned."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     pod = WatchedPod(task)
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     assert pod.seen_mid_command.endswith("$ mvn -B verify\n[INFO] Compiling 12 files\n"), pod.seen_mid_command
@@ -518,7 +528,7 @@ def test_the_log_is_written_while_the_command_runs(task):
 def test_the_log_is_there_before_the_gate_container_comes_up(task):
     """Preparing the fresh clone is the first thing that takes time; a log that only appears
     after it would leave nothing to look at for as long."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     pod = WatchedPod(task)
     gate.run_gate(task, pod, ["true"], [])
     assert pod.seen_at_gate_up is not None and pod.seen_at_gate_up.startswith("# fresh clone of commit ")
@@ -527,7 +537,7 @@ def test_the_log_is_there_before_the_gate_container_comes_up(task):
 def test_a_failure_of_the_environment_is_not_reused(task):
     """You replied that Docker works again and the agent, rightly, committed nothing: the build
     must run, not repeat the failure."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     implementing(task)
     pod = FakePod(fail={"npm test"}, output="Cannot connect to the Docker daemon")
     gate.run_gate(task, pod, ["npm test"], [])
@@ -539,7 +549,7 @@ def test_a_failure_of_the_environment_is_not_reused(task):
 
 
 def test_a_test_file_changed_without_red_evidence_fails_the_gate(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "test").mkdir()
     (task.repo / "test" / "math.test.js").write_text('test("adds", () => expect(1).toBe(1));\n')
@@ -554,7 +564,7 @@ def test_a_test_file_changed_without_red_evidence_fails_the_gate(task):
 
 
 def test_red_evidence_is_asked_only_for_test_files(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "src.js").write_text("x\n")
     commit(task.repo, "Add code")
@@ -596,7 +606,7 @@ def test_removed_tests_are_counted_for_you(tmp_path):
     t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
     Approvals(t.meta, t.repo).approve()
-    gate.accept_plan(t, ["true"])
+    gate.accept_plan(t)
     tick(t, "endpoint returns 200", "error path is tested")
     (t.repo / "test" / "math.test.js").write_text('import { test } from "vitest";\ntest("adds", () => {});\n')
     git(t.repo, "commit", "-qam", "Drop a test")
@@ -613,7 +623,7 @@ def test_removed_tests_are_counted_for_you(tmp_path):
 def test_a_certificate_failure_deep_in_a_maven_log_is_of_the_environment(task):
     """Maven ends a failed build with its reactor summary, dozens of lines below the test that
     could not pull an image: the words that say why are nowhere near the end."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     x509 = (
         "Caused by: com.github.dockerjava.api.exception.DockerClientException: Could not pull image:"
         " tls: failed to verify certificate: x509: certificate signed by unknown authority"
@@ -628,7 +638,7 @@ def test_a_certificate_failure_deep_in_a_maven_log_is_of_the_environment(task):
 def test_a_refused_connection_far_from_the_end_is_still_of_the_code(task):
     """A test that checks a refusal on purpose prints the same words; only as the build's last
     words do they mean the environment."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     lines = "\n".join(f"[INFO] line {i}" for i in range(80))
     said = f"Error: connect ECONNREFUSED 127.0.0.1:1\n{lines}\n[INFO] BUILD FAILURE"
     result = gate.run_gate(task, FakePod(fail={"npm test"}, output=said), ["npm test"], [])
@@ -639,7 +649,7 @@ def test_your_reply_builds_the_same_commit_again(task):
     """The verification failed on something the gate took for the code, the agent asked, and you
     replied that it is fixed. The agent, rightly, committed nothing: the build must run, not
     repeat the old failure to the agent, which would only ask again."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     implementing(task)
     pod = FakePod(fail={"npm test"}, output="[ERROR] expected 1 but was 2")
     gate.run_gate(task, pod, ["npm test"], [])
@@ -654,16 +664,14 @@ def test_a_plan_may_say_there_is_nothing_to_build(task):
     from vivibox.plan import parse_plan
 
     criteria = "\n\n## Acceptance criteria\n\n- [ ] x\n"
-    gate.check_plan(parse_plan(f"+++\nverify = false\n+++{criteria}"), [])
-    with pytest.raises(gate.GateError, match="verify = false"):
-        gate.check_plan(parse_plan(f"+++\n+++{criteria}"), [])
-    gate.check_plan(parse_plan(f"+++\n+++{criteria}"), [], project_no_build=True)
+    assert parse_plan(f"+++\nverify = false\n+++{criteria}").no_build
+    gate.check_plan(parse_plan(f"+++\nverify = false\n+++{criteria}"))
 
 
 def test_a_project_with_no_build_is_verified_without_the_pod(task):
     """The criteria, the commits and the rest are checked as ever; there is just nothing to run,
     so no clone and no container for it."""
-    gate.accept_plan(task, [], project_no_build=True)
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     commit(task.repo, "Write the handbook")
     pod = FakePod()
@@ -678,7 +686,7 @@ def test_a_build_file_the_task_adds_is_pointed_out_when_the_project_runs_nothing
     """A new product's first plan finds an empty repository and says verify = false; the writer
     then makes the build. The gate runs none of it, and says so, for you to pick the command."""
     task.plan_path.write_text(task.plan_path.read_text().replace("+++\n", "+++\nverify = false\n", 1))
-    gate.accept_plan(task, [])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "package.json").write_text('{"scripts": {"test": "node --test"}}')
     commit(task.repo, "Scaffold the app")
@@ -699,7 +707,7 @@ def test_a_node_projects_dependencies_are_installed_on_the_fresh_clone_first(tas
     """A plan says verify = ["npm test"]; on a fresh clone there is no node_modules, and every
     tool it needs is "not found". The gate installs first, the way the lockfile says, as a
     command of its own in the log; a command that installs already is left alone."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     (task.repo / "package.json").write_text('{"scripts": {"test": "tsc --noEmit && vitest run"}}')
     (task.repo / "package-lock.json").write_text("{}")
@@ -724,7 +732,7 @@ def test_a_node_projects_dependencies_are_installed_on_the_fresh_clone_first(tas
 
 
 def test_a_project_without_package_json_gets_no_install(task):
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
     commit(task.repo, "Add code")
     pod = FakePod()
@@ -751,7 +759,7 @@ def test_the_feedback_is_markdown_that_keeps_its_list_out_of_the_code_block():
 def test_the_log_ends_with_a_summary_that_names_the_first_trouble_line(task):
     """A pager opened at the end lands on the summary: each command's outcome and time, and for
     the one that failed the line of its first trouble, a jump away."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     pod = FakePod(fail={"npm test"}, output="ok\nFAIL src/a.test.js\n  Error: boom\n")
     result = gate.run_gate(task, pod, ["npm run lint", "npm test", "npm run e2e"], [])
     text = result.log.read_text()
@@ -769,7 +777,7 @@ def test_an_image_testcontainers_cannot_get_deep_in_a_maven_log_is_of_the_enviro
     """Testcontainers could not pull the image a test needs (a registry the network does not reach,
     a rate limit): nothing the agent commits changes that, and in a many-module build the line is
     far from the end. Seen on a work laptop with quay.io/minio/minio."""
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     pulled = (
         "Caused by: org.testcontainers.containers.ContainerFetchException: Can't get Docker image:"
         " RemoteDockerImage(imageName=quay.io/minio/minio:latest, imagePullPolicy=DefaultPullPolicy())"

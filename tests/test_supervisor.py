@@ -479,7 +479,7 @@ def test_accepting_the_plan_puts_an_old_question_away(task):
     task.transition(State.CHECKPOINT_PLAN)
     handoff = task.meta / "handoff"
     (handoff / supervisor.QUESTION).write_text("Which database?")
-    supervisor.accept_plan(task, "plan accepted", ["true"])
+    supervisor.accept_plan(task, "plan accepted")
     assert not (handoff / supervisor.QUESTION).exists(), "or it would block the first turn as a new question"
     assert any(p.name.startswith("question-answered-") for p in handoff.iterdir())
 
@@ -568,16 +568,27 @@ def test_verifying_again_puts_the_agents_question_away(task):
     assert list((task.meta / "handoff").glob("question-answered-*.md")), "kept for the record"
 
 
-def test_a_plan_without_a_build_settles_nothing_for_the_project(task):
-    """verify = false holds for this task: a new product's first plan finds an empty repository,
-    and what the writer leaves behind is for the next plan to build."""
-    saved = []
-    task.plan_path.write_text("+++\nverify = false\n+++\n\n## Acceptance criteria\n\n- [ ] x\n")
-    task.transition(State.CHECKPOINT_PLAN)
-    keep = lambda commands, no_build: saved.append((commands, no_build))  # noqa: E731
-    supervisor.accept_plan(task, "plan accepted", save_verify=keep)
-    assert saved == [], "nothing kept: the project still has no way of being verified"
-    assert task.read_state().state is State.IMPLEMENT
+def test_the_writer_is_asked_for_the_command_only_when_the_project_has_none(task):
+    """It builds the project while it works, so it knows what builds and tests it; not when the
+    project has a command, nor when the task was made with nothing to build."""
+
+    def first_implement_prompt(project_verify, plan_header=""):
+        t = create_task(
+            task.root.parent / f"t{len(project_verify)}{len(plan_header)}", "demo", "Goal", TEMPLATE
+        )
+        t.plan_path.write_text(DRAFT.replace("+++\n", f"+++\n{plan_header}\n", 1))
+        t.transition(State.CHECKPOINT_PLAN)
+        supervisor.accept_plan(t, "plan accepted")
+        harness = FakeHarness(t)
+        ports = supervisor.Ports(run_gate=lambda _: gate_result(), risky_changes=lambda: [])
+        supervisor.Supervisor(t, harness, ports, max_iterations=2, project_verify=project_verify).step()
+        return harness.prompts[0]
+
+    asked = first_implement_prompt([])
+    assert supervisor.PROPOSE_PREFIX + supervisor.IMPLEMENT_PROMPT in asked
+    assert "/task/handoff/verify-proposal.md" in asked
+    assert supervisor.PROPOSE_PREFIX not in first_implement_prompt(["npm test"])
+    assert supervisor.PROPOSE_PREFIX not in first_implement_prompt([], "verify = false")
 
 
 def test_a_turn_leaves_its_running_cost_with_the_task_while_it_runs(task):

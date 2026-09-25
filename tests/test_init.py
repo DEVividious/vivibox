@@ -105,22 +105,28 @@ def test_init_can_start_a_repository_from_scratch(env, tmp_path):
     assert "Initial commit" in log
 
 
-def test_a_project_from_scratch_gets_its_command_from_the_first_plan(env, tmp_path):
-    from vivibox import actions, gate
+def test_a_project_with_no_command_is_verified_with_what_its_writer_proposed(env, tmp_path):
+    """A plan that names a command sets nothing: the writer, who builds the project while it
+    works, proposes one; the task is verified with it, and the project keeps nothing yet."""
+    from vivibox import actions, gate, proposal
     from vivibox.config import load_project
     from vivibox.states import State
 
     fresh = tmp_path / "clicker"
     actions.setup_project(fresh, "clicker", [], create=True)
-    assert load_project("clicker").verify == [], "nothing to run until the plan says what"
-
     task = actions.create("clicker", "A click counter page")
     plan = '+++\nverify = ["npm test"]\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it counts clicks\n'
     task.plan_path.write_text(plan)
     task.transition(State.CHECKPOINT_PLAN)
     actions.accept_plan(task, load_project("clicker"))
-    assert load_project("clicker").verify == ["npm test"], "the project keeps it for its next task"
-    assert actions.verify_commands(task, load_project("clicker")) == ["npm test"]
+    project = load_project("clicker")
+    assert project.verify == [], "the plan settles nothing for the project"
+    assert actions.verify_commands(task, project) == []
+    assert "proposed no command" in actions.missing_command(task, project)
+    (task.meta / "handoff" / proposal.PROPOSAL).write_text("```\n$ npm ci && npm test\n```\n")
+    assert actions.verify_commands(task, project) == ["npm ci && npm test"]
+    assert actions.missing_command(task, project) == ""
+    assert load_project("clicker").verify == [], "kept only once you accept it"
     assert (task.meta / gate.ACCEPTED_PLAN).exists()
 
 
@@ -148,11 +154,11 @@ def test_a_plan_without_a_build_holds_for_that_task_only(env, tmp_path):
     plan = "+++\nverify = false\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it is written\n"
     task.plan_path.write_text(plan)
     task.transition(State.CHECKPOINT_PLAN)
-    assert actions.verify_from_plan(task, load_project("notes")) == "", "it settles nothing to confirm"
     actions.accept_plan(task, load_project("notes"))
     project = load_project("notes")
     assert not project.no_build and project.verify == [], "the next plan decides for the project"
     assert actions.verify_commands(task, project) == [], "this task runs no build"
+    assert actions.missing_command(task, project) == "", "and nobody is asked for a command"
     assert "verify = false" not in (config_dir() / "projects" / "notes.toml").read_text()
 
 

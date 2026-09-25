@@ -478,12 +478,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
                     self.go_on(task, "Plan accepted")
                 self.reload()
 
-            # What the first plan settles for the project, said once, where you decide.
-            if settles := actions.verify_from_plan(task, project):
-                asked = f"The plan sets how {project.name} is verified from now on: {settles}."
-                self.push_screen(Confirm(f"{asked}\n\nAccept the plan?", "Accept"), accept)
-            else:
-                accept()
+            accept()
         else:
             self.push_screen(
                 Confirm(f"Accept the work of {task.id} into your checkout and remove the task?", "Accept"),

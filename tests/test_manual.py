@@ -222,11 +222,13 @@ def test_a_verify_line_is_taken_as_the_command(task):
     assert parse_plan(task.plan_path.read_text()).verify == ["npm test"]
 
 
-def test_the_chat_is_asked_for_a_command_only_when_the_project_has_none(task, tmp_path):
+def test_the_chat_is_never_asked_for_a_command(task, tmp_path):
     """A planning chat asked where red.md goes and which command to use: vivibox decides both,
-    and the prompt says so rather than leaving the chat to guess or ask."""
+    and the prompt says so rather than leaving the chat to guess or ask. With no command yet, the
+    agent that carries the plan out proposes one."""
     web, cli = manual.prompts(task, tmp_path)
-    assert "Verify:" in web and "Verify:" in cli
+    assert "Verify:" not in web and "Verify:" not in cli
+    assert "the command the agent proposes" in web
     web, _ = manual.prompts(task, tmp_path, ["npm ci", "npm test"])
     assert "Verify:" not in web and "`npm ci && npm test`" in web and "red.md" in web
     assert "+++" not in web, "the header is vivibox's; the chat is not asked for it"

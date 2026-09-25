@@ -709,7 +709,7 @@ def test_status_lists_finished_tasks_under_the_live_ones(env, capsys):
     assert "done" in lines[2] and "Old one" in lines[2] and "$0.10" in lines[2]
 
 
-def test_accepting_the_first_plan_says_how_the_project_is_verified_from_now_on(env, capsys):
+def test_accepting_a_plan_that_names_a_command_settles_nothing_for_the_project(env, capsys):
     from vivibox import actions
     from vivibox.states import State
 
@@ -720,7 +720,10 @@ def test_accepting_the_first_plan_says_how_the_project_is_verified_from_now_on(e
     task.transition(State.CHECKPOINT_PLAN)
     assert main(["accept", task.id]) == 0
     out = capsys.readouterr().out
-    assert "Plan accepted" in out and "npm test" in out and "from now on" in out
+    assert "Plan accepted" in out and "from now on" not in out
+    from vivibox.config import load_project
+
+    assert load_project("clicker").verify == [], "the writer proposes it, for you to accept after the work"
 
 
 @pytest.mark.real_start

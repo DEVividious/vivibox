@@ -51,27 +51,21 @@ class GateError(Exception):
     pass
 
 
-def check_plan(plan: Plan, project_verify: list[str] | tuple = (), project_no_build: bool = False) -> None:
-    """What keeps a plan from being accepted, as a GateError; the planner is told the same."""
+def check_plan(plan: Plan) -> None:
+    """What keeps a plan from being accepted, as a GateError; the planner is told the same. How the
+    project is built is not the plan's to say: its writer proposes that, for you to accept."""
     if any(c.text == PLACEHOLDER for c in plan.criteria):
         raise GateError("the plan still carries the template's placeholder criterion; replace it")
     if not plan.criteria:
         # Name the heading: the criteria are usually written, just not where this looks for them.
         raise GateError("no '- [ ]' criteria under an 'Acceptance criteria' heading in the plan")
-    if not (project_verify or project_no_build or plan.verify or plan.no_build):
-        raise GateError(
-            "this project has no command that builds and tests it yet; the plan must set one, "
-            'for example verify = ["npm test"] in its header, or verify = false when there is '
-            "nothing to build or test"
-        )
 
 
-def accept_plan(task: Task, project_verify: list[str] | tuple = (), project_no_build: bool = False) -> Plan:
-    """Freezes the plan you accepted and gives the agent a checklist of its criteria to tick.
-    A project with no verify command of its own (a new one) gets it from the plan."""
+def accept_plan(task: Task) -> Plan:
+    """Freezes the plan you accepted and gives the agent a checklist of its criteria to tick."""
     text = task.plan_path.read_text()
     plan = parse_plan(text)
-    check_plan(plan, project_verify, project_no_build)
+    check_plan(plan)
     (task.meta / ACCEPTED_PLAN).write_text(text)
     checklist = "".join(f"- [ ] {c.text}\n" for c in plan.criteria)
     (task.meta / "handoff" / CRITERIA_FILE).write_text(
@@ -487,9 +481,11 @@ def run_gate(
     java: str = "",
     timeout: float = 0,
     no_build: bool = False,
+    no_command: str = "",
 ) -> GateResult:
     """timeout: seconds one command may take; 0 for no limit. no_build: the project has said it
-    has nothing to build, so build files it gains are not pointed out."""
+    has nothing to build, so build files it gains are not pointed out. no_command: why there is no
+    command when there should be one; the task then waits for you, with no attempt spent."""
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
@@ -506,6 +502,9 @@ def run_gate(
         result.build_skipped = "a test is switched off, so the suite would prove nothing"
     if result.build_skipped:
         log.write_text(f"# commit {head}: the build was not run: {result.build_skipped}\n")
+    elif not commands and no_command:
+        log.write_text(f"# commit {head}: the build was not run: {no_command}\n")
+        result.environment = no_command
     elif not commands:
         # A project with no build: the criteria and the commits are checked, and no clone or
         # container is made for nothing to run.

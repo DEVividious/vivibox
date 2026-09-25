@@ -32,7 +32,7 @@ Reset view.
 def at_review(tasks_dir):
     task = create_task(tasks_dir, "demo", "Reset view", PLAN)
     task.transition(State.CHECKPOINT_PLAN)
-    supervisor.accept_plan(task, "plan accepted", ["true"])
+    supervisor.accept_plan(task, "plan accepted")
     task.transition(State.VERIFY)
     task.transition(State.CHECKPOINT_FINAL)
     return task

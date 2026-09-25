@@ -124,7 +124,12 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
     monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
     ran = []
-    monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands))
+    missing = []
+    monkeypatch.setattr(
+        gate,
+        "run_gate",
+        lambda t, pod, commands, *a, **k: ran.append(commands) or missing.append(k["no_command"]),
+    )
 
     class Pod:
         def prepare_running(self):
@@ -144,7 +149,11 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
     )
     assert sup.ports.preparing(), "the preparation set since"
     sup.ports.run_gate(task)
-    assert ran == [["npm test"]]
+    assert ran == [["npm test"]] and missing == [""]
+    path.write_text(path.read_text().replace('verify = ["npm test"]', "verify = []"))
+    sup.ports.run_gate(task)
+    assert ran[-1] == [] and "proposed no command" in missing[-1], "the writer's, and it wrote none"
+    path.write_text(path.read_text().replace("verify = []", 'verify = ["npm test"]'))
     task.set_paused(True)  # a step with nothing to do still reads the file
     assert not sup.step()
     assert sup.project_verify == ["npm test"] and sup.prepared == ["npm ci"]

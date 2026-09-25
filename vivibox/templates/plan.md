@@ -3,9 +3,8 @@
 kind = "{{kind}}"
 # One line naming what this task does, for your task list; the agent fills it in when it plans.
 summary = ""
-# How the gate builds and tests this project, when the project has no command yet (a new project);
-# false when there is nothing to build or test in this task. A CI definition (.github/workflows,
-# .gitlab-ci.yml, Jenkinsfile) says how the project is built, when there is one.
+# false when this task has nothing to build or test, set when it is made. How the project is
+# built is not the plan's to say: the writer proposes it.
 verify = []
 +++
 

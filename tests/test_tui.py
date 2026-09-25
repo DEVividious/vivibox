@@ -166,8 +166,9 @@ def plan_with(task, header):
     task.transition(State.CHECKPOINT_PLAN)
 
 
-def test_the_first_plan_shows_the_verification_it_sets_before_you_accept(env):
-    """The command is kept for the project's next tasks, so it is said once, where you decide."""
+def test_a_plan_that_names_a_command_settles_nothing_for_the_project(env):
+    """How the project is built is the writer's to propose and yours to accept on its own, after
+    the work: accepting the plan asks nothing about it and keeps nothing."""
     from vivibox.config import load_project
 
     fresh_project(env)
@@ -180,14 +181,11 @@ def test_the_first_plan_shows_the_verification_it_sets_before_you_accept(env):
         await pilot.pause()
         await pilot.press("a")
         await pilot.pause()
-        assert isinstance(app.screen, widgets.Confirm)
-        assert "npm ci && npm test" in app.screen.question and "clicker" in app.screen.question
-        await pilot.press("enter")
-        await pilot.pause()
+        assert not isinstance(app.screen, widgets.Confirm)
         assert task.read_state().state is State.IMPLEMENT
 
     run(scenario)
-    assert load_project("clicker").verify == ["npm ci && npm test"]
+    assert load_project("clicker").verify == []
 
 
 def test_a_plan_without_a_build_is_accepted_without_a_word_about_the_project(env):
@@ -329,7 +327,7 @@ def test_accepting_the_work_offers_a_commit(env):
     ):
         subprocess.run(["git", *args], cwd=task.repo, check=True, capture_output=True)
     at_plan_checkpoint(task)
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     for state in (State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
         task.transition(state)
 
@@ -709,7 +707,7 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
 def test_criteria_are_ticked_off_in_view_while_the_agent_works(env):
     task = new_task()
     at_plan_checkpoint(task)
-    gate.accept_plan(task, load_project("demo").verify)
+    gate.accept_plan(task)
     st = task.transition(State.IMPLEMENT)
     assert "\u2610 it works" in detail(task, st, 3), "an open criterion"
     assert "no verification yet" in detail(task, st, 3).lower()
@@ -721,7 +719,7 @@ def test_criteria_are_ticked_off_in_view_while_the_agent_works(env):
 def test_a_failed_gate_shows_what_the_build_said(env):
     task = new_task()
     at_plan_checkpoint(task)
-    gate.accept_plan(task, load_project("demo").verify)
+    gate.accept_plan(task)
     st = task.transition(State.IMPLEMENT)
     handoff = task.meta / "handoff"
     (handoff / "verify-feedback.md").write_text("# Verification failed\n- Command failed: `mvn -B verify`\n")
@@ -743,7 +741,7 @@ def test_the_build_files_a_task_leaves_behind_are_pointed_out(env):
     says which file names the command and where to pick it."""
     task = new_task()
     at_plan_checkpoint(task)
-    gate.accept_plan(task, load_project("demo").verify)
+    gate.accept_plan(task)
     st = task.transition(State.IMPLEMENT)
     task.event("gate", passed=True, build_files=[["npm ci && npm test", "package.json"]])
     shown = detail(task, st, 3)
@@ -1194,7 +1192,7 @@ def test_criteria_ticked_during_a_turn_show_up(env, monkeypatch):
     the whole of an implementation, which is exactly when it has something to say."""
     task = new_task("Waiting")
     at_plan_checkpoint(task)
-    gate.accept_plan(task, ["true"])
+    gate.accept_plan(task)
     task.transition(State.IMPLEMENT)
     monkeypatch.setattr(tui, "pod_views", lambda ids: {})
     checklist = task.meta / "handoff" / gate.CRITERIA_FILE
@@ -2530,7 +2528,7 @@ def test_the_panel_shows_times_on_your_clock(env, monkeypatch):
 
     task = new_task()
     at_plan_checkpoint(task)
-    gate.accept_plan(task, load_project("demo").verify)
+    gate.accept_plan(task)
     st = task.transition(State.IMPLEMENT)
     task.event("gate", passed=False)
     stamp = task.events()[-1]["ts"]
@@ -2605,7 +2603,7 @@ def test_a_deleted_task_in_the_history_reads_as_words():
 def implementing(goal="Goal"):
     task = new_task(goal)
     at_plan_checkpoint(task)
-    gate.accept_plan(task, load_project("demo").verify)
+    gate.accept_plan(task)
     task.transition(State.IMPLEMENT)
     task.event("started", model="m")
     return task

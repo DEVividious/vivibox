@@ -310,6 +310,14 @@ def test_a_stopped_sidecar_with_other_mounts_is_made_again(pod):
     assert pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")
 
 
+def test_the_pod_says_whether_its_agent_container_runs(pod):
+    assert not pod.running()
+    pod.runner.states[pod.agent] = "exited"
+    assert not pod.running()
+    pod.runner.states[pod.agent] = "running"
+    assert pod.running()
+
+
 def test_up_requires_repo(tmp_path):
     with pytest.raises(PodError, match="does not exist"):
         Pod("shop-1", tmp_path / "missing", "img", runner=FakeDocker()).up()

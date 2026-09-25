@@ -94,12 +94,19 @@ def start_box(task_id: str) -> None:
     task.event("started", model="you")
 
 
+def box_pod_running(task_id: str) -> bool:
+    return actions.task_pod(task_id).running()
+
+
 def box_shell_command(task_id: str) -> list[str]:
     """A shell in the box, in the clone, through tmux like the agent's window: Ctrl-q leaves,
-    the box stays."""
+    the box stays. A pod Docker took down comes up first: a shell into a stopped container ends
+    at once, and tmux says only "no sessions"."""
     task, _ = actions.load(task_id)
     if task.read_state().paused:
         raise PodError(f"{task_id} is stopped; start it again with: vivibox start {task_id}")
+    if not box_pod_running(task_id):
+        start_box(task_id)
     pod = actions.task_pod(task_id)
     actions.agent_view(task, ["docker", "exec", "-it", "-w", str(task.repo), pod.agent, "bash", "-l"])
     return [*actions.TMUX, "attach-session", "-t", actions.tmux_session(task_id)]

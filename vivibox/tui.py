@@ -33,6 +33,7 @@ from .dialogs import (
     Reply,
     ReplyWithCriteria,
 )
+from .keys_box import BoxKeys
 from .keys_demo import DemoKeys
 from .keys_models import ModelKeys
 from .keys_plan import PlanKeys
@@ -60,6 +61,7 @@ from .panel import (
     save_collapsed,
     save_view,
     ticked_at,
+    watchable,
 )
 from .settings import Settings
 from .states import State
@@ -68,7 +70,7 @@ from .task import Task, TaskState, list_tasks
 from .widgets import Confirm
 
 
-class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App):
+class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App):
     TITLE = "vivibox"
     # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
     ENABLE_COMMAND_PALETTE = False
@@ -256,6 +258,10 @@ class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, Wo
                 ticked_at(task),
                 # The turn under way writes its running cost at every step; the same reason.
                 live_at(task),
+                # What the row says and whether w has something to show move without the state:
+                # a session recorded after the start, a preparation that ends, a log opened.
+                self.views[st.id].status,
+                watchable(task, st, st.id in self.running),
             )
             for task, st in self.pairs
         )
@@ -482,48 +488,6 @@ class Vivibox(TaskTable, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, Wo
                 Confirm(f"Accept the work of {task.id} into your checkout and remove the task?", "Accept"),
                 lambda yes: yes and self.finish(task.id),
             )
-
-    @work(thread=True)
-    def close_box(self, task_id: str) -> None:
-        self.call_from_thread(self.busy_with, task_id, "closing the box…")
-        try:
-            task, project = actions.load(task_id)
-            where = actions.close_box(task, project)
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        else:
-            said = f"{task_id} closed; " + (
-                f"its work is ready for your review in {where}" if where else "it changed risky files"
-            )
-            self.call_from_thread(self.notify, said, timeout=8)
-        self.call_from_thread(self.busy_with, task_id, "")
-
-    def action_enter_box(self) -> None:
-        task, _ = self.selected()
-        try:
-            command = actions.box_shell_command(task.id)
-        except Exception as e:
-            self.fail(e)
-            return
-        with self.suspend():
-            subprocess.run(command)
-        self.reload()
-
-    def action_new_box(self) -> None:
-        name = self.selected_project()
-        self.notify(f"Opening a box in {name}…")
-        self.open_box(name)
-
-    @work(thread=True)
-    def open_box(self, name: str) -> None:
-        try:
-            task = actions.open_box(name)
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        else:
-            self.call_from_thread(self.notify, f"{task.id} is open; w enters it, a brings its work back.")
-            self.call_from_thread(self.select, task.id)
-        self.call_from_thread(self.reload)
 
     def select(self, task_id: str) -> None:
         """Puts the cursor on a row the next refresh will list: what you just made is what you

@@ -991,6 +991,27 @@ def test_the_footer_shows_your_keys_while_the_terminal_has_no_focus(env):
     run(scenario)
 
 
+def test_w_appears_once_the_agent_has_a_conversation_without_leaving_the_view(env, monkeypatch):
+    """A session is recorded after the start, without moving the task's state: the list looked the
+    same, so the footer was never drawn again and w came only with a new vivibox."""
+    task = implementing("Watched")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        assert "watch" not in keys(app), "no conversation to look at yet"
+        assert "enter_box" not in keys(app), "w is never a shell in a task's pod, only in a box"
+        task.set_session("writer", "ses_1")
+        app.reload()
+        await pilot.pause()
+        await pilot.pause()
+        assert "watch" in keys(app)
+
+    run(scenario)
+
+
 def test_the_list_says_when_you_asked_for_a_task_not_only_when_it_last_moved(env):
     task = new_task("Waiting")
 

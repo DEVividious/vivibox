@@ -509,6 +509,10 @@ class Pod:
 
     # --- lifecycle --------------------------------------------------------------------------
 
+    def running(self) -> bool:
+        """Whether the agent's container runs: Docker may have taken it down under a task."""
+        return self._state(self.agent) == "running"
+
     def up(self, timeout: float = 90) -> None:
         """Starts whatever is not running. Idempotent."""
         if not self.repo.is_dir():

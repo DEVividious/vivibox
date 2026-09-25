@@ -515,6 +515,8 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
         "verify_again": st.state is State.CHECKPOINT_BLOCKED,
         "show_log": True,  # the timeline, at least
         "watch": watchable(task, st, running),
+        # w's other binding: without this, a task whose w was off opened a shell in its pod.
+        "enter_box": False,
         # Not again while one of them is under way. A task that stopped on a failure still has
         # its supervisor, and what it needs is a start, not a stop followed by a start.
         "start_task": st.state is not State.DONE and not at_work and not busy,

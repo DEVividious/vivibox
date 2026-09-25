@@ -41,6 +41,7 @@ from . import (
 from .box import (  # noqa: F401
     BOX_COMMIT,
     BOX_GOAL,
+    box_pod_running,
     box_providers,
     box_shell_command,
     close_box,

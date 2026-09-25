@@ -171,3 +171,32 @@ def test_a_box_gets_every_provider_you_have_a_key_for(env, monkeypatch):
     providers.set_enabled(providers.PROVIDER, "anthropic", False)
     task = actions.open_box("demo")
     assert actions.box_providers(task) == ["deepseek"], "what is on; the switched-off one stays out"
+
+
+class DownPod:
+    """A box's pod that Docker took down under it: a restart of Docker or of the machine."""
+
+    agent = "vivibox-demo-1-agent"
+
+    def __init__(self, running=False):
+        self.up = running
+
+    def running(self):
+        return self.up
+
+
+def test_entering_a_box_whose_pod_went_down_brings_the_pod_up_first(env, monkeypatch):
+    """The shell is a docker exec in the pod's container: into a stopped one it ends at once, and
+    tmux said only "no sessions"."""
+    task = actions.open_box("demo")
+    actions.boxes_started.clear()
+    pod = DownPod()
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: pod)
+    monkeypatch.setattr(box, "start_box", lambda task_id: actions.boxes_started.append(task_id))
+    monkeypatch.setattr(actions, "agent_view", lambda task, command: None)
+    assert not box.box_pod_running(task.id)
+    box.box_shell_command(task.id)
+    assert actions.boxes_started == [task.id]
+    pod.up = True
+    box.box_shell_command(task.id)
+    assert actions.boxes_started == [task.id], "a pod that runs is left as it is"

@@ -90,18 +90,70 @@ NODE_VERIFY = {
 }
 # The install half of each: what a fresh clone needs before any of its scripts can run.
 NODE_INSTALL = {manager: command.split(" && ")[0] for manager, command in NODE_VERIFY.items()}
-# A command that installs the dependencies itself, in any of the package managers' words.
-INSTALLS = re.compile(r"\b(npm (ci|install|i)\b|yarn install\b|pnpm (install|i)\b|corepack\b)|^\s*yarn\s*$")
+# A command that installs the dependencies itself, in any of the package managers' words, also
+# in a folder of its own (`yarn --cwd apps/web install`, `npm --prefix apps/web ci`, `pnpm -C …`).
+INSTALLS = re.compile(
+    r"\b(?:npm|yarn|pnpm)\b(?:\s+(?:--cwd|--prefix|--dir|-C)(?:=|\s+)\S+)?\s+(?:ci|install|i)\b"
+    r"|\bcorepack\b|^\s*yarn\s*$"
+)
+# What `npm ci`, Yarn and pnpm install from; without one, an install on a fresh clone fails.
+LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+# Where a monorepo keeps its packages when its package.json does not say (`workspaces`).
+USUAL_WORKSPACES = ("apps/*", "packages/*")
 
 
 def with_dependencies(repo: Path, commands: list[str]) -> list[str]:
     """The commands with the project's dependencies installed first, for a Node project whose
-    commands do not do that themselves: on a fresh clone every tool they need is "not found"."""
-    if not commands or not (repo / "package.json").exists():
+    commands do not do that themselves: on a fresh clone every tool they need is "not found". A
+    package.json without a lockfile (a monorepo's root) gets none: `npm ci` there fails every
+    time, and the command that runs the app's tests installs in the app's folder itself."""
+    if not commands or not (repo / "package.json").exists() or not has_lockfile(repo):
         return commands
     if any(INSTALLS.search(command) for command in commands):
         return commands
     return [NODE_INSTALL[package_manager(repo)], *commands]
+
+
+def has_lockfile(folder: Path) -> bool:
+    return any((folder / name).exists() for name in LOCKFILES)
+
+
+def _scripts(folder: Path) -> dict | None:
+    """The scripts of a package.json, None when it has none at all (nothing said)."""
+    try:
+        return json.loads(_read(folder / "package.json")).get("scripts")
+    except (ValueError, AttributeError):
+        return None
+
+
+def _workspaces(repo: Path) -> list[Path]:
+    """The packages of a monorepo, each with a package.json: the globs `workspaces` names in the
+    root package.json, else the usual folders."""
+    try:
+        named = json.loads(_read(repo / "package.json")).get("workspaces")
+    except (ValueError, AttributeError):
+        named = None
+    if isinstance(named, dict):
+        named = named.get("packages")
+    globs = named if isinstance(named, list) else USUAL_WORKSPACES
+    found = []
+    for pattern in globs:
+        found += sorted(p for p in repo.glob(str(pattern)) if (p / "package.json").is_file())
+    return found
+
+
+def node_candidates(repo: Path) -> list[tuple[str, str]]:
+    """One per package of a monorepo with a test script, run from its folder; the root's own
+    command when it has a test script, or when it says nothing and has no such packages."""
+    packages = [p for p in _workspaces(repo) if "test" in (_scripts(p) or {})]
+    scripts = _scripts(repo)
+    found = []
+    if (scripts is None and not packages) or "test" in (scripts or {}):
+        found.append((NODE_VERIFY[package_manager(repo)], "package.json"))
+    for package in packages:
+        folder = package.relative_to(repo).as_posix()
+        found.append((f"cd {folder} && {NODE_VERIFY[package_manager(package)]}", f"{folder}/package.json"))
+    return found[:MAX_CI]
 
 
 def package_manager(repo: Path) -> str:
@@ -139,7 +191,7 @@ def candidates(repo: Path) -> list[tuple[str, str]]:
     elif (repo / "pom.xml").exists():
         found.append(("mvn -B verify", "pom.xml"))
     if (repo / "package.json").exists():
-        found.append((NODE_VERIFY[package_manager(repo)], "package.json"))
+        found += node_candidates(repo)
     return found + [c for c in ci_commands(repo) if c[0] not in {command for command, _ in found}]
 
 

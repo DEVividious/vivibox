@@ -285,3 +285,42 @@ def test_a_narrowed_proposal_is_not_run_but_named_for_the_gate(env, tmp_path):
     assert actions.verify_commands(task, project) == ["./mvnw -B verify"]
     own = dataclasses.replace(project, verify=["./mvnw -Dtest=Smoke test"])
     assert actions.narrowed_proposal(task, own) == "", "the project's own choice"
+@pytest.mark.parametrize(
+    "command",
+    [
+        "yarn --cwd apps/web install --frozen-lockfile && yarn --cwd apps/web test",
+        "npm --prefix apps/web ci && npm --prefix apps/web test",
+        "cd apps/web && yarn install && yarn test",
+        "pnpm -C apps/web install --frozen-lockfile && pnpm -C apps/web test",
+    ],
+)
+def test_a_command_that_installs_in_a_folder_is_left_alone(tmp_path, command):
+    """`--cwd`, `--prefix`, `-C` or a `cd` before the install: the command installs itself, and
+    an `npm ci` put in front of it would fail on a root without a lockfile."""
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "package-lock.json").write_text("{}")
+    assert init.with_dependencies(tmp_path, [command]) == [command]
+
+
+def test_a_monorepo_offers_its_apps_commands_not_the_roots(tmp_path):
+    """The root package.json of a monorepo has no test script and no lockfile; the apps under
+    it, or the workspaces it names, have both. The candidates are theirs, from their folder."""
+    (tmp_path / "package.json").write_text('{"private": true, "scripts": {"prepare": "cd apps/web && yarn"}}')
+    web = tmp_path / "apps" / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text('{"scripts": {"test": "vitest"}}')
+    (web / "yarn.lock").write_text("")
+    docs = tmp_path / "apps" / "docs"
+    docs.mkdir()
+    (docs / "package.json").write_text('{"scripts": {"build": "next build"}}')
+    assert init.candidates(tmp_path) == [
+        ("cd apps/web && yarn install --frozen-lockfile && yarn test", "apps/web/package.json"),
+    ], "one per app with a test script; the root, which tests nothing, is not offered"
+    (tmp_path / "package.json").write_text('{"workspaces": ["packages/*"]}')
+    core = tmp_path / "packages" / "core"
+    core.mkdir(parents=True)
+    (core / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    (core / "pnpm-lock.yaml").write_text("")
+    assert init.candidates(tmp_path) == [
+        ("cd packages/core && pnpm install --frozen-lockfile && pnpm test", "packages/core/package.json"),
+    ], "the workspaces it names win over the usual folders"

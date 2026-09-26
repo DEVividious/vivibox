@@ -747,8 +747,8 @@ def verify_again(task: Task) -> None:
         raise gate.GateError(
             f"{task.id} is not blocked on a failed verification; only that is verified again"
         )
-    supervisor.put_question_away(task)
-    task.transition(State.VERIFY, reason="verify again")
+    kept = supervisor.put_question_away(task)
+    task.transition(State.VERIFY, reason="verify again", **({"question": kept.name} if kept else {}))
 
 
 def risky_target(task: Task) -> State:

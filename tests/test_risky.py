@@ -123,3 +123,12 @@ def test_test_configuration_is_risky_too(path):
     """What decides which tests run, and how, switches tests off without any of the words the gate
     looks for in added lines; a change to it is for you to see before the work counts."""
     assert any(matches(path, p) for p in DEFAULT_PATTERNS), path
+
+
+def test_lockfiles_are_risky(repo):
+    """A lockfile decides what `npm ci` installs on your host, and an agent that adds one where
+    the project has none (a Yarn monorepo's root) changes how the project is verified."""
+    for name in ("web/package-lock.json", "web/yarn.lock", "web/pnpm-lock.yaml", "npm-shrinkwrap.json"):
+        write(repo, name, "")
+    found = set(scan(repo))
+    assert {"web/package-lock.json", "web/yarn.lock", "web/pnpm-lock.yaml", "npm-shrinkwrap.json"} <= found

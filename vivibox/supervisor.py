@@ -196,11 +196,26 @@ def question(task: Task) -> str | None:
     return text or None
 
 
-def put_question_away(task: Task) -> None:
-    """A question that is answered or overtaken: kept for the record, out of the supervisor's way."""
+def put_question_away(task: Task) -> Path | None:
+    """A question that is answered or overtaken: kept for the record, out of the supervisor's way.
+    Returns where it went, for a verification that may find it unanswered after all."""
     path = task.meta / "handoff" / QUESTION
-    if path.exists():
-        path.rename(path.with_name(f"question-answered-{time.strftime('%Y%m%d-%H%M%S')}.md"))
+    if not path.exists():
+        return None
+    kept = path.with_name(f"question-answered-{time.strftime('%Y%m%d-%H%M%S')}.md")
+    path.rename(kept)
+    return kept
+
+
+def held_question(task: Task) -> Path | None:
+    """The question you answered with g, as this verification recorded it when it started: back
+    to the agent's place if the build fails again, because nothing answered it yet."""
+    entered = next((e for e in reversed(task.events()) if e["type"] == "state"), None)
+    if not entered or entered["data"].get("current") != str(State.VERIFY):
+        return None
+    name = entered["data"].get("question")
+    kept = task.meta / "handoff" / name if name else None
+    return kept if kept and kept.exists() else None
 
 
 # Errors that pass with time: the provider busy or rate limiting, the network gone for a moment.
@@ -569,6 +584,18 @@ class Supervisor:
                 self.task.id,
                 f"verification could not run: {result.environment[:150]}; fix it, then press g"
                 f" (vivibox verify-again {self.task.id})",
+            )
+        elif not result.passed and (kept := held_question(self.task)):
+            # You pressed g on the agent's question and the build failed again: the question is
+            # still unanswered, so it comes back to you; a feedback turn would have the agent work
+            # around what it asked about. No attempt is spent.
+            kept.rename(kept.with_name(QUESTION))
+            asked = (question(self.task) or "").splitlines()[0][:150]
+            self.task.transition(
+                State.CHECKPOINT_BLOCKED, reason="verification still failing; the agent's question stands"
+            )
+            self.ports.notify(
+                self.task.id, f"verification still failing; the agent's question stands: {asked}"
             )
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)

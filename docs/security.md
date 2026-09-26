@@ -9,7 +9,7 @@ on your machine until you have approved it.
 - **Nothing the agent writes runs on your host without your approval.** The task clone's
   `.git/config` and hooks are read-only for the agent, so git on your host, run by you or by your
   IDE, cannot execute agent-written commands. Files that run code on IDE import or in your
-  shell (`pom.xml`, `.mvn/`, Gradle files, `package.json`, `.idea/`, `.vscode/`, `.envrc`, git
+  shell (`pom.xml`, `.mvn/`, Gradle files, `package.json` and lockfiles, `.idea/`, `.vscode/`, `.envrc`, git
   hooks, nested repositories…) need your approval whenever they change. So does test
   configuration (`vitest.config.*`, `jest.config.*`, `pytest.ini`, `pyproject.toml`, `conftest.py`…),
   which can leave tests out without any of the words the gate looks for.

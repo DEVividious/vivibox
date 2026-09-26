@@ -865,3 +865,30 @@ def test_your_reply_at_the_end_gives_the_reviewer_its_rounds_back(task, tmp_path
     task.set_reviews(2)
     task.reset_iterations()
     assert task.read_state().reviews == 0
+
+
+def test_the_agents_question_stands_when_the_verification_fails_again_after_g(task):
+    """You pressed g on a question about the environment, and the build failed for the same
+    reason: the question is still unanswered, so it comes back to you, with no turn of the
+    agent (a feedback turn would have it work around what it asked about) and no attempt spent."""
+    from vivibox import actions, supervisor
+
+    harness = FakeHarness(task)
+    blocked(task, harness)
+    asked = "The gate installs with `npm ci`, but this repository has no lockfile. Which way?\n"
+    (task.meta / "handoff" / "question.md").write_text(asked)
+    before = task.read_state().iteration
+    actions.verify_again(task)
+    sup, notes = make(task, harness, results=[gate_result(False)])
+    sup.step()  # verify: fails again
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_BLOCKED and st.iteration == before
+    assert supervisor.question(task) == asked.strip(), "back where the view and the next turn read it"
+    assert harness.prompts == [], "no turn of the agent"
+    assert "question stands" in notes[-1] and "npm ci" in notes[-1]
+    assert (task.meta / "handoff" / "verify-feedback.md").exists(), "why it failed is there for l"
+    actions.verify_again(task)
+    sup, notes = make(task, harness, results=[gate_result(True)])
+    sup.step()  # verify: passes once you fixed it
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+    assert supervisor.question(task) is None, "answered by the build running"

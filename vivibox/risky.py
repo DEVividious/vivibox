@@ -27,6 +27,9 @@ DEFAULT_PATTERNS = (
     "buildSrc/**",
     # Node
     "package.json", ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs",
+    # Lockfiles decide what an install puts on your host, and one added where the project had
+    # none changes how it is verified.
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
     # IDEs
     ".idea/**", ".run/**", ".vscode/**",
     # Git hooks and hook managers

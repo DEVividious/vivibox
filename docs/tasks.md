@@ -96,7 +96,9 @@ When a verification fails on something outside the code (no Docker, no network, 
 full disk, or a command past `verify_timeout`), the task shows `verification could not run` and
 waits for you without spending one of the agent's attempts: fix it and press `g`. When the
 verification does not recognise such a cause but the agent does and asks about it, `g` is the
-answer too: the build runs again, without a turn of the agent.
+answer too: the build runs again, without a turn of the agent. When it fails again, the agent's
+question stands and the task waits for you once more, no turn and no attempt spent: a feedback
+turn would have the agent work around what it asked about instead of waiting for your answer.
 
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a

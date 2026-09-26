@@ -11,7 +11,8 @@
   `docs/prompt-guidelines.md`. `tests/test_prompt_rules.py` enforces its mechanical rules.
 - Every change in behaviour gets a test that fails first for its own assertion.
 - `vivibox/actions.py` is the facade the view and the command line call; what it does lives in
-  `roles.py`, `projects.py`, `demo.py`, `box.py` and `review.py`, which reach the task primitives
+  `roles.py`, `projects.py`, `demo.py`, `box.py`, `review.py` and `window.py` (the agent's
+  window under `w`), which reach the task primitives
   through `actions`. The view is the app in `tui.py` with its keys mixed in by group from `keys_*.py`
   and the list from `table.py`. The supervisor in `supervisor.py` drives a task through its states
   on a tool that keeps the `harness.Harness` contract, through what `supervisor.Ports` hands it;

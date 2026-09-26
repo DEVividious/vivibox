@@ -2960,6 +2960,40 @@ def test_w_looks_at_the_verification_once_its_log_is_there(env, monkeypatch):
     run(scenario)
 
 
+def test_w_while_verifying_offers_the_verification_first_and_the_agents_after(env, monkeypatch):
+    """Pressing w during a verification went straight to its log; the writer's and the planner's
+    conversations were out of reach until it ended. Now it asks, the verification first."""
+    task = implementing()
+    task.set_session("writer", "ses_w")
+    task.set_session("planner", "ses_p")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    watched = []
+    monkeypatch.setattr(tui.Vivibox, "watch", lambda self, task_id, role="": watched.append((task_id, role)))
+    task.transition(State.VERIFY)
+    (task.meta / "log" / "verify-1-120000.log").write_text("# fresh clone\n")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        assert isinstance(app.screen, dialogs.ChooseSession)
+        options = app.screen.query_one(OptionList)
+        shown = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert shown[0].startswith("verification") and "running" in shown[0]
+        assert shown[1].startswith("writer") and shown[2].startswith("planner")
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert watched[-1] == (task.id, "writer")
+        await pilot.press("w")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert watched[-1] == (task.id, actions.VERIFICATION)
+
+    run(scenario)
+
+
 def test_w_asks_which_conversation_when_the_task_has_two(env, monkeypatch):
     """The planner's conversation stays readable once the writer is at work; with both there, you
     pick. With one, w opens it without asking."""

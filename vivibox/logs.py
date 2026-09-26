@@ -5,8 +5,11 @@ entry the cursor is on, followed as it is written."""
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 from textual import on
 from textual.app import ComposeResult
@@ -20,6 +23,10 @@ from .states import State
 from .task import Task, TaskState
 
 COMMAND = re.compile(r"^\$ (.+)$", re.MULTILINE)
+VERIFICATION_OVER = (
+    "The verification finished: nothing runs in it any more. Its log and the earlier ones stay"
+    " under l; Ctrl-q leaves."
+)
 EXIT = re.compile(r"^\[exit (-?\d+)( after ([^\]]+))?\]$", re.MULTILINE)
 ITERATION = re.compile(r"^verify-(\d+)-")
 
@@ -127,3 +134,26 @@ class ChooseLog(ModalScreen["list[str] | None"]):
 
     def key_escape(self) -> None:
         self.dismiss(None)
+
+
+def follow_verification(
+    task: Task, log: Path, out: IO[str], sleep: Callable[[float], None] = time.sleep
+) -> None:
+    """The verification's log as it is written, in the window w opens, and a word once the task
+    has left verifying: a window on a log nobody writes to looked like a verification that
+    hangs. The summary is written before the state changes, so it is shown before the word."""
+    shown = 0
+
+    def more() -> None:
+        nonlocal shown
+        text = log.read_text()
+        if len(text) > shown:
+            out.write(text[shown:])
+            out.flush()
+            shown = len(text)
+
+    while task.read_state().state is State.VERIFY:
+        more()
+        sleep(1)
+    more()
+    print(f"\n{VERIFICATION_OVER}", file=out, flush=True)

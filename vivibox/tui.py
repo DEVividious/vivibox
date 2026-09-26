@@ -620,17 +620,24 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         self.reload()
 
     def action_watch(self) -> None:
-        """The agent, or the verification as it runs. A task with two conversations, the planner's
-        done and the writer's under way, asks which; the verification's log is the writer's turn."""
+        """The agent, or the verification as it runs. With more than one thing to look at, it
+        asks: the verification's log first while it runs, then the conversations, the one at
+        work before the finished ones."""
         task, st = self.selected()
-        sessions = [] if st.box or st.state is State.VERIFY else actions.watchable_sessions(task, st)
-        if len(sessions) < 2:
+        sessions = [] if st.box else actions.watchable_sessions(task, st)
+        if st.state is State.VERIFY:
+            rows = [(actions.VERIFICATION, "running now; its log as it is written")]
+            handed = "its conversation; the work it handed in is being verified"
+            rows += [(role, handed) for role, _ in sessions]
+        else:
+            at_work = "planner" if st.state is State.PLAN else "writer"
+            rows = [
+                (role, "at work now" if role == at_work else "finished; its conversation")
+                for role, _ in sessions
+            ]
+        if len(rows) < 2:
             self.watch(task.id)
             return
-        at_work = "planner" if st.state is State.PLAN else "writer"
-        rows = [
-            (role, "at work now" if role == at_work else "finished; its conversation") for role, _ in sessions
-        ]
         self.push_screen(ChooseSession(rows), lambda role: role and self.watch(task.id, role))
 
     def watch(self, task_id: str, role: str = "") -> None:

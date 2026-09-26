@@ -35,7 +35,7 @@ First public version.
 - Providers, models and MCP servers from an imported `opencode.json`; keys in vivibox's own
   store; a retired model is not offered, and a start on one says so.
 - The view: tasks waiting for you first, projects by name, a task's row kept in place; `w`
-  watches or talks to the agent, or the verification as it runs, from inside tmux too; `l`
+  watches or talks to the agent, or the verification as it runs, asking which when there is a choice and saying when the verification is over, from inside tmux too; `l`
   reads the timeline, a verification log or the supervisor's; `f` pages the diff; `S` stops by
   force; `h` and `H` show accepted and deleted tasks; the header counts what waits and works,
   today's cost, and says when Docker is down or a provider has no key; `?` names every key and
@@ -51,5 +51,6 @@ First public version.
 
 ### Internal
 
+- The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
 - `CHANGELOG.md` is written as the work is done: a change under `vivibox/` changes it in the
   same commit, and `tests/test_structure.py` fails on a branch that does not.

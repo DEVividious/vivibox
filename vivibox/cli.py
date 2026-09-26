@@ -231,6 +231,18 @@ def cmd_attach(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_follow_verification(args: argparse.Namespace) -> int:
+    """What the window under w runs while a verification does: not for your own shell."""
+    import signal
+
+    from . import logs
+
+    task, _ = actions.load(args.task)
+    logs.follow_verification(task, Path(args.log), sys.stdout)
+    signal.pause()  # the window stays on the word until Ctrl-q, which takes it down
+    return 0
+
+
 def cmd_accept(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     st = task.read_state()
@@ -668,6 +680,10 @@ def parser() -> argparse.ArgumentParser:
                 "--force", action="store_true",
                 help="kill the supervisor and the containers instead of waiting; the turn under way is lost",
             )  # fmt: skip
+    follow = sub.add_parser("follow-verification", help=argparse.SUPPRESS)  # what w's window runs
+    follow.add_argument("task")
+    follow.add_argument("log")
+    follow.set_defaults(func=cmd_follow_verification)
     accept = sub.add_parser(
         "accept",
         help="accept the plan, the writer's verification command, or the finished work: it lands in"

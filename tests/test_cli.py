@@ -1,4 +1,5 @@
 import os
+import shlex
 
 import pytest
 
@@ -27,6 +28,36 @@ def test_version_names_the_installed_build(capsys):
     assert left.value.code == 0
     assert capsys.readouterr().out.strip() == f"vivibox {version.current()}"
     assert version.current() and version.current() != "0+unknown"
+
+
+def test_the_window_on_a_verification_says_when_it_is_over(env):
+    """A window on a log nobody writes to any more looked like a verification that hangs: once
+    the task leaves verifying, the log's last lines are shown and a word says it is over, and
+    where the logs stay."""
+    import io
+
+    from test_tui import implementing
+
+    from vivibox import logs
+    from vivibox.states import State
+
+    task = implementing()
+    task.transition(State.VERIFY)
+    log = task.meta / "log" / "verify-1-120000.log"
+    log.write_text("# fresh clone of commit abc\n\n$ npm test\n")
+    out = io.StringIO()
+
+    def a_second(seconds: float) -> None:
+        # The verification ends while the window is up: the summary, then the state.
+        if task.read_state().state is State.VERIFY:
+            log.write_text(log.read_text() + "[exit 0 after 3 s]\n# summary\n# npm test: ok after 3 s\n")
+            task.transition(State.CHECKPOINT_FINAL)
+
+    logs.follow_verification(task, log, out, sleep=a_second)
+    shown = out.getvalue()
+    assert "$ npm test" in shown and "# npm test: ok after 3 s" in shown, "the log, to its summary"
+    assert shown.rstrip().endswith(logs.VERIFICATION_OVER)
+    assert "nothing runs in it" in logs.VERIFICATION_OVER and "`l`" not in logs.VERIFICATION_OVER
 
 
 def test_unknown_project_fails_cleanly(env, capsys):
@@ -249,7 +280,7 @@ def test_a_forced_stop_kills_the_supervisor_and_the_pod_and_says_so(env, capsys,
     (task.meta / actions.SUPERVISOR_PID).write_text("4242")
     monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
     signals, killed, removed = [], [], []
-    monkeypatch.setattr(actions.os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append((pid, sig)))
     monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
     monkeypatch.setattr(
         actions, "task_pod", lambda task_id: type("P", (), {"kill": lambda self: killed.append(task_id)})()
@@ -371,14 +402,14 @@ def test_the_agent_view_follows_the_agent_from_the_planner_to_the_writer(monkeyp
 
     planner = ["opencode", "attach", "--session", "ses_planner"]
     writer = ["opencode", "attach", "--session", "ses_writer"]
-    calls = fake_tmux(monkeypatch, shows=actions.shlex.join(planner))
+    calls = fake_tmux(monkeypatch, shows=shlex.join(planner))
     monkeypatch.setattr(actions, "tmux_has", lambda target: True)
     actions.agent_view(SimpleNamespace(id="demo-1"), writer)
     kinds = [c[0] for c in calls]
     assert kinds.index("kill-session") < kinds.index("new-session"), "the planner's window makes way"
     created = next(c for c in calls if c[0] == "new-session")
-    assert created[-1] == actions.shlex.join(writer)
-    assert ["set-environment", "-t", "vivibox-demo-1", actions.SHOWS, actions.shlex.join(writer)] in calls
+    assert created[-1] == shlex.join(writer)
+    assert ["set-environment", "-t", "vivibox-demo-1", actions.SHOWS, shlex.join(writer)] in calls
 
 
 def test_w_shows_the_verification_while_it_runs_and_the_agent_otherwise(env, monkeypatch):
@@ -402,7 +433,10 @@ def test_w_shows_the_verification_while_it_runs_and_the_agent_otherwise(env, mon
     log.write_text("# fresh clone of commit abc\n\n$ npm test\n")
     assert actions.attach_command(task.id)[-2:] == ["-t", f"vivibox-{task.id}"]
     created = next(c for c in calls if c[0] == "new-session")
-    assert created[-1] == actions.shlex.join([*actions.VERIFICATION_VIEW, str(log)])
+    assert created[-1] == shlex.join(["vivibox", "follow-verification", task.id, str(log)])
+    # The agents' conversations stay a name away while the verification runs.
+    task.set_session("planner", "ses_planner")
+    assert "ses_planner" in actions.view_command(task, task.read_state(), "planner")[-1]
     calls.clear()
     task.transition(State.IMPLEMENT)
     actions.attach_command(task.id)

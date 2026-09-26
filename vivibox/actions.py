@@ -8,19 +8,16 @@ import contextlib
 import fcntl
 import os
 import re
-import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import time
 from collections.abc import Callable
-from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
 from . import (
-    brief,
     claudecode,
     code,
     context,
@@ -148,7 +145,27 @@ from .roles import (  # noqa: F401
     writer,
 )
 from .states import State
-from .task import Task, TaskState, create_task, find_task
+from .task import Task, create_task, find_task
+from .window import (  # noqa: F401
+    LEAVE_BINDING,
+    LEAVE_KEY,
+    SHOWS,
+    TMUX,
+    VERIFICATION,
+    agent_view,
+    attach_command,
+    close_agent_view,
+    leave_key,
+    outside_tmux,
+    shown,
+    tmux,
+    tmux_has,
+    tmux_session,
+    verification_log,
+    view_command,
+    watchable_session,
+    watchable_sessions,
+)
 
 SUPERVISOR_PID = "supervisor.pid"
 
@@ -185,138 +202,6 @@ def task_pod(task_id: str) -> Pod:
         gate_dir=task.root / "gate", review_dir=task.root / ".review",
         network_pool=load_config().network_pool,
     )  # fmt: skip
-
-
-# The agent view runs on a tmux server of its own: your own tmux sessions and key bindings stay as they
-# are, and Ctrl-q leaves the view from anywhere in it.
-TMUX = ["tmux", "-L", "vivibox", "-f", "/dev/null"]
-LEAVE_KEY = "C-q"
-# '-E true' replaces the detaching client with a command that does nothing. Without it tmux
-# prints "[detached (from session ...)]" after leaving its own screen, so the line lands on the
-# normal one and is still in your scrollback once vivibox closes.
-LEAVE_BINDING = ["bind-key", "-n", LEAVE_KEY, "detach-client", "-E", "true"]
-
-
-def outside_tmux() -> dict[str, str]:
-    """The environment for a window on the agent: without $TMUX, which a view started inside tmux
-    carries and which makes tmux refuse to attach, though the agent's server is another one."""
-    return {k: v for k, v in os.environ.items() if k != "TMUX"}
-
-
-def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run([*TMUX, *args], capture_output=True, text=True, check=check)
-
-
-def tmux_session(task_id: str) -> str:
-    return f"vivibox-{task_id}"
-
-
-def tmux_has(target: str) -> bool:
-    return tmux("has-session", "-t", target).returncode == 0
-
-
-def leave_key() -> None:
-    tmux(*LEAVE_BINDING)
-
-
-def close_agent_view(task_id: str) -> None:
-    """The window on the agent, gone once you leave it: an `opencode attach` nobody looks at
-    renders its interface at a third of a core; w opens it again in a second."""
-    tmux("kill-session", "-t", tmux_session(task_id))
-
-
-# The command a task's tmux session shows, kept in the session's environment: the planner's
-# conversation and the writer's are two, and a window opened during planning must not go on
-# showing the planner once the writer is at work.
-SHOWS = "VIVIBOX_SHOWS"
-
-
-def shown(session: str) -> str:
-    out = tmux("show-environment", "-t", session, SHOWS).stdout or ""
-    return out.partition("=")[2].strip() if out.startswith(f"{SHOWS}=") else ""
-
-
-def agent_view(task: Task, command: list[str]) -> None:
-    """A tmux session showing the agent, opened when missing or when it shows another conversation;
-    closing it never touches the agent."""
-    session = tmux_session(task.id)
-    wanted = shlex.join(command)
-    if tmux_has(session):
-        if shown(session) == wanted:
-            # The keys live on the server, which outlives any one session, so a server still
-            # running from before carries an older binding. Setting it again is cheap.
-            leave_key()
-            return
-        tmux("kill-session", "-t", session)
-    tmux("new-session", "-d", "-s", session, "-n", "agent", wanted, check=True)
-    tmux("set-environment", "-t", session, SHOWS, wanted)
-    for option in (
-        LEAVE_BINDING,
-        ["set-option", "-g", "status-right", " Ctrl-q: back to vivibox "],
-        ["set-option", "-g", "status-left", f" {task.id} "],
-        ["set-option", "-g", "status-left-length", "40"],
-    ):
-        tmux(*option)
-
-
-def watchable_sessions(task: Task, st: TaskState | None = None) -> list[tuple[str, str]]:
-    """The opencode conversations there are to look at, as (role, session): only opencode has a
-    window to attach to, and a claude-code turn is watched through its log. The writer's first,
-    then the planner's, which stays readable once the writer is at work."""
-    st = st or task.read_state()
-    return [
-        (role, st.sessions[role])
-        for role in brief.ROLES[::-1]
-        if st.sessions.get(role) and role_of(task, role).harness == opencode.NAME
-    ]
-
-
-def watchable_session(task: Task, st: TaskState | None = None, role: str = "") -> str:
-    """The conversation w shows: the role's you name, else the first there is; "" for none."""
-    found = dict(watchable_sessions(task, st))
-    return found.get(role, "") if role else next(iter(found.values()), "")
-
-
-def verification_log(task: Task, st: TaskState | None = None) -> Path | None:
-    """The log of the verification under way: the newest written since the task started
-    verifying. None before the gate has opened it, and when the task is not verifying."""
-    st = st or task.read_state()
-    if st.state is not State.VERIFY:
-        return None
-    # A second's slack: the log is opened right after the transition, and mtimes are coarse.
-    since = datetime.fromisoformat(st.updated).timestamp() - 1
-    logs = [p for p in (task.meta / "log").glob("verify-*.log") if p.stat().st_mtime >= since]
-    return max(logs, key=lambda p: p.stat().st_mtime, default=None)
-
-
-VERIFICATION_VIEW = ["tail", "-n", "+1", "-F"]
-
-
-def view_command(task: Task, st: TaskState, role: str = "") -> list[str]:
-    """What w shows: the verification's log while it runs, else the agent's opencode window; the
-    conversation of the role you name, whatever runs."""
-    if not supervisor_running(task):
-        raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
-    if st.state is State.VERIFY and not role:
-        log = verification_log(task, st)
-        if log is None:
-            raise PodError(
-                f"{task.id}: the verification is starting and has no log yet; try again in a moment"
-            )
-        return [*VERIFICATION_VIEW, str(log)]
-    session = watchable_session(task, st, role)
-    if not session:
-        raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
-    return opencode.OpenCode(task_pod(task.id)).attach_command(session)
-
-
-def attach_command(task_id: str, role: str = "") -> list[str]:
-    task, _ = load(task_id)
-    st = task.read_state()
-    if st.box:
-        return box_shell_command(task_id)
-    agent_view(task, view_command(task, st, role))
-    return [*TMUX, "attach-session", "-t", tmux_session(task_id)]
 
 
 # --- lifecycle ----------------------------------------------------------------------------------

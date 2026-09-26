@@ -77,6 +77,32 @@ def test_a_box_costs_one_number_not_a_split(env):
     assert "planning" not in entry and ui.finished_cost(entry) == "$0.01"
 
 
+def test_a_task_records_what_it_runs_with_when_it_starts_and_a_role_you_change(env):
+    """The settings event: the roles as the task runs them, the review, the limits and the
+    verification, so a report names them; choosing a role under m is on the record too."""
+    from vivibox import roles, version
+    from vivibox.config import load_config, load_project
+
+    task = actions.create("demo", "Goal", cwd=env)
+    config = load_config()
+    found = roles.task_settings(task, load_project("demo"), config)
+    assert found["roles"] == {"planner": "opencode m", "writer": "opencode m"}
+    assert found["verify"] == ["true"] and found["verify_timeout"] == 1800 and found["max_iterations"] == 3
+    assert found["review"] == "" and found["version"] == version.current() and found["auto"] is False
+    actions.record_settings(task, load_project("demo"), config)
+    assert [e["data"] for e in task.events() if e["type"] == "settings"] == [found]
+    actions.choose_role(task, "writer", ("opencode", "other/strong"), config)
+    assert roles.role_of(task, "writer", config).model == "other/strong"
+    assert [e["data"] for e in task.events() if e["type"] == "settings_changed"] == [
+        {"role": "writer", "harness": "", "model": "other/strong"}
+    ]
+    actions.choose_role(task, "writer", ("opencode", "m"), config)  # config.toml's own again
+    assert "writer" not in task.read_state().models
+    assert [e["data"] for e in task.events() if e["type"] == "settings_changed"][-1] == {
+        "role": "writer", "harness": "", "model": ""
+    }  # fmt: skip
+
+
 def test_a_finished_task_keeps_the_reviewers_cost_apart(env):
     """Once accepted, the list still shows the review figure the task had live, and the
     implementation figure does not swallow it."""

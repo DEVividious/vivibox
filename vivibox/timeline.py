@@ -62,6 +62,45 @@ def _gate(data: dict) -> str:
     return text
 
 
+def _value(value) -> str:
+    if isinstance(value, list):
+        return " && ".join(value) if value else "nothing"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value) if value not in ("", None) else "nothing"
+
+
+def _settings(data: dict) -> tuple[str, str]:
+    """What the task started with, as two lines that fit: the agents (roles and the review), and
+    the project's side (verification, preparation, the rest that is set, the build of vivibox)."""
+    agents = [", ".join(f"{role} {ran}" for role, ran in (data.get("roles") or {}).items())]
+    if review := data.get("review"):
+        agents.append(f"review {review}, {data.get('max_reviews', '?')} rounds")
+    parts = []
+    verify = data.get("verify")
+    minutes = round((data.get("verify_timeout") or 0) / 60)
+    parts.append(
+        f"verify {_value(verify)}" + (f" ({minutes} min)" if minutes and isinstance(verify, list) else "")
+    )
+    for name in ("prepare", "java", "pass_env", "base"):
+        if data.get(name):
+            parts.append(f"{name} {_value(data[name])}")
+    if data.get("auto"):
+        parts.append("--auto")
+    if data.get("version"):
+        parts.append(f"vivibox {data['version']}")
+    return "; ".join(agents), "; ".join(parts)
+
+
+def _changed(data: dict) -> str:
+    """What m or e changed while the task ran: a role's model, or a project setting."""
+    if "role" in data:
+        model = data.get("model") or "config.toml's model"
+        harness = data.get("harness") or "config.toml's harness"
+        return f"{data['role']} → {model} ({harness})"
+    return ", ".join(f"{name} → {_value(value)}" for name, value in data.items())
+
+
 def _generic(kind: str, data: dict) -> str:
     said = ", ".join(f"{k} {v}" for k, v in data.items() if v not in ("", None, [], {}))
     return f"{kind}: {said}" if said else kind
@@ -82,6 +121,12 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = f"goal: {data.get('goal', '')}"
         elif kind == "started":
             text = f"started on {data.get('model', '?')}"
+        elif kind == "settings":
+            agents, project = _settings(data)
+            found.append((ui.clock(ts), f"started with: {agents}"))
+            text = f"and: {project}"
+        elif kind == "settings_changed":
+            text = f"you: changed {_changed(data)}"
         elif kind == "state":
             reason = data.get("reason", "")
             text = f"→ {state_words(data.get('current', '?'))}"

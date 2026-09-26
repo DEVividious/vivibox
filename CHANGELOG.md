@@ -45,7 +45,9 @@ First public version.
 - Attachments: `@path` in a task's description copies a file or folder for the agent; a path
   in the repository is a reference. Secrets folders are refused.
 - Notifications on your phone through ntfy; a cost warning and a cost limit per task;
-  `vivibox stats`, `vivibox timeline`, `vivibox status`.
+  `vivibox stats`, `vivibox timeline`, `vivibox status`. The timeline records what a task started
+  with (roles, review, limits, verification, preparation, base, the build of vivibox) and what
+  `m` or `e` changed while it ran.
 - `host/setup.sh` and `host/uninstall.sh`; Docker's default networks moved off ranges a VPN
   uses; the pod's TCP MSS clamped to the uplink's MTU.
 - The commit suggested at acceptance tells the whole of the task's work, its subject from the

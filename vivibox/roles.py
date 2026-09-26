@@ -20,6 +20,7 @@ from . import (
     manual,
     opencode,
     providers,
+    version,
 )
 from .config import (
     Config,
@@ -215,6 +216,51 @@ def needs_provider(config: Config) -> bool:
     if keys.list_keys() or providers.load():
         return False
     return any(r.harness != manual.NAME and not r.model for r in config.roles.values())
+
+
+def task_settings(task: Task, project, config: Config) -> dict:
+    """What the task runs with, as one record: the roles as it runs them, the review, the limits,
+    the verification and the preparation, the base, and which build of vivibox. A report about a
+    task starts here; the timeline shows it, and m and e add what they change."""
+    st = task.read_state()
+    order = {"planner": 0, "writer": 1, "reviewer": 2}
+    roles = {
+        name: f"{r.harness} {r.model}".strip()
+        for name in sorted(config.roles, key=lambda n: (order.get(n, 9), n))
+        for r in [role_of(task, name, config)]
+    }
+    verify = "no build" if project.no_build else project.verify or "writer proposes"
+    return {
+        "roles": roles,
+        "review": (st.review_mode or config.review_mode) if "reviewer" in config.roles else "",
+        "max_reviews": config.max_reviews,
+        "max_iterations": config.max_iterations,
+        "verify": verify,
+        "verify_timeout": project.verify_timeout or config.verify_timeout,
+        "prepare": project.prepare,
+        "java": project.java,
+        "pass_env": project.pass_env,
+        "base": st.base_commit[:7],
+        "auto": st.auto_plan,
+        "version": version.current(),
+    }
+
+
+def record_settings(task: Task, project, config: Config) -> None:
+    task.event("settings", **task_settings(task, project, config))
+
+
+def choose_role(task: Task, role: str, choice: Choice, config: Config) -> None:
+    """m: this task's harness and model for a role, on the record. config.toml's own choice gives
+    the role back to config.toml, following it when it changes; the harness is kept only when it
+    differs, so a task on another model keeps following config.toml's harness."""
+    harness, model = choice
+    if choice == configured_choice(config, role):
+        harness = model = ""
+    elif harness == config.roles[role].harness:
+        harness = ""
+    task.set_role(role, harness, model)
+    task.event("settings_changed", role=role, harness=harness, model=model)
 
 
 def configured_choice(config: Config, role_name: str) -> Choice:

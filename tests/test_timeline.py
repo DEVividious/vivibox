@@ -76,3 +76,29 @@ def test_a_narrowed_proposal_is_named_in_the_timeline(tmp_path):
     )
     what = [text for _, text in timeline.entries(task)]
     assert "verification 1: failed; proposed command narrowed to -Dtest=PetTests (verify-1-1.log)" in what
+
+
+def test_what_the_task_started_with_and_what_changed_since_are_in_the_timeline(tmp_path):
+    """A report about a task had no way of saying which models, which verification and which
+    limits it ran with, nor what was changed under m or e while it ran."""
+    task = create_task(tmp_path, "demo", "Add health endpoint", "")
+    roles = {"planner": "opencode deepseek/deepseek-v4-pro", "writer": "opencode deepseek/deepseek-v4-flash"}
+    task.event(
+        "settings",
+        roles=roles, review="loop", max_reviews=2, max_iterations=3, verify=["npm ci && npm test"],
+        verify_timeout=1800, prepare=["npm ci"], java="17", pass_env=["NPM_TOKEN"], base="abc1234",
+        auto=True, version="0.1.1.dev3+gabc1234",
+    )  # fmt: skip
+    task.event("settings_changed", verify=["npm run check"], prepare=[])
+    task.event("settings_changed", role="writer", harness="", model="deepseek/deepseek-v4-pro")
+    what = [text for _, text in timeline.entries(task)]
+    assert what[1] == (
+        "started with: planner opencode deepseek/deepseek-v4-pro, writer opencode deepseek/deepseek-v4-flash;"
+        " review loop, 2 rounds"
+    )
+    assert what[2] == (
+        "and: verify npm ci && npm test (30 min); prepare npm ci; java 17; pass_env NPM_TOKEN;"
+        " base abc1234; --auto; vivibox 0.1.1.dev3+gabc1234"
+    )
+    assert what[3] == "you: changed verify → npm run check, prepare → nothing"
+    assert what[4] == "you: changed writer → deepseek/deepseek-v4-pro (config.toml's harness)"

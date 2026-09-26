@@ -128,6 +128,7 @@ from .roles import (  # noqa: F401
     available_models,
     choice_label,
     choices,
+    choose_role,
     configured_choice,
     fetch_provider_catalog,
     harness_for,
@@ -141,7 +142,9 @@ from .roles import (  # noqa: F401
     provider_catalog,
     provider_keys,
     provider_models,
+    record_settings,
     role_of,
+    task_settings,
     writer,
 )
 from .states import State
@@ -423,6 +426,7 @@ def _start(
     task.set_problem("")  # whatever kept it from starting before did not this time
     if supervise:
         start_supervisor(task)
+    record_settings(task, project, config)
     task.event("started", model=model)
     return model
 

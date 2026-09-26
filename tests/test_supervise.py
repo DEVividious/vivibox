@@ -157,6 +157,13 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
     task.set_paused(True)  # a step with nothing to do still reads the file
     assert not sup.step()
     assert sup.project_verify == ["npm test"] and sup.prepared == ["npm ci"]
+    # Every change the running task read is on its record, once each, with what it changed to.
+    changed = [e["data"] for e in task.events() if e["type"] == "settings_changed"]
+    assert changed == [
+        {"verify": ["npm test"], "prepare": ["npm ci"]},
+        {"verify": []},
+        {"verify": ["npm test"]},
+    ], changed
 
 
 def test_the_writer_is_told_the_projects_own_verification_limit(env, monkeypatch):

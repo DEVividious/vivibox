@@ -120,9 +120,6 @@ class ModelKeys:
         harness, model = choice
         if not model and harness != manual.NAME:
             return  # "no model yet" is where the role is, not a model to put it on
-        if choice == actions.configured_choice(config, role):
-            task.set_role(role)  # back to config.toml, and following it when it changes
-        else:
-            task.set_role(role, harness if harness != config.roles[role].harness else "", model)
+        actions.choose_role(task, role, choice, config)
         self.notify(f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6)
         self.reload()

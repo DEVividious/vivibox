@@ -37,6 +37,10 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     return 0
 
 
+# The project settings a running task reads at every step: a change to one is on its record.
+WATCHED = ("verify", "no_build", "prepare", "verify_timeout", "pass_env", "java")
+
+
 def live_config(start: Config) -> Callable[[], Config]:
     """config.toml as it is now, for what may change while a task runs: a topic set under k
     reaches the task from its next message, not from its next start. A file that cannot be read
@@ -92,13 +96,23 @@ def make_supervisor(
         actions.harness_for("reviewer", pod.review_side(), task) if "reviewer" in config.roles else None
     )
 
+    seen = project
+
     def now() -> Project:
         """The project file as it is now: what you change under e reaches the next verification
-        and the next turn, without a stop and a start. The one given while the file cannot be read."""
+        and the next turn, without a stop and a start, and goes on the task's record once. The one
+        given while the file cannot be read."""
+        nonlocal seen
         try:
-            return load_project(project.name)
+            current = load_project(project.name)
         except (ConfigError, OSError):
             return project
+        if changed := {
+            name: getattr(current, name) for name in WATCHED if getattr(current, name) != getattr(seen, name)
+        }:
+            task.event("settings_changed", **changed)
+        seen = current
+        return current
 
     def run_gate(t: Task) -> gate.GateResult:
         p = now()

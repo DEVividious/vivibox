@@ -161,3 +161,30 @@ def test_completion_offers_the_projects_files_as_well_as_where_you_are(env, tmp_
     found = context.complete("", tmp_path, repo=env / "repo")
     assert found[:1] == ["~/"] and "src/" in found and "tickets/" in found
     assert context.complete("sr", tmp_path, repo=env / "repo") == ["src/"]
+
+
+def test_a_relative_mention_is_the_projects_file_before_the_shells(env, tmp_path):
+    """@README.md typed from another folder meant that folder's README; the description is about
+    the project, so its file wins. ./ and ~/ stay explicit, from where you are."""
+    in_repo(env, "README.md", "# the project\n")
+    (tmp_path / "README.md").write_text("# somewhere else\n")
+    task = actions.create("demo", "Update @README.md and @./README.md", cwd=tmp_path)
+    plan = task.plan_path.read_text()
+    assert f"{task.repo}/README.md" in plan, "the project's, by its path in the clone"
+    assert (task.meta / "context" / "README.md").read_text() == "# somewhere else\n", "./ is explicit"
+
+
+def test_a_project_named_vivibox_is_not_mistaken_for_the_key_store(env, tmp_path):
+    """Any path with a folder called vivibox was refused, to keep ~/.local/share/vivibox and
+    ~/.config/vivibox from the agent; a project of that name, this one, could attach nothing."""
+    notes = tmp_path / "vivibox" / "docs" / "notes.md"
+    notes.parent.mkdir(parents=True)
+    notes.write_text("notes\n")
+    task = actions.create("demo", f"See @{notes}", cwd=tmp_path)
+    assert (task.meta / "context" / "notes.md").exists()
+    for kept in (".local/share/vivibox/keys/deepseek", ".config/vivibox/config.toml"):
+        secret = tmp_path / kept
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text("x")
+        with pytest.raises(context.ContextError, match="credential"):
+            actions.create("demo", f"See @{secret}", cwd=tmp_path)

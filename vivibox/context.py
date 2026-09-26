@@ -30,7 +30,10 @@ SECRET_NAMES = (
     ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "id_rsa*", "id_ed25519*",
     "id_ecdsa*", ".netrc", ".npmrc", ".pypirc", "credentials", "credentials.*", "settings.xml", "*.kdbx",
 )  # fmt: skip
-SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".docker", ".kube", "vivibox")
+SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".docker", ".kube")
+# vivibox's own key store and settings, by their place, not by the name: a project called vivibox
+# is a project like any other.
+SECRET_PATHS = (".local/share/vivibox", ".config/vivibox")
 
 
 class ContextError(Exception):
@@ -42,8 +45,10 @@ def mentions(text: str) -> list[str]:
 
 
 def _secret(path: Path) -> bool:
-    return any(fnmatch.fnmatch(path.name, p) for p in SECRET_NAMES) or any(
-        part in SECRET_DIRS for part in path.parts
+    return (
+        any(fnmatch.fnmatch(path.name, p) for p in SECRET_NAMES)
+        or any(part in SECRET_DIRS for part in path.parts)
+        or any(f"/{kept}/" in f"{path.as_posix()}/" for kept in SECRET_PATHS)
     )
 
 
@@ -62,14 +67,13 @@ class Mentions:
 
 
 def _locate(mention: str, cwd: Path, repo: Path | None) -> Path | None:
-    """Where a mention points: from where you are, else from the project's root, so @src/Main.java
-    works from any folder you started vivibox in."""
-    here = (cwd / Path(mention).expanduser()).resolve()
-    if here.exists():
-        return here
+    """Where a mention points: a plain path is the project's first (the description is about the
+    project, and @README.md from another folder meant that folder's), then one from where you
+    started vivibox; ~/, /, ./ and ../ are explicit and mean where you are."""
     if repo and not mention.startswith(EXPLICIT) and (there := (repo / mention).resolve()).exists():
         return there
-    return None
+    here = (cwd / Path(mention).expanduser()).resolve()
+    return here if here.exists() else None
 
 
 def _git_status(repo: Path, path: str) -> str:

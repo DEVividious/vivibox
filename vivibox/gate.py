@@ -423,7 +423,8 @@ class GateResult:
 SELECTS_TESTS = re.compile(
     r"(?<![\w-])(?:-Dtest=\S+|-Dit\.test=\S+|--tests(?:=|\s+)\S+|-k\s+\S+|-t\s+\S+"
     r"|--testNamePattern(?:=|\s+)\S+|--testPathPattern(?:=|\s+)\S+|-run\s+\S+"
-    r"|\S*\.(?:test|spec)\.[cm]?[jt]sx?\b|\S*(?:/|^)test_\w+\.py\b|\S*_test\.py\b)"
+    r"|\S*\.(?:test|spec)\.[cm]?[jt]sx?\b|\S*(?:/|^)test_\w+\.py\b|\S*_test\.py\b"
+    r"|unittest\s+(?:-v\s+)?\S*test_\w+)"
 )
 
 

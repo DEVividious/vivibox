@@ -207,16 +207,21 @@ def test_canary_a_test_failing_before_the_task_is_asked_about_not_removed(bench)
 def test_propose_the_writer_of_a_project_with_no_command_writes_the_one_it_ran(bench):
     """No verification command yet: the writer says what builds and tests the project, the gate
     verifies the task with it, and the project keeps nothing until you accept it."""
-    from vivibox import proposal
+    from vivibox import gate, proposal
     from vivibox.config import load_project
 
-    project(bench, "propose", {"calc.py": CALC, "test_calc.py": TESTS}, [])
+    # A second test file the task does not touch: a writer verified by its own file alone would
+    # be tempted to name it, and the gate refuses such a command (gate.narrowed_proposal).
+    other = "import unittest\n\n\nclass ShapeTests(unittest.TestCase):\n"
+    other += "    def test_square(self):\n        self.assertEqual(2 * 2, 4)\n"
+    project(bench, "propose", {"calc.py": CALC, "test_calc.py": TESTS, "test_shapes.py": other}, [])
     task, sup = begin("propose", "Add subtract(a, b) to calc.py, with a unit test in test_calc.py")
     try:
         st = drive(task, sup, {State.CHECKPOINT_BLOCKED, State.CHECKPOINT_FINAL})
         command = proposal.proposed(task)
         assert command, f"no command in {proposal.PROPOSAL} (state {st.state})"
         assert "unittest" in command or "pytest" in command, f"a command that runs the tests: {command!r}"
+        assert not gate.narrowed_proposal(command), f"the whole build, not its own tests: {command!r}"
         assert st.state is State.CHECKPOINT_FINAL, f"verified with it: {st.state}, {st.problem}"
         logs = sorted((task.meta / "log").glob("verify-*.log"))
         assert logs and command in logs[-1].read_text(), "the gate ran the proposed command"

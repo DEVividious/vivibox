@@ -515,7 +515,7 @@ class NewTask(Dialog):
                             yield Select(
                                 [("Blocking notes go back to the writer by themselves (loop)", "loop"),
                                  ("Every note comes to me (supervised)", "supervised"),
-                                 ("No review for this task", "none")],
+                                 ("No reviewer for this task", "none")],
                                 value=config.review_mode, allow_blank=False, compact=True, id="review",
                             )  # fmt: skip
             with Horizontal(classes="buttons"):
@@ -569,7 +569,7 @@ class NewTask(Dialog):
         self.call_after_refresh(self.fit)
 
     def reviewer_follows_review(self) -> None:
-        """No review for this task, no reviewer: its model row goes, and nothing runs for it."""
+        """No reviewer for this task: its model row goes, and nothing runs for it."""
         if self.query("#review"):
             reviewing = self.query_one("#review", Select).value != "none"
             self.query_one("#role-reviewer", Select).parent.display = reviewing

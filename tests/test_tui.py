@@ -4141,6 +4141,9 @@ def test_no_review_for_this_task_takes_the_reviewers_model_off_the_form(env, mon
         review = app.screen.query_one("#review", Select)
         reviewer = app.screen.query_one("#role-reviewer", Select)
         assert reviewer.parent.display
+        assert ("No reviewer for this task", "none") in [(str(t), v) for t, v in review._options], (
+            "the choice names the role it leaves out, as the row it hides does"
+        )
         review.value = "none"
         await pilot.pause()
         assert not reviewer.parent.display

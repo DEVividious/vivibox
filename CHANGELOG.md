@@ -22,7 +22,7 @@ First public version.
   criterion that is only the build passing is refused.
 - A reviewer on a model of its own reads the work after a green gate; blocking notes go back to
   the writer by themselves (`loop`) or every note comes to you (`supervised`); a task can go
-  without a review. The reviewer reads the writer's reply in a later round. Its cost stands in a
+  without a reviewer. The reviewer reads the writer's reply in a later round. Its cost stands in a
   column of its own.
 - A project without a verification command asks the writer for one, and the proposal waits for
   your review before the first verification (`review the command`); a proposal narrowed to some

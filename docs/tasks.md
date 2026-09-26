@@ -180,8 +180,8 @@ nothing and adds no criteria; the supervisor, not the agents, ends the loop.
   repeated at you. No blocking notes, or the last
   round, and the work comes to you as usual, the notes with it.
 - In **supervised** mode the reviewer reads once and every note comes to you.
-- `n` asks which for the task when there is a reviewer, and *no review* is a choice too: the
-  reviewer's model row goes with it, and no container is started for it. `k` sets the default,
+- `n` asks which for the task when there is a reviewer, and *no reviewer* is a choice too: its
+  model row goes with it, and no container is started for it. `k` sets the default,
   the reviewer's model and the rounds.
 
 The list says `reviewing` while it reads, and its cost stands in a column of its own. At the

@@ -186,6 +186,13 @@ def test_help_fits_in_eighty_columns_without_wrapping():
         assert len(line) <= 78, f"{len(line)} columns: {line!r}"
 
 
+def test_help_says_that_a_capital_key_is_shift_and_the_letter():
+    """S, C and H read as the letter itself on a screen of lowercase keys; the line names Shift."""
+    for line in dialogs.HELP.splitlines():
+        if re.match(r"  (\w, )?[A-Z] ", line):
+            assert "Shift+" in line, line
+
+
 def test_a_dialog_has_at_most_one_primary_button():
     """One primary button per dialog (§4), checked in the source: a class at a time, in every
     module that defines a screen."""

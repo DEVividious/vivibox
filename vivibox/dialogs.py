@@ -652,7 +652,7 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]The selected task[/b]
   d, Enter  show or hide its details
   e     edit the plan; with a manual planner, paste your chat's plan
-  c, C  copy the planning prompt for a chat, or for a CLI
+  c, C  copy the planning prompt for a chat, or (Shift+c) for a CLI
   o     open the review copy in your IDE
   v     run the app in its pod, or stop it
   w     watch or talk to the agent; while verifying, its log (Ctrl-q leaves);
@@ -660,7 +660,7 @@ HELP = """[b]Your decisions[/b], on the selected task
   l     the newest log in your pager: followed while the verification runs,
         else opened at its end
   s     stop the task, or start it again
-  S     stop it by force when s hangs; the turn under way is lost
+  S     Shift+s: stop it by force when s hangs; the turn under way is lost
   m     what each role runs on, for this task
   x     delete the task; on a finished one, its line in the history
 
@@ -675,7 +675,7 @@ HELP = """[b]Your decisions[/b], on the selected task
   i     set up a project
   k     settings: providers & MCP, roles, editor for o, notifications, limits
   h     show or hide the tasks you accepted
-  H     show or hide the tasks you deleted (hidden to start with)
+  H     Shift+h: show or hide the tasks you deleted (hidden to start with)
   q     quit
 """
 

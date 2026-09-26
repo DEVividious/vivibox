@@ -17,6 +17,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.content import Content
 from textual.widgets import DataTable, Header, Markdown, Select, Static
 
 from . import actions, code, ide, probe, ui
@@ -651,6 +652,17 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             after_window(session_gone=not actions.tmux_has(actions.tmux_session(task_id)))
             actions.close_agent_view(task_id)
         self.reload()
+
+    def format_title(self, title: str, sub_title: str) -> Content:
+        """The header's text. Textual dims the whole subtitle; what would keep every task from
+        starting stands first in it, in red and bold, so it is not read as one more count."""
+        note = getattr(self, "machine_note", "")  # the header asks before __init__ sets it
+        if not note or not sub_title.startswith(note):
+            return super().format_title(title, sub_title)
+        rest = sub_title[len(note) :]
+        return Content.assemble(
+            Content(title), (" — ", "dim"), (note, "bold red"), Content(rest).stylize("dim")
+        )
 
     def action_leave_note(self) -> None:
         """Ctrl-q leaves the agent's window; pressed here, a second late or after a w that opened

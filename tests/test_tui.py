@@ -4421,5 +4421,11 @@ def test_the_header_says_first_what_would_keep_every_task_from_starting(env, mon
         app.reload()
         await pilot.pause()
         assert app.sub_title.startswith("Docker is not running: no task can start · "), app.sub_title
+        # The warning in red and bold, not in the dim the rest of the header has: it was grey
+        # and read as one more count.
+        shown = app.format_title(app.title, app.sub_title)
+        note = "Docker is not running: no task can start"
+        styles = [str(span.style) for span in shown.spans if shown.plain[span.start : span.end] == note]
+        assert styles and all("red" in style and "bold" in style for style in styles), shown.spans
 
     run(scenario)

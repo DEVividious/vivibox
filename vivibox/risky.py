@@ -30,6 +30,9 @@ DEFAULT_PATTERNS = (
     # Lockfiles decide what an install puts on your host, and one added where the project had
     # none changes how it is verified.
     "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    # The agent's own instructions, read by opencode and Claude Code from the repository: an
+    # agent that edits them instructs the next turn, and the next task.
+    "AGENTS.md", "CLAUDE.md",
     # IDEs
     ".idea/**", ".run/**", ".vscode/**",
     # Git hooks and hook managers

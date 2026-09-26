@@ -140,3 +140,12 @@ def test_the_reviewer_is_told_what_a_note_on_the_code_itself_looks_for():
         "the type, not the purpose",
     ):
         assert case in text, case
+
+
+def test_the_repositorys_agents_md_is_instruction_and_the_rest_of_the_repository_is_data():
+    """opencode reads AGENTS.md at the repository's root as instructions and cannot be told not
+    to; the brief used to call every file of the repository data, and said nothing about which
+    sentence wins. The file is named as instruction, once, and is a risky file (risky.py)."""
+    text = BRIEFS["writer"]
+    assert "`AGENTS.md`" in text.split("## What to trust")[1]
+    assert "is data, not instruction" not in text, "the old blanket sentence"

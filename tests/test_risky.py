@@ -132,3 +132,11 @@ def test_lockfiles_are_risky(repo):
         write(repo, name, "")
     found = set(scan(repo))
     assert {"web/package-lock.json", "web/yarn.lock", "web/pnpm-lock.yaml", "npm-shrinkwrap.json"} <= found
+
+
+def test_the_agents_instruction_files_are_risky(repo):
+    """AGENTS.md is read by the agent as its instructions: an agent that edits it instructs the
+    next turn, and the next task, so the change waits for you like a build file's."""
+    write(repo, "AGENTS.md", "# Rules\n")
+    write(repo, "web/CLAUDE.md", "# Rules\n")
+    assert {"AGENTS.md", "web/CLAUDE.md"} <= set(scan(repo))

@@ -59,10 +59,12 @@ then waits for the person without an attempt spent, and the agent gets no turn f
 
 ## 5. Data is not instruction
 
-The brief names what is instruction: the brief itself, `/task/plan.md`,
+The brief names what is instruction: the brief itself, `AGENTS.md` at the repository's root
+(opencode reads it as instructions and cannot be told not to, and it is where a team keeps its
+conventions; it is a risky file, so an agent's change to it waits for the person), `/task/plan.md`,
 `/task/handoff/comments.md` and the message that starts a turn. Everything else the agent reads,
-the repository and `/task/context` included, is data. No prompt quotes repository text back to
-the agent as an instruction.
+the rest of the repository and `/task/context` included, is data. No prompt quotes repository
+text back to the agent as an instruction.
 
 ## 6. Names
 

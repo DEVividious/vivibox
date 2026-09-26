@@ -2172,10 +2172,33 @@ def test_the_new_task_dialog_shows_every_field_at_once(env, size):
         assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "nothing to scroll: every field is in view"
         assert dialog.query_one(".dialog").region.width <= size[0], "the dialog fits the terminal"
         shown = screen_text(app)
-        for word in ("Project", "Kind", "Task", "Attach…", "@path", "Plan", "Planner", "Writer", "Create",
+        for word in ("Project", "Kind", "Goal", "Attach…", "@path", "Plan", "Planner", "Writer", "Create",
                      "Cancel", "ctrl+s"):  # fmt: skip
             assert word in shown, f"{word} not on the screen at {size}"
         assert dialog.query_one("#goal").region.height >= 3, "room for at least a line of the description"
+
+    run(scenario, size=size)
+
+
+@pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), False)])
+def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_working_order(env, size, headed):
+    """Task and Agents head the two groups on a tall terminal and go first on a short one (§4);
+    the roles stand as they work, planner, writer, reviewer, with the review mode under them."""
+    from ux import screen_text
+
+    with_reviewer(env)
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        shown = screen_text(app)
+        assert ("Agents" in shown) is headed, shown
+        rows = [app.screen.query_one(f"#role-{r}").region.y for r in ("planner", "writer", "reviewer")]
+        assert rows == sorted(rows), rows
+        assert app.screen.query_one("#review").region.y > rows[-1]
+        assert app.screen.query_one(widgets.Fields).max_scroll_y == 0, "every field in view"
 
     run(scenario, size=size)
 

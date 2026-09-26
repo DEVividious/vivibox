@@ -101,9 +101,11 @@ starts the pod when needed.
 
 - A dialog is a form: a column of one-word labels on the left, one field per row. A list or a
   checkbox is one row with no frame; the only boxes are a multi-line text and the buttons that
-  close the dialog. Related fields form a group, and a blank row separates groups; the lists of
-  a group stand a blank row apart too. On a short terminal the rows between them go before the
-  multi-line text shrinks below three lines.
+  close the dialog. Related fields form a group under a heading, and a blank row separates
+  groups; the lists of a group stand a blank row apart too, and every other field is drawn a
+  shade darker, so rows stay apart where no blank row fits. On a short terminal the headings go
+  first, then the rows between the lists, before the multi-line text shrinks below three lines.
+  Roles stand in the order they work: planner, writer, reviewer.
 - A button that helps fill a field stands in that field's row, compact, or is the last entry of
   that field's list ("+ set up another project…"). The closing row holds one
   primary button, then Cancel, then the key that presses the primary button.

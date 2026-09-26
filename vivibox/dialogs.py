@@ -444,6 +444,7 @@ class NewTask(Dialog):
         with Vertical(classes="dialog form"):
             with Fields(classes="fields"):
                 with Vertical(id="task", classes="section"):
+                    yield Label("Task", classes="title")
                     # A list even with one project in it: the dialog looks the same however many
                     # you have. What is not on it is set up from it, like a provider from a model list.
                     with Horizontal(classes="row"):
@@ -471,7 +472,7 @@ class NewTask(Dialog):
                     suggestions = OptionList(id="suggestions")
                     suggestions.display = False
                     with Horizontal(classes="row", id="task-row"):
-                        yield Label("Task", classes="key")
+                        yield Label("Goal", classes="key")
                         yield DescriptionArea(
                             suggestions, Path.cwd(), id="goal", classes="description",
                             placeholder="What should the agent do? A line, or a whole ticket with its"
@@ -484,6 +485,7 @@ class NewTask(Dialog):
                         yield Button("Attach…", compact=True, id="attach")
                         yield Label("or @path, for a copy of a file or folder.", classes="hint")
                 with Vertical(id="planning", classes="section"):
+                    yield Label("Agents", classes="title")
                     # One question, not two boxes that could both be ticked.
                     with Horizontal(classes="row"):
                         yield Label("Plan", classes="key")
@@ -494,8 +496,10 @@ class NewTask(Dialog):
                             value="review", allow_blank=False, compact=True, id="plan",
                         )  # fmt: skip
                     # Each role on config.toml's choice unless you pick another; m changes it later.
+                    # In the order they work: the planner, the writer, then the reviewer.
                     config = load_config()
-                    for name in sorted(config.roles):
+                    order = {"planner": 0, "writer": 1, "reviewer": 2}
+                    for name in sorted(config.roles, key=lambda n: (order.get(n, 9), n)):
                         offered = actions.choices(name, config, self.available)
                         configured = actions.configured_choice(config, name)
                         with Horizontal(classes="row gap"):
@@ -575,21 +579,26 @@ class NewTask(Dialog):
 
     def fit(self) -> None:
         """The description as tall as the screen leaves after the other rows, a line at least, so
-        the whole form stays in view and the description scrolls inside itself. The blank rows
-        between the lists of a group go first, before the description would shrink below three
-        lines."""
+        the whole form stays in view and the description scrolls inside itself. Before the
+        description would shrink below three lines, the groups' headings go, then the blank rows
+        between the lists of a group."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
         dialog = self.query_one(".dialog")
         room = int(self.size.height * 0.9) - self.CHROME
         fields.styles.max_height = max(5, room)
-        others = fields.virtual_size.height - self.query_one("#task-row").outer_size.height
-        gaps = len([row for row in self.query(".row.gap") if row.display])
-        if not dialog.has_class("tight"):
-            others -= gaps  # the rows without their gaps, whichever way they are drawn now
-        tight = room - others - gaps < 3
+        # Counted, not measured: a measure is the last layout's, whatever class the dialog has
+        # been given since. A row is a line; the second group stands a blank row below the first.
+        rows = [row for row in self.query(".row") if row.display and row.id != "task-row"]
+        others = len(rows) + 1
+        gaps = len([row for row in rows if row.has_class("gap")])
+        titles = 2 * len(self.query(".title"))  # a heading and the blank row under it
+        spare = room - others - 3
+        plain, tight = spare < gaps + titles, spare < gaps
+        dialog.set_class(plain, "plain")
         dialog.set_class(tight, "tight")
-        goal.styles.height = max(3, min(12, room - others - (0 if tight else gaps)))
+        taken = others + (0 if tight else gaps) + (0 if plain else titles)
+        goal.styles.height = max(3, min(12, room - taken))
         goal.focus()
 
     @on(Select.Changed, "#project")

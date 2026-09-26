@@ -38,13 +38,19 @@ HeaderIcon { display: none; }
 /* Lists of a group a row apart, unless the terminal is short (fit() decides). */
 .form .row.gap { margin-top: 1; }
 .form.tight .row.gap { margin-top: 0; }
+/* A group has a heading, and its fields are bands, every other one darker, so rows stay apart
+   even where a short terminal leaves no blank row between them. On a short terminal the
+   headings go too: every field on the screen comes first. */
+.form .title { width: 100%; text-style: bold; color: $primary; margin-bottom: 1; }
+.form.plain .title { display: none; }
 .form .key { width: 10; color: $text-muted; }
 .form .hint { width: 1fr; color: $text-muted; }
 .form .row > Select, .form .row > TextArea { width: 1fr; }
 .form .row > Button { margin: 0 2 0 0; min-width: 9; }
-.form #base-ref { width: 1fr; }
+.form #base-ref { width: 1fr; text-align: left; content-align: left middle; text-style: none; color: $text; padding: 0 1; }
 .form .buttons > .keys { width: auto; padding: 1 0; }
-.form Select > SelectCurrent { background: $boost; }
+.form Select > SelectCurrent, .form #base-ref { background: $boost; }
+.form .row:odd > Select > SelectCurrent, .form .row:odd > #base-ref { background: $panel; }
 /* An open list is framed and set apart: bare, it ended right above the next row, whose value read
    as one more of its options. */
 .form Select > SelectOverlay.-textual-compact { border: round $accent !important; background: $panel; }

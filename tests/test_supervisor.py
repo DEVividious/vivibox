@@ -572,23 +572,32 @@ def test_the_writer_is_asked_for_the_command_only_when_the_project_has_none(task
     """It builds the project while it works, so it knows what builds and tests it; not when the
     project has a command, nor when the task was made with nothing to build."""
 
-    def first_implement_prompt(project_verify, plan_header=""):
+    def first_implement_prompt(project_verify, plan_header="", **limits):
         t = create_task(
-            task.root.parent / f"t{len(project_verify)}{len(plan_header)}", "demo", "Goal", TEMPLATE
+            task.root.parent / f"t{len(project_verify)}{len(plan_header)}{len(limits)}",
+            "demo",
+            "Goal",
+            TEMPLATE,
         )
         t.plan_path.write_text(DRAFT.replace("+++\n", f"+++\n{plan_header}\n", 1))
         t.transition(State.CHECKPOINT_PLAN)
         supervisor.accept_plan(t, "plan accepted")
         harness = FakeHarness(t)
         ports = supervisor.Ports(run_gate=lambda _: gate_result(), risky_changes=lambda: [])
-        supervisor.Supervisor(t, harness, ports, max_iterations=2, project_verify=project_verify).step()
+        supervisor.Supervisor(
+            t, harness, ports, max_iterations=2, project_verify=project_verify, **limits
+        ).step()
         return harness.prompts[0]
 
     asked = first_implement_prompt([])
-    assert supervisor.PROPOSE_PREFIX + supervisor.IMPLEMENT_PROMPT in asked
+    assert supervisor.PROPOSE_PREFIX.format(minutes=30) + supervisor.IMPLEMENT_PROMPT in asked
     assert "/task/handoff/verify-proposal.md" in asked
-    assert supervisor.PROPOSE_PREFIX not in first_implement_prompt(["npm test"])
-    assert supervisor.PROPOSE_PREFIX not in first_implement_prompt([], "verify = false")
+    # The whole build it runs itself gets the verification's own time limit, so its tool's default
+    # of two minutes does not cut a Maven suite short and read as a failure, or a question.
+    assert "30 minutes" in asked and "timeout" in asked
+    assert "10 minutes" in first_implement_prompt([], verify_timeout=600)
+    assert "verify-proposal" not in first_implement_prompt(["npm test"])
+    assert "verify-proposal" not in first_implement_prompt([], "verify = false")
 
 
 def test_a_turn_leaves_its_running_cost_with_the_task_while_it_runs(task):

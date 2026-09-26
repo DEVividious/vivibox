@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import brief, gate, manual, proposal, reviewing, ui
-from .config import Project
+from .config import DEFAULT_VERIFY_TIMEOUT, Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .risky import Change
@@ -110,8 +110,10 @@ neighbours as they were installed, before your change.
 PROPOSE_PREFIX = """No command verifies this project yet. When the work is done, write the one command
 that builds the whole project and runs all its tests, as its pipeline would, on one line in
 /task/handoff/verify-proposal.md: the orchestrator verifies your work with it, and the user
-decides whether the project keeps it. A command that picks some tests (`-Dtest=`, `--tests`,
-`-k`, a test file) is refused, and you propose again.
+decides whether the project keeps it. The whole build may take long: run it with a timeout of
+{minutes} minutes on your shell tool, the same the verification has; a build cut short by a
+timeout is no result and no reason to ask. A command that picks some tests (`-Dtest=`,
+`--tests`, `-k`, a test file) is refused, and you propose again.
 
 """
 
@@ -304,6 +306,9 @@ class Supervisor:
     max_reviews: int = 2
     # The gate's result the review followed, for the message that ends the task's work.
     last_gate: gate.GateResult | None = None
+    # The seconds the verification may take (limits.verify_timeout, or the project's own): what
+    # the writer is told to allow its own whole build, so the two are one number.
+    verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
 
     def role_for(self, state: State) -> str:
         """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
@@ -574,7 +579,7 @@ class Supervisor:
         if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
-            prompt = PROPOSE_PREFIX + prompt
+            prompt = PROPOSE_PREFIX.format(minutes=max(1, round(self.verify_timeout / 60))) + prompt
         if self._turn(st, prompt) is None:
             return
         if q := question(self.task):

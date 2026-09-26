@@ -26,7 +26,8 @@ First public version.
   column of its own.
 - A project without a verification command asks the writer for one, and the proposal waits for
   your review before the first verification (`review the command`); a proposal narrowed to some
-  tests is refused.
+  tests is refused. The writer is told to allow its own whole build the verification's time
+  limit, so its tool's default timeout does not read as a failure.
 - A box: a pod of your own in a project, with opencode, to work in by hand (`b`).
 - Projects prepare once in a new task's clone (`prepare`), asked for under `i` and by `vivibox
   init` with the build files' suggestion of a build without tests; Node projects get their dependencies

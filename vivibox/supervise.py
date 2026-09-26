@@ -134,6 +134,7 @@ def make_supervisor(
         reviewer=reviewer,
         review_mode=task.read_state().review_mode or config.review_mode,
         max_reviews=config.max_reviews,
+        verify_timeout=project.verify_timeout or config.verify_timeout,
         project_verify=project.verify,
         project_no_build=project.no_build,
         prepared=project.prepare,

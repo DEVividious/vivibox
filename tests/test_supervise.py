@@ -159,6 +159,31 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
     assert sup.project_verify == ["npm test"] and sup.prepared == ["npm ci"]
 
 
+def test_the_writer_is_told_the_projects_own_verification_limit(env, monkeypatch):
+    """The limit the gate runs with, config.toml's or the project's own, is the one the writer
+    is told for its build: the same number, from the same place."""
+    from vivibox import actions
+    from vivibox.config import load_project
+
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+
+    class Pod:
+        def review_side(self):
+            return None
+
+        def review_down(self):
+            pass
+
+        def prepare_running(self):
+            return False
+
+    task = actions.create("demo", "Goal", cwd=env)
+    assert supervise.make_supervisor(task, load_project("demo"), Pod(), config()).verify_timeout == 1800
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text() + "verify_timeout = 600\n")
+    assert supervise.make_supervisor(task, load_project("demo"), Pod(), config()).verify_timeout == 600
+
+
 def test_the_agents_window_opens_on_w_and_not_at_every_turn(env, monkeypatch):
     """The supervisor used to open a tmux window with `opencode attach` at every turn, for w to
     have something to show; each such window rendered opencode's interface for nobody, at a third

@@ -83,7 +83,9 @@ new task's clone runs first (`prepare`, a build without tests, so the writer sta
 project: `bash mvnw -B install -DskipTests`, `bash gradlew assemble`, or the Node install by its
 lockfile; empty where the files say nothing, `--prepare` and Change… set it). The verification
 is a command you type, or left empty: the next task's writer, who builds the project while it works, then writes
-the command it ran to `/task/handoff/verify-proposal.md`, and before the first verification the
+the command it ran to `/task/handoff/verify-proposal.md` (told to allow that build the
+verification's own time limit, `verify_timeout`, so its tool's default of two minutes does not
+cut a suite short), and before the first verification the
 task waits for you as `review the command`: `a` opens the same field as under `e` with the
 command in it, Enter keeps it for the project and the gate runs with it; `e` changes it first,
 `r` sends the writer back for another. A writer that proposed none leaves the field empty, for

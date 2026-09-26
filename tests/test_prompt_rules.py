@@ -124,3 +124,19 @@ def test_word_budgets():
         if name == "DEMO_ASK":  # a conversation of its own, with no brief behind it: it is its own
             continue
         assert len(text.split()) <= MAX_PROMPT_WORDS, f"{name}: {len(text.split())} words"
+
+
+def test_the_reviewer_is_told_what_a_note_on_the_code_itself_looks_for():
+    """Four of six reviews on the trial run of 2026-09-26 were empty: the brief named only what
+    keeps the work from being what the plan says. What a senior reviewer sends back besides
+    that is listed, as cases, not as the names of principles."""
+    text = BRIEFS["reviewer"]
+    for case in (
+        "repeats what the repository already has",
+        "one caller",
+        "did not ask for",
+        "restates the line",
+        "how the code is written instead of what it does",
+        "the type, not the purpose",
+    ):
+        assert case in text, case

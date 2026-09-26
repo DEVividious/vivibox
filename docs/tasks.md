@@ -166,8 +166,11 @@ With a reviewer in `config.toml` (`[roles.reviewer]`, best on another family of 
 writer), the work the gate passed is read by it before it comes to you. It works in a container
 of its own on a fresh clone of the commits, with the writer's tree read-only and only its own key,
 and writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
-(`path:line`), what is wrong and what would make it right. It runs no build, asks nothing and
-adds no criteria; the supervisor, not the agents, ends the loop.
+(`path:line`), what is wrong and what would make it right: what keeps the work from being what
+the plan says, and, besides the plan, what a senior reviewer sends back (code the repository
+already has, an abstraction with one caller, behaviour nobody asked for, a comment that restates
+the code, a test of how the code is written, a name that says the type). It runs no build, asks
+nothing and adds no criteria; the supervisor, not the agents, ends the loop.
 
 - In **loop** mode blocking notes go back to the writer by themselves, then the gate runs again
   and the reviewer reads again, up to `max_reviews` rounds (2), with what the writer answered

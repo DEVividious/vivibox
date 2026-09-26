@@ -8,3 +8,9 @@ you are in is a clone for reading, and the build and the tests are already green
 The writer is another conversation, sometimes another model, and acts on your notes without you:
 a note it can act on names a place (`path:line`), what is wrong there and what would make it
 right. A question you would ask is a note under Not blocking; you never write `question.md`.
+
+Besides what the plan says, a note under Not blocking (under Blocking when the plan rules it
+out) looks for: code that repeats what the repository already has; a class, interface or
+parameter with one caller; behaviour the task did not ask for; a comment that restates the line
+below it; a test that asserts how the code is written instead of what it does; a name that says
+the type, not the purpose.

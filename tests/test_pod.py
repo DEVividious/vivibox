@@ -474,6 +474,19 @@ def test_the_agent_builds_without_the_maven_build_cache_and_the_gate_keeps_its_o
     assert not any(arg.startswith("MAVEN_OPTS=") for arg in pod.gate_command()), "the image's stay"
 
 
+def test_a_stop_and_a_forced_stop_take_the_gate_down_too(pod):
+    """The work laptop's case: S killed the agent and the sidecar and left the gate's container, which shares
+    the sidecar's network namespace, hanging without a network, and the next start struggled. The
+    gate is made anew for every verification, so removing it loses nothing."""
+    pod.kill()
+    assert pod.runner.find("docker", "kill", pod.agent, pod.sidecar)
+    assert pod.runner.find("docker", "rm", "-f", pod.gate), "a forced stop drops the gate"
+    pod.runner.calls.clear()
+    pod.down()
+    assert pod.runner.find("docker", "rm", "-f", pod.gate), "so does a stop"
+    assert not pod.runner.find("docker", "kill"), "a stop does not kill"
+
+
 def test_the_pod_trusts_the_authorities_the_host_trusts(pod, tmp_path, monkeypatch):
     """The work laptop's case: the host pulls an image the pod's daemon could not, "x509: certificate signed
     by unknown authority". The authority was in the host's trust store and in no container's."""

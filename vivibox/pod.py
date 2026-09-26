@@ -605,9 +605,11 @@ class Pod:
         raise PodError(f"Docker in {self.sidecar} did not start:\n{log.stdout}")
 
     def down(self) -> None:
-        """Stops the pod and keeps its data. A review under way is lost with it: its container is
-        made anew for every round."""
+        """Stops the pod and keeps its data. A review or a verification under way is lost with it:
+        their containers are made anew for every round. The gate shares the sidecar's network
+        namespace; left behind, it would hang without a network once the sidecar stops."""
         self.review_down()
+        self.gate_down()
         for name in (self.agent, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
@@ -615,6 +617,7 @@ class Pod:
         """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
         self._run("docker", "kill", self.agent, self.sidecar, check=False)
         self.review_down()
+        self.gate_down()
 
     def gate_up(self) -> None:
         """A fresh container with a fresh clone of the task branch: only committed work is verified."""

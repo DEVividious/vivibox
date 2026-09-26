@@ -164,7 +164,10 @@ ENVIRONMENT = re.compile(
     r"|SSL certificate problem|unable to get local issuer certificate"
     r"|short read: expected \d+ ?bytes"
     r"|Cannot allocate memory|Out of memory|\bOOM\b|Killed process"
-    r"|Temporary failure in name resolution|network is unreachable",
+    r"|Temporary failure in name resolution|network is unreachable"
+    # A tool the fresh clone lacks: nothing the agent commits brings it; an install in front of
+    # the command does, or the image.
+    r"|(?:^|\b)(?:sh|bash)(?:: \d+)?: [\w./-]+: (?:command )?not found$",
     re.IGNORECASE,
 )
 # Words no test prints on purpose, matched anywhere in the output: a build tool that runs many

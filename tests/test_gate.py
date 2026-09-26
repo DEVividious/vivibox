@@ -887,3 +887,20 @@ def test_a_package_json_without_a_lockfile_gets_no_install(task):
         pod = FakePod()
         gate.run_gate(task, pod, [command], [])
         assert ran(pod) == [command], "nothing to install by: the command is on its own"
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["/bin/sh: 1: tsc: not found", "bash: vitest: command not found", "sh: mvn: not found"],
+)
+def test_a_tool_not_found_on_the_fresh_clone_is_a_failure_of_the_environment(task, said):
+    """Nothing the agent could commit brings a tool the fresh clone lacks: the command needs an
+    install in front of it, or the image the tool. A feedback turn had the writer look for a
+    place to put the install, and find none."""
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    pod = FakePod(fail={"yarn build"}, output=said)
+    result = gate.run_gate(task, pod, ["yarn build"], [])
+    assert result.environment == said and not result.passed
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "for you, no attempt spent"

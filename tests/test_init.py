@@ -362,3 +362,25 @@ def test_accepting_the_command_keeps_it_for_the_project_and_starts_the_verificat
     task = at_checkpoint("Add Owner tests", "./mvnw -Dtest=Owner test")
     assert actions.reply(task, "The whole build, please") is State.IMPLEMENT
     assert supervisor.next_prompt(task, supervisor.IMPLEMENT_PROMPT) == supervisor.COMMENT_PROMPT
+
+
+def test_a_command_that_starts_in_a_folder_gets_its_install_there(tmp_path):
+    """A monorepo's app has the lockfile, not the root: the command the writer proposed runs
+    from the app's folder (`cd apps/web && …`) and, on a fresh clone, found nothing installed
+    (`tsc: not found`, exit 127, two turns of the writer lost). The install goes in front of it,
+    in the same folder, by that folder's lockfile."""
+    (tmp_path / "package.json").write_text('{"private": true}')
+    web = tmp_path / "apps" / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text('{"scripts": {"test": "vitest"}}')
+    (web / "yarn.lock").write_text("")
+    command = "cd apps/web && cp .env.example .env && yarn build && yarn test --run"
+    assert init.with_dependencies(tmp_path, [command]) == [
+        "cd apps/web && yarn install --frozen-lockfile",
+        command,
+    ]
+    installs = "cd apps/web && yarn install --frozen-lockfile && yarn test"
+    assert init.with_dependencies(tmp_path, [installs]) == [installs], "installs itself"
+    assert init.with_dependencies(tmp_path, ["cd apps/other && yarn test"]) == [
+        "cd apps/other && yarn test"
+    ], "no lockfile there: nothing to install by"

@@ -102,9 +102,12 @@ run (read from `.github/workflows`, `.gitlab-ci.yml`, `Jenkinsfile`, `bitbucket-
 notes of `i` and `vivibox init`, never taken for the verification by itself: a pipeline often
 builds with more than its build files say, and a command that builds the wrong thing passes. For a Node project the gate installs the dependencies on the fresh clone first (`npm ci`, or
 Yarn or pnpm by the lockfile) when the command does not do that itself, as a command of its own
-in the log; a `package.json` without a lockfile next to it, a monorepo's root, gets no install,
-and the notes name each package with a test script instead (`cd apps/web && yarn install
---frozen-lockfile && yarn test`). Otherwise: the command the gate runs (`bash gradlew
+in the log; a command that starts in a folder (`cd apps/web && yarn test`, a monorepo's app) is
+installed for in that folder, by its lockfile; a `package.json` without a lockfile next to it, a
+monorepo's root, gets no install, and the notes name each package with a test script instead
+(`cd apps/web && yarn install --frozen-lockfile && yarn test`). A tool the fresh clone lacks
+(`tsc: not found`) is a failure of the environment, not of the code: the task waits for you to
+put the install in front of the command. Otherwise: the command the gate runs (`bash gradlew
 test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
 when `packageManager` in `package.json` or the lockfile names them) and, when the build needs it,
 a JDK other than the image's Java 21, for example Java 17 for Gradle 7. It shows the file and writes

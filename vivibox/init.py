@@ -98,6 +98,8 @@ INSTALLS = re.compile(
 )
 # What `npm ci`, Yarn and pnpm install from; without one, an install on a fresh clone fails.
 LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+# A command that begins by entering a folder: what follows runs there, and so does its install.
+STARTS_IN = re.compile(r"^\s*cd\s+([\w./-]+)\s*(?:&&|;)")
 # Where a monorepo keeps its packages when its package.json does not say (`workspaces`).
 USUAL_WORKSPACES = ("apps/*", "packages/*")
 
@@ -105,13 +107,17 @@ USUAL_WORKSPACES = ("apps/*", "packages/*")
 def with_dependencies(repo: Path, commands: list[str]) -> list[str]:
     """The commands with the project's dependencies installed first, for a Node project whose
     commands do not do that themselves: on a fresh clone every tool they need is "not found". A
-    package.json without a lockfile (a monorepo's root) gets none: `npm ci` there fails every
-    time, and the command that runs the app's tests installs in the app's folder itself."""
-    if not commands or not (repo / "package.json").exists() or not has_lockfile(repo):
+    command that starts in a folder (`cd apps/web && …`, a monorepo's app) is installed for in
+    that folder, by that folder's lockfile; a package.json without a lockfile next to it gets
+    nothing, because `npm ci` there fails every time."""
+    if not commands or any(INSTALLS.search(command) for command in commands):
         return commands
-    if any(INSTALLS.search(command) for command in commands):
+    folder = STARTS_IN.match(commands[0])
+    where = repo / folder.group(1) if folder else repo
+    if not (where / "package.json").exists() or not has_lockfile(where):
         return commands
-    return [NODE_INSTALL[package_manager(repo)], *commands]
+    install = NODE_INSTALL[package_manager(where)]
+    return [f"cd {folder.group(1)} && {install}" if folder else install, *commands]
 
 
 def has_lockfile(folder: Path) -> bool:

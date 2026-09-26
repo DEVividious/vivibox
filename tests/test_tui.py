@@ -2477,7 +2477,7 @@ def test_the_view_says_what_it_stopped_to_run_the_app(env, monkeypatch):
     run(scenario)
 
 
-def test_the_view_leaves_at_once_when_a_step_still_waits_on_docker(monkeypatch, capsys):
+def test_the_view_leaves_at_once_when_a_step_still_waits_on_docker(env, monkeypatch, capsys):
     """Textual runs thread workers in the loop's default executor, and asyncio waits for them at
     the end: a pod start that hung held the window until Ctrl-C, which showed a traceback. Nothing
     is lost by leaving: the pod and the supervisor are processes of their own."""

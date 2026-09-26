@@ -1,7 +1,16 @@
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# Git's global configuration for the tests: an identity of their own, so a repository they make
+# without one commits the same on this machine and on a runner with no ~/.gitconfig, and nothing
+# the tests do reads or writes yours.
+GIT_CONFIG = Path(tempfile.mkdtemp(prefix="vivibox-tests-")) / "gitconfig"
+GIT_CONFIG.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
+os.environ["GIT_CONFIG_GLOBAL"] = str(GIT_CONFIG)
 
 
 def make_repo(path: Path) -> Path:

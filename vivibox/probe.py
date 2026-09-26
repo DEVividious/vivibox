@@ -5,6 +5,7 @@ container. Text and shell scripts only; pod.py runs them.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 
 DEMO_PID = "/tmp/vivibox-demo.pid"
@@ -106,3 +107,17 @@ class DemoState:
 
     running: bool
     log: str = ""
+
+
+def docker_running() -> bool:
+    """Whether the host's Docker daemon answers: without it no pod starts, and the view says so
+    before you make a task, not from a message gone in seconds after one fails to start."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "info", "-f", "{{.ServerVersion}}"], capture_output=True, timeout=10
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False

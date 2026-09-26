@@ -42,7 +42,7 @@ def no_real_start(request, monkeypatch):
     """A decision now starts a task nobody is working on, and starting means Docker. Tests get a
     stand-in that records the call in vivibox.actions.started; one marked real_start gets the real
     thing."""
-    from vivibox import actions
+    from vivibox import actions, probe
 
     if "real_start" in request.keywords:
         return
@@ -51,3 +51,5 @@ def no_real_start(request, monkeypatch):
     monkeypatch.setattr(
         actions, "start", lambda task_id, resume=False, on_step=None: started.append(task_id) or "m"
     )
+    # The view asks the daemon for the header's warning; the tests have no daemon to ask.
+    monkeypatch.setattr(probe, "docker_running", lambda: True)

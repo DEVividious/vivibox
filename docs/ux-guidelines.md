@@ -86,7 +86,8 @@ starts the pod when needed.
   Cancel focused.
 - The footer shows only keys that do something for the selected row, decisions first, then the
   row's actions, then `n`, `i`, `?` and `q`; everything else is under `?`. The header counts what
-  waits for you and what works, what `h` and `H` hide, and what today's tasks have cost. At 80 columns the whole
+  waits for you and what works, what `h` and `H` hide, and what today's tasks have cost; first of
+  all it says what would keep every task from starting (Docker down, a provider without a key). At 80 columns the whole
   footer fits. A key named in any text is a key the footer offers at that moment: ask the same
   function that enables the key (`watchable`, `check_action`), never repeat its condition.
 - The list is projects with their tasks under them. Enter on a project folds or unfolds it, and

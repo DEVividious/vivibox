@@ -4286,3 +4286,30 @@ def test_the_header_says_what_today_cost(env):
         assert "0.5" not in app.sub_title, "yesterday's is history"
 
     run(scenario)
+
+
+def test_the_header_says_first_what_would_keep_every_task_from_starting(env, monkeypatch):
+    """Docker down, or a provider without a key, showed only once a task failed to start, in a
+    message gone in seconds. The header says it before you press n."""
+    from vivibox import keys, roles
+
+    path = env / "config" / "config.toml"
+    path.write_text(path.read_text().replace('model = "m"', 'model = "deepseek/deepseek-v4-flash"'))
+    config = load_config()
+    assert roles.provider_keys(config) == ["deepseek"]
+    assert roles.machine_problem(config, docker_ok=True) == "no key for deepseek: press k"
+    keys.set_key("deepseek", "sk-test")
+    assert roles.machine_problem(config, docker_ok=True) == "", "whole now"
+    assert roles.machine_problem(config, docker_ok=False).startswith("Docker is not running")
+    from vivibox import probe
+
+    monkeypatch.setattr(probe, "docker_running", lambda: False)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await app.workers.wait_for_complete()
+        app.reload()
+        await pilot.pause()
+        assert app.sub_title.startswith("Docker is not running: no task can start · "), app.sub_title
+
+    run(scenario)

@@ -134,6 +134,7 @@ from .roles import (  # noqa: F401
     configured_choice,
     fetch_provider_catalog,
     harness_for,
+    machine_problem,
     model_missing,
     models_cache,
     models_offered,

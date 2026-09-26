@@ -203,7 +203,9 @@ class TaskTable:
         return f"[{color}]{state}{count}[/]"
 
     def set_sub_title(self) -> None:
-        parts = [f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you"]
+        # First what would keep every task from starting: Docker down, a provider without a key.
+        parts = [self.machine_note] if self.machine_note else []
+        parts.append(f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you")
         if self.working:
             parts.append(f"{self.working} working")
         # What h and H keep out of sight, so a list that looks short is not a surprise.

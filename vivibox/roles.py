@@ -27,6 +27,7 @@ from .config import (
     Role,
     load_config,
 )
+from .harness import HarnessError
 from .pod import Pod
 from .task import Task
 
@@ -292,3 +293,20 @@ def provider_keys(config: Config, task: Task | None = None) -> list[str]:
         elif role.harness == claudecode.NAME and "anthropic" not in found:
             found.append("anthropic")
     return found
+
+
+def machine_problem(config: Config, docker_ok: bool | None = None) -> str:
+    """What would keep every task from starting, in a line for the header: Docker down, a role
+    without a model, or a provider a role needs without a key. "" when nothing would."""
+    if docker_ok is False:
+        return "Docker is not running: no task can start"
+    try:
+        needed = provider_keys(config)
+    except ConfigError as e:
+        return str(e.args[0] if e.args else e)
+    except HarnessError:
+        return ""  # a model not of the <provider>/<model> shape is refused at the start, with its own words
+    have = keys.list_keys()
+    if missing := [p for p in needed if p not in have]:
+        return f"no key for {', '.join(missing)}: press k"
+    return ""

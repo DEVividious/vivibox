@@ -904,6 +904,9 @@ def test_a_tool_not_found_on_the_fresh_clone_is_a_failure_of_the_environment(tas
     result = gate.run_gate(task, pod, ["yarn build"], [])
     assert result.environment == said and not result.passed
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "for you, no attempt spent"
+
+
+@pytest.mark.parametrize(
     "criterion,refused",
     [
         ("`./mvnw -B verify` passes with the new tests included (no test skipped)", True),

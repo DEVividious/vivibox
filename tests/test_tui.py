@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -3370,8 +3371,9 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
         await pilot.pause()
         shown = [str(key.key_display) for key in app.query(FooterKey)]
         assert shown[:2] == ["r", "g"], "your decisions come first"
-        for hidden in ("i", "h", "k"):
+        for hidden in ("h", "k"):
             assert hidden not in shown, f"{hidden} is under ? Help"
+        assert shown.index("i") == shown.index("n") + 1, "i stands after n, on every row"
         assert shown.index("?") == shown.index("q") - 1
         await pilot.press("question_mark")
         await pilot.pause()
@@ -4238,5 +4240,49 @@ def test_an_unticked_box_shows_no_mark(env):
         await pilot.pause()
         on = box.get_component_rich_style("toggle--button")
         assert on.color != on.bgcolor, "a ticked box shows its mark"
+
+    run(scenario)
+
+
+def test_i_is_offered_on_every_row_and_the_header_has_no_palette_icon(env):
+    """Setting up a project was under ? only; a person with one project and no memory of the
+    empty screen's hint had no way to find it. The header's icon opened Textual's command
+    palette, which vivibox does not use."""
+    from textual.widgets._header import HeaderIcon
+
+    task = new_task()
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo"))
+        await pilot.pause()
+        assert "new_project" in keys(app), "on a project's row"
+        app.table.move_cursor(row=rows(app).index(task.id))
+        await pilot.pause()
+        assert "new_project" in keys(app), "and on a task's"
+        assert not app.query_one(HeaderIcon).display
+
+    run(scenario)
+
+
+def test_the_header_says_what_today_cost(env):
+    """The limits are in dollars, and every row shows its own figure; the day's sum was nowhere."""
+    task = new_task()
+    task.event("turn", state="plan", ok=True, cost=0.05, tokens=1000, error="")
+    actions.history_path().parent.mkdir(parents=True, exist_ok=True)
+    today = now()
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="milliseconds")
+    entries = [
+        {"id": "demo-8", "project": "demo", "title": "Today", "cost": 0.12, "commit": "a", "branch": "",
+         "conflicts": [], "finished": today, "created": today},
+        {"id": "demo-7", "project": "demo", "title": "Yesterday", "cost": 0.5, "commit": "b", "branch": "",
+         "conflicts": [], "finished": yesterday, "created": yesterday},
+    ]  # fmt: skip
+    actions.history_path().write_text("".join(json.dumps(e) + "\n" for e in entries))
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert app.sub_title.endswith("$0.17 today"), app.sub_title
+        assert "0.5" not in app.sub_title, "yesterday's is history"
 
     run(scenario)

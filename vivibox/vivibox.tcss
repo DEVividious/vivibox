@@ -1,4 +1,6 @@
 DataTable { height: 1fr; }
+/* The header's icon opens Textual's command palette, which vivibox does not use. */
+HeaderIcon { display: none; }
 /* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
 .catalog { height: auto; max-height: 40vh; }
 #rows { height: auto; max-height: 75vh; }

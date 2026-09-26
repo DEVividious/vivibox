@@ -4,6 +4,8 @@ task rows, the spinner and the header's counts. Mixed into the app in tui.py.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from rich.markup import escape
 from rich.text import Text
 from textual.widgets import Static
@@ -12,6 +14,11 @@ from . import actions, ui
 from .dialogs import NO_PROJECTS
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
+
+
+def finished_on(stamp: str):
+    """The local day a history entry's timestamp falls on."""
+    return datetime.fromisoformat(stamp).astimezone().date()
 
 
 class TaskTable:
@@ -59,6 +66,11 @@ class TaskTable:
         kept = [e for e in actions.history() if e["id"] not in live and e.get("project") in known]
         shown = lambda e: self.show_deleted if e.get("deleted") else self.show_done  # noqa: E731
         self.done = sorted((e for e in kept if shown(e)), key=lambda e: ui.task_number(e["id"]), reverse=True)
+        # What the tasks finished today cost; the live ones are added where the header is set.
+        today = datetime.now().astimezone().date()
+        self.spent_finished = sum(
+            e.get("cost") or 0 for e in kept if e.get("finished") and finished_on(e["finished"]) == today
+        )
         self.hidden = {}
         for entry in kept:
             if not shown(entry):
@@ -172,6 +184,7 @@ class TaskTable:
         self.waiting_ids = waiting_now
         self.waiting = len(waiting_now)
         self.working = sum(self.busy(st) for _, st in pairs)
+        self.spent_today = self.spent_finished + sum(ui.cost(task).total for task, _ in pairs)
         self.set_sub_title()
         self.show_detail()
         self.refresh_bindings()
@@ -195,6 +208,9 @@ class TaskTable:
             parts.append(f"{self.working} working")
         # What h and H keep out of sight, so a list that looks short is not a surprise.
         parts += [f"{count} {kind} hidden" for kind, count in sorted(self.hidden.items())]
+        # The limits are in dollars and every row shows its own figure; the day's sum is here.
+        if self.spent_today:
+            parts.append(f"${self.spent_today:.2f} today")
         if self.code_changed:
             parts.append(CODE_CHANGED)
         self.sub_title = " · ".join(parts)

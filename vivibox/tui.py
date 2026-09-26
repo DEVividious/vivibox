@@ -107,7 +107,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         Binding("o", "open_repo", "IDE"),
         Binding("x", "forget_project", "Forget"),
         Binding("n", "new", "New"),
-        Binding("i", "new_project", "New project", show=False),
+        Binding("i", "new_project", "Project"),
         Binding("h", "toggle_done", "Show/hide accepted", show=False),
         Binding("H", "toggle_deleted", "Show/hide deleted", show=False),
         Binding("k", "settings", "Settings", show=False),
@@ -167,6 +167,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
         self.pods: dict[str, PodView] = {}  # what each task's pod is doing, refreshed off the loop
         self.waiting = self.working = 0
+        self.spent_today = self.spent_finished = 0.0
         self.waiting_ids: set[str] | None = None  # None until the first refresh: nothing is new then
         self.table = self.query_one(DataTable)
         self.panel = self.query_one("#detail")

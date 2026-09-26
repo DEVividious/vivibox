@@ -64,7 +64,7 @@ before any fix; features and other tasks get the usual plan.
 
 Desktop notifications tell you when a task waits for you, so you can leave the view closed, and
 [ntfy](configure.md) carries the same to your phone. In the view itself a task that starts to wait rings the terminal's bell, and the window's title counts
-those waiting. After a reboot the view offers to start the tasks that were running. Their
+those waiting; the header adds what today's tasks have cost. After a reboot the view offers to start the tasks that were running. Their
 buttons (**Show plan**, **Accept plan**, **Open in idea**) cover the common steps too.
 
 Everything the view does is also a command, for scripts or when you prefer a shell:

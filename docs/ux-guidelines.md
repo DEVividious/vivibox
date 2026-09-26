@@ -85,7 +85,8 @@ starts the pod when needed.
 - Red is for a button that stops, deletes or forgets. Such a dialog with lasting loss opens with
   Cancel focused.
 - The footer shows only keys that do something for the selected row, decisions first, then the
-  row's actions, then `n`, `?` and `q`; everything else is under `?`. At 80 columns the whole
+  row's actions, then `n`, `i`, `?` and `q`; everything else is under `?`. The header counts what
+  waits for you and what works, what `h` and `H` hide, and what today's tasks have cost. At 80 columns the whole
   footer fits. A key named in any text is a key the footer offers at that moment: ask the same
   function that enables the key (`watchable`, `check_action`), never repeat its condition.
 - The list is projects with their tasks under them. Enter on a project folds or unfolds it, and

@@ -205,8 +205,8 @@ def test_canary_a_test_failing_before_the_task_is_asked_about_not_removed(bench)
 
 
 def test_propose_the_writer_of_a_project_with_no_command_writes_the_one_it_ran(bench):
-    """No verification command yet: the writer says what builds and tests the project, the gate
-    verifies the task with it, and the project keeps nothing until you accept it."""
+    """No verification command yet: the writer says what builds and tests the project, the task
+    (made with --auto here) keeps it for the project, and the gate verifies the task with it."""
     from vivibox import gate, proposal
     from vivibox.config import load_project
 
@@ -225,7 +225,7 @@ def test_propose_the_writer_of_a_project_with_no_command_writes_the_one_it_ran(b
         assert st.state is State.CHECKPOINT_FINAL, f"verified with it: {st.state}, {st.problem}"
         logs = sorted((task.meta / "log").glob("verify-*.log"))
         assert logs and command in logs[-1].read_text(), "the gate ran the proposed command"
-        assert load_project("propose").verify == [], "kept only once you accept it"
+        assert load_project("propose").verify == [command], "an --auto task keeps a whole command itself"
     finally:
         finish(task)
 

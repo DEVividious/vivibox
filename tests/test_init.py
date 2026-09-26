@@ -285,6 +285,8 @@ def test_a_narrowed_proposal_is_not_run_but_named_for_the_gate(env, tmp_path):
     assert actions.verify_commands(task, project) == ["./mvnw -B verify"]
     own = dataclasses.replace(project, verify=["./mvnw -Dtest=Smoke test"])
     assert actions.narrowed_proposal(task, own) == "", "the project's own choice"
+
+
 @pytest.mark.parametrize(
     "command",
     [

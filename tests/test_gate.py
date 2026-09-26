@@ -867,6 +867,8 @@ def test_a_proposal_narrowed_to_the_writers_tests_is_refused_before_the_build(ta
     text = gate.feedback(result)
     assert "-Dtest=PetTests" in text and "whole project" in text and "verify-proposal.md" in text
     assert gate.next_state(result, 1, 3) is State.IMPLEMENT, "the writer's to fix: an attempt spent"
+
+
 def test_a_package_json_without_a_lockfile_gets_no_install(task):
     """A monorepo's root package.json has no lockfile: `npm ci` there fails every time, before the
     command that would have installed the app's dependencies itself."""

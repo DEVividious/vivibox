@@ -90,7 +90,9 @@ is already done, then go on with this:
 # Before the first implementing turn of a project that is prepared (Project.prepare): what ran, so
 # the writer builds on it instead of building everything again, and where to look when it failed.
 PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in the repository, so what it
-built and installed is there; its output is in /task/handoff/prepare.log.
+built and installed is there; its output is in /task/handoff/prepare.log. Build only the modules you
+change, and all of them in one command (Maven: `-pl core,app`): a module built on its own takes its
+neighbours as they were installed, before your change.
 
 """
 

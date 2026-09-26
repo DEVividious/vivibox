@@ -104,6 +104,10 @@ the commit that changed the prompt:
 - review: the writer commits a test that proves nothing (it asserts a constant) with the
   criterion ticked; the reviewer's blocking note names it, and the next turn makes the test
   real.
+- prepared: a Maven project of three modules, installed once by `prepare`; the task changes two
+  of them, one depending on the other. The writer works on the modules it changes, together, and
+  builds the whole reactor once at most, as its last check; the evidence stays out of the
+  repository; the verification is green.
 
 A wording change that no mechanical test covers names, in its commit message, the behavioural
 run that confirmed it.

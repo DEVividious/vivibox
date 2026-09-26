@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -122,11 +123,14 @@ def bench(tmp_path_factory):
         mp.undo()
 
 
-def project(bench, name: str, files: dict[str, str], verify: list[str], pass_env: tuple = ()) -> Path:
+def project(
+    bench, name: str, files: dict[str, str], verify: list[str], pass_env: tuple = (), prepare: tuple = ()
+) -> Path:
     repo = make_repo(bench["tmp"] / name)
     # Bytecode a test run leaves would count as uncommitted files, and the gate builds commits only.
-    (repo / ".gitignore").write_text("__pycache__/\n")
+    (repo / ".gitignore").write_text("__pycache__/\ntarget/\n")
     for path, text in files.items():
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
         (repo / path).write_text(text)
     git = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731
     git("add", ".")
@@ -134,6 +138,8 @@ def project(bench, name: str, files: dict[str, str], verify: list[str], pass_env
     text = f'repo = "{repo}"\nverify = {json.dumps(verify)}\n'
     if pass_env:
         text += f"pass_env = {json.dumps(list(pass_env))}\n"
+    if prepare:
+        text += f"prepare = {json.dumps(list(prepare))}\n"
     (bench["cfg"] / "projects" / f"{name}.toml").write_text(text)
     return repo
 
@@ -286,6 +292,178 @@ def test_early_stop_a_report_costs_an_attempt_and_the_next_turn_commits(bench):
         sup.step()  # the turn that reads the feedback, without a prompt of ours
         spend(task)
         assert head(task.repo) != base, "and commits"
+    finally:
+        finish(task)
+
+
+# A Maven project of three modules, the versions those already in the shared cache: nothing to download.
+POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example</groupId>
+  <artifactId>shop</artifactId>
+  <version>1.0</version>
+  <packaging>pom</packaging>
+  <modules>
+    <module>core</module>
+    <module>app</module>
+    <module>extra</module>
+  </modules>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>6.1.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin><artifactId>maven-resources-plugin</artifactId><version>3.4.0</version></plugin>
+        <plugin><artifactId>maven-compiler-plugin</artifactId><version>3.15.0</version></plugin>
+        <plugin><artifactId>maven-surefire-plugin</artifactId><version>3.6.0</version></plugin>
+        <plugin><artifactId>maven-jar-plugin</artifactId><version>3.5.0</version></plugin>
+        <plugin><artifactId>maven-install-plugin</artifactId><version>3.1.4</version></plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
+"""
+MODULE_POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>example</groupId>
+    <artifactId>shop</artifactId>
+    <version>1.0</version>
+  </parent>
+  <artifactId>{name}</artifactId>
+{dependencies}</project>
+"""
+ON_CORE = """  <dependencies>
+    <dependency>
+      <groupId>example</groupId>
+      <artifactId>core</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+"""
+JAVA_CLASS = """package shop;
+
+public final class {name} {{
+    private {name}() {{}}
+
+{body}}}
+"""
+JAVA_TEST = """package shop;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
+
+class {name}Test {{
+    @Test
+    void {test}() {{
+        assertEquals({expected}, {call});
+    }}
+}}
+"""
+
+
+def java_module(name: str, cls: str, body: str, test: str, expected: str, call: str, deps: str = "") -> dict:
+    return {
+        f"{name}/pom.xml": MODULE_POM.format(name=name, dependencies=deps),
+        f"{name}/src/main/java/shop/{cls}.java": JAVA_CLASS.format(name=cls, body=body),
+        f"{name}/src/test/java/shop/{cls}Test.java": JAVA_TEST.format(
+            name=cls, test=test, expected=expected, call=call
+        ),
+    }
+
+
+MAVEN_FILES = {
+    "pom.xml": POM,
+    **java_module(
+        "core", "Calc", "    public static int add(int a, int b) {\n        return a + b;\n    }\n",
+        "adds", "3", "Calc.add(1, 2)",
+    ),
+    **java_module(
+        "app", "Report",
+        "    public static int sum(int... values) {\n        int total = 0;\n"
+        "        for (int v : values) {\n            total = Calc.add(total, v);\n        }\n"
+        "        return total;\n    }\n",
+        "sums", "6", "Report.sum(1, 2, 3)", deps=ON_CORE,
+    ),
+    **java_module(
+        "extra", "Extra",
+        "    public static String greet(String name) {\n        return \"hello \" + name;\n    }\n",
+        "greets", "\"hello you\"", "Extra.greet(\"you\")",
+    ),
+}  # fmt: skip
+MAVEN_GOAL = (
+    "Add Calc.subtract(a, b) to the core module and Report.difference(int... values) to the app "
+    "module: the first value minus every other one, through Calc.subtract. One unit test for each, "
+    "in the module's own test class."
+)
+
+
+def writer_commands(task) -> list[str]:
+    """The shell commands the writer ran, read from its conversation on the pod's opencode server."""
+    from vivibox.opencode import MOUNT, PORT
+
+    session = task.read_state().sessions.get("writer", "")
+    assert session, "the writer had no session"
+    get = (
+        f'curl -fsS -u "opencode:$(cat {MOUNT}/server-password)" '
+        f"http://127.0.0.1:{PORT}/session/{session}/message"
+    )
+    out = actions.task_pod(task.id).exec("bash", "-c", get, check=False).stdout
+    commands = []
+    for message in json.loads(out or "[]"):
+        for part in message.get("parts") or []:
+            if part.get("type") == "tool" and part.get("tool") == "bash":
+                command = ((part.get("state") or {}).get("input") or {}).get("command")
+                if command:
+                    commands.append(command)
+    return commands
+
+
+# mvn where a shell command starts: not the word in a file the writer writes with a heredoc.
+MVN = re.compile(r"(?:^|[;&|(]\s*|&&\s*)\s*mvn\b", re.MULTILINE)
+
+
+def builds_everything(command: str) -> bool:
+    """A Maven run of the whole reactor: no module chosen with -pl, -f or a cd into one."""
+    if not MVN.search(command):
+        return False
+    chosen = re.search(r"(?<!\S)(-pl|--projects|-f|--file)(?=[\s=])", command)
+    return not chosen and not re.search(r"\bcd\b.*\b(core|app|extra)\b.*\bmvn\b", command)
+
+
+def test_prepared_the_writer_builds_the_modules_it_changes_and_the_whole_once_at_most(bench):
+    """A project installed once by `prepare`: the writer works on the modules it changes, the two of
+    them together, since the second takes the first as installed, before the change. One run of the
+    whole reactor, last, is its own check before the gate's: three runs of three did it (2026-09-26),
+    whatever the prefix said, and the brief names that command. The commands come from the writer's
+    own conversation; the gate has the last word."""
+    project(bench, "prepared", MAVEN_FILES, ["mvn -B -q verify"], prepare=("mvn -B -q install -DskipTests",))
+    task, sup = begin("prepared", MAVEN_GOAL)
+    try:
+        st = drive(task, sup, {State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED}, steps=14)
+        commands = writer_commands(task)
+        maven = [c for c in commands if MVN.search(c)]
+        print("\nwriter's Maven commands:")
+        for c in maven:
+            print(f"  {c}")
+        assert st.state is State.CHECKPOINT_FINAL, f"ended in {st.state}: {st.problem or 'a question'}"
+        assert maven, f"the writer ran no Maven at all; its commands: {commands}"
+        whole = [c for c in maven if builds_everything(c)]
+        assert whole in ([], maven[-1:]), f"the whole reactor built while working, extra included: {whole}"
+        assert "subtract" in (task.repo / "core/src/main/java/shop/Calc.java").read_text()
+        assert "difference" in (task.repo / "app/src/main/java/shop/Report.java").read_text()
+        assert not (task.repo / "red.md").exists(), "the evidence goes to the handoff, not the repository"
     finally:
         finish(task)
 

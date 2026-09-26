@@ -68,6 +68,10 @@ INSTALLED = "/cache/m2/installed"
 # JVM dies. The gate keeps its cache: it holds whole verifications only (ADR-0023). Every Maven a
 # wrapper may fetch reads MAVEN_OPTS, and the extension reads system properties.
 AGENT_MAVEN_OPTS = "-Dmaven.repo.local=/cache/m2 -Dmaven.build.cache.enabled=false"
+# The most a scratch tmpfs (/tmp, and the gate's and reviewer's fresh home) may take of the host's
+# memory. Without a size it grows to half of it: an agent that cloned the project twice into /tmp
+# to try an install held 5 GB. Real work lives in the clone and the caches, which are on disk.
+TMP_SIZE = "4g"
 # The preparation's process, in the agent's /tmp: gone with the container, as the process is.
 PREPARE_PID = "/tmp/vivibox-prepare.pid"
 HOST_GATEWAY = "host.docker.internal"
@@ -457,7 +461,7 @@ class Pod:
             "--label", f"vivibox.task={self.task_id}",
             "--network", f"container:{self.sidecar}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", "/tmp:exec,mode=1777",
+            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
             *self.docker_env(),
             # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
             "-e", "HUSKY=0",
@@ -488,7 +492,8 @@ class Pod:
             "--label", f"vivibox.task={self.task_id}",
             "--network", f"container:{self.sidecar}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", "/tmp:exec,mode=1777", "--tmpfs", "/config:exec,mode=1777",
+            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
+            "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
             *self.docker_env(),
             "-e", "HUSKY=0",
             *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
@@ -513,7 +518,8 @@ class Pod:
             "--label", f"vivibox.task={self.task_id}",
             "--network", f"container:{self.sidecar}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", "/tmp:exec,mode=1777", "--tmpfs", "/config:exec,mode=1777",
+            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
+            "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
             *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
             *(arg for m in all_mounts for arg in ("-v", m.arg())),
             "-w", self.review_src,

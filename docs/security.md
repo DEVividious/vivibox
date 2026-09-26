@@ -27,7 +27,8 @@ on your machine until you have approved it.
 Each task gets a pod: an unprivileged agent container and a Docker daemon in a sidecar that runs
 under [Sysbox](https://github.com/nestybox/sysbox). The agent container runs as your UID with every
 capability dropped, `no-new-privileges` and a read-only root filesystem; it writes only to the task's
-clone, its home and `/tmp`. The Docker socket lives in a volume the two share and never on your host.
+clone, its home and `/tmp`, and `/tmp` is a tmpfs of at most 4 GB, so what an agent leaves there
+cannot take the host's memory. The Docker socket lives in a volume the two share and never on your host.
 Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would pick
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
 after a test, and the pod's daemon then loses the image another test is still pulling, at random. A

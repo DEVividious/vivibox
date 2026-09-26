@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from vivibox import pod as pod_module
 from vivibox import toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
@@ -648,3 +649,13 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     assert len(pod.runner.find("docker", "rm", "-f", pod.review)) == dropped + 1, "a stop drops the round too"
     pod.remove()
     assert any(pod.review in c for c in pod.runner.find("docker", "rm", "-f")), "gone with the pod"
+
+
+def test_every_tmpfs_has_a_size_so_scratch_files_cannot_take_the_hosts_memory(pod, tmp_path):
+    """A tmpfs without a size grows to half the host's memory: an agent that cloned itself twice
+    into /tmp to test an install held 5 GB of RAM. Each scratch mount stops at TMP_SIZE."""
+    pod.gate_dir = tmp_path / "gate"
+    for cmd in (pod.agent_command(), pod.gate_command(), pod.review_command([], {})):
+        mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tmpfs"]
+        assert mounts and all(f"size={pod_module.TMP_SIZE}" in m for m in mounts), mounts
+        assert all(m.split(":")[0] in ("/tmp", "/config") for m in mounts)

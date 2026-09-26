@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from vivibox import actions, box, ui
+from vivibox import actions, box, ui, version
 from vivibox.cli import main
 from vivibox.config import load_config, load_project
 from vivibox.states import State
@@ -86,6 +86,7 @@ def test_a_finished_task_keeps_the_reviewers_cost_apart(env):
     actions.remember(done, load_project("demo"), "abcdef0123456789")
     entry = json.loads(actions.history_path().read_text().splitlines()[-1])
     assert ui.finished_cost(entry) == "$0.40 + $0.06 + $0.05"
+    assert entry["version"] == version.current(), "which build accepted it, for a bug report"
     actions.remember_removed(task, load_project("demo"))
     entry = json.loads(actions.history_path().read_text().splitlines()[-1])
     assert entry["cost"] == 0 and "review" not in entry, "nothing spent, nothing to split off"

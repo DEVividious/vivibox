@@ -1,0 +1,38 @@
+name: Bug report
+description: Something vivibox does wrong
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `vivibox --version`. It names the commit your build came from.
+      placeholder: vivibox 0.1.1.dev3+g183ca9f
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: "`uname -sr`, `docker version --format '{{.Server.Version}}'`, `sysbox-runc --version | head -1`"
+      placeholder: Linux 6.14.0, Docker 28.3.2, sysbox-runc 0.6.7
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, key by key or command by command, and what you saw instead of what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The log under `l` in the view (the timeline, the verification log or the supervisor's), or `vivibox timeline <task>`. Take out anything private.
+      render: text
+  - type: input
+    id: project
+    attributes:
+      label: Project
+      description: What the project is built with (Maven, npm, …) and whether the repository is public. A link, if it is.

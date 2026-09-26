@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from . import actions, gate, keys, ntfy, prepare, reviewing, supervisor
+from . import actions, gate, keys, ntfy, prepare, reviewing, supervisor, version
 from .config import Config, ConfigError, Project, load_config, load_project
 from .risky import Approvals
 from .states import waits_for_user
@@ -28,7 +28,10 @@ def cmd_supervise(args: argparse.Namespace) -> int:
 
     sup = make_supervisor(task, project, pod, config, current)
     actions.supervising(task)
-    print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
+    print(
+        f"vivibox {version.current()} supervising {task.id}. Your decisions: vivibox accept|reply {task.id}",
+        flush=True,
+    )
     stepped(task.read_state())  # a resumed task already has its session
     sup.run(on_step=stepped)
     return 0

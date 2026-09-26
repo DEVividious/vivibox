@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version comes from the tags
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest
+      - run: uv build
+      - run: uv run vivibox --version
+
+  changelog:
+    # A change under vivibox/ has its line in CHANGELOG.md (AGENTS.md); tests/test_structure.py
+    # checks the same on a branch with main at hand, which a pull request's checkout lacks.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
+          if grep -q '^vivibox/' <<<"$changed" && ! grep -qx 'CHANGELOG.md' <<<"$changed"; then
+            echo "::error::a change under vivibox/ needs a line in CHANGELOG.md (see AGENTS.md)"
+            exit 1
+          fi
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # publish:
+  #   PyPI comes after the first reports (ADR-0028): trusted publishing on a tag, no token.
+  #   needs: [check]
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: ubuntu-latest
+  #   environment: pypi
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+  #     - uses: astral-sh/setup-uv@v5
+  #     - run: uv build
+  #     - run: uv publish

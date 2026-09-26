@@ -25,7 +25,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from . import actions, context, ide, panel, repo
+from . import actions, context, ide, panel, repo, version
 from .browse import ANY, FOLDER, Browse, shown_path
 from .config import ConfigError, load_config, load_project
 from .verify_ui import AskVerify
@@ -699,6 +699,8 @@ class Help(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="dialog help"):
+            # The build first, where it is seen without scrolling: a bug report starts with it.
+            yield Label(f"vivibox {version.current()}", classes="files")
             yield Static(HELP, id="help")
             if self.note:
                 yield Label(self.note, id="note")

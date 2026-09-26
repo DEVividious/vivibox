@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
-from test_tui import at_plan_checkpoint, implementing, new_task, rows
+from test_tui import at_plan_checkpoint, implementing, new_task, rows, run
 
 from vivibox import (
     actions,
@@ -177,6 +177,20 @@ def test_every_key_the_panel_names_is_a_key_the_footer_offers(env, monkeypatch, 
                     assert offered, f"{st.goal}: the panel names `{key}`, the footer does not offer it"
 
     asyncio.run(go())
+
+
+def test_help_says_which_build_this_is(env):
+    """The version at the bottom of the help, where a person looks when asked which build."""
+    from ux import screen_text
+
+    from vivibox import version
+
+    async def scenario(app, pilot):
+        await pilot.press("?")
+        await pilot.pause()
+        assert f"vivibox {version.current()}" in screen_text(app)
+
+    run(scenario)
 
 
 def test_help_fits_in_eighty_columns_without_wrapping():

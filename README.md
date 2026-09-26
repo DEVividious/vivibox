@@ -73,6 +73,8 @@ your own chat. [docs/configure.md](docs/configure.md).
   shell; closing it brings your work back through the same review as a task's
 - [UX guidelines](docs/ux-guidelines.md) and [prompt guidelines](docs/prompt-guidelines.md), for
   anyone changing what the view says or what the agents read
+- [Contributing](CONTRIBUTING.md): reporting a problem (`vivibox --version` first), working on the
+  code, releases; [changelog](CHANGELOG.md)
 
 Status: one writer per task, a planner and a reviewer on models of your choice, several tasks at
 once. GitHub pull requests are next.

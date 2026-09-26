@@ -1,0 +1,18 @@
+name: Feature request
+description: Something vivibox should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: situation
+    attributes:
+      label: The situation
+      description: What you were doing when you missed it, and what you did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What vivibox could do
+      description: One or two sentences. A key, a setting, a command line option, if you have one in mind.
+    validations:
+      required: true

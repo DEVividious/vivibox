@@ -1,14 +1,29 @@
 [project]
 name = "vivibox"
-version = "0.1.0"
-description = "Orchestrator for AI agent tasks in isolated pods"
+# The version comes from git: a tag vX.Y.Z, or X.Y.(Z+1).devN+g<commit> past it (ADR: CHANGELOG.md).
+dynamic = ["version"]
+description = "Coding agents in a box that keeps them off your machine, in both directions"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Maciej Jaworski" }]
+keywords = ["ai", "coding-agent", "sandbox", "docker", "sysbox", "opencode"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development",
+]
 dependencies = [
     "textual>=8.2.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/DEVividious/vivibox"
+Changelog = "https://github.com/DEVividious/vivibox/blob/main/CHANGELOG.md"
+Issues = "https://github.com/DEVividious/vivibox/issues"
 
 [project.scripts]
 vivibox = "vivibox.cli:main"
@@ -17,8 +32,17 @@ vivibox = "vivibox.cli:main"
 dev = ["pytest>=8", "ruff>=0.6", "shellcheck-py>=0.10"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+fallback-version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["vivibox"]

@@ -17,6 +17,13 @@
   on a tool that keeps the `harness.Harness` contract, through what `supervisor.Ports` hands it;
   `supervise.py` wires both for the command line. A module past 800 lines is split before a
   feature is added to it (`tests/test_structure.py` fails on one).
+- A change under `vivibox/` gets a line under `## [Unreleased]` in `CHANGELOG.md` in the same
+  commit (Keep a Changelog: Added, Changed, Fixed; a change a person cannot notice goes under
+  `### Internal`). `tests/test_structure.py` fails on a branch that changes `vivibox/` and not
+  `CHANGELOG.md`. The version is git's, never a file's: a tag `vX.Y.Z` is a release, every
+  commit past it is `X.Y.(Z+1).devN+g<commit>`, and `vivibox --version` names it, so a bug
+  report names the commit. A release is the `Unreleased` section given a number and a date, a
+  commit, and an annotated tag pushed by the person.
 - Before committing: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
 - A change to a prompt that no mechanical test covers gets a behavioural run:

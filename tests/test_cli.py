@@ -18,6 +18,17 @@ def test_new_and_status(env, capsys):
     assert "created" in capsys.readouterr().out
 
 
+def test_version_names_the_installed_build(capsys):
+    """What a bug report starts with: the version from git, a tag or the commit past it."""
+    from vivibox import version
+
+    with pytest.raises(SystemExit) as left:
+        main(["--version"])
+    assert left.value.code == 0
+    assert capsys.readouterr().out.strip() == f"vivibox {version.current()}"
+    assert version.current() and version.current() != "0+unknown"
+
+
 def test_unknown_project_fails_cleanly(env, capsys):
     assert main(["new", "missing", "x", "--draft"]) == 1
     assert "missing.toml" in capsys.readouterr().err

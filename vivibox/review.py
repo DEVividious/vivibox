@@ -18,6 +18,7 @@ from . import (
     ide,
     repo,
     ui,
+    version,
 )
 from .config import (
     Config,
@@ -159,6 +160,7 @@ def remember_removed(task: Task, project: Project) -> None:
         "created": st.created,
         "finished": now(),
         "deleted": str(st.state),
+        "version": version.current(),
     }
     path = history_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +186,8 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         "created": done.created,
         "demo": done.demo,
         "finished": now(),
+        # Which build accepted it: what a bug report about the work starts with.
+        "version": version.current(),
     }
     with path.open("a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

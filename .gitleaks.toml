@@ -1,0 +1,7 @@
+# Secret scan: docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:latest git /repo
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The opencode server password is read from a file in the pod at run time"
+regexes = ['''\$\(cat \{MOUNT\}/server-password\)''']

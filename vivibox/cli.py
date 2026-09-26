@@ -23,6 +23,7 @@ from . import (
     stats,
     timeline,
     ui,
+    version,
 )
 from . import init as project_init
 from .config import ConfigError, config_dir, load_config, load_project
@@ -547,6 +548,7 @@ def parser() -> argparse.ArgumentParser:
         prog="vivibox",
         description="Run AI agent tasks in isolated pods. Without a command: the interactive view.",
     )
+    p.add_argument("--version", action="version", version=f"vivibox {version.current()}")
     # Without a command: the interactive view.
     sub = p.add_subparsers(dest="command")
 

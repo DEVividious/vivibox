@@ -823,14 +823,23 @@ def test_one_start_or_stop_of_a_task_at_a_time_from_however_many_views(env, monk
         assert killed == ["demo-1"]
 
 
-def test_accept_names_the_writers_command_and_where_to_keep_it(env, capsys, monkeypatch):
-    from test_tui import done_with_a_proposal
+def test_accept_keeps_the_writers_command_for_the_project_and_verifies(env, capsys):
+    from test_tui import at_command_checkpoint
 
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    task = done_with_a_proposal(env)
+    from vivibox.config import load_project
+    from vivibox.states import State
+
+    task = at_command_checkpoint(env)
     assert main(["accept", task.id]) == 0
     out = capsys.readouterr().out
-    assert "proposed `npm ci && npm test`" in out and "demo.toml" in out
+    assert "demo is verified with `npm ci && npm test` from now on" in out
+    assert load_project("demo").verify == ["npm ci && npm test"] and task.read_state().state is State.VERIFY
+    task = at_command_checkpoint(env, command="")
+    assert main(["accept", task.id]) == 1
+    err = capsys.readouterr().err
+    assert "no command came from the writer" in err and "--verify" in err
+    assert main(["accept", task.id, "--verify", "npm test"]) == 0
+    assert load_project("demo").verify == ["npm test"] and task.read_state().state is State.VERIFY
 
 
 def test_new_takes_a_task_with_nothing_to_build(env):

@@ -8,11 +8,12 @@ import contextlib
 import shutil
 import subprocess
 
-from . import actions, manual
+from . import actions, gate, manual, proposal
 from .panel import edit_in_editor, planned_by_you
 from .plan import PlanError, parse_plan
 from .states import State
 from .task import Task
+from .verify_ui import AskVerify
 from .widgets import Confirm
 
 
@@ -83,3 +84,45 @@ class PlanKeys:
 
     def action_copy_prompt_cli(self) -> None:
         self.action_copy_prompt(cli=True)
+
+    def action_edit_command(self) -> None:
+        self.review_command(self.selected()[0])
+
+    def review_command(self, task: Task) -> None:
+        """The command the writer proposed, in the field e shows: Enter keeps it for the project
+        and the verification runs with it; typed over, yours is kept instead; empty, nothing is
+        decided. The box that leaves it to the writer is not offered: the writer just had its say."""
+        project = actions.load(task.id)[1]
+        command = proposal.proposed(task)
+        if not command:
+            heading = (
+                f"No command came from the writer of {task.id}. Type the one that builds {project.name}"
+                " and runs its tests; Enter keeps it for the project and verifies the task with it."
+            )
+        elif selection := gate.narrowed_proposal(command):
+            heading = (
+                f"The writer of {task.id} proposes this command, narrowed to {selection}: verified by its"
+                " own tests alone it would pass whatever it broke elsewhere. Change it to the whole build;"
+                " Enter keeps it for the project."
+            )
+        else:
+            heading = (
+                f"The writer of {task.id} proposes how {project.name} is verified, the command it ran."
+                " Enter keeps it for the project and verifies the task with it; Escape decides nothing."
+            )
+
+        def chosen(choice: dict) -> None:
+            if not choice or not choice.get("verify"):
+                if choice is not None and choice != {}:
+                    self.notify("Nothing typed: type the command, or r to ask the writer for one.")
+                return
+            try:
+                actions.accept_command(task, project, choice["verify"][0])
+            except Exception as e:
+                self.fail(e)
+                return
+            self.notify(f"{project.name} is verified with `{choice['verify'][0]}` from now on")
+            self.go_on(task, "Command kept")
+            self.reload()
+
+        self.push_screen(AskVerify(project.name, [command], heading=heading, writer_box=False), chosen)

@@ -183,6 +183,11 @@ def accept_plan(task: Task, reason: str) -> None:
     task.transition(State.IMPLEMENT, reason=reason)
 
 
+def accept_command(task: Task, command: str, reason: str) -> None:
+    """The command is the project's now (the caller kept it); the verification runs with it."""
+    task.transition(State.VERIFY, reason=reason, command=command)
+
+
 def _read(path: Path) -> str:
     try:
         return path.read_text()
@@ -247,6 +252,8 @@ class Ports:
     notify: Callable[..., None] = lambda task_id, message, kind="": notify(task_id, message)
     # Fetches the work into your repository and updates the review copy; returns the copy's path.
     prepare_review: Callable[[], Path | None] = lambda: None
+    # Keeps the command the writer proposed for the project, when --auto takes it without you.
+    keep_command: Callable[[str], None] = lambda command: None
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None
@@ -565,7 +572,31 @@ class Supervisor:
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
             return
+        if self._asks_for_command():
+            self._command_checkpoint(st)
+            return
         self.task.transition(State.VERIFY)
+
+    def _command_checkpoint(self, st: TaskState) -> None:
+        """The command the writer proposed is what the task is about to be verified with: yours to
+        keep for the project, change or send back, before the gate runs. --auto keeps a whole one
+        itself; a missing or narrowed one still waits for you."""
+        command = proposal.proposed(self.task)
+        selection = gate.narrowed_proposal(command)
+        if st.auto_plan and command and not selection and not self.ports.risky_changes():
+            self.ports.keep_command(command)
+            accept_command(self.task, command, "command kept automatically")
+            return
+        if not command:
+            reason = (
+                f"no command came from the writer: it wrote none to /task/handoff/{proposal.PROPOSAL};"
+                " type one, or send it back"
+            )
+        elif selection:
+            reason = f"command proposed: `{command}`, narrowed to {selection}; change it, or send it back"
+        else:
+            reason = f"command proposed: `{command}`; keep it for the project, change it, or send it back"
+        self._checkpoint(State.CHECKPOINT_COMMAND, reason, kind="command")
 
     def _asks_for_command(self) -> bool:
         """The project has no command, and neither it nor the task says there is nothing to build."""

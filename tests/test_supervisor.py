@@ -892,3 +892,73 @@ def test_the_agents_question_stands_when_the_verification_fails_again_after_g(ta
     sup.step()  # verify: passes once you fixed it
     assert task.read_state().state is State.CHECKPOINT_FINAL
     assert supervisor.question(task) is None, "answered by the build running"
+
+
+def with_proposal(command):
+    def act(t):
+        (t.meta / "handoff" / "verify-proposal.md").write_text(f"{command}\n")
+
+    return act
+
+
+def command_supervisor(task, harness, results=(), auto=False):
+    """A project with no command, its plan accepted: the writer is asked for one."""
+    task.plan_path.write_text(DRAFT)
+    task.transition(State.CHECKPOINT_PLAN)
+    supervisor.accept_plan(task, "plan accepted")
+    if auto:
+        task.set_auto_plan(True)
+    results, notes, kept = list(results), [], []
+    ports = supervisor.Ports(
+        run_gate=lambda t: results.pop(0),
+        risky_changes=lambda: [],
+        notify=lambda _id, msg, kind="": notes.append(msg),
+        keep_command=kept.append,
+    )
+    return supervisor.Supervisor(task, harness, ports, max_iterations=2, project_verify=[]), notes, kept
+
+
+def test_the_writers_command_is_a_checkpoint_before_the_first_verification(task):
+    """The command the writer proposes is what the task is verified with: you see it before the
+    gate runs and keep it for the project, once; then the gate runs."""
+    harness = FakeHarness(task, [with_proposal("npm ci && npm test")])
+    sup, notes, kept = command_supervisor(task, harness, results=[gate_result()])
+    sup.step()  # implement: the turn ends with a proposal
+    assert task.read_state().state is State.CHECKPOINT_COMMAND
+    assert notes[-1] == (
+        "command proposed: `npm ci && npm test`; keep it for the project, change it, or send it back"
+    )
+    assert sup.step() is False and kept == [], "waits for you"
+    supervisor.accept_command(task, "npm ci && npm test", "command accepted")
+    assert task.read_state().state is State.VERIFY
+    sup.step()  # verify
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_no_command_from_the_writer_is_the_same_checkpoint_with_nothing_to_keep(task):
+    sup, notes, kept = command_supervisor(task, FakeHarness(task))
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_COMMAND
+    assert notes[-1].startswith("no command came from the writer"), notes[-1]
+
+
+def test_a_command_narrowed_to_some_tests_reaches_the_checkpoint_with_a_warning(task):
+    sup, notes, kept = command_supervisor(
+        task, FakeHarness(task, [with_proposal("./mvnw -Dtest=PetTests test")])
+    )
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_COMMAND
+    assert "narrowed to -Dtest=PetTests" in notes[-1]
+
+
+def test_auto_keeps_a_whole_command_without_stopping_but_stops_on_a_narrowed_one(task):
+    harness = FakeHarness(task, [with_proposal("npm ci && npm test")])
+    sup, notes, kept = command_supervisor(task, harness, results=[gate_result()], auto=True)
+    sup.step()
+    assert kept == ["npm ci && npm test"] and task.read_state().state is State.VERIFY
+    other = create_task(task.root.parent / "t2", "demo", "Goal", TEMPLATE)
+    sup, notes, kept = command_supervisor(
+        other, FakeHarness(other, [with_proposal("pytest -k pet")]), auto=True
+    )
+    sup.step()
+    assert kept == [] and other.read_state().state is State.CHECKPOINT_COMMAND

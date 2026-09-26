@@ -16,7 +16,6 @@ from . import (
     actions,
     gate,
     ide,
-    proposal,
     repo,
     ui,
 )
@@ -203,8 +202,6 @@ class Finished:
     # How this task's project was run, kept as a record so the next task need not work it out again.
     demo: str = ""
     project: str = ""
-    # The verify command the writer proposed for a project that has none: yours to keep, on its own.
-    proposed: str = ""
 
 
 def finish(
@@ -232,7 +229,6 @@ def finish(
     done.created = st.created
     done.demo = actions.demo_instruction(task)
     done.project = project.name
-    done.proposed = proposal.proposed(task) if proposal.asked(task, project) else ""
     if branch_only:
         done.branch = repo.create_branch(project.repo, task.id, commit)
     else:

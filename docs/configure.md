@@ -80,15 +80,17 @@ vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the re
 
 Either way vivibox reads the build files and proposes a project. The verification is a command you
 type, or left empty: the next task's writer, who builds the project while it works, then writes
-the command it ran to `/task/handoff/verify-proposal.md`, and the task is verified with that. A
-command that picks some tests (`-Dtest=`, `--tests`, `-k`, a test file named) is refused without
-a build: the writer would be verified by its own tests alone, so it is told to propose the whole
-one, at the cost of an attempt. A
-writer that proposes none leaves the task waiting for you with "verification could not run", no
-attempt spent. So does a command that runs a file the repository's commits do not have (`./mvnw`
-after a move to Gradle, a wrapper never committed): the task waits for you to change it under `e`.
-Once you have accepted the work, the proposal is a decision of its own: the same
-field as under `e`, the command in it, Enter keeps it for the project, Escape leaves it empty. A
+the command it ran to `/task/handoff/verify-proposal.md`, and before the first verification the
+task waits for you as `review the command`: `a` opens the same field as under `e` with the
+command in it, Enter keeps it for the project and the gate runs with it; `e` changes it first,
+`r` sends the writer back for another. A writer that proposed none leaves the field empty, for
+you to type the command or to ask for one; a command that picks some tests (`-Dtest=`, `--tests`,
+`-k`, a test file named) is shown with its selection, because a writer verified by its own tests
+alone would pass whatever it broke elsewhere. With `--auto` a whole command is kept without
+stopping, and a narrowed or missing one still waits for you. The project's next task has the
+command and skips this. A command that runs a file the repository's commits do not have (`./mvnw`
+after a move to Gradle, a wrapper never committed) leaves the task waiting for you with
+"verification could not run", no attempt spent: change it under `e`. A
 plan with `verify = false` runs no build in its task and settles nothing: when the task leaves
 build files behind, its panel names the command they call for. A repository
 with nothing to build or test ever (documents, configuration) says so with `verify = false` in the

@@ -17,9 +17,13 @@ class AskVerify(Dialog):
     """One command, Enter takes it. Or the box, taken the moment it is ticked: the next task's
     writer finds one and proposes it once its work is done. Escape leaves it as it is."""
 
-    def __init__(self, name: str, verify: list[str], no_build: bool = False, heading: str = ""):
+    def __init__(
+        self, name: str, verify: list[str], no_build: bool = False, heading: str = "", writer_box: bool = True
+    ):
         super().__init__()
         self.project_name, self.verify, self.no_build = name, verify, no_build
+        # At the command checkpoint the writer has just had its say: the box is not a choice.
+        self.writer_box = writer_box
         self.heading = heading or (
             f"How {name} is verified: the command that builds it and runs its tests. Enter saves."
         )
@@ -28,7 +32,8 @@ class AskVerify(Dialog):
         with Vertical(classes="dialog"):
             yield Label(self.heading, classes="wrap")
             yield Input(" && ".join(self.verify), id="command")
-            yield Checkbox(WRITER, value=not self.verify and not self.no_build, id="writer")
+            if self.writer_box:
+                yield Checkbox(WRITER, value=not self.verify and not self.no_build, id="writer")
             if self.no_build:
                 yield Label(
                     "The project file says there is nothing to build (verify = false); a command, "
@@ -41,14 +46,14 @@ class AskVerify(Dialog):
 
     @on(Input.Changed)
     def typed(self, event: Input.Changed) -> None:
-        if event.value.strip():
+        if event.value.strip() and self.writer_box:
             self.query_one(Checkbox).value = False
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:
         if command := event.value.strip():
             self.dismiss({"verify": [command], "no_build": False})
-        elif self.no_build and not self.query_one(Checkbox).value:
+        elif self.no_build and self.writer_box and not self.query_one(Checkbox).value:
             self.dismiss({})  # nothing typed and the box left alone: the file stays as it says
         else:
             self.dismiss({"verify": [], "no_build": False})

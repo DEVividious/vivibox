@@ -22,9 +22,9 @@ them all:
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; its verification is a command you type, or left to the first task's writer, with what its build files and pipeline (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) run in its notes |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the verification then checks the criteria and the commits only), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
-| `a` | accept the plan, or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
+| `a` | accept the plan; the writer's verification command, kept for the project (the field `e` shows, prefilled, Enter keeps it); or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
-| `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer |
+| `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer; at the command checkpoint, change the writer's command before it is kept |
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `f` | the work as a diff, in git's pager, before you accept it |
 | `o` | open the review copy in your editor: the project's, else `config.toml`'s, else the one the repository's own folders point at (`.idea`, `.vscode`) among those found here, else the first found; `?` says which, `k` or the project's row changes it |
@@ -86,7 +86,7 @@ vivibox attach myproject-1            # watch or talk to the agent, or the verif
 
 | Command | When |
 |---|---|
-| `vivibox accept <id>` | accept the plan (edit `.task/plan.md` first if you like), or the finished work |
+| `vivibox accept <id>` | accept the plan (edit `.task/plan.md` first if you like), the writer's verification command (`--verify "…"` keeps yours instead), or the finished work |
 | `vivibox reply <id> "comment"` | reject, ask for changes, or answer the agent's question |
 | `vivibox reply <id> "comment" --criterion "…"` | send finished or stuck work back with a new acceptance criterion (repeat for more): it joins the accepted plan, and the gate holds the work to it like the rest |
 | `vivibox risky <id>` / `vivibox approve-risky <id>` | review and approve changes to files that run code on your host |

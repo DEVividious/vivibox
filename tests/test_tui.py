@@ -375,46 +375,87 @@ def done_with_a_proposal(env, command="npm ci && npm test"):
     return task
 
 
-def test_the_writers_command_is_a_decision_of_its_own_after_the_work(env):
-    """First the work, as ever; then, on its own, the command the writer proposed, in the field
-    e shows: Enter keeps it for the project, and the next task is verified with it."""
-    done_with_a_proposal(env)
+def at_command_checkpoint(env, command="npm ci && npm test"):
+    """A task whose writer has just proposed the command, in a project with none."""
+    import re
+
+    from vivibox import proposal
+
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(re.sub(r"^verify = .*$", "verify = []", path.read_text(), flags=re.MULTILINE))
+    task = new_task()
+    at_plan_checkpoint(task)
+    gate.accept_plan(task)
+    if command:
+        (task.meta / "handoff" / proposal.PROPOSAL).write_text(f"`{command}`\n")
+    for state in (State.IMPLEMENT, State.CHECKPOINT_COMMAND):
+        task.transition(state)
+    return task
+
+
+def test_the_writers_command_is_a_decision_of_its_own_before_the_first_verification(env):
+    """You see the command the task is about to be verified with and keep it for the project,
+    once: the next task has it. a's field is e's, prefilled; leaving it to the writer is not a
+    choice here, the writer just had its say."""
+    from vivibox import actions
+
+    task = at_command_checkpoint(env)
 
     async def scenario(app, pilot):
         app.reload()
+        assert app.views[task.id].status == "review the command"
+        assert "`a` keep it" in detail(task, task.read_state(), 3, True, None)
         await pilot.press("a")
-        await pilot.press("right", "left", "enter")
-        await app.workers.wait_for_complete()
         await pilot.pause()
-        assert isinstance(app.screen, CommitWork), "the work first"
-        await pilot.press("escape")
-        await pilot.pause()
-        assert isinstance(app.screen, AskVerify), "then the command, on its own"
+        assert isinstance(app.screen, AskVerify)
         assert app.screen.query_one(Input).value == "npm ci && npm test"
-        assert "proposes" in app.screen.heading
+        assert "proposes" in app.screen.heading and not app.screen.query(Checkbox)
         await pilot.press("enter")
+        await app.workers.wait_for_complete()
         await pilot.pause()
+        assert load_project("demo").verify == ["npm ci && npm test"]
+        assert task.read_state().state is State.VERIFY and actions.started[-1] == task.id
 
     run(scenario)
-    assert load_project("demo").verify == ["npm ci && npm test"]
 
 
-def test_the_writers_command_left_alone_keeps_the_project_asking(env):
-    done_with_a_proposal(env)
+def test_no_command_from_the_writer_is_yours_to_type_or_to_ask_for(env):
+    task = at_command_checkpoint(env, command="")
 
     async def scenario(app, pilot):
         app.reload()
+        assert app.views[task.id].status == "review the command"
+        assert "No command came from the writer" in detail(task, task.read_state(), 3, True, None)
         await pilot.press("a")
-        await pilot.press("right", "left", "enter")
+        await pilot.pause()
+        assert isinstance(app.screen, AskVerify) and app.screen.query_one(Input).value == ""
+        assert "No command came from the writer" in app.screen.heading
+        await pilot.press("enter")  # nothing typed: nothing decided
+        await pilot.pause()
+        assert task.read_state().state is State.CHECKPOINT_COMMAND
+        assert not isinstance(app.screen, AskVerify)
+        await pilot.press("r")
+        await pilot.pause()
+        app.screen.query_one(TextArea).text = "Write the command that builds and tests the project."
+        await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        await pilot.press("escape")
-        await pilot.pause()
-        await pilot.press("escape")
-        await pilot.pause()
+        assert task.read_state().state is State.IMPLEMENT
 
     run(scenario)
-    assert load_project("demo").verify == [], "the next task's writer proposes again"
+
+
+def test_a_narrowed_command_is_shown_with_its_selection(env):
+    task = at_command_checkpoint(env, "./mvnw -Dtest=PetTests test")
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert "narrowed to -Dtest=PetTests" in detail(task, task.read_state(), 3, True, None)
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, AskVerify) and "narrowed to -Dtest=PetTests" in app.screen.heading
+
+    run(scenario)
 
 
 def test_a_task_with_nothing_to_build_is_said_so_when_it_is_made(env, monkeypatch):

@@ -36,7 +36,10 @@ MCP servers you already use. Keys go to vivibox's own key store, never into conf
 1. `i` points vivibox at a repository; `n` describes a task, a line or a whole ticket.
 2. The agent explores the repository and writes a plan with acceptance criteria. The task waits
    for you: `a` accepts the plan, `r` sends it back with a comment, `e` edits it.
-3. The agent implements and commits in its clone, ticking the criteria as it goes.
+3. The agent implements and commits in its clone, ticking the criteria as it goes. In a project
+   with no verification command yet, the task then waits for you once more: the command the
+   writer built and tested with. `a` keeps it for the project and the gate runs with it, `e`
+   changes it first, `r` asks the writer for another; the project's next task skips this.
 4. The gate builds and tests the commits on a fresh clone, checks every criterion is ticked, the
    commit messages, that no test was switched off, and that every test the agent touched is
    named in its red evidence. A red gate sends the agent back, up to a limit; then the task

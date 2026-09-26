@@ -19,6 +19,7 @@ from . import (
     gate,
     manual,
     progress,
+    proposal,
     providers,
     repo,
     review,
@@ -183,6 +184,30 @@ def plans_verify(task: Task, st: TaskState) -> list[str]:
     ]
 
 
+def command_to_review(task: Task) -> list[str]:
+    """The command the writer proposed, before the first verification: what it is, what is odd
+    about it, and that keeping it settles the project's verification."""
+    command = proposal.proposed(task)
+    if not command:
+        return [
+            f"**No command came from the writer:** it wrote none to `/task/handoff/{proposal.PROPOSAL}`.",
+            "Type the one that builds the project and runs its tests, or ask the writer for one.",
+            "",
+        ]
+    lines = [f"**Proposed command:** `{command}`", ""]
+    if selection := gate.narrowed_proposal(command):
+        lines += [
+            f"*This command is narrowed to {selection}: a writer verified by its own tests alone passes"
+            " whatever it broke elsewhere. Change it to the whole build, or ask the writer for it.*",
+            "",
+        ]
+    lines += [
+        "Kept, it is how every task of this project is verified from now on (`e` on the project changes it).",
+        "",
+    ]
+    return lines
+
+
 def build_said(log: Path, feedback: str = "") -> list[str]:
     """The lines of the last verification's log that say what failed, and where the rest is. The
     feedback the gate writes now quotes them itself; then only the log's place is added."""
@@ -281,6 +306,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         return "`c` copy the prompt for a browser · `C` for a CLI · `e` paste the plan"
     if st.state is State.CHECKPOINT_PLAN:
         return "`a` accept the plan · `r` send it back with a comment · `e` edit it"
+    if st.state is State.CHECKPOINT_COMMAND:
+        return "`a` keep it for the project · `e` change it · `r` ask the writer for another"
     if st.state is State.CHECKPOINT_FINAL:
         return "`f` the diff · `o` open the review copy · `v` run the app · `a` accept · `r` ask for changes"
     if st.state is State.APPROVAL_RISKY:
@@ -482,12 +509,15 @@ def finished_detail(entry: dict) -> str:
     )
 
 
-WAITING_ONLY = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY}
+WAITING_ONLY = {
+    State.CHECKPOINT_PLAN, State.CHECKPOINT_COMMAND, State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED,
+    State.APPROVAL_RISKY,
+}  # fmt: skip
 # The keys that act on the selected task; the rest of the view's keys are always there.
 TASK_ACTIONS = (
-    "accept", "reply", "edit_plan", "open_ide", "approve_risky", "watch", "start_task", "stop_task",
-    "stop_pod", "force_stop", "remove", "demo", "demo_stop", "models", "copy_prompt", "copy_prompt_cli",
-    "verify_again", "show_log", "show_diff", "enter_box",
+    "accept", "reply", "edit_plan", "edit_command", "open_ide", "approve_risky", "watch", "start_task",
+    "stop_task", "stop_pod", "force_stop", "remove", "demo", "demo_stop", "models", "copy_prompt",
+    "copy_prompt_cli", "verify_again", "show_log", "show_diff", "enter_box",
 )  # fmt: skip
 
 
@@ -518,7 +548,11 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
     allowed = {
         # A manual planner's checkpoint before your plan is in has nothing to accept, and a
         # reply would reach nobody: the planner is your own chat.
-        "accept": st.state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL) and not st.awaiting_plan,
+        "accept": (
+            st.state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_COMMAND, State.CHECKPOINT_FINAL)
+            and not st.awaiting_plan
+        ),
+        "edit_command": st.state is State.CHECKPOINT_COMMAND,
         "reply": st.state in WAITING_ONLY and not st.awaiting_plan and not st.box,
         "models": st.state is not State.DONE and not st.box,
         # Not while the agent may be writing its own draft.
@@ -639,6 +673,8 @@ def detail(
         ]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
         body = [*plans_verify(task, st), plan_body(read(task.plan_path))]
+    elif st.state is State.CHECKPOINT_COMMAND:
+        body = command_to_review(task)
     elif st.state is State.CHECKPOINT_FINAL:
         try:
             _, project = actions.load(st.id)

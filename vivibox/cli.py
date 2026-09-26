@@ -239,10 +239,14 @@ def cmd_accept(args: argparse.Namespace) -> int:
         actions.accept_plan(task, project)
         print(f"Plan accepted; {task.id} moves on to implementation.")
         carry_on(task)
+    elif st.state is State.CHECKPOINT_COMMAND:
+        actions.accept_command(task, project, args.verify or "")
+        kept = load_project(project.name).verify[0]
+        print(f"{project.name} is verified with `{kept}` from now on; {task.id} is verifying.")
+        carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
         done = actions.finish(task, project, branch_only=args.branch)
         report_finished(done)
-        offer_command(done)
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; nothing to accept (use 'vivibox reply')")
     return 0
@@ -260,19 +264,6 @@ def report_finished(done: actions.Finished) -> None:
         print(f"{done.task_id} is done ({done.cost}). Uncommitted in {done.source} ({branch}):")
         print(done.status, end="")
         offer_commit(done.source, done.message, branch)
-
-
-def offer_command(done: actions.Finished) -> None:
-    """The command the writer proposed, after the work: a question of its own."""
-    if not done.proposed or load_project(done.project).verify:
-        return
-    print(f"\nThe writer of {done.task_id} proposed `{done.proposed}` to verify {done.project} with.")
-    if sys.stdin.isatty() and input("Keep it for the project? [y/N] ").strip().lower() in ("y", "yes"):
-        actions.save_verify(load_project(done.project), [done.proposed])
-        print(f"{done.project} is verified with it from now on.")
-        return
-    where = config_dir() / "projects" / f"{done.project}.toml"
-    print(f'To keep it: e on the project in the view, or verify = ["{done.proposed}"] in {where}')
 
 
 def offer_commit(source: Path, message: str, branch: str) -> None:
@@ -672,11 +663,16 @@ def parser() -> argparse.ArgumentParser:
                 help="kill the supervisor and the containers instead of waiting; the turn under way is lost",
             )  # fmt: skip
     accept = sub.add_parser(
-        "accept", help="accept the plan, or the finished work: it lands in your checkout, uncommitted"
+        "accept",
+        help="accept the plan, the writer's verification command, or the finished work: it lands in"
+        " your checkout, uncommitted",
     )
     accept.add_argument("task", help="task id")
     accept.add_argument(
         "--branch", action="store_true", help="put the work on branch vivibox/<id> instead, e.g. for a PR"
+    )
+    accept.add_argument(
+        "--verify", help="at the command checkpoint: keep this verification command instead of the writer's"
     )
     accept.set_defaults(func=cmd_accept)
 

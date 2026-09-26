@@ -155,6 +155,10 @@ def cost(task: Task) -> Spend:
 # What the task needs, in words, and the commands for your next step.
 WAITING = {
     State.CHECKPOINT_PLAN: ("review the plan", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
+    State.CHECKPOINT_COMMAND: (
+        "review the command",
+        ["vivibox accept {id}", 'vivibox accept {id} --verify "…"', 'vivibox reply {id} "…"'],
+    ),
     State.CHECKPOINT_FINAL: ("review the work", ["vivibox accept {id}", 'vivibox reply {id} "…"']),
     State.CHECKPOINT_BLOCKED: (
         "needs your help",
@@ -199,7 +203,12 @@ def why_blocked(task: Task) -> Path | None:
 
 
 # At these checkpoints stopping the pod leaves the person's review decision in place.
-POD_ONLY_STOP = {State.CHECKPOINT_PLAN, State.CHECKPOINT_FINAL, State.APPROVAL_RISKY}
+POD_ONLY_STOP = {
+    State.CHECKPOINT_PLAN,
+    State.CHECKPOINT_COMMAND,
+    State.CHECKPOINT_FINAL,
+    State.APPROVAL_RISKY,
+}
 
 
 def group(st: TaskState) -> str:

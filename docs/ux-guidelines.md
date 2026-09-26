@@ -41,6 +41,7 @@ Status labels, the only ones allowed:
 | created, never started | `not started` | Waiting for you |
 | planning, agent at work | `planning` | Working |
 | plan ready | `review the plan` | Waiting for you |
+| the writer's verification command proposed, in a project with none; the first verification waits for it | `review the command` | Waiting for you |
 | manual planner, no plan yet | `plan it yourself` | Waiting for you |
 | implementing; from the second attempt `(attempt n/N)` follows | `implementing` | Working |
 | the project's preparation running, the writer's first turn waiting for it | `preparing` | Working |

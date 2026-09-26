@@ -10,6 +10,9 @@ class State(StrEnum):
     VERIFY = "verify"
     # The reviewer reads the work the gate passed; only when a reviewer is configured.
     REVIEW = "review"
+    # The writer proposed the command the task is verified with, in a project that has none: you
+    # keep it for the project, change it, or send the writer back, before the first verification.
+    CHECKPOINT_COMMAND = "checkpoint:command"
     # The agent changed files that run on IDE import (build files, hooks); waits for user approval.
     APPROVAL_RISKY = "approval:risky"
     # Verification still failing after the iteration limit.
@@ -18,14 +21,21 @@ class State(StrEnum):
     DONE = "done"
 
 
-CHECKPOINTS = {State.CHECKPOINT_PLAN, State.CHECKPOINT_BLOCKED, State.CHECKPOINT_FINAL}
+CHECKPOINTS = {
+    State.CHECKPOINT_PLAN,
+    State.CHECKPOINT_COMMAND,
+    State.CHECKPOINT_BLOCKED,
+    State.CHECKPOINT_FINAL,
+}
 
 TRANSITIONS: dict[State, set[State]] = {
     State.PLAN: {State.CHECKPOINT_PLAN, State.APPROVAL_RISKY},
     # Plan accepted, or rejected with a comment.
     State.CHECKPOINT_PLAN: {State.IMPLEMENT, State.PLAN},
     # To the blocked checkpoint when the agent asks you something instead of finishing.
-    State.IMPLEMENT: {State.VERIFY, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY},
+    State.IMPLEMENT: {State.VERIFY, State.CHECKPOINT_COMMAND, State.CHECKPOINT_BLOCKED, State.APPROVAL_RISKY},
+    # The command kept, and the verification runs; or sent back with a comment for another.
+    State.CHECKPOINT_COMMAND: {State.VERIFY, State.IMPLEMENT},
     State.VERIFY: {
         State.IMPLEMENT,
         State.REVIEW,

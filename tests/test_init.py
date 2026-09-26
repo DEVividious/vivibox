@@ -326,3 +326,39 @@ def test_a_monorepo_offers_its_apps_commands_not_the_roots(tmp_path):
     assert init.candidates(tmp_path) == [
         ("cd packages/core && pnpm install --frozen-lockfile && pnpm test", "packages/core/package.json"),
     ], "the workspaces it names win over the usual folders"
+
+
+def test_accepting_the_command_keeps_it_for_the_project_and_starts_the_verification(env, tmp_path):
+    from vivibox import actions, gate, proposal, supervisor
+    from vivibox.config import load_project
+    from vivibox.states import State
+
+    fresh = tmp_path / "clinic"
+    actions.setup_project(fresh, "clinic", [], create=True)
+
+    def at_checkpoint(goal, command):
+        task = actions.create("clinic", goal)
+        task.plan_path.write_text("+++\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it works\n")
+        task.transition(State.CHECKPOINT_PLAN)
+        actions.accept_plan(task, load_project("clinic"))
+        if command:
+            (task.meta / "handoff" / proposal.PROPOSAL).write_text(f"{command}\n")
+        task.transition(State.CHECKPOINT_COMMAND)
+        return task
+
+    task = at_checkpoint("Add Pet tests", "./mvnw -B verify")
+    actions.accept_command(task, load_project("clinic"))
+    assert load_project("clinic").verify == ["./mvnw -B verify"], "kept for the project, once"
+    assert task.read_state().state is State.VERIFY, "the verification runs with it now"
+    path = env / "config" / "projects" / "clinic.toml"
+    path.write_text(path.read_text().replace('verify = ["./mvnw -B verify"]', "verify = []"))
+    task = at_checkpoint("Add Vet tests", "")
+    with pytest.raises(gate.GateError, match="no command came from the writer"):
+        actions.accept_command(task, load_project("clinic"))
+    assert task.read_state().state is State.CHECKPOINT_COMMAND
+    actions.accept_command(task, load_project("clinic"), "./mvnw -B test")
+    assert load_project("clinic").verify == ["./mvnw -B test"], "yours wins over the proposal"
+    path.write_text(path.read_text().replace('verify = ["./mvnw -B test"]', "verify = []"))
+    task = at_checkpoint("Add Owner tests", "./mvnw -Dtest=Owner test")
+    assert actions.reply(task, "The whole build, please") is State.IMPLEMENT
+    assert supervisor.next_prompt(task, supervisor.IMPLEMENT_PROMPT) == supervisor.COMMENT_PROMPT

@@ -21,7 +21,7 @@ from textual.widgets import DataTable, Header, Markdown, Select, Static
 
 from . import actions, code, ide, ui
 from .app_support import LeavingExecutor, LiveFooter
-from .config import ConfigError, load_config, load_project
+from .config import ConfigError, load_config
 from .dialogs import (
     NEW_PROJECT,
     NO_PROJECTS,
@@ -67,7 +67,6 @@ from .settings import Settings
 from .states import State
 from .table import TaskTable
 from .task import Task, TaskState, list_tasks
-from .verify_ui import AskVerify
 from .widgets import Confirm
 
 
@@ -85,6 +84,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         Binding("g", "verify_again", "Verify again"),
         Binding("d", "details", "Details"),
         Binding("e", "edit_plan", "Edit plan"),
+        Binding("e", "edit_command", "Edit command"),
         Binding("c", "copy_prompt", "Prompt"),
         Binding("C", "copy_prompt_cli", "CLI prompt"),
         Binding("f", "show_diff", "Diff"),
@@ -467,6 +467,9 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         if st.box and st.state is State.IMPLEMENT:
             self.close_box(task.id)
             return
+        if st.state is State.CHECKPOINT_COMMAND:
+            self.review_command(task)
+            return
         if st.state is State.CHECKPOINT_PLAN:
             project = actions.load(task.id)[1]
 
@@ -513,7 +516,6 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             files = ", ".join(done.conflicts[:5])
             text = f"{done.task_id}: conflicts in {files}; resolve them in your IDE. Also on {done.branch}."
             self.notify(text, severity="warning", timeout=15)
-            self.offer_command(done)
             return
 
         def commit(message: str) -> None:
@@ -524,27 +526,8 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
                     self.notify(f"Committed: {actions.commit_work(done.source, message)}")
                 except Exception as e:
                     self.fail(e)
-            self.offer_command(done)
 
         self.push_screen(CommitWork(done), commit)
-
-    def offer_command(self, done: actions.Finished) -> None:
-        """The command the writer proposed, once the work is dealt with: a decision of its own,
-        in the field e shows, so it cannot slip through with the work."""
-        if not done.proposed or load_project(done.project).verify:
-            return
-        heading = (
-            f"The writer of {done.task_id} proposes how {done.project} is verified, the command it "
-            "ran. Enter keeps it for the project; Escape leaves it empty, for the next writer to propose."
-        )
-
-        def chosen(choice: dict) -> None:
-            if choice:
-                actions.save_verify(load_project(done.project), choice["verify"], choice["no_build"])
-                how = ", ".join(f"`{c}`" for c in choice["verify"]) or actions.WRITER_PROPOSES
-                self.notify(f"{done.project} is verified from now on: {how}")
-
-        self.push_screen(AskVerify(done.project, [done.proposed], heading=heading), chosen)
 
     def action_reply(self) -> None:
         task, st = self.selected()

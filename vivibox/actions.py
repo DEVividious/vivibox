@@ -97,6 +97,7 @@ from .projects import (  # noqa: F401
 from .proposal import (  # noqa: F401
     missing_command,
     narrowed_proposal,
+    proposed,
     verify_commands,
 )
 from .review import (  # noqa: F401
@@ -626,6 +627,22 @@ def accept_plan(task: Task, project: Project) -> None:
     supervisor.accept_plan(task, "plan accepted")
 
 
+def accept_command(task: Task, project: Project, command: str = "") -> None:
+    """Keeps the command the writer proposed, or the one you give instead, for the project, and
+    sends the task on to its first verification."""
+    st = task.read_state()
+    if st.state is not State.CHECKPOINT_COMMAND:
+        raise gate.GateError(f"{task.id} has no command waiting for you")
+    chosen = command.strip() or proposed(task)
+    if not chosen:
+        raise gate.GateError(
+            f'no command came from the writer; give one: vivibox accept {task.id} --verify "…",'
+            " or send it back with a reply"
+        )
+    save_verify(project, [chosen])
+    supervisor.accept_command(task, chosen, "command accepted")
+
+
 def plan_prompt(task: Task, cli: bool = False) -> str:
     """The prompt for planning this task in your own chat, in a browser or in a CLI."""
     path = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
@@ -681,6 +698,7 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
     handoff = task.meta / "handoff"
     targets = {
         State.CHECKPOINT_PLAN: State.PLAN,
+        State.CHECKPOINT_COMMAND: State.IMPLEMENT,
         State.CHECKPOINT_BLOCKED: State.IMPLEMENT,
         State.CHECKPOINT_FINAL: State.IMPLEMENT,
     }

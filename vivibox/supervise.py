@@ -125,6 +125,7 @@ def make_supervisor(
         risky_changes=lambda: Approvals(task.meta, task.repo, now().risky_extra).changes(),
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
+        keep_command=lambda command: actions.save_verify(now(), [command]),
         session_started=agent_window,
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,

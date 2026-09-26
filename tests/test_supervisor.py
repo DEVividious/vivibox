@@ -781,10 +781,14 @@ def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_t
     assert "git diff" in reviewer.prompts[0] and "/task/review/review.md" in reviewer.prompts[0]
     sup.step()  # the writer, told to fix the notes
     assert sup.harness.prompts[-1] == supervisor.REVIEW_FIX_PROMPT
+    (task.meta / "handoff" / "review-1-reply.md").write_text("The lockfile is needed because…\n")
     sup.step()  # verify
     sup.step()  # the review: clean
     st = task.read_state()
     assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
+    assert supervisor.REVIEW_AGAIN_PREFIX not in reviewer.prompts[0], "nothing to answer in round 1"
+    assert supervisor.REVIEW_AGAIN_PREFIX in reviewer.prompts[1], "round 2 reads the writer's reply"
+    assert "/task/handoff/review-N-reply.md" in reviewer.prompts[1]
     assert notes[-1].startswith("work ready for your review") and "review 2: no blocking notes" in notes[-1]
     assert [e["data"] for e in task.events() if e["type"] == "review"] == [
         {"round": 1, "blocking": 1, "not_blocking": 0, "problem": ""},

@@ -169,7 +169,9 @@ and writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**,
 adds no criteria; the supervisor, not the agents, ends the loop.
 
 - In **loop** mode blocking notes go back to the writer by themselves, then the gate runs again
-  and the reviewer reads again, up to `max_reviews` rounds (2). No blocking notes, or the last
+  and the reviewer reads again, up to `max_reviews` rounds (2), with what the writer answered
+  where it disagreed (`review-N-reply.md`) read first, so a note the answer settles is not
+  repeated at you. No blocking notes, or the last
   round, and the work comes to you as usual, the notes with it.
 - In **supervised** mode the reviewer reads once and every note comes to you.
 - `n` asks which for the task when there is a reviewer, and *no review* is a choice too; `k`

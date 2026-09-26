@@ -64,6 +64,14 @@ behaviour the plan rules out. Under "## Not blocking": the rest. Each note is on
 what the verification already checks: commits, ticks, switched-off tests, red evidence named.
 End the turn when the review is written."""
 
+# Before a round after the first: the writer may have answered the last round instead of acting
+# on it; a round that does not read the answer repeats its note, and the dispute goes to you.
+REVIEW_AGAIN_PREFIX = """Where the writer disagreed with your last round it said why in
+/task/handoff/review-N-reply.md (N is the round before this one): read it first. A note it
+answered stays under Blocking only with one sentence on why the answer does not hold.
+
+"""
+
 REVIEW_REPAIR_PROMPT = """The review in /task/review/review.md is not one the orchestrator can
 read: {problem}. Rewrite it with the two sections, "## Blocking" and "## Not blocking", and a
 place (path:line) on every note. End the turn when it is rewritten."""
@@ -663,7 +671,10 @@ class Supervisor:
         try:
             self.task.set_session("reviewer", "")  # the last round's server is gone with its container
             st = self.task.read_state()
-            if self._turn(st, REVIEW_PROMPT.format(base=st.base_commit), role="reviewer") is None:
+            prompt = REVIEW_PROMPT.format(base=st.base_commit)
+            if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
+                prompt = REVIEW_AGAIN_PREFIX + prompt
+            if self._turn(st, prompt, role="reviewer") is None:
                 return
             text = _read(out / "review.md")
             if problem := reviewing.problem(text):

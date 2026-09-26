@@ -1,17 +1,29 @@
 # vivibox
 
-Coding agents in a box that keeps them off your machine, in both directions.
+Coding agents in a box: they work on a clone, in a pod of their own, and nothing they write runs
+on your machine until you have looked at it.
 
-The agent works in its own pod: an unprivileged container with a Docker daemon of its own, so it can
-run builds, Testcontainers and `docker compose` without your host's socket, your network or your
-files. And nothing it writes runs on your machine until you have looked at it: it works on a clone,
-its work comes back as a review copy, files that run code on IDE import need your approval, and a
-gate it cannot bypass builds and tests its commits on a fresh clone before you accept anything.
+You describe a task. The agent plans; you accept the plan. The agent implements in its clone; a
+gate builds and tests the commits on a fresh clone and checks the plan's criteria; a reviewer on
+another model reads the work. Then it comes to you as a review copy, and only your `a` puts it in
+your checkout. Everything in between runs on its own.
 
-You decide at checkpoints. The agent plans, you accept the plan, the agent implements, the gate
-checks, you review and accept. Everything else runs on its own.
+![One task, from the description to the commit](docs/img/flow.svg)
 
-![The vivibox view: projects with their tasks, the selected task's review below](docs/img/view.svg)
+## Why a box
+
+- **The agent cannot reach your machine.** It runs as an unprivileged container with a Docker
+  daemon of its own (Sysbox), so builds, Testcontainers and `docker compose` work without your
+  host's socket, your network or your files.
+- **Nothing it writes runs on your machine unseen.** It works on a clone; its work comes back as a
+  review copy your IDE shows as uncommitted changes; files that run code on import (`pom.xml`,
+  `package.json`, git hooks, IDE settings, `AGENTS.md`) wait for your approval whenever they change.
+- **A gate it cannot bypass.** The commits are built and tested on a fresh clone with the
+  project's own command; every acceptance criterion has to be ticked, every test the agent
+  touched has to be seen failing first, no test may be switched off, and the commit messages are
+  checked. A red gate sends the agent back, up to a limit; then the task waits for you.
+
+More on what it protects against, and a comparison with Docker Sandboxes: [docs/security.md](docs/security.md).
 
 ## Install
 
@@ -21,52 +33,49 @@ Linux with Docker Engine (tested on Ubuntu 24.04), and a model: an API key for a
 ```bash
 git clone https://github.com/DEVividious/vivibox.git && cd vivibox
 host/setup.sh      # asks before each change: Sysbox, /srv/vivibox, uv, the vivibox command
-host/uninstall.sh  # the way back, when you want it gone
 vivibox            # builds the agent image, asks for a key and a model, opens the view
 ```
 
-Details, and what `setup.sh` changes on your machine: [docs/install.md](docs/install.md).
+`host/uninstall.sh` is the way back. What `setup.sh` changes on your machine, step by step:
+[docs/install.md](docs/install.md).
 
-**Bring your own models.** Import an `opencode.json` and every provider, model and MCP server in
-it is set up for the agents: your employer's endpoint with its custom models, a local model, the
-MCP servers you already use. Keys go to vivibox's own key store, never into config files.
+## A task, key by key
 
-## A task
+1. `i` points vivibox at a repository. `n` describes a task: a line, or a whole ticket, with
+   files attached as `@path`.
+2. The agent explores the repository and writes a plan with acceptance criteria. `a` accepts it,
+   `r` sends it back with a comment, `e` edits it.
+3. The agent implements and commits in its clone, ticking the criteria as it goes. The first
+   task of a project also proposes the command that verifies it; you keep it with `a`, once.
+4. The gate runs. Green, and the reviewer reads the work; red, and the agent gets the log back.
+5. The work waits for you as a review copy: `o` opens it in your IDE, `f` shows the diff, `v`
+   runs the app in the pod, `r` asks for changes, `a` accepts it into your checkout and offers a
+   commit message written from the plan and the agent's commits.
 
-1. `i` points vivibox at a repository; `n` describes a task, a line or a whole ticket.
-2. The agent explores the repository and writes a plan with acceptance criteria. The task waits
-   for you: `a` accepts the plan, `r` sends it back with a comment, `e` edits it.
-3. The agent implements and commits in its clone, ticking the criteria as it goes. In a project
-   with no verification command yet, the task then waits for you once more: the command the
-   writer built and tested with. `a` keeps it for the project and the gate runs with it, `e`
-   changes it first, `r` asks the writer for another; the project's next task skips this.
-4. The gate builds and tests the commits on a fresh clone, checks every criterion is ticked, the
-   commit messages, that no test was switched off, and that every test the agent touched is
-   named in its red evidence. A red gate sends the agent back, up to a limit; then the task
-   waits for you. A gate that could not run at all (no Docker, no network, a token expired)
-   waits for you at once, and `g` runs it again once you have fixed it.
-5. A reviewer on another model reads the work first, when you set one up. Then it waits for you as a review copy: `o` opens it in your IDE as uncommitted changes,
-   `v` runs the app in the pod, `a` accepts it into your checkout, `r` asks for changes.
+Desktop notifications, or [ntfy](docs/configure.md) on your phone, say when a task waits for you.
+Several tasks run at once, each in its own pod. Everything the view does is also a command
+(`vivibox new`, `accept`, `reply`, `status`…). All of it: [docs/tasks.md](docs/tasks.md).
 
-Desktop notifications, or ntfy on your phone, say when a task waits for you, and the view lists
-your projects with their tasks under them, newest first, and the cursor on what waits for you.
-Everything the view does is also a command
-(`vivibox new`, `accept`, `reply`, `status`…), and planning can happen in your own chat instead of
-on an API key. All of it: [docs/tasks.md](docs/tasks.md).
+## Models
+
+Any provider opencode knows, on an API key, or an `opencode.json` you import: your employer's
+endpoint with its custom models, a local model, the MCP servers you already use. Keys go to
+vivibox's own key store, never into config files. The planner, the writer and the reviewer can
+each run on a different model; the planner can also be Claude Code on your subscription, or you in
+your own chat. [docs/configure.md](docs/configure.md).
 
 ## More
 
-- [What it protects against, and how](docs/security.md), with a comparison to Docker Sandboxes
-- [Configuring providers, MCP servers and projects](docs/configure.md)
-- [UX guidelines](docs/ux-guidelines.md), for anyone changing what the view says
-- [Prompt guidelines](docs/prompt-guidelines.md), for anyone changing what the agents read
+- [What it protects against, and how](docs/security.md)
+- [Working with tasks](docs/tasks.md): every key, every command, the reviewer, running the app
+- [Providers, MCP servers and projects](docs/configure.md)
+- A box without an agent: `b` on a project opens its pod for you, with your keys, opencode and a
+  shell; closing it brings your work back through the same review as a task's
+- [UX guidelines](docs/ux-guidelines.md) and [prompt guidelines](docs/prompt-guidelines.md), for
+  anyone changing what the view says or what the agents read
 
-**A box without an agent.** `b` on a project opens its pod for you: the clone, your keys, opencode
-and the tools, and a shell. Work in it by hand, or run `opencode` there in the mode that asks no
-questions; closing it brings the work back through the same review as a task's.
-
-Status: one agent per task through opencode. Planning can also run on Claude Code, or in your own
-chat. Reviewer agents, GitHub and parallel tasks are next.
+Status: one writer per task, a planner and a reviewer on models of your choice, several tasks at
+once. GitHub pull requests are next.
 
 ## Development
 
@@ -74,7 +83,7 @@ chat. Reviewer agents, GitHub and parallel tasks are next.
 uv run ruff check . && uv run ruff format --check .
 uv run pytest                  # unit tests, no Docker needed
 uv run pytest -m docker        # isolation, pod and git protection checks on real containers
-uv run python docs/img/screenshot.py   # redraws the picture above from made-up tasks
+uv run python docs/img/screenshot.py   # redraws the pictures from made-up tasks
 ```
 
 ## License

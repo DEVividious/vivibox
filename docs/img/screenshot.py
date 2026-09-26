@@ -7,8 +7,10 @@ yours is read, and no pod is started.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -52,7 +54,7 @@ os.environ.update(
     XDG_CACHE_HOME=str(ROOT / "cache"),
 )
 
-from vivibox import actions, gate, tui  # noqa: E402
+from vivibox import actions, gate, reviewing, tui  # noqa: E402
 from vivibox.config import load_project  # noqa: E402
 from vivibox.pod import Listener  # noqa: E402
 from vivibox.states import State  # noqa: E402
@@ -91,8 +93,9 @@ def spent(made, planning: float, implementing: float = 0.0) -> None:
 
 
 def accepted(made, ticked: int = 0):
-    made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
-    gate.accept_plan(made, load_project(made.read_state().project).verify)
+    if made.read_state().state is not State.CHECKPOINT_PLAN:
+        made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
+    gate.accept_plan(made)
     made.transition(State.IMPLEMENT, reason="plan accepted")
     ticks = made.meta / "handoff" / gate.CRITERIA_FILE
     ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]", ticked))
@@ -205,9 +208,172 @@ async def draw() -> None:
         app.table.move_cursor(row=ids.index(selected))
         await pilot.press("d")
         await pilot.pause(0.5)
-        svg = app.export_screenshot().replace(str(ROOT / "srv" / "vivibox"), SHOWN_ROOT)
-        (HERE / "view.svg").write_text(svg)
+        (HERE / "view.svg").write_text(shown(app.export_screenshot()))
 
 
+# --- docs/img/flow.svg: one task from the description to the commit, as an animated picture ---
+
+SECONDS_PER_FRAME = 3
+REVIEW = """## Blocking
+
+## Not blocking
+
+- src/main/java/shop/CardValidator.java:41 — the expiry check compares strings; comparing YearMonth
+  values would survive a two-digit year. Fine as it is for the plan.
+"""
+
+
+TEXT = re.compile(r'(<text[^>]*textLength=")([\d.]+)("[^>]*>)(.*?)(</text>)', re.S)
+
+
+def shown(svg: str) -> str:
+    """The screenshot with the throwaway paths shown as the ones a person would have. Rich sizes
+    every text run to its original length (textLength), so a shorter path is scaled with it, or
+    the letters would be spread out to fill the old width."""
+    replacements = (
+        (str(ROOT / "srv" / "vivibox"), SHOWN_ROOT),
+        (str(ROOT / "data" / "vivibox"), "~/.local/share/vivibox"),
+        (str(ROOT), "~/projects"),
+    )
+
+    def fix(m: re.Match) -> str:
+        before, width, mid, content, end = m.groups()
+        new = content
+        for real, seen in replacements:
+            new = new.replace(real, seen)
+        if new == content:
+            return m.group(0)
+        ratio = len(html.unescape(new)) / len(html.unescape(content))
+        return f"{before}{float(width) * ratio:.1f}{mid}{new}{end}"
+
+    return TEXT.sub(fix, svg)
+
+
+def frame(app, frames: list[str]) -> None:
+    frames.append(shown(app.export_screenshot()))
+
+
+def animated(frames: list[str]) -> str:
+    """The frames as one SVG that shows them in turn, forever: a group per frame, its opacity
+    switched by a discrete animation, so no script and no external file is needed."""
+    total = SECONDS_PER_FRAME * len(frames)
+    head = frames[0].split(">", 1)[0] + ">"
+    view = head.split('viewBox="')[1].split('"')[0]
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}">']
+    for i, svg in enumerate(frames):
+        start, end = i / len(frames), (i + 1) / len(frames)
+        parts.append(
+            f'<g opacity="0"><animate attributeName="opacity" calcMode="discrete" values="0;1;0;0" '
+            f'keyTimes="0;{start:.4f};{end:.4f};1" dur="{total}s" repeatCount="indefinite"/>{svg}</g>'
+        )
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+async def flow() -> None:
+    """Runs before world(): the list has one project and the task the frames follow."""
+    from textual.widgets import TextArea
+
+    from vivibox.dialogs import CommitWork
+    from vivibox.widgets import Confirm
+
+    frames: list[str] = []
+    goal = "Reject expired cards at checkout: a card past its date is refused before payment"
+    criteria = [
+        "Expired card gives 402 at /checkout",
+        "A card expiring this month is accepted",
+        "Both covered by a test",
+    ]
+    app = tui.Vivibox()
+    async with app.run_test(size=(128, 34)) as pilot:
+        await pilot.pause(0.5)
+        app.reload()
+        await pilot.pause(0.5)
+        ids = [str(key.value).removeprefix("project:") for key in app.table.rows]
+        app.table.move_cursor(row=ids.index("shop"))
+        await pilot.press("n")
+        await pilot.pause(0.5)
+        app.screen.query_one(TextArea).text = goal
+        await pilot.pause(0.3)
+        frame(app, frames)  # 1. the task, described
+        await pilot.press("escape")
+        await pilot.pause(0.3)
+
+        made = task("shop", goal, criteria, 0)
+        made.plan_path.write_text(
+            made.plan_path.read_text().replace(
+                'summary = ""', 'summary = "Refuse expired cards at checkout"', 1
+            )
+        )
+        app.reload()
+        await pilot.pause(0.5)
+        app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(made.id))
+        await pilot.press("d")
+        await pilot.pause(0.5)
+        frame(app, frames)  # 2. planning
+
+        spent(made, 0.03)
+        made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
+        app.reload()
+        await pilot.pause(0.5)
+        frame(app, frames)  # 3. review the plan
+
+        accepted(made, ticked=2)
+        spent(made, 0.0, 0.07)
+        app.reload()
+        await pilot.pause(0.5)
+        frame(app, frames)  # 4. implementing, two criteria ticked
+
+        ticks = made.meta / "handoff" / gate.CRITERIA_FILE
+        ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]"))
+        for name, lines, subject in (
+            ("CardValidatorTest.java", 45, "Cover expired and current cards at checkout"),
+            ("CardValidator.java", 30, "Refuse a card past its expiry date"),
+        ):
+            (made.repo / name).write_text(f"class {name[:-5]} {{}}\n" * lines)
+            git("add", ".", cwd=made.repo)
+            git(
+                "-c",
+                "user.name=You",
+                "-c",
+                "user.email=you@example.com",
+                "commit",
+                "-qm",
+                subject,
+                cwd=made.repo,
+            )
+        made.transition(State.VERIFY)
+        (made.meta / "log" / "verify-1-120000.log").write_text("# fresh clone\n\n$ ./mvnw -B verify\n")
+        app.reload()
+        await pilot.pause(0.5)
+        frame(app, frames)  # 5. verifying
+
+        made.event("gate", passed=True, iteration=1, log="verify-1-120000.log")
+        made.transition(State.REVIEW, reason="verification passed")
+        reviewing.keep(made, 1, REVIEW)
+        made.set_reviews(1)
+        made.event("review", round=1, blocking=0, not_blocking=1, problem="")
+        made.transition(State.CHECKPOINT_FINAL, reason="verification passed; review 1: no blocking notes")
+        actions.prepare_review(made, load_project("shop"))
+        RUNNING.discard(made.id)
+        app.reload()
+        await pilot.pause(0.5)
+        frame(app, frames)  # 6. review the work, the reviewer's note with it
+
+        await pilot.press("a")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, Confirm)
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause(0.5)
+        assert isinstance(app.screen, CommitWork)
+        frame(app, frames)  # 7. the commit, written from the plan and the agent's commits
+        await pilot.press("escape")
+        await pilot.pause(0.3)
+    (HERE / "flow.svg").write_text(animated(frames))
+
+
+asyncio.run(flow())
+print(HERE / "flow.svg")
 asyncio.run(draw())
 print(HERE / "view.svg")

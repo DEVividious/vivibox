@@ -174,3 +174,21 @@ def test_the_reviewers_server_has_a_port_of_its_own(monkeypatch):
     monkeypatch.setattr(roles, "role_of", lambda task, name, config=None: Role("opencode", "other/strong"))
     assert roles.harness_for("reviewer", P(), None).port == opencode.REVIEW_PORT
     assert roles.harness_for("writer", P(), None).port == opencode.PORT
+
+
+def test_the_readiness_probe_gives_up_on_a_request_the_server_never_answers():
+    """A request made while `opencode serve` is coming up can be accepted and never answered;
+    without a time limit the probe hung for good, a turn with it, and the start lock of a task
+    being made (three times in one afternoon with three or four pods starting at once). A bounded
+    probe fails, and the wait loop asks again."""
+    ran = []
+
+    class P:
+        task_id, agent = "t1", "vivibox-t1-agent"
+
+        def exec(self, *cmd, check=True):
+            ran.append(cmd[-1])
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    assert opencode.OpenCode(P()).healthy()
+    assert f"--max-time {opencode.PROBE_SECONDS}" in ran[-1] and "/session" in ran[-1]

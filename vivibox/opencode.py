@@ -101,6 +101,10 @@ def parse_events(output: str) -> Turn:
     return Turn(session, not errors, round(cost, 6), tokens, "\n".join(texts), "\n".join(errors))
 
 
+# How long one readiness probe of the server may take.
+PROBE_SECONDS = 10
+
+
 class OpenCode(Harness):
     name = NAME
     # A provider key is always billed per token.
@@ -118,8 +122,11 @@ class OpenCode(Harness):
         self.url = f"http://127.0.0.1:{port}"
 
     def _get(self, path: str) -> bool:
+        # Bounded: a request the server accepts while coming up and never answers would otherwise
+        # hold the probe, and with it the turn or the start of the task, for good.
         probe = (
-            f'curl -fsS -o /dev/null -u "opencode:$(cat {MOUNT}/server-password)" {_quote(self.url + path)}'
+            f"curl -fsS --max-time {PROBE_SECONDS} -o /dev/null"
+            f' -u "opencode:$(cat {MOUNT}/server-password)" {_quote(self.url + path)}'
         )
         return self.pod.exec("bash", "-c", probe, check=False).returncode == 0
 

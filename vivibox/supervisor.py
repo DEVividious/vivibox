@@ -383,7 +383,10 @@ class Supervisor:
     def _turn(self, st: TaskState, prompt: str, role: str = "") -> Turn | None:
         role = role or self.role_for(st.state)
         harness = self.harness_of(role)
-        was = st.sessions.get(role, "")
+        # The session as it is now, not as the state given had it: a second turn of the same
+        # step (the plan's repair, the review's) would not see the one the first turn made, and
+        # would make another, briefed again, doing the first's work over.
+        was = self.task.read_state().sessions.get(role, "")
         if not was:
             # The first message of a role's conversation says what the role is and owns.
             prompt = f"{brief.role_text(role)}\n{prompt}"

@@ -463,6 +463,36 @@ def test_a_draft_the_gate_would_refuse_gets_one_repair_turn(task):
     assert len(harness.prompts) == 2 and "placeholder" in harness.prompts[1], "told what is wrong"
 
 
+def test_the_repair_turn_goes_on_in_the_planners_own_session(task):
+    """opencode makes the session ahead of the turn, and the supervisor keeps it in the task's
+    state; the repair turn read the state from before the first turn, saw no session, and made a
+    second one, briefed as the planner again: two planner sessions doing the same work, and the
+    plan's cost twice what opencode showed for the one you looked at."""
+
+    class SessionsAhead(FakeHarness):
+        def __init__(self, task, actions=()):
+            super().__init__(task, actions)
+            self.made, self.used = 0, []
+
+        def start_session(self, title):
+            self.made += 1
+            return f"ses_{self.made}"
+
+        def turn(self, prompt, session="", title="", on_step=None):
+            self.used.append(session)
+            turn = super().turn(prompt, session, title, on_step)
+            return Turn(session, turn.ok, turn.cost, turn.tokens, turn.text)
+
+    placeholder = DRAFT.replace("health endpoint returns 200", gate.PLACEHOLDER)
+    write_placeholder = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
+    harness = SessionsAhead(task, [write_placeholder, write_draft])
+    sup, notes = make(task, harness)
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN
+    assert harness.made == 1 and harness.used == ["ses_1", "ses_1"], "one conversation, both turns in it"
+    assert brief.role_text("planner") not in harness.prompts[1], "briefed once"
+
+
 def test_a_draft_still_refused_after_the_repair_turn_stops_for_you(task):
     placeholder = DRAFT.replace("health endpoint returns 200", gate.PLACEHOLDER)
     write_placeholder = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
@@ -848,6 +878,25 @@ def test_no_review_for_this_task_starts_no_reviewer(task, tmp_path):
     assert task.read_state().state is State.CHECKPOINT_FINAL
     assert sup.lifecycle == [] and reviewer.prompts == []
     assert "review 1" not in notes[-1]
+
+
+def test_the_reviews_repair_turn_goes_on_in_the_reviewers_own_session(task, tmp_path):
+    """The same as the planner's repair: the reviewer's second turn continues its conversation."""
+    sup, notes, reviewer = reviewed(task, tmp_path, ["not a review", CLEAN])
+    made = []
+    reviewer.start_session = lambda title: made.append(title) or f"rev_ses_{len(made)}"
+    used = []
+    original = reviewer.turn
+
+    def turn(prompt, session="", title="", on_step=None):
+        used.append(session)
+        done = original(prompt, session, title, on_step)
+        return Turn(session, done.ok, done.cost, done.tokens, done.text)  # opencode keeps the id it was given
+
+    reviewer.turn = turn
+    for _ in range(3):
+        sup.step()
+    assert len(made) == 1 and used == ["rev_ses_1", "rev_ses_1"], "one conversation for both turns"
 
 
 def test_a_review_that_is_not_one_is_sent_back_once_then_left_to_you(task, tmp_path):

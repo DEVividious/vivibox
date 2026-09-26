@@ -51,6 +51,11 @@ First public version.
 - The commit suggested at acceptance tells the whole of the task's work, its subject from the
   task and every commit of the agent as a line.
 
+### Fixed
+
+- The plan's repair turn, and the review's, went on in a second session briefed as the role
+  again, doing the first turn's work over: they continue the role's own conversation.
+
 ### Internal
 
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.

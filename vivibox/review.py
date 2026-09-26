@@ -5,6 +5,7 @@ the command line call.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from . import (
     gate,
     ide,
     repo,
+    timeline,
     ui,
     version,
 )
@@ -113,8 +115,8 @@ def archive_path(task_id: str) -> Path:
     return history_path().with_name("archive") / task_id
 
 
-# What is worth keeping of a task that is gone: the plan it was held to, what happened to it and
-# what it delivered, a few dozen kilobytes; not its clone, not its logs.
+# What is worth keeping of a task that is gone: the plan it was held to, what happened to it,
+# what it delivered, its logs and the reviews it got; not its clone.
 ARCHIVED = (
     "plan.md",
     gate.ACCEPTED_PLAN,
@@ -122,17 +124,27 @@ ARCHIVED = (
     "handoff/" + gate.CRITERIA_FILE,
     "handoff/" + actions.DEMO_FILE,
 )
+# Patterns under the task's files, kept under the same folder names.
+ARCHIVED_GLOBS = ("log/*.log", "handoff/review-*.md")
 
 
 def archive(task: Task) -> Path:
     """Keeps the task's record before its directory goes, so a finished task can still show its
-    plan, and what it cost can still be traced to the gate runs that cost it."""
+    plan, its timeline, its verification logs and its reviews under l, and what it cost can
+    still be traced to the gate runs that cost it."""
     kept = archive_path(task.id)
     kept.mkdir(parents=True, exist_ok=True)
     for name in ARCHIVED:
         source = task.meta / name
         if source.is_file():
             shutil.copy2(source, kept / source.name)
+    for pattern in ARCHIVED_GLOBS:
+        for source in task.meta.glob(pattern):
+            target = kept / ("log" if pattern.startswith("log/") else "") / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    with contextlib.suppress(OSError, ValueError):
+        (kept / "timeline.txt").write_text(timeline.render(task))
     return kept
 
 

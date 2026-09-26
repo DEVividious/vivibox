@@ -467,8 +467,8 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             return True
         pick = self.selected()
         if not pick:
-            # A finished task is history: you can only look at it or forget it.
-            return action == "remove" and self.finished_entry(self.selected_id()) is not None
+            # A finished task is history: you can only look at it, read what it kept, or forget it.
+            return action in ("remove", "show_log") and self.finished_entry(self.selected_id()) is not None
         task, st = pick
         return keys_for(task, st, self.agent_running(st.id), st.id in self.starting, self.pod.demo)[action]
 

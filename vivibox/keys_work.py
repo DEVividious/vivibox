@@ -56,8 +56,14 @@ class WorkKeys:
     def action_show_log(self) -> None:
         """The timeline, a verification log, or the supervisor's, in your pager: one entry opens
         at once, more are picked from."""
-        task, st = self.selected()
-        found, start = logs.entries(task, st, self.agent_running(task.id))
+        if (pick := self.selected()) is None:  # a finished task: what its archive kept
+            found, start = logs.archived_entries(actions.archive_path(self.selected_id() or "")), 0
+            if not found:
+                self.notify("Nothing kept: this task finished before vivibox kept logs.", timeout=6)
+                return
+        else:
+            task, st = pick
+            found, start = logs.entries(task, st, self.agent_running(task.id))
         if len(found) == 1:
             self.read_log(found[0].command)
             return

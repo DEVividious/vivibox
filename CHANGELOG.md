@@ -52,6 +52,8 @@ First public version.
   uses; the pod's TCP MSS clamped to the uplink's MTU.
 - The commit suggested at acceptance tells the whole of the task's work, its subject from the
   task and every commit of the agent as a line.
+- A finished task keeps its timeline, its verification logs, its reviews and the supervisor's
+  log with its plan, and `l` on its row reads them.
 
 ### Fixed
 

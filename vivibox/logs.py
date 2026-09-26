@@ -111,6 +111,33 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
     return found, 1 if verifying and logs else 0
 
 
+def archived_entries(kept: Path) -> list[Entry]:
+    """What l offers on a finished task: what its archive kept, the timeline first, the
+    verification logs newest first, the reviews, the supervisor's log. Nothing for a task that
+    finished before the logs were kept."""
+    found = []
+    if (kept / "timeline.txt").exists():
+        found.append(Entry("timeline", "what happened, oldest first", pager_command(kept / "timeline.txt")))
+    logs = sorted((kept / "log").glob("verify-*.log"), key=lambda p: p.name, reverse=True)
+    for log in logs:
+        found.append(Entry(log.name, describe(log), pager_command(log, at_end=True)))
+    reviews = [(m.group(1), p) for p in kept.glob("review-*.md") if (m := reviewing.NUMBERED.match(p.name))]
+    for n, path in sorted(reviews, key=lambda r: int(r[0]), reverse=True):
+        review = reviewing.parse_review(path.read_text())
+        said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
+        found.append(Entry(path.name, said, pager_command(path)))
+    supervisor = kept / "log" / "supervisor.log"
+    if supervisor.exists():
+        found.append(
+            Entry(
+                "supervisor.log",
+                "diagnostics: what the supervisor did",
+                pager_command(supervisor, at_end=True),
+            )
+        )
+    return found
+
+
 class ChooseLog(ModalScreen["list[str] | None"]):
     """Which log to read. Arrows pick, Enter opens it in your pager, Escape leaves."""
 

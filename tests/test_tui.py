@@ -583,6 +583,49 @@ def test_details_open_on_request(env):
     run(scenario)
 
 
+def test_l_on_a_finished_task_reads_what_its_archive_kept(env):
+    """Done, a task had no l: its logs were gone with its directory. Now they are kept, and l
+    lists them, the timeline first; a task finished before that is said to have nothing."""
+    from vivibox import actions, logs
+
+    actions.remember(
+        actions.Finished("demo-9", env, ui.Spend(0.3, 0.12), "Reject expired cards"),
+        load_project("demo"),
+        "abc1234567",
+    )
+    kept = actions.archive_path("demo-9")
+    (kept / "log").mkdir(parents=True)
+    (kept / "timeline.txt").write_text("# demo-9: Reject expired cards\n\n12:00:00  created\n")
+    (kept / "log" / "verify-1-120000.log").write_text("$ npm test\n[exit 0 after 3 s]\n")
+    (kept / "log" / "verify-2-130000.log").write_text("$ npm test\n[exit 1 after 2 s]\n")
+    (kept / "review-1.md").write_text("## Blocking\n\n- a.py:1 — wrong\n\n## Not blocking\n")
+    (kept / "log" / "supervisor.log").write_text("Supervising demo-9\n")
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo-9"))
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.check_action("show_log", ()) and "`l`" in app.shown
+        await pilot.press("l")
+        await pilot.pause()
+        assert isinstance(app.screen, logs.ChooseLog)
+        labels = [e.label for e in app.screen.found]
+        assert labels == [
+            "timeline",
+            "verify-2-130000.log",
+            "verify-1-120000.log",
+            "review-1.md",
+            "supervisor.log",
+        ]
+        assert any("1 blocking" in e.said for e in app.screen.found)
+        await pilot.press("escape")
+        await pilot.pause()
+
+    run(scenario)
+    assert logs.archived_entries(actions.archive_path("demo-8")) == [], "finished before logs were kept"
+
+
 def test_finished_tasks_are_listed_below_and_can_be_hidden(env):
     from vivibox import actions
 
@@ -3694,7 +3737,7 @@ def test_a_finished_task_shows_its_plan_from_the_archive(env):
     )
     shown = finished_detail(entry)
     assert "A filter." in shown and str(kept) in shown
-    assert "Press `x` to delete it from the history" in shown
+    assert "`x` to delete it from the history" in shown
 
 
 def test_forgetting_a_finished_task_says_the_archive_goes_too(env):

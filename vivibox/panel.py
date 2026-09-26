@@ -495,7 +495,7 @@ def finished_detail(entry: dict) -> str:
     kept = actions.archive_path(entry["id"])
     plan = read(kept / gate.ACCEPTED_PLAN) or read(kept / "plan.md")
     archived = (
-        [f"Its plan and its events are kept in `{kept}`.", "", "#### The plan", "", plan_body(plan)]
+        [f"Its plan, its events and its logs are kept in `{kept}`.", "", "#### The plan", "", plan_body(plan)]
         if plan
         else []
     )
@@ -510,7 +510,8 @@ def finished_detail(entry: dict) -> str:
             f"Its work is {where}, from commit `{entry['commit']}`.",
             "",
             *delivered,
-            "Press `x` to delete it from the history, `h` to hide accepted tasks.",
+            "Press `l` for its timeline, logs and reviews, `x` to delete it from the history, `h` to hide"
+            " accepted tasks.",
             "",
             *archived,
         ]

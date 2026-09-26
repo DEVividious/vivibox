@@ -694,6 +694,9 @@ def test_an_accepted_task_leaves_its_plan_and_events_in_the_archive(env, capsys,
     task = find_task(load_config().tasks_dir, "demo-1")
     agent_commit(task, "one.txt")
     final_checkpoint(task)
+    (task.meta / "log" / "verify-1-120000.log").write_text("$ true\n[exit 0 after 1 s]\n")
+    (task.meta / "log" / "supervisor.log").write_text("Supervising demo-1\n")
+    (task.meta / "handoff" / "review-1.md").write_text("## Blocking\n\n## Not blocking\n")
     assert main(["accept", "demo-1"]) == 0
     kept = actions.archive_path("demo-1")
     assert not task.root.exists() and kept.is_dir()
@@ -701,6 +704,11 @@ def test_an_accepted_task_leaves_its_plan_and_events_in_the_archive(env, capsys,
     assert (kept / "criteria.md").exists()
     assert not (kept / "repo").exists(), "the plan and the record, not the clone"
     assert '"type": "state"' in (kept / "events.jsonl").read_text()
+    # Its logs and the reviews it got go with it, and the timeline as text: once the task is
+    # done there was no way to read what its verifications and its reviewer said.
+    assert (kept / "log" / "verify-1-120000.log").read_text() == "$ true\n[exit 0 after 1 s]\n"
+    assert (kept / "log" / "supervisor.log").exists() and (kept / "review-1.md").exists()
+    assert (kept / "timeline.txt").read_text().startswith("# demo-1: Goal\n")
 
 
 def test_a_deleted_task_is_archived_too_and_forgetting_it_removes_the_archive(env, capsys):

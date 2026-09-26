@@ -31,7 +31,6 @@ from . import (
     manual,
     opencode,
     prepare,
-    proposal,
     providers,
     repo,
     reviewing,
@@ -94,6 +93,11 @@ from .projects import (  # noqa: F401
     propose_project,
     setup_project,
     start_repository,
+)
+from .proposal import (  # noqa: F401
+    missing_command,
+    narrowed_proposal,
+    verify_commands,
 )
 from .review import (  # noqa: F401
     ARCHIVED,
@@ -660,41 +664,6 @@ def save_verify(project: Project, commands: list[str], no_build: bool = False) -
     text = path.read_text()
     line = "verify = false" if no_build else "verify = [" + ", ".join(f'"{c}"' for c in commands) + "]"
     path.write_text(re.sub(r"^verify = (\[.*?\]|false)", line, text, count=1, flags=re.MULTILINE | re.DOTALL))
-
-
-def verify_commands(task: Task, project: Project) -> list[str]:
-    """The project's commands; for a project with none, the one this task's writer proposed. None
-    for a task made with nothing to build, whatever the project builds for its other tasks."""
-    if proposal.nothing_to_build(task):
-        return []
-    if project.verify or not proposal.asked(task, project):
-        return project.verify
-    if not (found := proposal.proposed(task)) or gate.narrowed_proposal(found):
-        return []
-    return [found]
-
-
-def narrowed_proposal(task: Task, project: Project) -> str:
-    """The selection of tests in the command the writer proposed, for the gate to refuse; "" for
-    a whole build, for no proposal, and for a project that has its own command, its choice."""
-    if project.verify or not proposal.asked(task, project):
-        return ""
-    return gate.narrowed_proposal(proposal.proposed(task))
-
-
-def missing_command(task: Task, project: Project) -> str:
-    """Why this task has no command to be verified with when it should: its writer proposed none.
-    "" when it has one, or has nothing to build."""
-    if (
-        verify_commands(task, project)
-        or not proposal.asked(task, project)
-        or narrowed_proposal(task, project)
-    ):
-        return ""
-    return (
-        f"the writer proposed no command in /task/handoff/{proposal.PROPOSAL} and {project.name} has "
-        "none; set one under e on the project"
-    )
 
 
 def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:

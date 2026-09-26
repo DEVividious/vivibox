@@ -757,6 +757,9 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
         await pilot.pause()
         assert isinstance(app.screen, dialogs.NewProject) and app.screen.where == fresh and fresh.is_dir()
         assert app.screen.query_one("#name", Input).value == "clicker"
+        from ux import screen_text
+
+        assert "nothing; the writer builds what it needs" in screen_text(app), "an empty folder: no build"
         app.screen.query_one("#create").press()
         await pilot.pause()
         assert app.screen.query_one("#goal"), "its first task follows right away"
@@ -767,6 +770,42 @@ def test_a_project_can_be_set_up_from_the_view(env, tmp_path, monkeypatch):
     project = load_project("clicker")
     assert project.repo == fresh and project.verify == [], "the first plan will set how to test it"
     assert (fresh / ".git").is_dir()
+
+
+def test_i_asks_what_to_prepare_a_new_tasks_clone_with_and_suggests_it(env, tmp_path, monkeypatch):
+    """After i and n at once, the first task's writer started on a clone nobody had built, and
+    the person built it by hand in the agent's window: i asks for prepare next to the
+    verification, with the build files' suggestion, which Change… edits."""
+    from ux import screen_text
+
+    from vivibox.config import load_project
+
+    maven = tmp_path / "api"
+    make_repo(maven)
+    (maven / "mvnw").write_text("")
+    (maven / "pom.xml").write_text("<project/>")
+    monkeypatch.chdir(maven)
+    monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: "m")
+
+    async def scenario(app, pilot):
+        await pilot.press("i")
+        await pilot.pause()
+        assert "Prepare" in screen_text(app) and "bash mvnw -B install -DskipTests" in screen_text(app)
+        app.screen.query_one("#change-prepare").press()
+        await pilot.pause()
+        field = app.screen.query_one("#value", Input)
+        assert field.value == "bash mvnw -B install -DskipTests"
+        field.value = "bash mvnw -B -q install -DskipTests"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "bash mvnw -B -q install -DskipTests" in screen_text(app)
+        app.screen.query_one("#create").press()
+        await pilot.pause()
+        assert app.screen.query_one("#goal"), "its first task follows right away"
+
+    run(scenario)
+    project = load_project("api")
+    assert project.prepare == ["bash mvnw -B -q install -DskipTests"]
 
 
 def test_a_folder_that_is_already_a_project_leads_to_a_task(env, tmp_path, monkeypatch):

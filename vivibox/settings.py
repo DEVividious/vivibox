@@ -18,6 +18,7 @@ from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from . import actions, configfile, ide, opencode, ui
+from . import init as project_init
 from .config import (
     DEFAULT_NTFY_SERVER,
     ENV_NAME,
@@ -31,7 +32,7 @@ from .config import (
     load_config,
     load_project,
 )
-from .dialogs import ChooseEditor, ChooseModel
+from .dialogs import NOTHING_TO_PREPARE, PREPARE_HINT, PREPARE_QUESTION, ChooseEditor, ChooseModel
 from .panel import edit_in_editor
 from .providers_ui import ManageProviders, provider_rows
 from .verify_ui import AskVerify
@@ -402,7 +403,7 @@ class ProjectSettings(Rows):
         return [
             (
                 "prepare, once per task",
-                " && ".join(project.prepare) or "nothing; the writer builds what it needs",
+                " && ".join(project.prepare) or NOTHING_TO_PREPARE,
                 "prepare",
             ),
             ("verification", verify, "verify"),
@@ -466,15 +467,9 @@ class ProjectSettings(Rows):
                     "prepare", [value] if value else [], f"a new task runs first: {value or 'nothing'}"
                 )
 
-            self.app.push_screen(
-                Ask(
-                    f"What to run once in a new task's clone of {self.project_name} while the plan is"
-                    " made; the writer's first turn waits for it:",
-                    " && ".join(project.prepare),
-                    "E.g. a build without tests, so the writer builds one module at a time. Empty: nothing.",
-                ),
-                typed,
-            )
+            # An empty field starts on what the build files suggest, for Enter to take.
+            suggested = " && ".join(project.prepare or project_init.prepare_suggestion(project.repo))
+            self.app.push_screen(Ask(PREPARE_QUESTION, suggested, PREPARE_HINT), typed)
         elif key == "java":
 
             def typed(value: str | None) -> None:

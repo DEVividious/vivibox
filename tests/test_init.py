@@ -46,6 +46,35 @@ def test_maven_and_npm(tmp_path):
     assert "package.json runs: npm ci && npm test" in found.notes
 
 
+def test_the_build_files_suggest_what_to_prepare_a_new_tasks_clone_with(tmp_path):
+    """A build without tests, so the writer starts on a built project and builds one module at a
+    time: the wrapper's own words for Maven and Gradle, the install by its lockfile for Node,
+    nothing where the files say nothing or the image has no tool for them."""
+    maven = make_repo(tmp_path / "api")
+    (maven / "mvnw").write_text("")
+    (maven / "pom.xml").write_text("<project/>")
+    assert init.prepare_suggestion(maven) == ["bash mvnw -B install -DskipTests"]
+    assert init.detect(maven).prepare == ["bash mvnw -B install -DskipTests"]
+    (maven / "mvnw").unlink()
+    assert init.prepare_suggestion(maven) == ["mvn -B install -DskipTests"]
+    gradle = make_repo(tmp_path / "app")
+    (gradle / "gradlew").write_text("")
+    assert init.prepare_suggestion(gradle) == ["bash gradlew assemble --no-daemon --console=plain"]
+    (gradle / "mvnw").write_text("")
+    assert init.prepare_suggestion(gradle)[0].startswith("bash gradlew"), "one build tool: the first found"
+    web = make_repo(tmp_path / "web")
+    (web / "package.json").write_text("{}")
+    assert init.prepare_suggestion(web) == [], "npm ci without a lockfile fails every time"
+    (web / "pnpm-lock.yaml").write_text("")
+    assert init.prepare_suggestion(web) == ["pnpm install --frozen-lockfile"]
+    other = make_repo(tmp_path / "svc")
+    (other / "go.mod").write_text("module svc\n")
+    assert init.prepare_suggestion(other) == [], "no Go in the image: nothing to suggest"
+    assert 'prepare = ["mvn -B install -DskipTests"]' in init.render(init.detect(maven)), (
+        "in the project file"
+    )
+
+
 YARN = "yarn install --immutable && yarn test"
 YARN_CLASSIC = "yarn install --frozen-lockfile && yarn test"
 PNPM = "pnpm install --frozen-lockfile && pnpm test"
@@ -97,9 +126,10 @@ def test_init_can_start_a_repository_from_scratch(env, tmp_path):
     from vivibox.config import load_project
 
     fresh = tmp_path / "clicker"
-    assert main(["init", str(fresh), "--git", "--yes", "--verify", "npm test"]) == 0
+    assert main(["init", str(fresh), "--git", "--yes", "--verify", "npm test", "--prepare", "npm ci"]) == 0
     project = load_project("clicker")
     assert project.repo == fresh and project.verify == ["npm test"]
+    assert project.prepare == ["npm ci"], "--prepare sets what a new task's clone runs first"
     assert (fresh / ".git").is_dir() and (fresh / "README.md").exists()
     log = subprocess.run(["git", "log", "--oneline"], cwd=fresh, capture_output=True, text=True).stdout
     assert "Initial commit" in log

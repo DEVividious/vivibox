@@ -118,9 +118,16 @@ def start_repository(path: Path) -> Path:
 
 
 def setup_project(
-    path: Path, name: str, verify: list[str], java: str = "", create: bool = False, no_build: bool = False
+    path: Path,
+    name: str,
+    verify: list[str],
+    java: str = "",
+    create: bool = False,
+    no_build: bool = False,
+    prepare: list[str] | None = None,
 ) -> Path:
-    """Writes ~/.config/vivibox/projects/<name>.toml for this repository. Returns the file."""
+    """Writes ~/.config/vivibox/projects/<name>.toml for this repository. Returns the file.
+    prepare: what a new task's clone runs first; None takes the build files' suggestion."""
     path = path.expanduser().resolve()
     top = git_root(path)
     if top is None:
@@ -141,6 +148,9 @@ def setup_project(
         project_init.detect_demo(top),
         java,
         no_build=no_build,
+        prepare=[c.strip() for c in prepare if c.strip()]
+        if prepare is not None
+        else project_init.prepare_suggestion(top),
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(project_init.render(found))

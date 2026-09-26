@@ -78,8 +78,9 @@ class ProjectKeys:
                 return
             try:
                 target = actions.setup_project(
-                    Path(form["path"]), form["name"], form["verify"], create=True, no_build=form["no_build"]
-                )
+                    Path(form["path"]), form["name"], form["verify"], create=True,
+                    no_build=form["no_build"], prepare=form["prepare"],
+                )  # fmt: skip
             except Exception as e:
                 self.fail(e)
                 return

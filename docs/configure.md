@@ -78,8 +78,11 @@ vivibox init
 vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the repository too
 ```
 
-Either way vivibox reads the build files and proposes a project. The verification is a command you
-type, or left empty: the next task's writer, who builds the project while it works, then writes
+Either way vivibox reads the build files and proposes a project: how it is verified, and what a
+new task's clone runs first (`prepare`, a build without tests, so the writer starts on a built
+project: `bash mvnw -B install -DskipTests`, `bash gradlew assemble`, or the Node install by its
+lockfile; empty where the files say nothing, `--prepare` and Change… set it). The verification
+is a command you type, or left empty: the next task's writer, who builds the project while it works, then writes
 the command it ran to `/task/handoff/verify-proposal.md`, and before the first verification the
 task waits for you as `review the command`: `a` opens the same field as under `e` with the
 command in it, Enter keeps it for the project and the gate runs with it; `e` changes it first,

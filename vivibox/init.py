@@ -28,6 +28,9 @@ class Detected:
     source: str = ""
     # Nothing to build or test here: verify = false in the project file.
     no_build: bool = False
+    # What a new task's clone runs first, before the writer: a build without tests, suggested
+    # by the build files; empty for nothing.
+    prepare: list[str] = field(default_factory=list)
 
 
 def project_name(repo: Path) -> str:
@@ -181,6 +184,25 @@ def package_manager(repo: Path) -> str:
     return "npm"
 
 
+def prepare_suggestion(repo: Path) -> list[str]:
+    """What to run once in a new task's clone before the writer: the build without its tests,
+    so the writer starts on a built project and builds one module at a time. The build tool's
+    own words for Maven and Gradle, the install by its lockfile for Node; nothing where the
+    files say nothing, or name a tool the image does not have. The first build tool found, as
+    the verification's candidates are ordered."""
+    if (repo / "gradlew").exists():
+        return ["bash gradlew assemble --no-daemon --console=plain"]
+    if (repo / "build.gradle.kts").exists() or (repo / "build.gradle").exists():
+        return ["gradle assemble --no-daemon --console=plain"]
+    if (repo / "mvnw").exists():
+        return ["bash mvnw -B install -DskipTests"]
+    if (repo / "pom.xml").exists():
+        return ["mvn -B install -DskipTests"]
+    if (repo / "package.json").exists() and has_lockfile(repo):
+        return [NODE_INSTALL[package_manager(repo)]]
+    return []
+
+
 def candidates(repo: Path) -> list[tuple[str, str]]:
     """Every command the project's build files and its pipeline call for, each with the file it
     comes from: notes for a new project, never its verification."""
@@ -319,6 +341,7 @@ def maven_notes(repo: Path) -> list[str]:
 def detect(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
     found.demo = detect_demo(repo)
+    found.prepare = prepare_suggestion(repo)
     level = source_level(repo)
     newest = IMAGE_JAVA
     # What the build files name is a note, never the verification: a pipeline often builds with
@@ -351,7 +374,8 @@ def render(found: Detected) -> str:
     home = Path.home()
     repo = f"~/{found.repo.relative_to(home)}" if found.repo.is_relative_to(home) else str(found.repo)
     demo = ", ".join(f'"{c}"' for c in found.demo)
+    prepare = ", ".join(f'"{c}"' for c in found.prepare)
     return (
-        f'repo = "{repo}"\nverify = {verify}\ndemo = [{demo}]\njava = "{found.java}"\n'
-        "risky_extra = []\nhost_services = []\npass_env = []\n"
+        f'repo = "{repo}"\nverify = {verify}\nprepare = [{prepare}]\ndemo = [{demo}]\n'
+        f'java = "{found.java}"\nrisky_extra = []\nhost_services = []\npass_env = []\n'
     )

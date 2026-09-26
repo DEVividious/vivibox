@@ -28,7 +28,8 @@ First public version.
   your review before the first verification (`review the command`); a proposal narrowed to some
   tests is refused.
 - A box: a pod of your own in a project, with opencode, to work in by hand (`b`).
-- Projects prepare once in a new task's clone (`prepare`); Node projects get their dependencies
+- Projects prepare once in a new task's clone (`prepare`), asked for under `i` and by `vivibox
+  init` with the build files' suggestion of a build without tests; Node projects get their dependencies
   installed by their lockfile, in the folder a command starts in; Maven keeps what a task
   installs in a volume of its own; Testcontainers images and the host's certificate authorities
   reach the pod.
@@ -52,5 +53,6 @@ First public version.
 ### Internal
 
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
+- `vivibox auth` and `vivibox models` live in `cli_providers.py`, under the size limit.
 - `CHANGELOG.md` is written as the work is done: a change under `vivibox/` changes it in the
   same commit, and `tests/test_structure.py` fails on a branch that does not.

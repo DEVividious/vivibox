@@ -231,6 +231,14 @@ class DescriptionArea(TextArea):
 NEW_PROJECT = "+ set up another project…"
 
 
+# The words for prepare, the same under i and under e on the project.
+NOTHING_TO_PREPARE = "nothing; the writer builds what it needs"
+PREPARE_QUESTION = (
+    "What to run once in a new task's clone while the plan is made; the writer's first turn waits for it:"
+)
+PREPARE_HINT = "A build without tests, so the writer builds one module at a time. Empty: nothing."
+
+
 class NewProject(Dialog):
     """A repository vivibox does not know yet, or a folder where one should start. How to build and
     test it is yours to type, or left to the first task's writer, who proposes the command it ran;
@@ -248,6 +256,10 @@ class NewProject(Dialog):
             with Horizontal(classes="role"):
                 yield Label("", id="verify", classes="wrap")
                 yield Button("Change…", id="change")
+            yield Label("Prepare: what a new task's clone runs first, before the writer")
+            with Horizontal(classes="role"):
+                yield Label("", id="prepare", classes="wrap")
+                yield Button("Change…", id="change-prepare")
             yield Label("", id="notes")
             with Horizontal(classes="buttons"):
                 yield Button("Set up", variant="primary", id="create")
@@ -270,6 +282,7 @@ class NewProject(Dialog):
         root = actions.git_root(where)
         self.taken = actions.project_at(root) if root else ""
         self.verify, self.no_build = list(found.verify), False
+        self.prepare = list(found.prepare)
         name = self.query_one("#name", Input)
         name.value = self.taken or found.name
         name.disabled = bool(self.taken)
@@ -281,7 +294,9 @@ class NewProject(Dialog):
             notes = [f"a new repository starts in {where}"]
         self.query_one("#notes", Label).update(" · ".join(notes))
         self.query_one("#change", Button).display = not self.taken
+        self.query_one("#change-prepare", Button).display = not self.taken
         self.show_verify()
+        self.show_prepare()
         self.query_one("#create", Button).label = "Open a task" if self.taken else "Set up"
 
     def show_verify(self) -> None:
@@ -293,6 +308,15 @@ class NewProject(Dialog):
             self.verify, self.no_build = choice["verify"], choice["no_build"]
             self.show_verify()
 
+    def show_prepare(self) -> None:
+        how = escape(" && ".join(self.prepare)) if self.prepare else NOTHING_TO_PREPARE
+        self.query_one("#prepare", Label).update(how)
+
+    def typed_prepare(self, value: str | None) -> None:
+        if value is not None:
+            self.prepare = [value.strip()] if value.strip() else []
+            self.show_prepare()
+
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "browse":
@@ -300,15 +324,22 @@ class NewProject(Dialog):
         elif event.button.id == "change":
             name = self.query_one("#name", Input).value.strip() or "this project"
             self.app.push_screen(AskVerify(name, self.verify, self.no_build), self.pick_verify)
+        elif event.button.id == "change-prepare":
+            from .settings import Ask  # settings builds on this module
+
+            self.app.push_screen(
+                Ask(PREPARE_QUESTION, " && ".join(self.prepare), PREPARE_HINT), self.typed_prepare
+            )
         elif event.button.id != "create":
             self.dismiss({})
         elif self.taken:
             self.dismiss({"use": self.taken})
         else:
             name = self.query_one("#name", Input).value.strip()
-            self.dismiss(
-                {"path": str(self.where), "name": name, "verify": self.verify, "no_build": self.no_build}
-            )
+            self.dismiss({
+                "path": str(self.where), "name": name, "verify": self.verify, "no_build": self.no_build,
+                "prepare": self.prepare,
+            })  # fmt: skip
 
     @on(Input.Submitted)
     def submitted(self) -> None:

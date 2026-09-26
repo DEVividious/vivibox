@@ -540,7 +540,11 @@ class NewTask(Dialog):
                 "kind": self.query_one("#kind", Select).value,
                 "auto": self.query_one("#plan", Select).value == "auto",
                 "draft": self.query_one("#plan", Select).value == "draft",
-                "roles": {s.id.removeprefix("role-"): s.value for s in self.query(".model").results(Select)},
+                "roles": {
+                    s.id.removeprefix("role-"): s.value
+                    for s in self.query(".model").results(Select)
+                    if s.parent.display  # a task without a review names no reviewer
+                },
                 "review": self.query_one("#review", Select).value if self.query("#review") else "",
                 "no_build": self.query_one("#no-build", Checkbox).value,
                 "base_ref": self.base_ref,
@@ -552,7 +556,19 @@ class NewTask(Dialog):
 
     def on_mount(self) -> None:
         self.for_project(str(self.query_one("#project", Select).value))
+        self.reviewer_follows_review()
         self.call_after_refresh(self.fit)
+
+    @on(Select.Changed, "#review")
+    def review_changed(self, event: Select.Changed) -> None:
+        self.reviewer_follows_review()
+        self.call_after_refresh(self.fit)
+
+    def reviewer_follows_review(self) -> None:
+        """No review for this task, no reviewer: its model row goes, and nothing runs for it."""
+        if self.query("#review"):
+            reviewing = self.query_one("#review", Select).value != "none"
+            self.query_one("#role-reviewer", Select).parent.display = reviewing
 
     def on_resize(self) -> None:
         self.call_after_refresh(self.fit)

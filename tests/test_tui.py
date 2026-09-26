@@ -4084,6 +4084,45 @@ def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monk
     run(scenario)
 
 
+def test_no_review_for_this_task_takes_the_reviewers_model_off_the_form(env, monkeypatch):
+    """A task without a review has no reviewer to pick a model for: the row goes, and comes back
+    with a mode that reviews. What the form sends names no reviewer either."""
+    with_reviewer(env, mode="loop")
+    calls = []
+
+    def create(
+        project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False, base_ref=""
+    ):
+        calls.append((roles, review_mode))
+        return new_task(goal)
+
+    monkeypatch.setattr(actions, "create", create)
+    monkeypatch.setattr(actions, "start", lambda task_id, resume=False, on_step=None: "m")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"Add divide")
+        review = app.screen.query_one("#review", Select)
+        reviewer = app.screen.query_one("#role-reviewer", Select)
+        assert reviewer.parent.display
+        review.value = "none"
+        await pilot.pause()
+        assert not reviewer.parent.display
+        review.value = "supervised"
+        await pilot.pause()
+        assert reviewer.parent.display
+        review.value = "none"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert calls[0][1] == "none" and "reviewer" not in calls[0][0]
+
+    run(scenario)
+
+
 def test_without_a_reviewer_n_does_not_ask(env, monkeypatch):
     async def scenario(app, pilot):
         await pilot.press("n")

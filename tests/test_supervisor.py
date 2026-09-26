@@ -830,6 +830,17 @@ def test_supervised_mode_reviews_once_and_leaves_every_note_to_you(task, tmp_pat
     assert "review 1: 1 blocking note" in notes[-1] and len(reviewer.prompts) == 1
 
 
+def test_no_review_for_this_task_starts_no_reviewer(task, tmp_path):
+    """The task's own choice of no review: the work goes from the green gate straight to you,
+    and the reviewer's container is never brought up."""
+    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING], mode="none")
+    for _ in range(2):
+        sup.step()
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+    assert sup.lifecycle == [] and reviewer.prompts == []
+    assert "review 1" not in notes[-1]
+
+
 def test_a_review_that_is_not_one_is_sent_back_once_then_left_to_you(task, tmp_path):
     """Like a plan draft that is not a plan: one turn to fix it, and if that fails too the work
     goes to you with the text as it is, said to be unreadable."""

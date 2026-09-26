@@ -628,6 +628,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         with self.suspend():
             subprocess.run(command, env=actions.outside_tmux())
             after_window(session_gone=not actions.tmux_has(actions.tmux_session(task_id)))
+            actions.close_agent_view(task_id)
         self.reload()
 
     def action_leave_note(self) -> None:

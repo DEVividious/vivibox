@@ -4175,9 +4175,18 @@ def test_the_agents_window_opens_from_inside_tmux_too(env, monkeypatch):
     monkeypatch.setattr(actions, "tmux_has", lambda target: True)
     monkeypatch.setattr(tui.subprocess, "run", lambda command, **kw: ran.update(command=command, **kw))
     monkeypatch.setattr(tui.Vivibox, "suspend", lambda self: contextlib.nullcontext())
+    tmux_calls = []
+    monkeypatch.setattr(
+        actions,
+        "tmux",
+        lambda *a, **kw: tmux_calls.append(list(a)) or subprocess.CompletedProcess(a, 0, "", ""),
+    )
 
     async def scenario(app, pilot):
         app.watch("demo-1")
         assert ran["command"][:2] == ["tmux", "-L"] and "TMUX" not in ran["env"]
+        assert ["kill-session", "-t", "vivibox-demo-1"] in tmux_calls, (
+            "closed on leaving: nothing renders for nobody"
+        )
 
     run(scenario)

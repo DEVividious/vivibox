@@ -848,3 +848,21 @@ def test_new_takes_a_task_with_nothing_to_build(env):
 
     assert main(["new", "demo", "Analyse PAY-123", "--no-build", "--draft"]) == 0
     assert "verify = false" in find_task(load_config().tasks_dir, "demo-1").plan_path.read_text()
+
+
+def test_attach_opens_the_agents_window_and_closes_it_when_you_leave(env, monkeypatch):
+    from vivibox import actions, cli
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    monkeypatch.setattr(
+        actions, "attach_command", lambda task_id, role="": ["tmux", "-L", "vivibox", "attach"]
+    )
+    ran = {}
+    monkeypatch.setattr(cli.subprocess, "run", lambda command, **kw: ran.update(command=command, **kw))
+    calls = fake_tmux(monkeypatch, shows="")
+    assert main(["attach", task.id]) == 0
+    assert ran["command"][0] == "tmux" and "TMUX" not in ran["env"]
+    assert ["kill-session", "-t", f"vivibox-{task.id}"] in calls

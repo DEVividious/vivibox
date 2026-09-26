@@ -218,6 +218,12 @@ def leave_key() -> None:
     tmux(*LEAVE_BINDING)
 
 
+def close_agent_view(task_id: str) -> None:
+    """The window on the agent, gone once you leave it: an `opencode attach` nobody looks at
+    renders its interface at a third of a core; w opens it again in a second."""
+    tmux("kill-session", "-t", tmux_session(task_id))
+
+
 # The command a task's tmux session shows, kept in the session's environment: the planner's
 # conversation and the writer's are two, and a window opened during planning must not go on
 # showing the planner once the writer is at work.

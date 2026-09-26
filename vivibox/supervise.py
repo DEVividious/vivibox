@@ -18,23 +18,15 @@ def cmd_supervise(args: argparse.Namespace) -> int:
     config = load_config()
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)
-    harness = actions.harness_for("writer", pod, task)
-
-    def agent_window(st) -> None:
-        # Your view of the agent, ready once its conversation exists; reopened if you closed it.
-        if session := actions.watchable_session(task, st):
-            actions.agent_view(task, harness.attach_command(session))
-
     current = live_config(config)
     stages = ntfy.Stages(
         lambda: channel_for(current()), again=any(e["type"] == "turn" for e in task.events())
     )
 
     def stepped(st) -> None:
-        agent_window(st)
         stages.seen(st)
 
-    sup = make_supervisor(task, project, pod, config, agent_window, current)
+    sup = make_supervisor(task, project, pod, config, current)
     actions.supervising(task)
     print(f"Supervising {task.id}. Your decisions: vivibox accept|reply {task.id}", flush=True)
     stepped(task.read_state())  # a resumed task already has its session
@@ -86,7 +78,6 @@ def make_supervisor(
     project,
     pod,
     config,
-    agent_window=lambda st: None,
     current: Callable[[], Config] | None = None,
 ) -> supervisor.Supervisor:
     """The supervisor as the command line runs it: the gate on the project's commands, your
@@ -126,7 +117,6 @@ def make_supervisor(
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
         keep_command=lambda command: actions.save_verify(now(), [command]),
-        session_started=agent_window,
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),

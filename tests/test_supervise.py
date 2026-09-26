@@ -157,3 +157,34 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
     task.set_paused(True)  # a step with nothing to do still reads the file
     assert not sup.step()
     assert sup.project_verify == ["npm test"] and sup.prepared == ["npm ci"]
+
+
+def test_the_agents_window_opens_on_w_and_not_at_every_turn(env, monkeypatch):
+    """The supervisor used to open a tmux window with `opencode attach` at every turn, for w to
+    have something to show; each such window rendered opencode's interface for nobody, at a third
+    of a core. Now w opens it, and leaving it closes it."""
+    from vivibox.cli import main
+    from vivibox.config import load_project
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(supervise.load_config().tasks_dir, "demo-1")
+    task.set_session("writer", "ses_1")
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    opened = []
+    monkeypatch.setattr(supervise.actions, "agent_view", lambda t, command: opened.append(command))
+
+    class Pod:
+        def prepare_running(self):
+            return False
+
+        def review_down(self):
+            pass
+
+        def review_side(self):
+            return self
+
+    sup = supervise.make_supervisor(task, load_project("demo"), Pod(), config())
+    sup.ports.session_started(task.read_state())
+    assert opened == [], "nothing opened for nobody"
+    assert not hasattr(supervise, "agent_window")

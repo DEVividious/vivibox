@@ -222,8 +222,12 @@ def cmd_rm(args: argparse.Namespace) -> int:
 
 
 def cmd_attach(args: argparse.Namespace) -> int:
+    task, _ = actions.load(args.task)
     command = actions.attach_command(args.task)
-    os.execvpe(command[0], command, actions.outside_tmux())
+    subprocess.run(command, env=actions.outside_tmux())
+    if not task.read_state().box:  # a box's shell keeps its state between visits
+        actions.close_agent_view(args.task)
+    return 0
 
 
 def cmd_accept(args: argparse.Namespace) -> int:

@@ -41,7 +41,7 @@ class BoxKeys:
             self.fail(e)
             return
         with self.suspend():
-            subprocess.run(command)
+            subprocess.run(command, env=actions.outside_tmux())
         self.reload()
 
     @work(thread=True)

@@ -191,6 +191,12 @@ LEAVE_KEY = "C-q"
 LEAVE_BINDING = ["bind-key", "-n", LEAVE_KEY, "detach-client", "-E", "true"]
 
 
+def outside_tmux() -> dict[str, str]:
+    """The environment for a window on the agent: without $TMUX, which a view started inside tmux
+    carries and which makes tmux refuse to attach, though the agent's server is another one."""
+    return {k: v for k, v in os.environ.items() if k != "TMUX"}
+
+
 def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run([*TMUX, *args], capture_output=True, text=True, check=check)
 

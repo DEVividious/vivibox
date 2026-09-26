@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -4104,3 +4105,38 @@ def test_ctrl_c_in_a_pager_stops_the_pager_not_the_view():
     )
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert done.stdout == "still here\n", done.stderr[-300:]
+
+
+def test_ctrl_q_in_the_view_does_not_quit_it(env):
+    """Ctrl-q is the way back from the agent's window; Textual's default made it quit the view,
+    so a press a second late, or after a w that opened nothing, closed vivibox without a word."""
+
+    async def scenario(app, pilot):
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        assert app.is_running, "the view is still here"
+        assert any("q quits" in str(n.message) for n in app._notifications), "and says how to leave"
+
+    run(scenario)
+
+
+def test_the_agents_window_opens_from_inside_tmux_too(env, monkeypatch):
+    """A view started in tmux carries $TMUX; tmux then refuses to attach the agent's session and
+    w shows nothing. The hand-off leaves $TMUX behind: the agent's server is another one."""
+    from vivibox import actions, tui
+
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+    assert "TMUX" not in actions.outside_tmux() and actions.outside_tmux()["PATH"]
+    ran = {}
+    monkeypatch.setattr(
+        actions, "attach_command", lambda task_id, role="": ["tmux", "-L", "vivibox", "attach"]
+    )
+    monkeypatch.setattr(actions, "tmux_has", lambda target: True)
+    monkeypatch.setattr(tui.subprocess, "run", lambda command, **kw: ran.update(command=command, **kw))
+    monkeypatch.setattr(tui.Vivibox, "suspend", lambda self: contextlib.nullcontext())
+
+    async def scenario(app, pilot):
+        app.watch("demo-1")
+        assert ran["command"][:2] == ["tmux", "-L"] and "TMUX" not in ran["env"]
+
+    run(scenario)

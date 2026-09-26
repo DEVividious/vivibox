@@ -223,7 +223,7 @@ def cmd_rm(args: argparse.Namespace) -> int:
 
 def cmd_attach(args: argparse.Namespace) -> int:
     command = actions.attach_command(args.task)
-    os.execvp(command[0], command)
+    os.execvpe(command[0], command, actions.outside_tmux())
 
 
 def cmd_accept(args: argparse.Namespace) -> int:

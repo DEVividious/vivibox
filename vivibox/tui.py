@@ -113,6 +113,8 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         Binding("k", "settings", "Settings", show=False),
         Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
+        # Textual binds Ctrl-q to quit; here it is the key that leaves the agent's window.
+        Binding("ctrl+q", "leave_note", "Leave", show=False, priority=True),
     ]
 
     def __init__(self):
@@ -641,9 +643,14 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             self.fail(e)
             return
         with self.suspend():
-            subprocess.run(command)
+            subprocess.run(command, env=actions.outside_tmux())
             after_window(session_gone=not actions.tmux_has(actions.tmux_session(task_id)))
         self.reload()
+
+    def action_leave_note(self) -> None:
+        """Ctrl-q leaves the agent's window; pressed here, a second late or after a w that opened
+        nothing, Textual's default would quit the view without a word."""
+        self.notify("This is vivibox: q quits it; Ctrl-q leaves the agent's window under w.")
 
     def action_help(self) -> None:
         self.push_screen(Help(self.editor_note()))

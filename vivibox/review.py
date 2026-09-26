@@ -247,15 +247,37 @@ def finish(
     return done
 
 
-def suggested_message(source: Path, base: str, commit: str, goal: str, criteria: list[str] = ()) -> str:
-    """Describe the actual commits, never copy the acceptance checklist or truncate a ticket."""
+def suggested_message(
+    source: Path, base: str, commit: str, goal: str, criteria: list[str] = (), summary: str = ""
+) -> str:
+    """The whole of the agent's work in the task: the subject says what the task was (the plan's
+    summary, else the goal's first line when it fits), and the body lists every commit the agent
+    made, in order. Never the acceptance checklist, never a truncated ticket."""
     log = repo.git("log", "--reverse", "--format=%s", f"{base}..{commit}", cwd=source).stdout
-    subjects = [p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p)]
-    first = subjects[-1] if subjects else goal.strip().partition("\n")[0].rstrip(".")
-    if not first or len(first) > gate.MAX_SUBJECT:
-        first = "Update project"
-    points = list(dict.fromkeys(p for p in subjects if p != first))
+    subjects = list(
+        dict.fromkeys(p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p))
+    )
+    fits = lambda line: line and len(line) <= gate.MAX_SUBJECT  # noqa: E731
+    first = next(
+        (
+            line
+            for line in (summary.strip().rstrip("."), goal.strip().partition("\n")[0].rstrip("."))
+            if fits(line)
+        ),
+        "",
+    )
+    if not first:
+        first = subjects[-1] if subjects and fits(subjects[-1]) else "Update project"
+    points = [p for p in subjects if p != first]
     return first + ("\n\n" + "\n".join(f"- {p}" for p in points) if points else "")
+
+
+def accepted_summary(task: Task) -> str:
+    """The one line the plan gave the task, for the commit's subject; "" without an accepted plan."""
+    try:
+        return parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).summary
+    except (OSError, PlanError):
+        return ""
 
 
 MESSAGE_FILE = "commit-message.json"
@@ -275,7 +297,7 @@ def prepare_message(task: Task, source: Path, commit: str) -> str:
     kept = proposed_message(task)
     if kept.get("base") == st.base_commit and kept.get("commit") == commit:
         return kept["message"]
-    message = suggested_message(source, st.base_commit, commit, st.goal)
+    message = suggested_message(source, st.base_commit, commit, st.goal, summary=accepted_summary(task))
     path = task.meta / MESSAGE_FILE
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps({"base": st.base_commit, "commit": commit, "message": message}) + "\n")

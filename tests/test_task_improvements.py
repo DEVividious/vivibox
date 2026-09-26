@@ -73,7 +73,7 @@ def test_single_commit_proposal_describes_change_without_acceptance_checklist(en
     task = ready_task()
     st = task.read_state()
     message = review.suggested_message(task.repo, st.base_commit, "HEAD", st.goal, ["it works"])
-    assert message == "Handle empty input"
+    assert message == "Handle empty input", "a goal too long for a subject: the commit's own, no checklist"
 
 
 def test_proposal_exists_before_accepting_and_is_shown_in_review(env):

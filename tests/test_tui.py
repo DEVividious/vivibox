@@ -342,7 +342,7 @@ def test_accepting_the_work_offers_a_commit(env):
         # The repository is on its main branch, so leaving it uncommitted is the focused choice.
         assert app.screen.focused.id == "later"
         message = app.screen.query_one("#message", TextArea)
-        assert message.text == "Add one"
+        assert message.text == "Goal\n\n- Add one", "the task as the subject, the commit listed"
         message.focus()
         await pilot.press("end", *" now")
         await pilot.press("ctrl+s")  # a multi-line field: ctrl+s submits, like every other one
@@ -350,7 +350,7 @@ def test_accepting_the_work_offers_a_commit(env):
 
     run(scenario)
     log = subprocess.run(["git", "log", "-1", "--format=%s%n%b"], cwd=source, capture_output=True, text=True)
-    assert log.stdout.strip() == "Add one now" and (source / "one.txt").exists()
+    assert log.stdout.strip() == "Goal now\n- Add one" and (source / "one.txt").exists()
     assert not task.root.exists()
 
 

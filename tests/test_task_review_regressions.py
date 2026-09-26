@@ -168,7 +168,9 @@ def test_proposed_subject_describes_implementation_after_test_first_commit(env):
     git(source, "commit", "--allow-empty", "-m", "Add failing test for empty input")
     git(source, "commit", "--allow-empty", "-m", "Handle empty input")
     message = review.suggested_message(source, base, "HEAD", "Fix input")
-    assert message == "Handle empty input\n\n- Add failing test for empty input"
+    assert message == "Fix input\n\n- Add failing test for empty input\n- Handle empty input", (
+        "the task as the subject, the agent's commits as the body, in order"
+    )
 
 
 def test_latest_subject_is_kept_when_it_repeats_an_earlier_commit(env):
@@ -177,5 +179,5 @@ def test_latest_subject_is_kept_when_it_repeats_an_earlier_commit(env):
     for subject in ("Handle empty input", "Cover an edge case", "Handle empty input"):
         git(source, "commit", "--allow-empty", "-m", subject)
     assert review.suggested_message(source, base, "HEAD", "Fix input") == (
-        "Handle empty input\n\n- Cover an edge case"
-    )
+        "Fix input\n\n- Handle empty input\n- Cover an edge case"
+    ), "a subject repeated is listed once"

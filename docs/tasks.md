@@ -147,8 +147,9 @@ details; `x` forgets one, archive included.
 
 - **Accept** with `vivibox accept <id>`: only now does the work reach your checkout, as
   uncommitted changes on your current branch. vivibox asks whether to commit them and suggests a
-  message: a subject from the plan's summary, then a list of the agent's commit subjects when it
-  made several, else of the criteria the work met; answer `n` to look at them in your IDE first.
+  message: a subject from the plan's summary (else the goal's first line, when it fits), then every
+  commit the agent made, one line each in order, so the commit tells the whole of the work;
+  answer `n` to look at them in your IDE first.
   It refuses while you have staged changes. Files that conflict with your branch are left for you
   to resolve, and the work is kept on branch `vivibox/<id>` too. `--branch` skips your checkout
   and only creates that branch.

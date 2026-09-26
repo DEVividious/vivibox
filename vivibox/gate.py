@@ -379,6 +379,9 @@ class GateResult:
     # The build files at this commit and the commands they name, when the project runs nothing and
     # has not said it never will: a new product's first task made its build. For you to pick.
     build_files: list[tuple[str, str]] = field(default_factory=list)
+    # The selection of tests in the command the writer proposed, when it picked some instead of
+    # the whole build: the build is not run, and the writer proposes again.
+    narrowed: str = ""
 
     @property
     def passed(self) -> bool:
@@ -391,6 +394,7 @@ class GateResult:
             and not self.switched_off
             and not self.uncommitted
             and not self.no_red_evidence
+            and not self.narrowed
         )
 
     def summary(self) -> dict:
@@ -406,11 +410,28 @@ class GateResult:
             "log": self.log.name,
             "build_skipped": self.build_skipped,
             "environment": self.environment,
+            "narrowed": self.narrowed,
             "no_red_evidence": len(self.no_red_evidence),
             "removed_tests": len(self.removed_tests),
             "removed": self.removed_tests[:MAX_LISTED],
             "build_files": [list(pair) for pair in self.build_files],
         }
+
+
+# What picks some tests out of a build: a test class or pattern given to Maven, Gradle, pytest,
+# Jest or Vitest, Go, or a test file named as the argument. A whole build names none of these.
+SELECTS_TESTS = re.compile(
+    r"(?<![\w-])(?:-Dtest=\S+|-Dit\.test=\S+|--tests(?:=|\s+)\S+|-k\s+\S+|-t\s+\S+"
+    r"|--testNamePattern(?:=|\s+)\S+|--testPathPattern(?:=|\s+)\S+|-run\s+\S+"
+    r"|\S*\.(?:test|spec)\.[cm]?[jt]sx?\b|\S*(?:/|^)test_\w+\.py\b|\S*_test\.py\b)"
+)
+
+
+def narrowed_proposal(command: str) -> str:
+    """The selection of tests in a proposed command, or "" when it builds the whole project. A
+    writer verified by the tests it wrote alone would pass whatever it broke elsewhere."""
+    found = SELECTS_TESTS.search(command)
+    return found.group(0) if found else ""
 
 
 def uncommitted(repo_dir: Path) -> list[str]:
@@ -520,10 +541,13 @@ def run_gate(
     timeout: float = 0,
     no_build: bool = False,
     no_command: str = "",
+    narrowed: str = "",
 ) -> GateResult:
     """timeout: seconds one command may take; 0 for no limit. no_build: the project has said it
     has nothing to build, so build files it gains are not pointed out. no_command: why there is no
-    command when there should be one; the task then waits for you, with no attempt spent."""
+    command when there should be one; the task then waits for you, with no attempt spent.
+    narrowed: the selection of tests in the command the writer proposed (narrowed_proposal); the
+    build is not run and the writer is told to propose the whole one."""
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
@@ -540,6 +564,11 @@ def run_gate(
         result.build_skipped = "a test is switched off, so the suite would prove nothing"
     if result.build_skipped:
         log.write_text(f"# commit {head}: the build was not run: {result.build_skipped}\n")
+    elif narrowed:
+        result.narrowed = narrowed
+        log.write_text(
+            f"# commit {head}: the build was not run: the proposed command is narrowed to {narrowed}\n"
+        )
     elif not commands and no_command:
         log.write_text(f"# commit {head}: the build was not run: {no_command}\n")
         result.environment = no_command
@@ -693,6 +722,12 @@ def feedback(result: GateResult) -> str:
         )
     if result.build_skipped:
         parts.append(f"- The build was not run: {result.build_skipped}. Fix that first.")
+    if result.narrowed:
+        parts.append(
+            f"- The command you proposed picks some tests ({result.narrowed}), so it was not run:"
+            " write to /task/handoff/verify-proposal.md the one command that builds the whole project"
+            " and runs all its tests, as its pipeline would."
+        )
     if result.unchanged:
         parts.append(
             f"- You committed nothing since the last verification (commit {result.unchanged[:10]}),"

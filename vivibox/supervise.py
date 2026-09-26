@@ -117,6 +117,7 @@ def make_supervisor(
             timeout=p.verify_timeout or config.verify_timeout,
             no_build=p.no_build,
             no_command=actions.missing_command(t, p),
+            narrowed=actions.narrowed_proposal(t, p),
         )
 
     ports = supervisor.Ports(

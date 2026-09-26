@@ -81,6 +81,9 @@ vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the re
 Either way vivibox reads the build files and proposes a project. The verification is a command you
 type, or left empty: the next task's writer, who builds the project while it works, then writes
 the command it ran to `/task/handoff/verify-proposal.md`, and the task is verified with that. A
+command that picks some tests (`-Dtest=`, `--tests`, `-k`, a test file named) is refused without
+a build: the writer would be verified by its own tests alone, so it is told to propose the whole
+one, at the cost of an attempt. A
 writer that proposes none leaves the task waiting for you with "verification could not run", no
 attempt spent. So does a command that runs a file the repository's commits do not have (`./mvnw`
 after a move to Gradle, a wrapper never committed): the task waits for you to change it under `e`.

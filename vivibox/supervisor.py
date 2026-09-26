@@ -100,9 +100,10 @@ neighbours as they were installed, before your change.
 # writer, who runs the build anyway, says what builds and tests it; the gate verifies the task with
 # that, and you decide on its own whether the project keeps it.
 PROPOSE_PREFIX = """No command verifies this project yet. When the work is done, write the one command
-that builds the project and runs its tests, as you ran it, on one line in
+that builds the whole project and runs all its tests, as its pipeline would, on one line in
 /task/handoff/verify-proposal.md: the orchestrator verifies your work with it, and the user
-decides whether the project keeps it.
+decides whether the project keeps it. A command that picks some tests (`-Dtest=`, `--tests`,
+`-k`, a test file) is refused, and you propose again.
 
 """
 

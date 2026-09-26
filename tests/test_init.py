@@ -258,3 +258,30 @@ def test_a_pipelines_variables_are_filled_in_so_the_note_says_what_ci_runs(tmp_p
         "variables:\n  GRADLE_OPTS: --offline\ntest:\n  script:\n    - ./gradlew test $GRADLE_OPTS $UNKNOWN\n"
     )
     assert ("bash gradlew test --offline $UNKNOWN", ".gitlab-ci.yml") in init.ci_commands(tmp_path)
+
+
+def test_a_narrowed_proposal_is_not_run_but_named_for_the_gate(env, tmp_path):
+    """A writer that proposes `-Dtest=Mine test` would be verified by its own tests alone: the
+    gate gets the selection to refuse, and nothing to run; a project's own command is its choice."""
+    import dataclasses
+
+    from vivibox import actions, proposal
+    from vivibox.config import load_project
+    from vivibox.states import State
+
+    fresh = tmp_path / "clinic"
+    actions.setup_project(fresh, "clinic", [], create=True)
+    task = actions.create("clinic", "Add Pet tests")
+    task.plan_path.write_text("+++\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] pets are tested\n")
+    task.transition(State.CHECKPOINT_PLAN)
+    actions.accept_plan(task, load_project("clinic"))
+    project = load_project("clinic")
+    (task.meta / "handoff" / proposal.PROPOSAL).write_text("./mvnw -Dtest=PetTests test\n")
+    assert actions.narrowed_proposal(task, project) == "-Dtest=PetTests"
+    assert actions.verify_commands(task, project) == [], "not run: the gate refuses it instead"
+    assert actions.missing_command(task, project) == "", "a command was proposed, a wrong one"
+    (task.meta / "handoff" / proposal.PROPOSAL).write_text("./mvnw -B verify\n")
+    assert actions.narrowed_proposal(task, project) == ""
+    assert actions.verify_commands(task, project) == ["./mvnw -B verify"]
+    own = dataclasses.replace(project, verify=["./mvnw -Dtest=Smoke test"])
+    assert actions.narrowed_proposal(task, own) == "", "the project's own choice"

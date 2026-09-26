@@ -44,6 +44,8 @@ def _gate(data: dict) -> str:
         text += f"; outside the code: {why}"
     if skipped := data.get("build_skipped"):
         text += f"; build not run: {skipped}"
+    if narrowed := data.get("narrowed"):
+        text += f"; proposed command narrowed to {narrowed}"
     for key, said in (
         ("missing_criteria", "criteria not met"),
         ("commit_problems", "commit problems"),

@@ -663,13 +663,27 @@ def verify_commands(task: Task, project: Project) -> list[str]:
         return []
     if project.verify or not proposal.asked(task, project):
         return project.verify
-    return [found] if (found := proposal.proposed(task)) else []
+    if not (found := proposal.proposed(task)) or gate.narrowed_proposal(found):
+        return []
+    return [found]
+
+
+def narrowed_proposal(task: Task, project: Project) -> str:
+    """The selection of tests in the command the writer proposed, for the gate to refuse; "" for
+    a whole build, for no proposal, and for a project that has its own command, its choice."""
+    if project.verify or not proposal.asked(task, project):
+        return ""
+    return gate.narrowed_proposal(proposal.proposed(task))
 
 
 def missing_command(task: Task, project: Project) -> str:
     """Why this task has no command to be verified with when it should: its writer proposed none.
     "" when it has one, or has nothing to build."""
-    if verify_commands(task, project) or not proposal.asked(task, project):
+    if (
+        verify_commands(task, project)
+        or not proposal.asked(task, project)
+        or narrowed_proposal(task, project)
+    ):
         return ""
     return (
         f"the writer proposed no command in /task/handoff/{proposal.PROPOSAL} and {project.name} has "

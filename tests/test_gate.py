@@ -829,3 +829,41 @@ def test_a_file_the_command_runs_is_looked_for_where_the_command_runs_it(task):
         assert gate.missing_program(task.repo, [command]) == "", command
     (task.repo / "stray").write_text("uncommitted\n")
     assert "stray" in gate.missing_program(task.repo, ["sh stray"]), "only what is committed counts"
+
+
+@pytest.mark.parametrize(
+    "command,selection",
+    [
+        ("./mvnw -Dtest=PetTests test", "-Dtest=PetTests"),
+        ("./mvnw -B -Dit.test=OwnerIT verify", "-Dit.test=OwnerIT"),
+        ("bash gradlew test --tests com.acme.PetTest", "--tests com.acme.PetTest"),
+        ("uv run pytest -k test_pet", "-k test_pet"),
+        ("uv run pytest tests/test_pet.py", "tests/test_pet.py"),
+        ("yarn vitest run src/utils/__tests__/format.test.ts", "src/utils/__tests__/format.test.ts"),
+        ("npx jest -t 'formats a date'", "-t 'formats"),
+        ("go test -run TestPet ./...", "-run TestPet"),
+        ("./mvnw -B verify", ""),
+        ("bash gradlew test --no-daemon --console=plain", ""),
+        ("cd apps/react-vite && yarn install --frozen-lockfile && yarn vitest run", ""),
+        ("uv run pytest -q", ""),
+    ],
+)
+def test_a_command_narrowed_to_some_tests_is_told_from_a_whole_build(command, selection):
+    """The writer proposes the command it is verified with; one that picks its own tests would
+    pass whatever it broke elsewhere. The gate names the selection, or "" for a whole build."""
+    assert gate.narrowed_proposal(command) == selection
+
+
+def test_a_proposal_narrowed_to_the_writers_tests_is_refused_before_the_build(task):
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, ["./mvnw -Dtest=PetTests test"], [], narrowed="-Dtest=PetTests")
+    assert ran(pod) == [], "a build with the wrong command proves nothing, and costs minutes"
+    assert not result.passed and result.narrowed == "-Dtest=PetTests"
+    assert "narrowed" in result.log.read_text() and "-Dtest=PetTests" in result.log.read_text()
+    assert task.events()[-1]["data"]["narrowed"] == "-Dtest=PetTests"
+    text = gate.feedback(result)
+    assert "-Dtest=PetTests" in text and "whole project" in text and "verify-proposal.md" in text
+    assert gate.next_state(result, 1, 3) is State.IMPLEMENT, "the writer's to fix: an attempt spent"

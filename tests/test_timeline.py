@@ -62,3 +62,17 @@ def test_the_preparation_says_what_runs_and_how_it_ended(tmp_path):
     assert "preparation failed, exit 1; its output is under l" in said
     task.event("prepared", ok=True, code=0)
     assert [what for _, what in timeline.entries(task)][-1] == "prepared"
+
+
+def test_a_narrowed_proposal_is_named_in_the_timeline(tmp_path):
+    task = create_task(tmp_path, "demo", "Add Pet tests", "")
+    task.event(
+        "gate",
+        iteration=1,
+        passed=False,
+        failed_commands=[],
+        narrowed="-Dtest=PetTests",
+        log="verify-1-1.log",
+    )
+    what = [text for _, text in timeline.entries(task)]
+    assert "verification 1: failed; proposed command narrowed to -Dtest=PetTests (verify-1-1.log)" in what

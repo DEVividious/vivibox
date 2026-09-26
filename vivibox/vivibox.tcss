@@ -52,3 +52,7 @@ DataTable { height: 1fr; }
 }
 /* Every dialog sits in the middle of the screen, the ones still to be written too. */
 ModalScreen { align: center middle; }
+/* A toggle that is off shows an empty box: Textual draws its mark in a darker shade of the box,
+   which in these colours read as ticked. On, the mark is the success colour. */
+ToggleButton > .toggle--button { color: $panel; }
+ToggleButton.-on > .toggle--button { color: $text-success; }

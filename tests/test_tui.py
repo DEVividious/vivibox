@@ -4217,3 +4217,26 @@ def test_projects_keep_their_order_whatever_their_tasks_do(env, monkeypatch):
         )
 
     run(scenario)
+
+
+def test_an_unticked_box_shows_no_mark(env):
+    """Textual draws the toggle's X in a darker shade of its own background when it is off, and
+    in the view's colours that shade was visible: the box of a new task looked ticked, and
+    "Nothing to build" looked chosen. Off, the mark has the colour of its box; on, it is seen."""
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo"))
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        box = app.screen.query_one(Checkbox)
+        assert not box.value
+        off = box.get_component_rich_style("toggle--button")
+        assert off.color == off.bgcolor, "an unticked box shows no mark"
+        box.value = True
+        await pilot.pause()
+        on = box.get_component_rich_style("toggle--button")
+        assert on.color != on.bgcolor, "a ticked box shows its mark"
+
+    run(scenario)

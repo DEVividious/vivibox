@@ -6,8 +6,8 @@ Run `vivibox` with no arguments:
 vivibox
 ```
 
-The interactive view lists your projects with their tasks under them, the ones waiting for you
-first, and refreshes on its own. A task is listed under what you typed until the agent has planned
+The interactive view lists your projects by name with their tasks under them, the cursor on the
+task waiting for you, and refreshes on its own. A task is listed under what you typed until the agent has planned
 it; from then on under the one-line summary of its plan. Enter on a project folds its tasks away
 and unfolds them again; a folded project's row still says how many wait for you. A project's row
 also says what would keep its tasks from starting, such as a variable it passes that is not set in

@@ -68,13 +68,14 @@ class TaskTable:
         self.has_deleted = any(e.get("deleted") for e in kept)
 
     def project_order(self, pairs: list) -> list[str]:
-        """Projects with a task waiting for you first, then by name. A project a task belongs to
-        is listed even when its file is gone, so the task is not orphaned off the screen."""
-        ranks: dict[str, int] = {}
-        for _, st in pairs:
-            ranks[st.project] = min(ranks.get(st.project, ui.FINISHED), self.views[st.id].rank)
-        names = set(self.problems) | set(ranks) | {e.get("project", "") for e in self.done}
-        return sorted(names, key=lambda n: (ranks.get(n, ui.FINISHED), n))
+        """Projects by name, whatever their tasks do: a project that moved when a task of its
+        started to wait moved every row under the cursor. What waits for you says so by its colour,
+        the header's count and where the cursor starts. A project a task belongs to is listed even
+        when its file is gone, so the task is not orphaned off the screen."""
+        names = (
+            set(self.problems) | {st.project for _, st in pairs} | {e.get("project", "") for e in self.done}
+        )
+        return sorted(names)
 
     def project_summary(self, name: str, tasks: list, done: int) -> str:
         """The project row's status: what keeps its tasks from starting, else what they are doing,

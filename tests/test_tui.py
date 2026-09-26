@@ -4190,3 +4190,30 @@ def test_the_agents_window_opens_from_inside_tmux_too(env, monkeypatch):
         )
 
     run(scenario)
+
+
+def test_projects_keep_their_order_whatever_their_tasks_do(env, monkeypatch):
+    """A project that jumped to the top when a task of its started to wait moved every row under
+    the cursor, and a key pressed then landed on another task. Projects are listed by name; what
+    waits for you says so by its colour, the header's count and where the cursor starts."""
+    fresh_project(env, "zulu")
+    fresh_project(env, "alpha")
+    quiet = new_task("Quiet")
+    quiet.set_paused(True)
+    assert main(["new", "zulu", "Waiting in zulu", "--draft"]) == 0
+    waiting = find_task(load_config().tasks_dir, "zulu-1")
+    at_plan_checkpoint(waiting)
+
+    async def scenario(app, pilot):
+        app.reload()
+        assert rows(app) == ["alpha", "demo", "demo-1", "zulu", "zulu-1"], "by name, waiting or not"
+        assert app.selected_id() == "zulu-1", "the cursor starts on what waits for you"
+        at_plan_checkpoint(quiet)
+        quiet.set_paused(False)
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["alpha", "demo", "demo-1", "zulu", "zulu-1"], (
+            "a project that starts to wait stays put"
+        )
+
+    run(scenario)

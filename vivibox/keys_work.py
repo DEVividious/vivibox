@@ -7,7 +7,7 @@ from __future__ import annotations
 from . import actions, ide, logs
 from .app_support import in_terminal
 from .config import ConfigError
-from .panel import git_diff
+from .panel import git_diff, git_env
 
 
 class WorkKeys:
@@ -51,7 +51,7 @@ class WorkKeys:
             self.fail(e)
             return
         with self.suspend():
-            in_terminal(command)
+            in_terminal(command, env=git_env())
 
     def action_show_log(self) -> None:
         """The timeline, a verification log, or the supervisor's, in your pager: one entry opens

@@ -3565,6 +3565,17 @@ def test_f_shows_the_work_as_a_diff_and_is_offered_when_the_work_is_ready(env):
     assert "Health.java" in out, command
 
 
+def test_the_diff_is_paged_on_its_own_screen(monkeypatch):
+    """git sets LESS=FRX when it is unset, and -X keeps less on the terminal's main screen: the
+    diff scrolled among what the terminal showed before vivibox, and stayed there after q. With
+    LESS set to R alone, less takes the alternate screen like the pager under l does, and gives
+    the view back whole. Your own LESS is your choice and stays."""
+    monkeypatch.delenv("LESS", raising=False)
+    assert panel.git_env()["LESS"] == "R"
+    monkeypatch.setenv("LESS", "-RX")
+    assert panel.git_env()["LESS"] == "-RX"
+
+
 def test_the_plan_stays_readable_after_it_is_accepted(env):
     task = implementing()
     plan = task.meta / gate.ACCEPTED_PLAN

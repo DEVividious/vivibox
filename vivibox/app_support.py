@@ -47,13 +47,13 @@ class LeavingExecutor(ThreadPoolExecutor):
         return sum(1 for future in self.at_work if not future.done())
 
 
-def in_terminal(command: list[str]) -> None:
+def in_terminal(command: list[str], env: dict[str, str] | None = None) -> None:
     """A pager, an editor or an IDE, with the terminal to itself. Ctrl-C reaches every process on
     the terminal, the view waiting behind it too: in less +F it stops following, and it ended the
     view once you pressed q. A handler that does nothing, not SIG_IGN, which the program would
     inherit: a handler goes back to the default in the program started."""
     previous = signal.signal(signal.SIGINT, lambda *_: None)
     try:
-        subprocess.run(command)
+        subprocess.run(command, env=env)
     finally:
         signal.signal(signal.SIGINT, previous)

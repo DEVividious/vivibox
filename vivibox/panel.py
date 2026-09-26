@@ -256,6 +256,14 @@ def git_diff(task: Task, project) -> list[str]:
     return ["git", "-C", str(project.repo), "diff", f"{base}...{repo.review_ref(task.id)}"]
 
 
+def git_env() -> dict[str, str]:
+    """The environment for git's own pager. With LESS unset git sets it to FRX, and -X keeps less
+    on the terminal's main screen: the diff scrolls among what the terminal showed before, and
+    stays there after q. R alone puts it on the alternate screen, as the pager under l is. Your
+    own LESS stays as it is."""
+    return {**os.environ, "LESS": os.environ.get("LESS") or "R"}
+
+
 def pager_command(path: Path, follow: bool = False, at_end: bool = False) -> list[str]:
     """Your pager on the file. With less: following it as it is written (Ctrl-C stops following),
     or opened at its end, where a failed build says why."""

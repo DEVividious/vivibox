@@ -966,3 +966,15 @@ def test_auto_keeps_a_whole_command_without_stopping_but_stops_on_a_narrowed_one
     )
     sup.step()
     assert kept == [] and other.read_state().state is State.CHECKPOINT_COMMAND
+
+
+def test_a_plan_whose_criterion_is_the_build_command_goes_back_to_the_planner_once(task):
+    """Like the placeholder: one repair turn naming the criterion, then your review."""
+    draft = task.meta / "handoff" / "plan-draft.md"
+    first = lambda t: draft.write_text(DRAFT + "- [ ] `./mvnw -B verify` passes\n")  # noqa: E731
+    harness = FakeHarness(task, [first, write_draft])
+    sup, notes = make(task, harness)
+    assert sup.step()
+    assert len(harness.prompts) == 2 and "not a criterion" in harness.prompts[1]
+    assert "./mvnw -B verify" in harness.prompts[1]
+    assert task.read_state().state is State.CHECKPOINT_PLAN and notes == ["plan ready for review"]

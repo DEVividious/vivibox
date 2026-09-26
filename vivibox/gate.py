@@ -53,6 +53,21 @@ class GateError(Exception):
     pass
 
 
+# A build tool's command in backticks, and a word that says it went through: a criterion that is
+# the verification itself, which the orchestrator runs after every turn, whatever the plan says.
+BUILD_COMMAND = re.compile(
+    r"`(?:\./)?(?:mvnw?|gradlew?|gradle|npm|npx|yarn|pnpm|pytest|uv run pytest|vitest|go test"
+    r"|cargo test|make)\b[^`]*`"
+)
+WENT_THROUGH = re.compile(r"\b(?:pass(?:es|ed)?|green|succeeds?|exits? 0)\b", re.IGNORECASE)
+
+
+def command_criteria(plan: Plan) -> list[str]:
+    """The criteria that name the build command and ask for it to pass. The writer would run the
+    whole build itself to tick them; the brief's sentence alone left them in three plans of four."""
+    return [c.text for c in plan.criteria if BUILD_COMMAND.search(c.text) and WENT_THROUGH.search(c.text)]
+
+
 def check_plan(plan: Plan) -> None:
     """What keeps a plan from being accepted, as a GateError; the planner is told the same. How the
     project is built is not the plan's to say: its writer proposes that, for you to accept."""
@@ -61,6 +76,11 @@ def check_plan(plan: Plan) -> None:
     if not plan.criteria:
         # Name the heading: the criteria are usually written, just not where this looks for them.
         raise GateError("no '- [ ]' criteria under an 'Acceptance criteria' heading in the plan")
+    if named := command_criteria(plan):
+        raise GateError(
+            "the verification command is not a criterion (the orchestrator runs it after every turn,"
+            f" whatever the plan says); drop it from: {named[0][:120]}"
+        )
 
 
 def accept_plan(task: Task) -> Plan:

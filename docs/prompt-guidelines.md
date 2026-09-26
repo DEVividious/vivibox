@@ -35,6 +35,7 @@ broken, next to the line that broke it.
 | build files, test configuration, IDE settings and hooks change only with the user's approval | `risky.Approvals.changes` |
 | every test file added or changed is named in `red.md` | `gate.red_evidence_missing` |
 | the command a writer proposes builds the whole project, not a selection of tests | `gate.narrowed_proposal` |
+| the verification command is not a criterion of the plan | `gate.command_criteria` |
 | a review has its two sections and a place on every note | `reviewing.problem` |
 
 A sentence no row covers is one of two things: a fact about the pod ("Docker works here") or a

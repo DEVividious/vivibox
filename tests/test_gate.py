@@ -904,3 +904,26 @@ def test_a_tool_not_found_on_the_fresh_clone_is_a_failure_of_the_environment(tas
     result = gate.run_gate(task, pod, ["yarn build"], [])
     assert result.environment == said and not result.passed
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "for you, no attempt spent"
+    "criterion,refused",
+    [
+        ("`./mvnw -B verify` passes with the new tests included (no test skipped)", True),
+        ("`yarn test --run`, `yarn lint`, and `yarn check-types` all pass in `apps/react-vite`", True),
+        ("`VetControllerTests` covers both cases and `./mvnw -B verify` is green", True),
+        ("The chosen test command runs PetTests and it passes", False),
+        ("`Pet.getVisits()` returns an empty collection for a new pet", False),
+        ("`package.json` gains no dependency; `yarn.lock` is unchanged", False),
+    ],
+)
+def test_a_criterion_that_is_the_build_command_is_refused(criterion, refused):
+    """The orchestrator runs the verification after every turn, on every module, whatever the
+    plan says; a criterion that names it makes the writer run the whole build itself to tick it,
+    and the brief's sentence alone left it in three plans of four."""
+    from vivibox.plan import parse_plan
+
+    plan = parse_plan(f"+++\n+++\n\n# Goal\n\n## Acceptance criteria\n\n- [ ] it works\n- [ ] {criterion}\n")
+    assert bool(gate.command_criteria(plan)) is refused
+    if refused:
+        with pytest.raises(gate.GateError, match="not a criterion"):
+            gate.check_plan(plan)
+    else:
+        gate.check_plan(plan)

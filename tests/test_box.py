@@ -77,6 +77,20 @@ def test_a_box_costs_one_number_not_a_split(env):
     assert "planning" not in entry and ui.finished_cost(entry) == "$0.01"
 
 
+def test_a_finished_task_keeps_the_reviewers_cost_apart(env):
+    """Once accepted, the list still shows the review figure the task had live, and the
+    implementation figure does not swallow it."""
+    task = actions.create("demo", "Reviewed work", cwd=env)
+    spent = ui.Spend(0.4, 0.06, 0.05)
+    done = actions.Finished(task.id, load_project("demo").repo, spent, "Reviewed work")
+    actions.remember(done, load_project("demo"), "abcdef0123456789")
+    entry = json.loads(actions.history_path().read_text().splitlines()[-1])
+    assert ui.finished_cost(entry) == "$0.40 + $0.06 + $0.05"
+    actions.remember_removed(task, load_project("demo"))
+    entry = json.loads(actions.history_path().read_text().splitlines()[-1])
+    assert entry["cost"] == 0 and "review" not in entry, "nothing spent, nothing to split off"
+
+
 def test_closing_a_box_brings_its_work_to_review(env):
     task = actions.open_box("demo")
     (task.repo / "idea.md").write_text("my work\n")

@@ -45,6 +45,7 @@ config = ROOT / "config"
     f'tasks_dir = "{ROOT / "srv" / "vivibox"}"\n'
     '[roles.planner]\nharness = "opencode"\nmodel = "deepseek/deepseek-v4-pro"\n'
     '[roles.writer]\nharness = "opencode"\nmodel = "deepseek/deepseek-v4-flash"\n'
+    '[roles.reviewer]\nharness = "opencode"\nmodel = "deepseek/deepseek-v4-pro"\n'
 )
 for name in PROJECTS:
     make_repo(ROOT / name)
@@ -56,7 +57,7 @@ os.environ.update(
     XDG_CACHE_HOME=str(ROOT / "cache"),
 )
 
-from vivibox import actions, gate, reviewing, tui  # noqa: E402
+from vivibox import actions, gate, keys, reviewing, tui  # noqa: E402
 from vivibox.config import load_project  # noqa: E402
 from vivibox.pod import Listener  # noqa: E402
 from vivibox.states import State  # noqa: E402
@@ -69,6 +70,8 @@ PLAN = """## Approach
 
 {criteria}
 """
+# A key in the throwaway store, or the header would warn that no task can start.
+keys.set_key("deepseek", "sk-made-up")
 RUNNING: set[str] = set()
 SERVING: dict[str, tui.PodView] = {}
 actions.supervisor_running = lambda task: task.id in RUNNING
@@ -88,13 +91,10 @@ def task(project: str, goal: str, criteria: list[str], minutes_ago: int, approac
     return made
 
 
-def spent(made, planning: float, implementing: float = 0.0) -> None:
-    if planning:
-        made.event("turn", state="plan", ok=True, cost=planning, tokens=int(planning * 6e6), error="")
-    if implementing:
-        made.event(
-            "turn", state="implement", ok=True, cost=implementing, tokens=int(implementing * 6e6), error=""
-        )
+def spent(made, planning: float, implementing: float = 0.0, review: float = 0.0) -> None:
+    for state, cost in (("plan", planning), ("implement", implementing), ("review", review)):
+        if cost:
+            made.event("turn", state=state, ok=True, cost=cost, tokens=int(cost * 6e6), error="")
 
 
 def accepted(made, ticked: int = 0):
@@ -146,6 +146,7 @@ def reviewed(made, note: str = REVIEW_NOTE, others: int = 1) -> None:
     if state is State.VERIFY:
         made.event("gate", passed=True, iteration=1, log="verify-1-120000.log")
         made.transition(State.REVIEW, reason="verification passed")
+    spent(made, 0.0, review=0.02)
     reviewing.keep(made, 1, note)
     made.set_reviews(1)
     made.event("review", round=1, blocking=0, not_blocking=others, problem="")
@@ -258,7 +259,7 @@ def world() -> dict:
     ):
         finished = (datetime.now(UTC) - timedelta(hours=hours)).isoformat(timespec="milliseconds")
         entry = {"id": f"{project}-{n * 10}", "project": project, "title": title, "cost": cost,
-                 "planning": 0.03, "commit": "5a1bcba9d2", "branch": "", "conflicts": [],
+                 "planning": 0.03, "review": 0.02, "commit": "5a1bcba9d2", "branch": "", "conflicts": [],
                  "criteria": [title], "created": finished, "finished": finished}  # fmt: skip
         lines.append(json.dumps(entry))
     history.write_text("\n".join(lines) + "\n")
@@ -352,7 +353,8 @@ async def flow(moving: dict) -> None:
         app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(row_id))
 
     app = tui.Vivibox()
-    async with app.run_test(size=(128, 36)) as pilot:
+    # Wide enough for every column, the reviewer's included: the picture shows the whole list.
+    async with app.run_test(size=(150, 36)) as pilot:
         await pilot.pause(0.5)
         await settle()
         health = next(st.id for _, st in app.pairs if "health" in st.goal)
@@ -424,6 +426,7 @@ async def flow(moving: dict) -> None:
             "## Blocking\n\n## Not blocking\n\n- src/main/java/payments/InvoicePdf.java:52 — the font is"
             " loaded per document; once, in a field, would do.\n"
         )
+        spent(made, 0.0, review=0.02)
         reviewing.keep(made, 1, note)
         made.set_reviews(1)
         made.event("review", round=1, blocking=0, not_blocking=1, problem="")

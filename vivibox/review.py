@@ -155,6 +155,7 @@ def remember_removed(task: Task, project: Project) -> None:
         "cost": round(spent.total, 4),
         # A box has no planning to split off, and the list shows one number for an entry without it.
         **({"planning": round(spent.planning, 4)} if spent.split else {}),
+        **({"review": round(spent.review, 4)} if spent.review else {}),
         "created": st.created,
         "finished": now(),
         "deleted": str(st.state),
@@ -174,6 +175,8 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         "title": done.message.partition("\n")[0] or f"Box in {project.name}",
         "cost": round(done.cost.total, 4),
         **({"planning": round(done.cost.planning, 4)} if done.cost.split else {}),
+        # The reviewer's figure, so the list can show it after the task as it did during.
+        **({"review": round(done.cost.review, 4)} if done.cost.review else {}),
         "commit": commit[:10],
         "branch": done.branch,
         "conflicts": done.conflicts,

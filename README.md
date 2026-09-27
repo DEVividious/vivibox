@@ -1,137 +1,108 @@
 # vivibox
 
-Coding agents in a box: they work on a clone, in a pod of their own, and nothing they write runs
-on your machine until you have looked at it.
+**Give coding agents a task. Review the result. Keep control of your code.**
 
-vivibox is built for a situation many teams are in: access to a strong model is rationed, and
-cheap models are plentiful. It gets the most out of that combination by putting the strong model
-where a decision has the most leverage, the plan and the supervision, and the cheap ones in the
-loop of implementing and reviewing, behind a gate none of them can bypass.
+vivibox runs coding agents in isolated environments, each with a clone of your repository and
+its own Docker daemon. They plan, implement, test and review; you approve the plan and decide
+what lands in your checkout.
 
-You describe a task. The agent plans; you accept the plan. The agent implements in its clone; a
-gate builds and tests the commits on a fresh clone and checks the plan's criteria; a reviewer on
-another model reads the work. Then it comes to you as a review copy, and only your `a` puts it in
-your checkout. Everything in between runs on its own.
+Built for when access to a strong model is limited and cheaper models are plentiful: put the
+strong model on planning, let cheaper models write and review, and verify their work with your
+project's build and tests.
 
-![One task, from the description to the commit](docs/img/flow.svg)
+![A task in vivibox: describe it, approve the plan, follow implementation and verification, then review and accept the work.](docs/img/flow.svg)
 
-## Why a box
+*An example task, with time compressed and illustrative costs.* [Open the still view](docs/img/view.svg).
 
-- **The agent cannot reach your machine.** It runs as an unprivileged container with a Docker
-  daemon of its own (Sysbox), so builds, Testcontainers and `docker compose` work without your
-  host's socket, your network or your files.
-- **Nothing it writes runs on your machine unseen.** It works on a clone; its work comes back as a
-  review copy your IDE shows as uncommitted changes; files that run code on import (`pom.xml`,
-  `package.json`, git hooks, IDE settings, `AGENTS.md`) wait for your approval whenever they change.
-- **A gate it cannot bypass.** The commits are built and tested on a fresh clone with the
-  project's own command; every acceptance criterion has to be ticked, every test the agent
-  touched has to be seen failing first, no test may be switched off, and the commit messages are
-  checked. A red gate sends the agent back, up to a limit; then the task waits for you.
+## Why vivibox?
 
-More on what it protects against, and a comparison with Docker Sandboxes: [docs/security.md](docs/security.md).
+- **Several tasks, one terminal.** Work across repositories at once. See progress, costs and
+  what needs your attention; get desktop or ntfy notifications when a task waits for you.
+- **Models you choose, roles you assign.** Use different models for planning, writing and
+  review. Pick a flow for each task, from one agent to independent review and fix rounds.
+- **A full build environment per task.** Run builds, Testcontainers and `docker compose` in
+  the task's pod, without sharing your host's Docker socket. Preview the app there too.
+- **Verification before handoff.** Builds and tests run on a fresh clone. Checks cover the
+  accepted plan's checklist, commit messages, disabled tests and recorded failing-test evidence.
+  Failures go back to the writer, within your round and cost limits.
+- **Your checkout stays yours.** Inspect a review copy in your IDE, ask for changes, then
+  accept. Changes to build files, hooks and IDE settings need separate approval before review.
 
-## Install
+A **pod** is the task's isolated environment: an agent container and its own Docker daemon,
+using Sysbox. Host and private-network access is blocked except for services you allow.
+[How isolation and verification work →](docs/security.md)
 
-Linux with Docker Engine (tested on Ubuntu 24.04), and a model: an API key for any provider in
-[opencode](https://opencode.ai)'s list, or an `opencode.json` you already have.
+## Get started
 
-```bash
-git clone https://github.com/DEVividious/vivibox.git && cd vivibox
-host/setup.sh      # asks before each change: Sysbox, /srv/vivibox, uv, the vivibox command
-vivibox            # builds the agent image, asks for a key and a model, opens the view
-```
-
-`host/uninstall.sh` is the way back. What `setup.sh` changes on your machine, step by step:
-[docs/install.md](docs/install.md).
-
-## A task, key by key
-
-1. `i` points vivibox at a repository. `n` describes a task: a line, or a whole ticket, with
-   files attached as `@path`.
-2. The agent explores the repository and writes a plan with acceptance criteria. `a` accepts it,
-   `r` sends it back with a comment, `e` edits it.
-3. The agent implements and commits in its clone, ticking the criteria as it goes. The first
-   task of a project also proposes the command that verifies it; you keep it with `a`, once.
-4. The gate runs. Green, and the reviewer reads the work; red, and the agent gets the log back.
-   Which agents there are, and in what order, is the task's orchestration mode (below).
-5. The work waits for you as a review copy: `o` opens it in your IDE, `f` shows the diff, `v`
-   runs the app in the pod, `r` asks for changes, `a` accepts it into your checkout and offers a
-   commit message written from the plan and the agent's commits.
-
-Desktop notifications, or [ntfy](docs/configure.md) on your phone, say when a task waits for you.
-Several tasks run at once, each in its own pod. Everything the view does is also a command
-(`vivibox new`, `accept`, `reply`, `status`…). All of it: [docs/tasks.md](docs/tasks.md).
-
-## Orchestration modes
-
-How a task is shared between the planner, the writer and the reviewer, and where the
-verification runs, is one setting, `agent_orchestration_mode`: in `config.toml`, the Flow row
-under `k`, and per task the Flow row under `n`.
-
-| Mode | In the view | Flow | When |
-|---|---|---|---|
-| `single_agent` | Single agent | P+W+R → Gate | small, routine, cheap tasks |
-| `planner_executor` | Planner → Executor | P → W+R → Gate | a good plan matters and the implementation is routine |
-| `planner_maker_checker` (default) | Planner → Writer → Reviewer | P → W → Gate → R ⇄ W | an independent review at every round |
-| `supervisor_worker` | Supervisor ⇄ Worker | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
-
-Legend: P planner, W writer, R reviewer, Gate the verification (build, tests, criteria,
-commits); `+` one agent, one session and one model, the first role's; `→` then; `⇄` rounds of
-fixes, up to `max_rounds`. The supervisor reviews, like the reviewer, only work the Gate passed.
-
-- A writer that reviews its own work (W+R) gets a turn after each of its turns to read the diff
-  as a reviewer would, before the gate; nothing else reviews it.
-- The reviewer of `planner_maker_checker` reads in a container of its own, after a green gate;
-  its blocking notes go back to the writer, through the gate again, until it has none. Without
-  `[roles.reviewer]` it runs on the writer's model.
-- The supervisor of `supervisor_worker` is the planner: it reviews the worker's work after a
-  green gate in the same pod, with the plan still in its conversation, and sends back what to
-  change until it accepts. The flow is `planner_maker_checker`'s; what differs is who reviews and
-  where: one strong session that planned, on the worker's clone, instead of a reviewer of its
-  own in a container of its own.
-- One limit, `max_rounds` (3), counts the fix turns the writer gets, from the gate or from a
-  review, before the work comes to you; your reply gives them back.
-
-Models: a strong planner and a cheaper writer; the reviewer cheaper than or a little stronger
-than the writer, best of another family; in `supervisor_worker`, a strong supervisor. With little
-of a strong model and plenty of a cheap one: `planner_maker_checker`, the strong one planning,
-the cheap one writing and reviewing. The trade-offs: `single_agent` is the cheapest and has no
-independent review; `planner_maker_checker` costs the most turns; `supervisor_worker` spends the
-strong model on every round.
-
-## Models
-
-Any provider opencode knows, on an API key, or an `opencode.json` you import: your employer's
-endpoint with its custom models, a local model, the MCP servers you already use. Keys go to
-vivibox's own key store, never into config files. The planner, the writer and the reviewer can
-each run on a different model; the planner can also be Claude Code on your subscription, or you in
-your own chat. [docs/configure.md](docs/configure.md).
-
-## More
-
-- [What it protects against, and how](docs/security.md)
-- [Working with tasks](docs/tasks.md): every key, every command, the orchestration modes and the
-  reviewer, running the app
-- [Providers, MCP servers and projects](docs/configure.md)
-- A box without an agent: `b` on a project opens its pod for you, with your keys, opencode and a
-  shell; closing it brings your work back through the same review as a task's
-- [UX guidelines](docs/ux-guidelines.md) and [prompt guidelines](docs/prompt-guidelines.md), for
-  anyone changing what the view says or what the agents read
-- [Contributing](CONTRIBUTING.md): reporting a problem (`vivibox --version` first), working on the
-  code, releases; [changelog](CHANGELOG.md)
-
-Status: one writer per task, a planner and a reviewer on models of your choice, four ways of
-sharing a task between them, several tasks at once. GitHub pull requests are next.
-
-## Development
+**Requirements:** Linux with Docker Engine (tested on Ubuntu 24.04), and a model API key or an
+existing `opencode.json` to import. macOS and Windows are not supported.
 
 ```bash
-uv run ruff check . && uv run ruff format --check .
-uv run pytest                  # unit tests, no Docker needed
-uv run pytest -m docker        # isolation, pod and git protection checks on real containers
-uv run python docs/img/screenshot.py   # redraws the pictures from made-up tasks
+git clone https://github.com/DEVividious/vivibox.git
+cd vivibox
+host/setup.sh
+vivibox
 ```
 
-## License
+Setup asks before changing your machine, including installing Sysbox and restarting Docker.
+On first launch, vivibox builds the agent image and helps you choose a provider and model.
+[Installation details and uninstall →](docs/install.md)
 
-MIT, see [LICENSE](LICENSE).
+## Your first task
+
+1. **Describe the change.** Press `i` to add a repository, then `n` for a task. Paste a ticket
+   or a short goal; attach context with `@path`.
+2. **Agree on the plan.** Read the approach and acceptance criteria. `a` accepts, `r` asks for
+   changes, `e` edits. Coding starts after your approval by default.
+3. **Let the agents work.** The writer implements, verification runs, and review follows your
+   chosen flow. Fixes repeat automatically within the task's limits. If the project has no
+   verification command, the writer proposes one for you to approve separately.
+4. **Try the result.** `o` opens the review copy in your IDE, `f` shows the diff, `v` runs the
+   app in the pod. Use `r` to ask for changes.
+5. **Accept when ready.** `a` applies the work to your checkout. A separate dialog lets you
+   choose the branch and edit the proposed commit message.
+
+Prefer a shell? The same workflow is available as commands:
+
+```bash
+vivibox new myproject "Add a /health endpoint with a database check"
+vivibox status myproject-1
+vivibox accept myproject-1
+vivibox reply myproject-1 "Also cover the database timeout"
+```
+
+[All keys and commands →](docs/tasks.md)
+
+## Choose a flow
+
+Choose **Flow** when creating a task (`n`), or set the default in settings (`k`).
+
+| Flow | How the work is shared | Best for |
+|---|---|---|
+| **Single agent** | One agent plans, writes and reviews its own work | Small, routine tasks |
+| **Planner → Executor** | A planner hands off to an agent that writes and reviews its own work | A strong plan with cheaper execution |
+| **Planner → Writer → Reviewer** · default | Separate agents plan, write and review; review follows verification | Independent review with automatic fix rounds |
+| **Supervisor ⇄ Worker** | The agent that planned also reviews each verified revision | Keeping the planning context through complex changes |
+
+Every flow includes verification. The first two use self-review; the other two send review
+feedback back to the writer. You choose the models and the limit on fix rounds.
+[Flow details →](docs/tasks.md#orchestration-modes)
+
+## Bring your tools
+
+Use providers supported by opencode, a custom API endpoint or a local model. Import providers
+and MCP servers from your `opencode.json`; API keys stay in vivibox's key store.
+You can also plan in your own chat and bring the plan back to vivibox.
+[Providers, models and projects →](docs/configure.md)
+
+Want to work directly in the isolated environment? Press `b` on a project to open a **box** with
+opencode and a shell. Its changes return through the same review-copy and approval steps.
+[Working in a box →](docs/tasks.md#a-box-the-pod-without-an-agent)
+
+## Project status & contributing
+
+**Alpha.** Local task workflows, four flows, parallel tasks and app previews are available today.
+GitHub pull request integration is planned.
+
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) ·
+[Security](docs/security.md) · [MIT license](LICENSE)

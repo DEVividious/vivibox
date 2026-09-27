@@ -42,6 +42,13 @@ checked by tests. In short:
 Open the pull request against `main`. CI runs the linters, the tests and a build, and checks
 the changelog line.
 
+### README visuals
+
+`uv run python docs/img/screenshot.py` rebuilds the animated tour and still view from fictional
+projects, without starting pods or using model APIs. The tour uses the real interface, with
+captions and transitions composed by `docs/img/animation.py`. Check it at README width and with
+reduced motion enabled after regenerating it.
+
 ## Releases
 
 A release is a tag: the `Unreleased` section gets a version and a date, the commit is tagged

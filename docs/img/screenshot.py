@@ -1,4 +1,4 @@
-"""Draws docs/img/view.svg, the picture of the view in the README: uv run python docs/img/screenshot.py
+"""Draws the README tour and still view: uv run python docs/img/screenshot.py
 
 Made-up projects and tasks in a throwaway directory, one in every state worth showing. Nothing of
 yours is read, and no pod is started.
@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from animation import animated
 
 HERE = Path(__file__).parent
 # Short: a throwaway path longer than the one shown in its place would cut lines that fit on a real
@@ -56,6 +58,9 @@ os.environ.update(
     XDG_CONFIG_HOME=str(ROOT / "xdg"),
     XDG_CACHE_HOME=str(ROOT / "cache"),
 )
+
+# Render the product palette even when the invoking shell disables terminal colour.
+os.environ.pop("NO_COLOR", None)
 
 from vivibox import actions, gate, keys, reviewing, tui  # noqa: E402
 from vivibox.config import load_project  # noqa: E402
@@ -292,35 +297,13 @@ def shown(svg: str) -> str:
     return TEXT.sub(fix, svg)
 
 
-def animated(frames: list[tuple[str, float]]) -> str:
-    """The frames, each with its seconds, as one SVG that shows them in turn, forever: a group per
-    frame, its opacity switched by a discrete animation, so no script and no other file is needed."""
-    total = sum(seconds for _, seconds in frames)
-    view = frames[0][0].split('viewBox="')[1].split('"')[0]
-    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}">']
-    at = 0.0
-    for svg, seconds in frames:
-        start, end = at / total, (at + seconds) / total
-        at += seconds
-        parts.append(
-            f'<g opacity="0"><animate attributeName="opacity" calcMode="discrete" values="0;1;0;0" '
-            f'keyTimes="0;{start:.4f};{min(end, 1):.4f};1" dur="{total:.1f}s" repeatCount="indefinite"/>'
-            f"{svg}</g>"
-        )
-    parts.append("</svg>")
-    return "\n".join(parts)
-
-
-GOAL = "Add GET /invoices/{id}/pdf: the invoice rendered as a PDF, 404 when there is no such invoice"
+GOAL = "Add PDF downloads for invoices"
 CRITERIA = [
-    "GET /invoices/{id}/pdf answers 200 with application/pdf",
-    "The PDF carries the invoice number, the lines and the total",
-    "An unknown id gives 404",
-    "Both covered by a test",
+    "GET /invoices/{id}/pdf returns a PDF with the invoice lines and total",
+    "An unknown invoice returns 404",
+    "Both cases are covered by tests",
 ]
-APPROACH = """1. `InvoicePdf` renders an `Invoice` with the PDF library already in the pom.
-2. `InvoiceController.pdf(id)` looks the invoice up and answers 404 through `ResponseStatusException`.
-3. `InvoiceControllerTests` covers the found and the missing invoice."""
+APPROACH = "Use the existing PDF library; add the endpoint and tests."
 SUMMARY = "Serve invoices as PDF at GET /invoices/{id}/pdf"
 COMMITS = (
     ("Render an invoice as a PDF document", "src/main/java/payments/InvoicePdf.java"),
@@ -340,10 +323,10 @@ async def flow(moving: dict) -> None:
     from vivibox.dialogs import CommitWork
     from vivibox.widgets import Confirm
 
-    frames: list[tuple[str, float]] = []
+    frames: list[tuple[str, float, str, str]] = []
 
-    def shot(seconds: float) -> None:
-        frames.append((shown(app.export_screenshot()), seconds))
+    def shot(seconds: float, title: str, detail: str) -> None:
+        frames.append((shown(app.export_screenshot()), seconds, title, detail))
 
     async def settle() -> None:
         app.reload()
@@ -353,9 +336,8 @@ async def flow(moving: dict) -> None:
         app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(row_id))
 
     app = tui.Vivibox()
-    # Wide enough for every column, the reviewer's included: the picture shows the whole list; tall
-    # enough for the new task form to show all of the flow's help.
-    async with app.run_test(size=(150, 40)) as pilot:
+    # A compact terminal keeps text readable when GitHub fits the image to the README.
+    async with app.run_test(size=(112, 38)) as pilot:
         await pilot.pause(0.5)
         await settle()
         health = next(st.id for _, st in app.pairs if "health" in st.goal)
@@ -363,23 +345,17 @@ async def flow(moving: dict) -> None:
         await pilot.press("d")
         await pilot.pause(0.4)
         (HERE / "view.svg").write_text(shown(app.export_screenshot()))
-        shot(2.5)  # the view: three projects, tasks in every state, one waiting with its review
+        shot(4, "Several tasks, one view", "Follow progress across projects. See what needs your attention.")
 
+        await pilot.press("d")  # close the panel before opening the form over the list
         select("project:payments-api")
         await pilot.press("n")
         await pilot.pause(0.4)
-        shot(0.8)  # n: a new task
         field = app.screen.query_one(TextArea)
-        for cut in (18, 44, 70):
-            field.text = GOAL[:cut]
-            await pilot.pause(0.2)
-            shot(0.5)
         field.text = GOAL
-        await pilot.pause(0.2)
-        shot(1.2)
         app.screen.query_one("#orchestration").focus()
         await pilot.pause(0.3)
-        shot(3.0)  # Flow: how the agents share the task, the models they run on, under the fields
+        shot(5, "Describe the change", "Choose the flow and models for this task.")
         await pilot.press("escape")
         await pilot.pause(0.3)
 
@@ -389,28 +365,27 @@ async def flow(moving: dict) -> None:
         )
         await settle()
         select(made.id)
+        await pilot.press("d")
         await pilot.pause(0.3)
-        shot(1.5)  # planning, the panel on the new task
 
         spent(made, 0.03)
         made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
         moving["cart"].event("gate", passed=True, iteration=1)
         moving["cart"].transition(State.REVIEW, reason="verification passed")
         await settle()
-        shot(3.0)  # review the plan: the approach and the criteria
+        shot(5, "Approve the plan", "Read the approach and acceptance criteria before coding starts.")
 
         accepted(made, ticked=0)
         reviewed(moving["retry"], others=0)
         RUNNING.discard(moving["retry"].id)
         await settle()
-        shot(1.5)  # implementing, nothing ticked yet; a task of another project came to review
 
         ticks = made.meta / "handoff" / gate.CRITERIA_FILE
         ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]", 2))
         spent(made, 0.0, 0.08)
         moving["vat"].transition(State.VERIFY)
         await settle()
-        shot(1.5)  # two criteria ticked
+        shot(3, "Let the writer work", "Implementation happens in a clone. Your checkout stays yours.")
 
         ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]"))
         committed(made, *COMMITS)
@@ -419,12 +394,12 @@ async def flow(moving: dict) -> None:
         reviewed(moving["cart"], others=0)
         RUNNING.discard(moving["cart"].id)
         await settle()
-        shot(1.5)  # verifying
+        shot(3, "Verify the work", "Run the project’s build and tests on a fresh clone.")
 
         made.event("gate", passed=True, iteration=1, log="verify-1-120000.log")
         made.transition(State.REVIEW, reason="verification passed")
         await settle()
-        shot(1.2)  # the reviewer reads
+        shot(3, "Get an independent review", "In this flow, a separate agent reviews the verified changes.")
 
         note = (
             "## Blocking\n\n## Not blocking\n\n- src/main/java/payments/InvoicePdf.java:52 — the font is"
@@ -438,21 +413,20 @@ async def flow(moving: dict) -> None:
         actions.prepare_review(made, load_project("payments-api"))
         RUNNING.discard(made.id)
         await settle()
-        shot(3.0)  # review the work: the diff, the reviewer's note
+        shot(5, "Review the result", "Open the review copy in your IDE, try the app, or ask for changes.")
 
         await pilot.press("a")
         await pilot.pause(0.3)
         assert isinstance(app.screen, Confirm)
-        shot(1.0)
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause(0.5)
         assert isinstance(app.screen, CommitWork)
-        shot(3.0)  # the commit, from the plan's summary and the agent's commits
+        shot(4, "Choose how to commit", "After accepting the work, choose a branch and edit the message.")
         await pilot.press("escape")
         await pilot.pause(0.3)
         await settle()
-        shot(2.0)  # done, among the rest
+        shot(3, "Keep work moving", "The accepted task is done. Other projects carry on alongside it.")
     (HERE / "flow.svg").write_text(animated(frames))
 
 

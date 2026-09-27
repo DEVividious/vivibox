@@ -85,10 +85,11 @@ ModalScreen { align: center middle; background: $background 70%; }
 ToggleButton > .toggle--button { color: $panel-lighten-2; background: $panel-lighten-2; }
 ToggleButton.-on > .toggle--button { color: $success; }
 
-/* Lists in a dialog: the highlighted row a lighter surface, bold while the list has focus. */
+/* Lists in a dialog: the highlighted row a lighter surface and bold while the list has focus,
+   a faint band in a list that has not. */
 .dialog OptionList, .dialog SelectionList { border: none; background: transparent; padding: 0; }
 .dialog OptionList:focus, .dialog SelectionList:focus { border: none; background-tint: transparent; }
-.dialog OptionList > .option-list--option-highlighted { background: $selection; color: $foreground; text-style: none; }
+.dialog OptionList > .option-list--option-highlighted { background: $panel; color: $foreground; text-style: none; }
 .dialog OptionList:focus > .option-list--option-highlighted { background: $selection; text-style: bold; }
 .dialog OptionList > .option-list--option-hover { background: $panel; }
 .dialog OptionList > .option-list--option-disabled { color: $foreground; }

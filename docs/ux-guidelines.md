@@ -127,7 +127,10 @@ starts the pod when needed.
   Change…, New folder… beside what the browser picked, Import opencode.json… beside the
   provider's search), or is the last entry of that field's list ("+ set up another project…").
   A screen that manages a list (Providers & MCP) has what changes the list in a row under it,
-  the action it is opened for first and primary, and closes with Close alone. The closing
+  the action it is opened for first and primary, and closes with Close alone. An action on the
+  highlighted row of a list (Remove…) stands under that list too. Ticking lists (what an
+  opencode.json brings, what is on) are sections of a form, `space` ticks and `ctrl+s` presses
+  the primary button. The closing
   row holds one primary button, then Cancel; the key that presses the primary button is in the
   frame.
 - Every field of a form starts in the same column; Branch, a field that opens a picker, is drawn
@@ -286,4 +289,4 @@ theme's variables and the code the constants, by meaning, never a hue by name
 
 Rules above that the code does not meet yet. Remove a line when it is fixed.
 
-- §4: `ChooseImport` and `ManageItems` are lists with a note rather than forms.
+None now.

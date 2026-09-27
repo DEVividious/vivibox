@@ -247,6 +247,7 @@ def test_a_button_that_helps_fill_a_field_is_never_among_the_closing_ones(env, t
         (lambda: browse.Browse("folder", "Pick", start=tmp_path), ["select", "cancel"], ["new-folder"]),
         (lambda: providers_ui.AddProvider([("deepseek", "DeepSeek")]), ["add", "cancel"], ["import"]),
         (lambda: providers_ui.ManageProviders(), ["close"], ["add", "import", "manage"]),
+        (lambda: providers_ui.ManageItems(), ["save", "cancel"], ["remove"]),
     ]
 
     async def scenario(app, pilot):
@@ -264,3 +265,39 @@ def test_a_button_that_helps_fill_a_field_is_never_among_the_closing_ones(env, t
             await pilot.pause()
 
     run(scenario, size=(80, 24))
+
+
+def test_the_import_and_the_manage_screens_are_forms_saved_with_ctrl_s(env, tmp_path):
+    """What an opencode.json brings, under PROVIDERS and MCP SERVERS, and what is on, are forms like
+    the others: sections, help under a rule, ctrl+s for the primary button."""
+    from vivibox import keys, providers
+
+    source = tmp_path / "opencode.json"
+    source.write_text(
+        '{"provider": {"deepseek": {"options": {"apiKey": "sk-theirs"}}},'
+        ' "mcp": {"tools": {"type": "local", "command": ["npx", "tools-mcp"]}}}'
+    )
+    keys.set_key("openai", "sk-other")
+    got = []
+
+    async def scenario(app, pilot):
+        app.push_screen(
+            providers_ui.ChooseImport(source, providers.read_opencode(source, env={})), got.append
+        )
+        await pilot.pause()
+        text = screen_text(app)
+        assert "PROVIDERS" in text and "MCP SERVERS" in text and "From" in text
+        assert "unticked" in str(app.screen.query_one("#about", Label).render())
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert [f.name for f in got[0]] == ["deepseek", "tools"], "ctrl+s imports what is ticked"
+        app.push_screen(providers_ui.ManageItems(), got.append)
+        await pilot.pause()
+        assert "ON FOR TASKS" in screen_text(app)
+        assert "next time it starts" in str(app.screen.query_one("#about", Label).render())
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert got[1] == [], "saved with nothing changed"
+        assert not isinstance(app.screen, providers_ui.ManageItems)
+
+    run(scenario)

@@ -63,11 +63,15 @@ class ChooseImport(Dialog):
         super().__init__()
         self.source, self.reading = source, reading
 
+    frame_title = "Import from opencode"
+    hint_keys = (("space", "tick"), ("ctrl+s", "import"), look.ESC_CANCELS)
+
     def compose(self) -> ComposeResult:
-        self.frame_title = "Import from opencode"
-        with Vertical(classes="dialog"):
-            yield Label(f"In {escape(shown_path(self.source))}; untick what to leave out.", classes="wrap")
-            for kind, heading in ((providers.PROVIDER, "Providers"), (providers.MCP, "MCP servers")):
+        with Vertical(classes="dialog form"):
+            with Horizontal(classes="row"):
+                yield Label("From", classes="key")
+                yield Label(escape(shown_path(self.source)), classes="value")
+            for kind, heading in ((providers.PROVIDER, "PROVIDERS"), (providers.MCP, "MCP SERVERS")):
                 rows = [
                     Selection(
                         import_label(f),
@@ -79,16 +83,29 @@ class ChooseImport(Dialog):
                     if f.kind == kind
                 ]
                 if rows:
-                    yield Label(heading, classes="group")
-                    yield SelectionList[int](*rows, id=f"found-{kind}", classes="found")
+                    with Vertical(classes="section"):
+                        yield Label(heading, classes="title")
+                        yield SelectionList[int](*rows, id=f"found-{kind}", classes="found")
             if self.reading.left:
-                yield Label(f"Left in the file, not for vivibox: {', '.join(self.reading.left)}.")
+                yield Label(
+                    f"Left in the file, not for vivibox: {', '.join(self.reading.left)}.",
+                    classes="files wrap",
+                )
+            yield Label(
+                "Ticked comes over, unticked stays out. One that would replace yours starts unticked; "
+                "one you already have cannot be picked.",
+                id="about",
+                classes="wrap",
+            )
             with Horizontal(classes="buttons"):
                 yield Button("Import", variant="primary", id="import")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
         self.query(".found").first().focus()
+
+    def key_ctrl_s(self) -> None:
+        self.query_one("#import", Button).press()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -250,20 +267,35 @@ class ManageItems(Dialog):
     """What is on: a ticked provider's models are offered for a task, a ticked MCP server is given to
     every task. Unticking keeps it, and its key, for later; Remove takes it away. Save applies."""
 
+    frame_title = "Manage providers & MCP"
+    hint_keys = (("space", "on/off"), ("ctrl+s", "save"), look.ESC_CANCELS)
+    ON_OFF = (
+        "Ticked is on: a provider's models are offered for a task, an MCP server is given to every "
+        "task. Unticked keeps it, and its key, for later. A change reaches a task the next time it "
+        "starts."
+    )
+    field_help = {
+        "items": ON_OFF,
+        "remove": "Takes the highlighted one away from vivibox, with its key; you are asked first.",
+        "serena-mode": "Serena, the code-navigation MCP server that comes with vivibox: when a task gets it.",
+        "save": ON_OFF,
+        "cancel": "",
+    }
+
     def compose(self) -> ComposeResult:
-        self.frame_title = "Manage providers & MCP"
         with Vertical(classes="dialog form"):
-            yield Label(
-                "Tick what is on; Remove takes the highlighted one away with its secrets.", classes="wrap"
-            )
-            yield Label("A change reaches a task the next time it starts.", classes="files")
+            yield Label("ON FOR TASKS", classes="title")
             self.rows = [r for r in provider_rows() if r[1] != providers.SERENA]
             yield SelectionList[int](
                 *(Selection(row_label(n, said, True), i, on) for i, (_, n, said, on) in enumerate(self.rows)),
                 id="items",
                 classes="catalog",
             )
-            with Horizontal(classes="row"):
+            # Remove acts on the highlighted row of the list, so it stands under the list, not
+            # among the buttons that close the dialog.
+            with Horizontal(classes="row actions"):
+                yield Button("Remove…", variant="error", compact=True, id="remove")
+            with Horizontal(classes="row files"):
                 yield Label("Serena", classes="key")
                 yield Select(
                     [(said, mode) for mode, said in SERENA_MODE_SAID.items()],
@@ -272,13 +304,16 @@ class ManageItems(Dialog):
                     compact=True,
                     id="serena-mode",
                 )
+            yield Label("", id="about", classes="wrap")
             with Horizontal(classes="buttons"):
                 yield Button("Save", variant="primary", id="save")
-                yield Button("Remove", variant="error", id="remove")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#items").focus()
+
+    def key_ctrl_s(self) -> None:
+        self.query_one("#save", Button).press()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:

@@ -224,6 +224,17 @@ def task_pod(task_id: str) -> Pod:
 # --- lifecycle ----------------------------------------------------------------------------------
 
 
+def ensure_mirror(task: Task, config: Config) -> None:
+    """The Docker Hub mirror running before a pod starts, when it is on. One that does not start is
+    said on the task and stops nothing: the pod's daemon then pulls from Docker Hub itself."""
+    if not config.hub_mirror:
+        return
+    try:
+        mirror.ensure(config.hub_mirror_port)
+    except PodError as e:
+        task.event("mirror", problem=str(e))
+
+
 def title_of(description: str) -> str:
     """What the list shows of a task until its plan names it in a line of its own: the start of
     its description, whatever that is, so nothing has to be written as a title."""
@@ -432,10 +443,7 @@ def _start(
     changed = opencode.prepare(task, model, project.verify, used)
     if config.hub_mirror:
         on_step("starting the Docker Hub mirror…")
-        try:
-            mirror.ensure(config.hub_mirror_port)
-        except PodError as e:
-            task.event("mirror", problem=str(e))
+    ensure_mirror(task, config)
     on_step("starting the pod…")
     pod.up()
     if project.java or project.tools:

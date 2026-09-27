@@ -162,3 +162,26 @@ def test_vivibox_mirror_says_whether_it_runs_and_what_it_holds(env, monkeypatch,
     removed = []
     monkeypatch.setattr(mirror, "remove", lambda: removed.append(True))
     assert main(["mirror", "remove"]) == 0 and removed
+
+
+def test_a_box_starts_the_mirror_before_its_pod_too(env, monkeypatch, tmp_path):
+    from vivibox import actions, box, image, opencode, secrets
+    from vivibox.cli import main
+    from vivibox.pod import Pod
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(image, "exists", lambda ref: True)
+    monkeypatch.setattr(secrets, "prepare", lambda task_id, keys: None)
+    monkeypatch.setattr(opencode, "prepare", lambda task, model, verify, used: False)
+    order = []
+    monkeypatch.setattr(actions, "ensure_mirror", lambda task, config: order.append("mirror"))
+
+    def up(self):
+        order.append("pod")
+        raise RuntimeError("enough")
+
+    monkeypatch.setattr(Pod, "up", up)
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    with pytest.raises(RuntimeError, match="enough"):
+        box.start_box("demo-1")
+    assert order == ["mirror", "pod"]

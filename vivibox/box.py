@@ -86,6 +86,7 @@ def start_box(task_id: str) -> None:
     secrets.prepare(task.id, used + providers.mcp_secrets())
     model = actions.role_of(task, "writer", config).model
     opencode.prepare(task, model, project.verify, used)
+    actions.ensure_mirror(task, config)
     pod.up()
     toolchain.ensure(pod, project.java, tools=project.tools)
     prepare.begin(task, project, pod)

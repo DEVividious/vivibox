@@ -66,7 +66,7 @@ def test_a_box_costs_one_number_not_a_split(env):
     task.event("turn", cost=0.0123, tokens=100, kind="demo")
     assert str(ui.cost(task)) == "$0.01"
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "cost $0.01" in shown and "planning" not in shown
+    assert "$0.01 so far" in shown and "#### Roles" not in shown, "no agents: one number"
     actions.remember_removed(task, load_project("demo"))
     entry = json.loads(actions.history_path().read_text().splitlines()[-1])
     assert entry["cost"] == 0.0123 and "planning" not in entry

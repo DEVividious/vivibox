@@ -175,6 +175,12 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 
 - The panel's first line after the header is `Next:` with the keys that move the task on
   (`tui.next_steps`), before any log or diff. The body explains; it does not repeat the keys.
+- The panel is a header (`<id> · <status>`), one line of where and how long (project, created,
+  updated, the cost so far), `Next:`, what the state asks of the person, and then the same
+  sections in the same order, each only when it has something: the newest review
+  (`#### Review n: …`), `#### Acceptance criteria n/N`, `#### Roles` (a row per agent: what it
+  runs on, its turns and its cost; roles one agent plays share a row) and `#### The plan`. A
+  plan under review is the body itself, not a section below it.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

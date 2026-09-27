@@ -23,7 +23,6 @@ from . import (
     providers,
     repo,
     review,
-    reviewing,
     supervisor,
     timeline,
     ui,
@@ -31,8 +30,19 @@ from . import (
 from . import pod as pod_module
 from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
-from .plan import PlanError, parse_plan
 from .plan import body as plan_body
+from .plan import parse_plan
+from .sections import (  # noqa: F401 (criteria and checklist: the list reads them from here)
+    build_files_left,
+    checklist,
+    criteria,
+    criteria_section,
+    gate_failed,
+    last_gate,
+    plan_section,
+    reviewers_notes,
+    roles_section,
+)
 from .states import State
 from .task import Task, TaskState
 
@@ -43,26 +53,6 @@ CODE_CHANGED = "vivibox changed on disk: quit and start it again"
 OLDER_SUPERVISOR = "runs an older vivibox; stop and start it (`s`) when it suits you"
 SPIN_SECONDS = 0.1
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-
-def criteria(task: Task) -> str:
-    try:
-        if (task.meta / gate.ACCEPTED_PLAN).exists():
-            total = len(parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).criteria)
-            return f"{total - len(gate.missing_criteria(task))}/{total}"
-        return f"0/{len(parse_plan(task.plan_path.read_text()).criteria)}"
-    except (OSError, PlanError, gate.GateError):
-        return "-"
-
-
-def checklist(task: Task) -> list[str]:
-    """Every criterion of the accepted plan, and which of them the agent reports as met."""
-    try:
-        wanted = [c.text for c in parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).criteria]
-        missing = set(gate.missing_criteria(task))
-    except (OSError, PlanError, gate.GateError):
-        return []
-    return [f"- {'☐' if text in missing else '☑'} {text}" for text in wanted]
 
 
 @dataclass
@@ -334,48 +324,6 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     return "wait" + watch + " · `s` stop"
 
 
-def reviewers_notes(task: Task) -> list[str]:
-    """The newest review, for the final checkpoint: its counts, then the notes as written."""
-    path = reviewing.latest(task)
-    if path is None:
-        return []
-    text = path.read_text()
-    review = reviewing.parse_review(text)
-    n = reviewing.NUMBERED.match(path.name).group(1)
-    return [
-        "",
-        f"**Review {n}:** {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",
-        "",
-        text.rstrip(),
-    ]
-
-
-def gate_failed(task: Task) -> bool:
-    gates = [e for e in task.events() if e["type"] == "gate"]
-    return bool(gates) and not gates[-1]["data"].get("passed")
-
-
-def build_files_left(task: Task) -> list[str]:
-    """The build files the last verification found in a project that runs nothing: a new product's
-    first task made its build, and the command is yours to pick."""
-    for event in reversed(task.events()):
-        if event["type"] == "gate":
-            return [
-                f"**{source} names `{command}`**, and this project runs nothing yet: `e` on its row picks it."
-                for command, source in event["data"].get("build_files") or []
-            ]
-    return []
-
-
-def last_gate(task: Task) -> str:
-    """How the last gate run went, so a checklist that has not moved still shows whether work has."""
-    for event in reversed(task.events()):
-        if event["type"] == "gate":
-            outcome = "passed" if event["data"].get("passed") else "failed"
-            return f"Verification {outcome} at {ui.clock(event['ts'])}."
-    return "No verification yet."
-
-
 PROJECT_ROW = "project:"
 # The keys that decide something, first in the footer and never off it, however narrow the terminal.
 DECISION_KEYS = ("a", "r", "p", "g")
@@ -612,16 +560,11 @@ def detail(
     """What you need to decide on this task, as markdown."""
     seen = ui.view(task, st, running, max_iterations)
     watch = " Look at the agent with `w`." if watchable(task, st, running) else ""
-    spent = ui.cost(task)
     head = [
         f"### {st.id} · {seen.status}",
         "",
-        f"*criteria {criteria(task)} · updated {ui.ago(st.updated)}"
-        + (
-            f" · cost {spent}"
-            if st.box
-            else f" · planning + implementation{' + review' if spent.review else ''} {spent}"
-        )
+        f"*{st.project} · created {ui.ago(st.created)} · updated {ui.ago(st.updated)}"
+        f" · {ui.money(ui.cost(task).total)} so far"
         # During a turn: the cost above grows with it, and this says the agent is still at it.
         + (f" · last step {ui.ago(live['at'])}" if (live := task.live_turn()) else "")
         + "*",
@@ -698,7 +641,6 @@ def detail(
             "",
             f"```\n{stat.rstrip() or 'no changes fetched yet'}\n```",
             *removed_tests(task),
-            *reviewers_notes(task),
         ]
     elif st.state is State.APPROVAL_RISKY:
         try:
@@ -726,20 +668,11 @@ def detail(
         )
     elif st.state is State.VERIFY and seen.group == "Working":
         body = verification_running(task, st)
-    elif items := checklist(task):
-        # What the task is still short of. The agent ticks these itself and the gate only checks
-        # that none is left open, so a tick is what the agent claims, not something vivibox saw.
+    elif (task.meta / gate.ACCEPTED_PLAN).exists():
         doing = ""
         if st.state is State.IMPLEMENT and seen.group == "Working" and (lasting := ui.lasting(st.updated)):
             doing = f"**Implementing** {lasting}."
-        body = [
-            *([doing, ""] if doing else []),
-            "**Acceptance criteria**, as the agent reports them:",
-            "",
-            *items,
-            "",
-            f"{last_gate(task)}{watch}",
-        ]
+        body = [*([doing, ""] if doing else []), f"{last_gate(task)}{watch}"]
         if left := build_files_left(task):
             body += ["", *left]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
@@ -749,7 +682,6 @@ def detail(
             # A long turn is a still row; what happened lately says it is a turn, not a hang.
             body += ["", "**Lately**", "", *(f"- `{line}`" for line in timeline.latest(task)), "",
                      "`l` reads the whole timeline."]  # fmt: skip
-        body += ["", "#### The plan", "", plan_body(read(task.meta / gate.ACCEPTED_PLAN))]
     else:
         events = task.events()[-8:]
         body = ["**Recent events**", ""] + [
@@ -771,6 +703,12 @@ def detail(
             "",
             *(f"- {marks[t['status']]} {t['content']}" for t in todos),
         ]
+    # The same sections in the same order in every state: the plan under review is the body.
+    if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
+        body += [*reviewers_notes(task), *criteria_section(task)]
+    body += roles_section(task, st)
+    if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
+        body += plan_section(task)
     return "\n".join(head + body)
 
 

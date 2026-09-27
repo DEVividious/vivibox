@@ -212,7 +212,7 @@ writer gets before the work comes to you: a red gate is one, a review with block
 one, the first implementation and a verification alone are none. Your reply gives them back.
 The list says `implementing (round n/N)` from the first fix turn on, `reviewing` while a
 reviewer or the supervisor reads, and the reviewing's cost stands in a column of its own where
-the mode has one. At the final checkpoint the panel shows the newest review with its counts;
+the mode has one. From the first review on, the panel shows the newest one with its counts;
 `l` opens every round.
 
 What the reviewer reads, and what comes to you, is the commit the gate verified: commits that
@@ -297,8 +297,9 @@ never reads or copies, and goes with the box.
 ### What the tasks cost, and what the gate refused
 
 The list shows what a task cost in three columns, one figure each: `PLAN`, `IMPL` and, when a
-reviewer is configured, `REVIEW`; a box shows one figure under `IMPL`. The panel and the history
-keep the same split.
+reviewer is configured, `REVIEW`; a box shows one figure under `IMPL`. The history keeps the same
+split; the panel (`d`) lists each agent of the task with what it runs on, its turns and its cost,
+roles one agent plays together in one row.
 
 `vivibox stats` adds up the events of every task, live and finished: how many verification runs
 a task took to pass (median and maximum), what a turn costs per role and per state, how many

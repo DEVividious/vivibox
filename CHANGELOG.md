@@ -90,6 +90,10 @@ First public version.
   task (`feature/<title>`, `bugfix/<title>`, or `<title>` for other work, with a number when the
   name is taken); the commit dialog asks which, a new branch first when the task started on
   `main`, and the checkout stays on the branch committed on. `vivibox accept` asks the same.
+- The details panel (`d`) has one layout in every state: the header, a line with the project,
+  the times and the cost so far, `Next:`, what the state asks of you, then the newest review,
+  the acceptance criteria, a Roles table (what each agent runs on, its turns and its cost) and
+  the plan. The review stays in the panel while the writer fixes its notes.
 
 ### Fixed
 
@@ -116,6 +120,7 @@ First public version.
 
 ### Internal
 
+- The details panel's sections live in `sections.py`; `panel.py` keeps the header and the states.
 - The gate's feedback text moves to `vivibox/feedback.py`.
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
 - `vivibox auth` and `vivibox models` live in `cli_providers.py`, under the size limit.

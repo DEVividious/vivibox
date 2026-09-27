@@ -4278,7 +4278,8 @@ def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(e
         app.table.move_cursor(row=rows(app).index(task.id))
         await pilot.pause()
         app.action_details()  # a second app in one test gets no keys from the pilot
-        assert "planning + implementation + review $0.10 + $0.04 + $0.02" in app.shown
+        assert "| Reviewer | - | 1 | $0.02 |" in app.shown, "unconfigured now, it took a turn"
+        assert "| Total | | 3 | $0.16 |" in app.shown
 
     run(with_)
 
@@ -4323,7 +4324,7 @@ def test_the_final_checkpoint_shows_the_reviewers_notes_and_l_opens_them(env, mo
         app.table.move_cursor(row=rows(app).index(task.id))
         await pilot.press("d")
         await pilot.pause()
-        assert "**Review 1:** 1 blocking, 0 not blocking" in app.shown and "a.py:1 — wrong" in app.shown
+        assert "#### Review 1: 1 blocking, 0 not blocking" in app.shown and "a.py:1 — wrong" in app.shown
         await pilot.press("l")
         await pilot.pause()
         assert isinstance(app.screen, logs.ChooseLog)

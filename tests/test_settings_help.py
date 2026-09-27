@@ -56,8 +56,10 @@ def test_orchestration_describes_the_mode_it_is_on_and_enter_moves_on_without_a_
         pick(app, "orchestration")
         await pilot.pause()
         now = ORCHESTRATION_MODES["planner_maker_checker"]
-        assert now.label in about(app) and now.when in about(app) and now.tradeoff in about(app)
-        assert "P planner" in about(app), "the legend of the symbols"
+        lines = about(app).splitlines()
+        assert lines[0] == now.label and lines[1] == now.flow, "the name, then the flow on a line of its own"
+        assert now.when in about(app) and now.tradeoff in about(app)
+        assert "P planner" in lines[-2] and "⇄" in lines[-1], "the legend last, two short lines"
         before = len(app._notifications)
         await pilot.press("enter")
         await pilot.pause()

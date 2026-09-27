@@ -153,8 +153,9 @@ stay as they are.
 
 Under the list of `k`, and of a project's `e`, a line says what the highlighted row does, for
 someone who has not read the docs (what one round is, what `cost_warning` does). It follows the
-highlight and the value: orchestration describes the mode it is on, with the legend of its
-symbols, and Enter moving to the next mode changes the line, not a notification. A change shows
+highlight and the value: orchestration describes the mode it is on, its name in bold, its flow
+alone on the next line in the accent colour, when it fits and what it costs a line each, the
+legend of the symbols last and muted, and Enter moving to the next mode changes the line, not a notification. A change shows
 on its row, and when it applies ("from a task's next start") is on that line before it is made:
 no notification says the new value again. A notification is for what the screen does not show,
 such as a value refused and why; it never carries a description, which is gone before it is read.

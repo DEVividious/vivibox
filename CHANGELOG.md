@@ -99,6 +99,8 @@ First public version.
 
 ### Fixed
 
+- The orchestration mode under `k` reads in lines: its name, its flow on a line of its own, when
+  it fits, what it costs, and the symbols last.
 - The new task form fits 80×24 with a reviewer too: Orchestration and Rounds were a scroll away.
 - Under `k` and a project's `e`, a line under the list says what the highlighted setting does
   (what a round is, what `cost_warning` does, the orchestration mode it is on with its legend);

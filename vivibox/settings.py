@@ -14,6 +14,7 @@ from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.content import Content
 from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
@@ -25,7 +26,6 @@ from .config import (
     JAVA,
     NTFY_LEVELS,
     NTFY_TOPIC,
-    ORCHESTRATION_LEGEND,
     ORCHESTRATION_MODES,
     RESERVED_ENV,
     ROUNDS_HELP,
@@ -106,8 +106,9 @@ class Rows(Dialog):
     def open(self, key: str) -> None:
         raise NotImplementedError
 
-    def about(self, key: str) -> str:
-        """What the row does, in words, for the line under the list; "" for nothing to say."""
+    def about(self, key: str) -> str | Content:
+        """What the row does, in words, for the line under the list; "" for nothing to say; a
+        Content where some of it stands out."""
         return ""
 
     def compose(self) -> ComposeResult:
@@ -134,7 +135,8 @@ class Rows(Dialog):
 
     def explain(self, index: int | None) -> None:
         key = self.keys[index] if index is not None and index < len(self.keys) else None
-        self.query_one("#about", Label).update(escape(self.about(key)) if key else "")
+        said = self.about(key) if key else ""
+        self.query_one("#about", Label).update(said if isinstance(said, Content) else escape(said))
 
     def on_mount(self) -> None:
         self.fill()
@@ -175,6 +177,12 @@ class Rows(Dialog):
             edit_in_editor(path)
 
 
+# The symbols of a mode's flow, in two lines that fit 80 columns (config.ORCHESTRATION_LEGEND says
+# the same at length, on n's hover).
+FLOW_LEGEND = (
+    "P planner · W writer · R reviewer · Gate the verification · → then\n"
+    "+ roles in one agent and one conversation · ⇄ rounds of fixes"
+)
 # What a row of k does, in the words of someone who has not read the docs.
 ROLE_ABOUT = {
     "planner": "The planner reads the task and the repository and writes the plan you accept: "
@@ -316,12 +324,19 @@ class Settings(Rows):
             ("edit config.toml in your editor…", " ", "file"),
         ]
 
-    def about(self, key: str) -> str:
+    def about(self, key: str) -> str | Content:
         config = self.app.config
         if key == "orchestration":
             mode = ORCHESTRATION_MODES[config.orchestration]
-            # The models it suits are on n's hover; here what fits in a short terminal.
-            return f"{mode.label}: {mode.flow}. {mode.when} {mode.tradeoff}\n{ORCHESTRATION_LEGEND}"
+            # The name, the flow on a line of its own, when it fits and what it costs, the symbols
+            # last; the models it suits are on n's hover. It fits 80×24.
+            return Content.assemble(
+                (mode.label, "bold"),
+                "\n",
+                (mode.flow, "bold $accent"),
+                f"\n{mode.when}\n{mode.tradeoff}\n",
+                (FLOW_LEGEND, "$text-muted"),
+            )
         if key == "ntfy_events":
             return (
                 "What your phone is told: decisions, when a task needs you (a plan, the work, a "

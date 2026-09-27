@@ -43,7 +43,6 @@ CODE_CHANGED = "vivibox changed on disk: quit and start it again"
 OLDER_SUPERVISOR = "runs an older vivibox; stop and start it (`s`) when it suits you"
 SPIN_SECONDS = 0.1
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-PROTECTED_BRANCHES = ("main", "master")
 
 
 def criteria(task: Task) -> str:

@@ -185,11 +185,14 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     task = find_task(load_config().tasks_dir, "demo-2")
     agent_commit(task, "two.txt")
     final_checkpoint(task)
-    answers = iter(["e", "Add two"])
+    answers = iter(["e", "Add two", "1"])
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     assert main(["accept", "demo-2"]) == 0
     assert git("log", "-1", "--format=%s").strip() == "Add two" and git("status", "--porcelain") == ""
     assert git("log", "-1", "--format=%b").strip() == "- Add two.txt", "the commit listed"
+    shown = capsys.readouterr().out
+    assert "1  main, where the task started" in shown and "2  a new branch: feature/goal" in shown
+    assert git("branch", "--show-current").strip() == "main"
 
     # --branch keeps the old way, for pull requests.
     assert main(["new", "demo", "Goal", "--draft"]) == 0
@@ -198,6 +201,17 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     final_checkpoint(task)
     assert main(["accept", "demo-3", "--branch"]) == 0
     assert "vivibox/demo-3" in git("branch", "--list") and not (source / "three.txt").exists()
+
+    # Where to commit is a question of its own; on a main branch a new branch is the default.
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-4")
+    agent_commit(task, "four.txt")
+    final_checkpoint(task)
+    answers = iter(["", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    assert main(["accept", "demo-4"]) == 0
+    assert git("branch", "--show-current").strip() == "feature/goal"
+    assert git("log", "-1", "--format=%s").strip() == "Goal"
 
 
 def test_the_suggested_commit_message_is_a_subject_and_a_list(env):

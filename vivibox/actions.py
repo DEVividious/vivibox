@@ -108,9 +108,11 @@ from .review import (  # noqa: F401
     apply_work,
     archive,
     archive_path,
+    branch_choices,
     changed_files,
     commit_work,
     current_branch,
+    default_branch,
     editor_command,
     fetch_work,
     finish,
@@ -308,8 +310,9 @@ def create(
     except BaseException:
         shutil.rmtree(task.root, ignore_errors=True)
         raise
-    task.set_base_commit(base)
-    task.event("base", ref=base_ref or "HEAD", commit=base)
+    branch = repo.start_branch(project.repo, base_ref)
+    task.set_base_commit(base, branch)
+    task.event("base", ref=base_ref or "HEAD", commit=base, **({"branch": branch} if branch else {}))
     if found.notes:  # what the agent sees differs from what you have: said once, kept with the task
         task.event("context", notes=found.notes)
     for role, (harness, model) in list(chosen.items()):

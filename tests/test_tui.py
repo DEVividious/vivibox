@@ -363,8 +363,18 @@ def test_accepting_the_work_offers_a_commit(env):
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert isinstance(app.screen, CommitWork)
-        # The repository is on its main branch, so leaving it uncommitted is the focused choice.
-        assert app.screen.focused.id == "later"
+        from ux import screen_text
+
+        # Where to commit comes first: the task started on main, so a branch of its own is offered.
+        branch = app.screen.query_one("#branch", Select)
+        assert app.screen.focused is branch and branch.value == "new"
+        assert "feature/goal, a new branch" in screen_text(app)
+        await pilot.press("enter")  # the list: the other place to commit it
+        await pilot.pause()
+        assert "main, where the task started (your main branch)" in screen_text(app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, CommitWork) and branch.value == "new"
         message = app.screen.query_one("#message", TextArea)
         assert message.text == "Goal\n\n- Add one", "the task as the subject, the commit listed"
         message.focus()
@@ -373,9 +383,67 @@ def test_accepting_the_work_offers_a_commit(env):
         await pilot.pause()
 
     run(scenario)
-    log = subprocess.run(["git", "log", "-1", "--format=%s%n%b"], cwd=source, capture_output=True, text=True)
-    assert log.stdout.strip() == "Goal now\n- Add one" and (source / "one.txt").exists()
+    git = lambda *a: subprocess.run(["git", *a], cwd=source, capture_output=True, text=True).stdout  # noqa: E731
+    assert (
+        git("log", "-1", "--format=%s%n%b").strip() == "Goal now\n- Add one" and (source / "one.txt").exists()
+    )
+    assert git("branch", "--show-current").strip() == "feature/goal", "the checkout stays on the new branch"
+    assert git("log", "-1", "--format=%s", "main").strip() == "Initial commit"
     assert not task.root.exists()
+
+
+def test_escape_on_an_open_list_closes_the_list_not_the_form(env):
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        form.query_one("#goal", TextArea).text = "Half a ticket"
+        kind = form.query_one("#kind", Select)
+        kind.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert kind.expanded
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is form and not kind.expanded, "what you typed is still there"
+        assert form.query_one("#goal", TextArea).text == "Half a ticket"
+        await pilot.press("escape")  # and the next one closes the form, as always
+        await pilot.pause()
+        assert app.screen is not form
+
+    run(scenario)
+
+
+def test_the_work_can_be_committed_on_the_branch_the_task_started_on(env):
+    source = load_project("demo").repo
+    task = new_task()
+    (task.repo / "one.txt").write_text("x\n")
+    for args in (
+        ["add", "one.txt"],
+        ["-c", "user.name=A", "-c", "user.email=a@b", "commit", "-qm", "Add one"],
+    ):
+        subprocess.run(["git", *args], cwd=task.repo, check=True, capture_output=True)
+    at_plan_checkpoint(task)
+    gate.accept_plan(task)
+    for state in (State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
+        task.transition(state)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await pilot.press("right", "left", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.screen.query_one("#branch", Select).value = "start"
+        await pilot.pause()
+        app.screen.query_one("#commit").press()
+        await pilot.pause()
+
+    run(scenario)
+    git = lambda *a: subprocess.run(["git", *a], cwd=source, capture_output=True, text=True).stdout  # noqa: E731
+    assert git("branch", "--show-current").strip() == "main"
+    assert git("log", "-1", "--format=%s").strip() == "Goal"
+    assert "feature/goal" not in git("branch", "--list")
 
 
 def done_with_a_proposal(env, command="npm ci && npm test"):

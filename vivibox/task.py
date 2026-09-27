@@ -34,6 +34,9 @@ class TaskState:
     created: str
     updated: str
     base_commit: str = ""
+    # The local branch the task started on, which accepted work can be committed on; "" when it
+    # started on a detached HEAD or a remote branch.
+    base_branch: str = ""
     # One conversation per role. A planner and a writer on the same harness would otherwise share
     # one, and a reviewer would review its own writing; a session of one harness handed to another
     # starts an error, not a conversation.
@@ -183,9 +186,9 @@ class Task:
         self._write_state(st)
         self.event("goal", goal=goal)
 
-    def set_base_commit(self, commit: str) -> None:
+    def set_base_commit(self, commit: str, branch: str = "") -> None:
         st = self.read_state()
-        st.base_commit = commit
+        st.base_commit, st.base_branch = commit, branch
         self._write_state(st)
         self.event("repo", base_commit=commit)
 

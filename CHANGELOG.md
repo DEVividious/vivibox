@@ -86,6 +86,10 @@ First public version.
 - `u` and `vivibox usage` show what each live task's pod uses now: CPU and memory of its
   containers and the disk of its volumes and folder, measured in a thread only while `u` is
   open; `--json` has them per container and per volume.
+- Accepted work is committed on the branch the task started on or on a new one named after the
+  task (`feature/<title>`, `bugfix/<title>`, or `<title>` for other work, with a number when the
+  name is taken); the commit dialog asks which, a new branch first when the task started on
+  `main`, and the checkout stays on the branch committed on. `vivibox accept` asks the same.
 
 ### Fixed
 
@@ -105,6 +109,8 @@ First public version.
   and `?` too), a "Notifications" group, and "verification gate timeout" shown in minutes and
   edited as `30m` or `1800`.
 - New tasks require your Git name and email before opening the form, with commands to set them.
+- Esc on an open list in a dialog closes the list; it closed the whole dialog, and a new task's
+  description went with it.
 - The plan's repair turn, and the review's, went on in a second session briefed as the role
   again, doing the first turn's work over: they continue the role's own conversation.
 

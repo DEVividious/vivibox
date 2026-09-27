@@ -300,20 +300,21 @@ def report_finished(done: actions.Finished) -> None:
         branch = actions.current_branch(done.source)
         print(f"{done.task_id} is done ({done.cost}). Uncommitted in {done.source} ({branch}):")
         print(done.status, end="")
-        offer_commit(done.source, done.message, branch)
+        offer_commit(done)
 
 
-def offer_commit(source: Path, message: str, branch: str) -> None:
+def offer_commit(done: actions.Finished) -> None:
+    source, message = done.source, done.message
     shown = "".join(f"  {line}\n" if line else "\n" for line in message.splitlines())
     if not sys.stdin.isatty():
         example = f" with this message:\n\n{shown}" if message else ""
         print(f"Commit it when you like, e.g.: git -C {source} commit{example}")
         return
     if message:
-        print(f"Commit to {branch} with this message?\n\n{shown}")
+        print(f"Commit it with this message?\n\n{shown}")
         answer = input("[Y]es, [e]dit the subject, [n]o: ").strip().lower()
     else:  # a box: the message is yours to write
-        answer = input(f"Commit to {branch}? [Y]es, with a message you type, [n]o: ").strip().lower()
+        answer = input("Commit it? [Y]es, with a message you type, [n]o: ").strip().lower()
         answer = "e" if answer in ("", "y", "yes") else answer
     if answer in ("e", "edit"):
         subject, _, rest = message.partition("\n")
@@ -321,10 +322,27 @@ def offer_commit(source: Path, message: str, branch: str) -> None:
     elif answer not in ("", "y", "yes"):
         print("Left uncommitted; review or change it in your IDE and commit when you are ready.")
         return
+    branch, create = where_to_commit(done)
     try:
-        print(f"Committed: {actions.commit_work(source, message)}")
+        made = actions.commit_work(source, message, branch, create)
+        print(f"Committed{f' on {branch}' if branch else ''}: {made}")
     except gate.GateError as e:
         print(f"Not committed: {e}")
+
+
+def where_to_commit(done: actions.Finished) -> tuple[str, bool]:
+    """A question of its own, after the message: the branch the task started on, or a new one."""
+    choices = actions.branch_choices(done)
+    if not choices:
+        return "", False
+    print("Where to commit it?")
+    for number, (label, value) in enumerate(choices, 1):
+        print(f"  {number}  {label if value == 'start' else f'a new branch: {done.new_branch}'}")
+    values = [value for _, value in choices]
+    default = values.index(actions.default_branch(done)) + 1 if actions.default_branch(done) in values else 1
+    answer = input(f"[{default}]: ").strip()
+    value = values[int(answer) - 1 if answer.isdigit() and 1 <= int(answer) <= len(values) else default - 1]
+    return (done.new_branch, True) if value == "new" else (done.start_branch, False)
 
 
 def cmd_plan(args: argparse.Namespace) -> int:

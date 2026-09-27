@@ -123,6 +123,25 @@ def branches(source: Path) -> list[tuple[str, str]]:
     return [(f"Current ({label})", "HEAD"), *sorted(choices, key=lambda c: c[0].casefold())]
 
 
+# A commit straight on one of these is what a team's review usually exists to prevent.
+PROTECTED_BRANCHES = ("main", "master")
+
+
+def start_branch(source: Path, base_ref: str = "") -> str:
+    """The local branch a task starts from: the checked-out one for HEAD, else the one picked;
+    "" for a detached HEAD or a remote branch, which nothing can be committed on."""
+    if base_ref in ("", "HEAD"):
+        return git("branch", "--show-current", cwd=source, check=False).stdout.strip()
+    name = base_ref.removeprefix("refs/heads/")
+    return name if branch_exists(source, name) else ""
+
+
+def branch_exists(source: Path, name: str) -> bool:
+    return (
+        git("show-ref", "--verify", "--quiet", f"refs/heads/{name}", cwd=source, check=False).returncode == 0
+    )
+
+
 def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = "") -> str:
     """Clones source into repo on a new task branch. Returns the base commit."""
     if (source / ".gitattributes").exists() and "filter=lfs" in (source / ".gitattributes").read_text():

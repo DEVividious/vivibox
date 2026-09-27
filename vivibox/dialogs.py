@@ -18,11 +18,12 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
+    Select,
     Static,
     TextArea,
 )
 
-from . import actions, ide, panel, version
+from . import actions, ide, version
 from .browse import FOLDER, Browse, shown_path
 from .verify_ui import AskVerify
 from .widgets import Dialog, EdgeTextArea
@@ -446,35 +447,57 @@ class Help(ModalScreen):
 
 
 class CommitWork(Dialog):
-    """After accepting: the work is staged in your checkout; commit it now, or leave it for your IDE."""
+    """After accepting: the work is staged in your checkout; commit it now, on the branch the task
+    started on or on a new one, or leave it for your IDE. Dismisses with the message, the branch
+    and whether to create it; {} leaves it uncommitted."""
 
     def __init__(self, done: actions.Finished):
         super().__init__()
         self.done = done
-        self.branch = actions.current_branch(done.source)
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        choices = actions.branch_choices(self.done)
+        with Vertical(classes="dialog form plain"):
             yield Label(f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:")
             yield Label(self.done.status.rstrip() or "(no changes)", classes="files")
-            warn = " (your main branch)" if self.branch in panel.PROTECTED_BRANCHES else ""
-            yield Label(f"Commit to {self.branch}{warn} with this message? (ctrl+s commits)")
-            yield EdgeTextArea(self.done.message, id="message")
+            with Horizontal(classes="row gap"):
+                yield Label("Branch", classes="key")
+                yield Select(
+                    choices, value=actions.default_branch(self.done) if choices else Select.BLANK,
+                    allow_blank=not choices, compact=True, id="branch",
+                )  # fmt: skip
+            with Horizontal(classes="row gap"):
+                yield Label("Message", classes="key")
+                yield EdgeTextArea(self.done.message, id="message")
             with Horizontal(classes="buttons"):
-                # On a main branch the safe choice comes first.
-                commit = Button("Commit", variant="primary", id="commit")
-                later = Button("Leave uncommitted", id="later")
-                yield from ((later, commit) if warn else (commit, later))
+                yield Button("Commit", variant="primary", id="commit")
+                yield Button("Leave uncommitted", id="later")
+                yield Label("ctrl+s commits", classes="hint keys")
 
     def on_mount(self) -> None:
-        self.query_one("#later" if self.branch in panel.PROTECTED_BRANCHES else "#message").focus()
+        self.query_one("#branch").focus()
+
+    def answer(self) -> dict:
+        chosen = self.query_one("#branch", Select).value
+        branch = {"start": self.done.start_branch, "new": self.done.new_branch}.get(chosen, "")
+        return {"message": self.query_one(TextArea).text, "branch": branch, "create": chosen == "new"}
+
+    def commit(self) -> None:
+        answer = self.answer()
+        if not answer["message"].strip():  # stays open: nothing is lost by saying so
+            self.notify("A commit needs a message.", severity="error")
+            return
+        self.dismiss(answer)
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(self.query_one(TextArea).text if event.button.id == "commit" else "")
+        if event.button.id == "commit":
+            self.commit()
+        else:
+            self.dismiss({})
 
     def key_ctrl_s(self) -> None:
-        self.dismiss(self.query_one(TextArea).text)
+        self.commit()
 
     def key_escape(self) -> None:
-        self.dismiss("")
+        self.dismiss({})

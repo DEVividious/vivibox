@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, TextArea
+from textual.widgets import Button, Label, Select, TextArea
 
 
 class Fields(VerticalScroll, can_focus=False, inherit_bindings=False):
@@ -27,6 +27,17 @@ class Dialog(ModalScreen):
         Binding("down", "app.focus_next", show=False),
         Binding("right", "app.focus_next", show=False),
     ]
+
+    async def handle_key(self, event: events.Key) -> bool:
+        """Esc on an open list closes the list: the dialog's own Esc would run first and throw away
+        everything typed in it."""
+        if event.key == "escape":
+            for select in self.query(Select):
+                if select.expanded:
+                    select.expanded = False
+                    select.focus()
+                    return True
+        return await super().handle_key(event)
 
 
 def leave_at_edge(area: TextArea, event: events.Key) -> bool:

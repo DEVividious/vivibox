@@ -8,7 +8,9 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -221,6 +223,10 @@ class Finished:
     # How this task's project was run, kept as a record so the next task need not work it out again.
     demo: str = ""
     project: str = ""
+    # Where the work can be committed: the branch the task started on ("" when it has none, or
+    # nobody knows it), and a new branch named after the task.
+    start_branch: str = ""
+    new_branch: str = ""
 
 
 def finish(
@@ -256,6 +262,11 @@ def finish(
             done.branch = repo.branch_name(task.id)
         else:
             done.status = repo.git("status", "--short", "--untracked-files=no", cwd=project.repo).stdout
+            # A task from before the branch was kept, or whose branch is gone since, offers the
+            # checkout's.
+            kept = st.base_branch and repo.branch_exists(project.repo, st.base_branch)
+            done.start_branch = st.base_branch if kept else repo.start_branch(project.repo)
+            done.new_branch = new_branch(project.repo, task_kind(task), st.goal, task.id)
     task.transition(State.DONE, reason="accepted")
     remember(done, project, commit)
     try:
@@ -356,10 +367,67 @@ def current_branch(source: Path) -> str:
     return repo.git("branch", "--show-current", cwd=source).stdout.strip() or "(detached)"
 
 
-def commit_work(source: Path, message: str) -> str:
-    """Commits what is staged in your checkout, with your identity and your hooks. Returns 'hash subject'."""
+BRANCH_PREFIXES = {"feature": "feature/", "bug": "bugfix/", "other": ""}
+MAX_BRANCH = 50
+
+
+def task_kind(task: Task) -> str:
+    """The kind given in n, from the plan; a box has none."""
+    for name in (gate.ACCEPTED_PLAN, "plan.md"):
+        with contextlib.suppress(OSError, PlanError):
+            return parse_plan((task.meta / name).read_text()).kind
+    return "other"
+
+
+def new_branch(source: Path, kind: str, title: str, task_id: str) -> str:
+    """feature/<title>, bugfix/<title> or <title>, in kebab-case and ASCII, cut at a word; a
+    number after it when your repository has that branch already."""
+    plain = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode().lower()
+    words = re.findall(r"[a-z0-9]+", plain)
+    prefix = BRANCH_PREFIXES.get(kind, "")
+    name = ""
+    for word in words:
+        longer = f"{name}-{word}" if name else word
+        if len(prefix) + len(longer) > MAX_BRANCH:
+            break
+        name = longer
+    name = prefix + (name or task_id)
+    taken, number = name, 0
+    while repo.branch_exists(source, taken):
+        number += 1
+        taken = f"{name}-{number}"
+    return taken
+
+
+def branch_choices(done: Finished) -> list[tuple[str, str]]:
+    """Where the work can be committed, as (what to show, "start" or "new"): the branch the task
+    started on, and one of its own."""
+    choices = []
+    if done.start_branch:
+        warn = " (your main branch)" if done.start_branch in repo.PROTECTED_BRANCHES else ""
+        choices.append((f"{done.start_branch}, where the task started{warn}", "start"))
+    if done.new_branch:
+        choices.append((f"{done.new_branch}, a new branch", "new"))
+    return choices
+
+
+def default_branch(done: Finished) -> str:
+    """A branch of its own when the task started on a main branch, or on none."""
+    return "start" if done.start_branch and done.start_branch not in repo.PROTECTED_BRANCHES else "new"
+
+
+def commit_work(source: Path, message: str, branch: str = "", create: bool = False) -> str:
+    """Commits what is staged in your checkout, with your identity and your hooks. Returns 'hash subject'.
+    branch: where; create makes it from the checkout's HEAD, otherwise the checkout switches to it
+    first, taking the staged work along. The checkout stays on it."""
     if not message.strip():
         raise gate.GateError("the commit message is empty")
+    if branch and (create or branch != current_branch(source)):
+        switch = ("switch", "--quiet", *(("-c",) if create else ()), branch)
+        p = repo.git(*switch, cwd=source, check=False)
+        if p.returncode != 0:
+            why = (p.stderr or p.stdout).strip()[:300]
+            raise gate.GateError(f"could not switch to {branch}; the changes stay staged: {why}")
     p = repo.git("commit", "--quiet", "-m", message.strip(), cwd=source, check=False)
     if p.returncode != 0:
         raise gate.GateError(

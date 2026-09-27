@@ -133,6 +133,11 @@ starts the pod when needed.
   actual commits, using the latest subject with earlier changes as bullets, without copying the
   acceptance checklist. Once the work is applied, the separate
   commit dialog opens while the pod is cleaned up; accepting shows `accepting…` until it finishes.
+- The commit dialog is a form: Branch, then Message. Branch offers the branch the task started on
+  and a new one named after the task (`feature/`, `bugfix/` or no prefix by the task's kind, a
+  number when taken); a task started on `main` or `master` has the new branch chosen, and the
+  start branch says "(your main branch)". The checkout stays on the branch committed on.
+- Esc on an open list closes the list, never the dialog under it.
 
 Settings name what a row is for, not its key: the editor section is "Manual review" and its row
 "IDE / text editor (o)", the same row on a project's screen, and the footer and `?` call `o` that

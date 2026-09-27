@@ -539,12 +539,16 @@ class Vivibox(
             self.notify(text, severity="warning", timeout=15)
             return
 
-        def commit(message: str) -> None:
-            if not message:
+        def commit(answer: dict) -> None:
+            if not answer:
                 self.notify("Left uncommitted; commit it in your IDE when you are ready.")
             else:
                 try:
-                    self.notify(f"Committed: {actions.commit_work(done.source, message)}")
+                    made = actions.commit_work(
+                        done.source, answer["message"], answer["branch"], answer["create"]
+                    )
+                    on = f" on {answer['branch']}" if answer["branch"] else ""
+                    self.notify(f"Committed{on}: {made}")
                 except Exception as e:
                     self.fail(e)
 

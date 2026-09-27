@@ -23,7 +23,7 @@ them all:
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the verification then checks the criteria and the commits only), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `u` | usage: one task a row, how long its planner, writer and reviewer took (their turns added up), its verifications, and the whole task from its creation to done or to now; for a live task, what its pod uses now: CPU and memory of its containers, the disk of its volumes and its folder, measured every ten seconds while `u` is open and never otherwise; the finished tasks too while the list shows them (`h`). `vivibox usage [--json]` prints the same |
 | `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
-| `a` | accept the plan; the writer's verification command, kept for the project (the field `e` shows, prefilled, Enter keeps it); or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
+| `a` | accept the plan; the writer's verification command, kept for the project (the field `e` shows, prefilled, Enter keeps it); or the finished work, which lands in your checkout; then commit it with the suggested message, on the branch the task started on or a new one named after it, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
 | `e` | edit the plan in `$EDITOR` before accepting it; with a manual planner, paste your chat's answer; at the command checkpoint, change the writer's command before it is kept |
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
@@ -152,7 +152,10 @@ details; `x` forgets one, archive included.
   uncommitted changes on your current branch. vivibox asks whether to commit them and suggests a
   message: a subject from the plan's summary (else the goal's first line, when it fits), then every
   commit the agent made, one line each in order, so the commit tells the whole of the work;
-  answer `n` to look at them in your IDE first.
+  answer `n` to look at them in your IDE first. Then it asks where: on the branch the task started
+  on, or on a new branch named after the task (`feature/<title>`, `bugfix/<title>`, or `<title>`
+  for other work; `-1`, `-2`, … when the name is taken), which a task started on `main` or
+  `master` offers first. Your checkout stays on the branch the commit went to.
   It refuses while you have staged changes. Files that conflict with your branch are left for you
   to resolve, and the work is kept on branch `vivibox/<id>` too. `--branch` skips your checkout
   and only creates that branch.

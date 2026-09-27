@@ -1316,7 +1316,10 @@ def test_every_turn_is_written_to_its_roles_transcript(task):
     assert heading.startswith("=== ") and " planner (as writer) · plan ===" in heading, (
         "the agent that played it"
     )
-    assert "Prompt: Read the goal" in log and "Reading the code.\n→ read: src/a.py\n" in log
+    assert "Prompt: … " in log and "/task/handoff/question.md." in log, (
+        "the end of the prompt, where the ask is"
+    )
+    assert "Reading the code.\n→ read: src/a.py\n" in log
     assert "ok · $0.0123 · 4500 tokens · " in footer
     assert not (task.meta / "log" / "writer.log").exists()
 
@@ -1330,3 +1333,15 @@ def test_a_failed_turn_says_why_in_its_transcript_and_a_tool_without_one_gives_i
     sup.step()
     log = (task.meta / "log" / "planner.log").read_text()
     assert "partial answer" in log and "failed: provider said no" in log.strip().splitlines()[-1]
+
+
+def test_the_transcripts_heading_keeps_the_end_of_the_prompt_where_the_ask_is():
+    """The first message of a role is its brief and then the turn's prompt; the first six lines
+    were the brief's, and writer.log did not say what the writer had been asked to do."""
+    from vivibox import transcript
+
+    first = brief.role_text("writer") + "\n" + prompts.IMPLEMENT_PROMPT
+    shown = transcript.shortened(first)
+    assert shown.startswith("… ") and shown.endswith(prompts.IMPLEMENT_PROMPT.splitlines()[-1])
+    assert "# Your role" not in shown
+    assert transcript.shortened("one line") == "one line"

@@ -13,7 +13,8 @@ from .harness import Turn
 from .task import Task
 
 ROLES = ("planner", "writer", "reviewer")
-# How much of the prompt a turn's heading keeps: the brief and the plan are the same every turn.
+# How much of the prompt a turn's heading keeps: its last lines, where what the turn asks for is.
+# The first message of a role opens with its brief, the same every task, and the ask comes after.
 PROMPT_LINES = 6
 PROMPT_CHARACTERS = 600
 FOOTER = re.compile(r"^--- \S+ · (ok|failed)(?:: [^·]*)? · \$([\d.]+)", re.MULTILINE)
@@ -25,11 +26,11 @@ def path(task: Task, role: str) -> Path:
 
 def shortened(prompt: str) -> str:
     lines = [line for line in prompt.strip().splitlines() if line.strip()]
-    shown = "\n".join(lines[:PROMPT_LINES])
+    shown = "\n".join(lines[-PROMPT_LINES:])
     if len(shown) > PROMPT_CHARACTERS:
-        shown = shown[: PROMPT_CHARACTERS - 1] + "…"
-    elif len(lines) > PROMPT_LINES:
-        shown += f"\n… {len(lines) - PROMPT_LINES} more lines"
+        shown = "…" + shown[-(PROMPT_CHARACTERS - 1) :]
+    if len(lines) > PROMPT_LINES:
+        shown = f"… {len(lines) - PROMPT_LINES} lines before\n" + shown
     return shown
 
 

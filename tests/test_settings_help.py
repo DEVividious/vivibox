@@ -9,8 +9,14 @@ from vivibox.config import ORCHESTRATION_MODES
 
 
 def labels(app) -> list[str]:
+    """The rows as they read, without their markup."""
+    from rich.text import Text
+
     options = app.screen.query_one("#rows", OptionList)
-    return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+    return [
+        Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+        for i in range(options.option_count)
+    ]
 
 
 def pick(app, name: str) -> None:
@@ -76,3 +82,57 @@ def test_a_projects_settings_say_what_they_do_too(env):
         assert "your shell" in about(app)
 
     run(scenario)
+
+
+def test_a_change_shows_on_its_row_and_its_description_not_in_a_notification(env):
+    """The row says the new value and the line under the list when it applies; a notification
+    saying the same again, "rounds = 5", is one more thing to read before it goes."""
+    from textual.widgets import Input
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("k")
+        await pilot.pause()
+        pick(app, "rounds")
+        await pilot.pause()
+        assert "next start" in about(app), "when a change applies is said before it is made"
+        before = len(app._notifications)
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "5"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert any(text.strip().startswith("rounds  5") for text in labels(app))
+        assert len(app._notifications) == before
+        pick(app, "desktop notifications")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app._notifications) == before
+        pick(app, "cost_limit")
+        await pilot.pause()
+        assert "next turn" in about(app)
+
+    run(scenario, notifications=True)
+
+
+def test_a_projects_changes_show_on_their_rows_without_a_notification(env):
+    from textual.widgets import Input
+
+    new_task()
+
+    async def scenario(app, pilot):
+        app.push_screen(settings.ProjectSettings("demo"))
+        await pilot.pause()
+        pick(app, "java")
+        await pilot.pause()
+        assert "next start" in about(app)
+        before = len(app._notifications)
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "17"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert any(text.strip().startswith("java  17") for text in labels(app))
+        assert len(app._notifications) == before
+
+    run(scenario, notifications=True)

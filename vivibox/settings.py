@@ -198,13 +198,14 @@ SETTINGS_ABOUT = {
     "ntfy_server": "The ntfy server the messages go through: ntfy.sh, unless you run your own.",
     "max_rounds": "One round is one fix turn of the writer: after a failed verification, or after a "
     "review with blocking notes. The first implementation is not a round. When a task has used its "
-    "rounds it stops for you, and your reply gives it as many again.",
+    "rounds it stops for you, and your reply gives it as many again. A change applies from a "
+    "task's next start.",
     "verify_timeout": "How long one verification command may run before it is stopped. Past it "
     "the task waits for you, and no round is spent.",
     "cost_warning": "When a task has cost this many dollars, you are told once and the task goes "
-    "on. None: you are never told.",
+    "on. None: you are never told. A change applies from a task's next turn.",
     "cost_limit": "When a task has cost this many dollars, it stops before its next turn and waits "
-    "for you. None: no limit.",
+    "for you. None: no limit. A change applies from a task's next turn.",
     "file": "config.toml in your editor, for what has no row here.",
 }
 # The same for a project's rows (e on its row).
@@ -212,9 +213,11 @@ PROJECT_ABOUT = {
     "prepare": "What a new task's clone runs once while the plan is made, usually a build "
     "without tests, so the writer starts on a built project. The writer's first turn waits for it.",
     "verify": "The command that proves the work: the gate runs it on a fresh clone of the "
-    "commits after every turn of the writer. Empty: the next task's writer proposes one.",
+    "commits after every turn of the writer. Empty: the next task's writer proposes one. A "
+    "change applies from the next verification, in every task.",
     "demo": "How v runs the project in its pod so you can look at it.",
-    "java": "The JDK this project builds with, when not the image's Java 21, e.g. 17 for an older Gradle.",
+    "java": "The JDK this project builds with, when not the image's Java 21, e.g. 17 for an older "
+    "Gradle. A change applies from a task's next start.",
     "pass_env": "Variables the build needs from your shell, such as a package registry token: "
     "the agent and the gate get their values from the shell vivibox was started in.",
     "editor": "What o opens this project's review copies with, when not config.toml's.",
@@ -340,10 +343,11 @@ class Settings(Rows):
             self.app.fail(e)
         self.fill()
 
-    def write(self, key: str, value: object, table: str, said: str) -> None:
+    def write(self, key: str, value: object, table: str) -> None:
+        """The row shows the new value, and the line under the list when it applies: no
+        notification says it again."""
         configfile.set_value(config_path(), key, value, table)
         self.reread()
-        self.say(said)
 
     def open(self, key: str) -> None:
         config = self.app.config
@@ -362,7 +366,6 @@ class Settings(Rows):
                     "model",
                     choice[1],
                     f"roles.{role}",
-                    f"{role} runs on {actions.choice_label(choice)} by default.",
                 )
 
             self.app.push_screen(
@@ -375,11 +378,11 @@ class Settings(Rows):
                 return
             self.app.push_screen(
                 ChooseEditor(found),
-                lambda command: command and self.write("ide", command, "review", f"o opens with {command}."),
+                lambda command: command and self.write("ide", command, "review"),
             )
         elif key == "notifications":
             on = not config.desktop_notifications
-            self.write("desktop", on, "notifications", f"Desktop notifications {'on' if on else 'off'}.")
+            self.write("desktop", on, "notifications")
         elif key == "ntfy":
 
             def typed(value: str | None) -> None:
@@ -391,7 +394,7 @@ class Settings(Rows):
                 if value and not NTFY_TOPIC.match(value):
                     self.say("A topic is a name: letters, digits, - and _.")
                     return
-                self.write("ntfy", value, "notifications", f"ntfy {'on' if value else 'off'}.")
+                self.write("ntfy", value, "notifications")
 
             self.app.push_screen(
                 Ask(
@@ -410,7 +413,7 @@ class Settings(Rows):
                 if not value.startswith(("https://", "http://")):
                     self.say(f"The server is an address, e.g. {DEFAULT_NTFY_SERVER}.")
                     return
-                self.write("ntfy_server", value.rstrip("/"), "notifications", f"ntfy server {value}.")
+                self.write("ntfy_server", value.rstrip("/"), "notifications")
 
             self.app.push_screen(
                 Ask("Address of the ntfy server:", config.ntfy_server, "ntfy.sh, or a server of your own."),
@@ -418,8 +421,7 @@ class Settings(Rows):
             )
         elif key == "ntfy_events":
             level = NTFY_LEVELS[(NTFY_LEVELS.index(config.ntfy_events) + 1) % len(NTFY_LEVELS)]
-            said = "the start and what the desktop gets" if level == NTFY_LEVELS[0] else "every stage too"
-            self.write("ntfy_events", level, "notifications", f"ntfy gets {level}: {said}.")
+            self.write("ntfy_events", level, "notifications")
         elif key == "add-reviewer":
             offered = [(opencode.NAME, m) for models in (self.app.available or {}).values() for m in models]
             if not offered:
@@ -433,7 +435,7 @@ class Settings(Rows):
                 if choice is None or not choice[1]:
                     return
                 configfile.set_value(config_path(), "harness", choice[0], "roles.reviewer")
-                self.write("model", choice[1], "roles.reviewer", f"reviewer on {choice[1]}.")
+                self.write("model", choice[1], "roles.reviewer")
 
             self.app.push_screen(
                 ChooseModel("reviewer", offered, None, offered[0], self.app.available), picked
@@ -452,7 +454,7 @@ class Settings(Rows):
                 if not value.isdigit() or int(value) < 1:
                     self.say("Rounds is a whole number of at least 1.")
                     return
-                self.write(key, int(value), "limits", f"{value} rounds from the next start.")
+                self.write(key, int(value), "limits")
 
             self.app.push_screen(Ask(ROUNDS_HELP, str(config.max_rounds)), rounds_typed)
         elif key == "verify_timeout":
@@ -464,7 +466,7 @@ class Settings(Rows):
                 if seconds < 1:
                     self.say("The timeout is minutes (30m) or seconds (1800), at least 1 second.")
                     return
-                self.write(key, seconds, "limits", f"verification gate timeout {duration(seconds)}.")
+                self.write(key, seconds, "limits")
 
             self.app.push_screen(
                 Ask(
@@ -493,8 +495,7 @@ class Settings(Rows):
                     self.say(f"{key} is dollars, e.g. 2.5; 0 for none.")
                     return
                 amount = int(amount) if amount == int(amount) else amount
-                said = f"{key} = ${amount:.2f} from the next turn." if amount else f"{key}: none."
-                self.write(key, amount, "limits", said)
+                self.write(key, amount, "limits")
 
             self.app.push_screen(Ask(prompts[key], f"{now:g}"), dollars)
         elif key == "file":
@@ -555,10 +556,10 @@ class ProjectSettings(Rows):
         self.app.reload()
         self.fill()
 
-    def write(self, key: str, value: object, said: str) -> None:
+    def write(self, key: str, value: object) -> None:
+        """As in the settings: the row says it, not a notification."""
         configfile.set_value(self.path(), key, value)
         self.changed()
-        self.say(said)
 
     def open(self, key: str) -> None:
         project = load_project(self.project_name)
@@ -568,9 +569,7 @@ class ProjectSettings(Rows):
                 if not choice:
                     return
                 actions.save_verify(project, choice["verify"], choice["no_build"])
-                how = ", ".join(f"`{c}`" for c in choice["verify"]) or actions.WRITER_PROPOSES
                 self.changed()
-                self.say(f"{self.project_name} is verified from now on: {how}")
 
             self.app.push_screen(AskVerify(self.project_name, project.verify, project.no_build), chosen)
         elif key == "demo":
@@ -580,19 +579,14 @@ class ProjectSettings(Rows):
                     project.demo,
                     "Empty: vivibox works it out from the repository, or asks the agent once.",
                 ),
-                lambda lines: (
-                    lines is not None
-                    and self.write("demo", lines, f"v runs: {', '.join(lines) or 'worked out'}")
-                ),
+                lambda lines: lines is not None and self.write("demo", lines),
             )
         elif key == "prepare":
 
             def typed(value: str | None) -> None:
                 if value is None:
                     return
-                self.write(
-                    "prepare", [value] if value else [], f"a new task runs first: {value or 'nothing'}"
-                )
+                self.write("prepare", [value] if value else [])
 
             # An empty field starts on what the build files suggest, for Enter to take.
             suggested = " && ".join(project.prepare or project_init.prepare_suggestion(project.repo))
@@ -605,7 +599,7 @@ class ProjectSettings(Rows):
                 if not JAVA.match(value):
                     self.say('java must look like "17" or "temurin-17", or be empty for 21.')
                     return
-                self.write("java", value, f"Java {value or '21'} from the next start")
+                self.write("java", value)
 
             self.app.push_screen(
                 Ask(
@@ -626,7 +620,7 @@ class ProjectSettings(Rows):
                 if reserved := sorted(set(names) & RESERVED_ENV):
                     self.say(f"vivibox sets {', '.join(reserved)} in the pod itself; leave them out.")
                     return
-                self.write("pass_env", names, f"from your shell: {', '.join(names) or 'nothing'}")
+                self.write("pass_env", names)
 
             self.app.push_screen(
                 Ask(
@@ -643,10 +637,7 @@ class ProjectSettings(Rows):
                 return
             self.app.push_screen(
                 ChooseEditor(found, first=("the one in config.toml", "")),
-                lambda command: (
-                    command is not None
-                    and self.write("ide", command, f"o opens it with {command or 'config.toml’s editor'}")
-                ),
+                lambda command: command is not None and self.write("ide", command),
             )
         elif key == "file":
             self.app.edit_project_file()

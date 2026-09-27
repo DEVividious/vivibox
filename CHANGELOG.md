@@ -101,7 +101,8 @@ First public version.
 
 - Under `k` and a project's `e`, a line under the list says what the highlighted setting does
   (what a round is, what `cost_warning` does, the orchestration mode it is on with its legend);
-  switching the orchestration no longer puts its description in a notification.
+  switching the orchestration no longer puts its description in a notification, and a change
+  shows on its row without a notification repeating it; when it applies is on that line.
 - In `n`, Kind, Branch and Build start in one column, each on a band of its own; Rounds has a
   band like the lists, and Attach… looks like a button.
 - The pod has a C compiler (gcc): Rust's build scripts failed with "linker `cc` not found", and a

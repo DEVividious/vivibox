@@ -153,8 +153,10 @@ stay as they are.
 Under the list of `k`, and of a project's `e`, a line says what the highlighted row does, for
 someone who has not read the docs (what one round is, what `cost_warning` does). It follows the
 highlight and the value: orchestration describes the mode it is on, with the legend of its
-symbols, and Enter moving to the next mode changes the line, not a notification. A notification
-confirms a change; it never carries a description, which is gone before it is read.
+symbols, and Enter moving to the next mode changes the line, not a notification. A change shows
+on its row, and when it applies ("from a task's next start") is on that line before it is made:
+no notification says the new value again. A notification is for what the screen does not show,
+such as a value refused and why; it never carries a description, which is gone before it is read.
 
 ## 5. Errors
 

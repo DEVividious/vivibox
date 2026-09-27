@@ -956,6 +956,19 @@ def test_new_takes_a_task_with_nothing_to_build(env):
     assert "verify = false" in find_task(load_config().tasks_dir, "demo-1").plan_path.read_text()
 
 
+def test_new_takes_the_tasks_orchestration_mode(env):
+    """As the Flow row in n: this task's mode; the other tasks keep config.toml's."""
+    from vivibox.config import load_config
+    from vivibox.orchestration import mode_of
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--flow", "single_agent", "--draft"]) == 0
+    assert main(["new", "demo", "Other", "--draft"]) == 0
+    config = load_config()
+    assert mode_of(find_task(config.tasks_dir, "demo-1"), config).name == "single_agent"
+    assert mode_of(find_task(config.tasks_dir, "demo-2"), config).name == config.orchestration
+
+
 def test_attach_opens_the_agents_window_and_closes_it_when_you_leave(env, monkeypatch):
     from vivibox import actions, cli
     from vivibox.config import load_config
@@ -972,3 +985,34 @@ def test_attach_opens_the_agents_window_and_closes_it_when_you_leave(env, monkey
     assert main(["attach", task.id]) == 0
     assert ran["command"][0] == "tmux" and "TMUX" not in ran["env"]
     assert ["kill-session", "-t", f"vivibox-{task.id}"] in calls
+
+
+@pytest.mark.real_start
+def test_a_start_names_the_model_that_writes_in_the_tasks_mode(env, monkeypatch, tmp_path, capsys):
+    """single_agent writes on the planner's model (P+W+R): "Started … (the writer's model)" named
+    one that never ran."""
+    from vivibox import actions, image, opencode, secrets, supervisor
+    from vivibox.pod import Pod
+
+    config = env / "config" / "config.toml"
+    config.write_text(
+        config.read_text()
+        .replace('model = "m"', 'model = "p/pro"', 1)
+        .replace('model = "m"', 'model = "p/flash"', 1)
+    )
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(image, "exists", lambda ref: True)
+    monkeypatch.setattr(secrets, "prepare", lambda task_id, keys: None)
+    monkeypatch.setattr(opencode, "prepare", lambda task, model, verify, used: False)
+    monkeypatch.setattr(actions, "model_missing", lambda *a: "")
+    monkeypatch.setattr(actions, "available_models", lambda refresh=False: [])
+    monkeypatch.setattr(Pod, "up", lambda self: None)
+    monkeypatch.setattr(actions.toolchain, "ensure", lambda *a, **kw: None)
+    monkeypatch.setattr(actions.prepare, "begin", lambda *a: None)
+    monkeypatch.setattr(opencode.OpenCode, "ensure_server", lambda self: None)
+    monkeypatch.setattr(opencode.OpenCode, "session_exists", lambda self, s: True)
+    monkeypatch.setattr(supervisor, "set_next_prompt", lambda *a: None)
+    assert main(["new", "demo", "Goal", "--flow", "single_agent", "--draft"]) == 0
+    assert actions.start("demo-1", supervise=False) == "p/pro"
+    assert main(["new", "demo", "Other", "--draft"]) == 0
+    assert actions.start("demo-2", supervise=False) == "p/flash"

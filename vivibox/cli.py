@@ -27,7 +27,7 @@ from . import (
 )
 from . import init as project_init
 from .cli_providers import cmd_auth, cmd_models
-from .config import ConfigError, config_dir, load_config, load_project
+from .config import ORCHESTRATION_MODES, ConfigError, config_dir, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
 from .states import State
@@ -55,6 +55,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         roles=roles,
         no_build=args.no_build,
         base_ref=args.base,
+        orchestration=args.flow,
     )
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     for note in actions.context_notes(task):
@@ -597,6 +598,12 @@ def parser() -> argparse.ArgumentParser:
         "--no-build",
         action="store_true",
         help="nothing to build or test in this task: research, a ticket analysis",
+    )
+    new.add_argument(
+        "--flow",
+        choices=ORCHESTRATION_MODES,
+        default="",
+        help="how this task is shared between the roles, as the Flow row in n (default: config.toml's)",
     )
     new.add_argument(
         "--model",

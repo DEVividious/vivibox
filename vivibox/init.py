@@ -93,17 +93,21 @@ NODE_VERIFY = {
     "yarn": "yarn install --immutable && yarn test",
     "yarn-classic": "yarn install --frozen-lockfile && yarn test",
     "pnpm": "pnpm install --frozen-lockfile && pnpm test",
+    # `bun test` is bun's own runner; the project's test script may be vitest or anything else.
+    "bun": "bun install --frozen-lockfile && bun run test",
 }
 # The install half of each: what a fresh clone needs before any of its scripts can run.
 NODE_INSTALL = {manager: command.split(" && ")[0] for manager, command in NODE_VERIFY.items()}
 # A command that installs the dependencies itself, in any of the package managers' words, also
 # in a folder of its own (`yarn --cwd apps/web install`, `npm --prefix apps/web ci`, `pnpm -C …`).
 INSTALLS = re.compile(
-    r"\b(?:npm|yarn|pnpm)\b(?:\s+(?:--cwd|--prefix|--dir|-C)(?:=|\s+)\S+)?\s+(?:ci|install|i)\b"
+    r"\b(?:npm|yarn|pnpm|bun)\b(?:\s+(?:--cwd|--prefix|--dir|-C)(?:=|\s+)\S+)?\s+(?:ci|install|i)\b"
     r"|\bcorepack\b|^\s*yarn\s*$"
 )
-# What `npm ci`, Yarn and pnpm install from; without one, an install on a fresh clone fails.
-LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+# What `npm ci`, Yarn, pnpm and bun install from; without one, an install on a fresh clone fails.
+LOCKFILES = (
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+)  # fmt: skip
 # A command that begins by entering a folder: what follows runs there, and so does its install.
 STARTS_IN = re.compile(r"^\s*cd\s+([\w./-]+)\s*(?:&&|;)")
 # Where a monorepo keeps its packages when its package.json does not say (`workspaces`).
@@ -182,6 +186,8 @@ def package_manager(repo: Path) -> str:
         return name
     if (repo / "pnpm-lock.yaml").exists():
         return "pnpm"
+    if (repo / "bun.lock").exists() or (repo / "bun.lockb").exists():
+        return "bun"
     if (repo / "yarn.lock").exists():
         return "yarn" if (repo / ".yarnrc.yml").exists() else "yarn-classic"
     return "npm"
@@ -250,18 +256,30 @@ RUST_CHANNEL = re.compile(r"""^\s*channel\s*=\s*["']([\w.+-]+)["']""", re.MULTIL
 
 
 def tools_for(repo: Path) -> list[str]:
-    """The Go or Rust a project's files ask for, as mise versions: go.mod's toolchain line, else
-    its go line; the channel of rust-toolchain.toml, or the legacy rust-toolchain file, else stable."""
+    """The Go, Rust or bun a project's files ask for, as mise versions: go.mod's toolchain line,
+    else its go line from Go 1.21 on, when that line became the version the module needs; before
+    it, the line was a floor nothing enforced (cobra says go 1.15 and its tests need 1.16), and
+    any Go since builds the module. The channel of rust-toolchain.toml, or the legacy
+    rust-toolchain file, else stable. The bun package.json names, else the latest."""
     found = []
     if (repo / "go.mod").exists():
         text = _read(repo / "go.mod")
         version = GO_TOOLCHAIN.search(text) or GO_VERSION.search(text)
-        found.append(f"go@{version.group(1) if version else 'latest'}")
+        named = version.group(1) if version else ""
+        enforced = named and tuple(int(n) for n in named.split(".")[:2]) >= (1, 21)
+        found.append(f"go@{named if enforced else 'latest'}")
     if (repo / "Cargo.toml").exists():
         channel = RUST_CHANNEL.search(_read(repo / "rust-toolchain.toml"))
         legacy = _read(repo / "rust-toolchain").strip()
         name = channel.group(1) if channel else legacy if re.fullmatch(r"[\w.+-]+", legacy) else "stable"
         found.append(f"rust@{name}")
+    if (repo / "package.json").exists() and package_manager(repo) == "bun":
+        try:
+            named = str(json.loads(_read(repo / "package.json")).get("packageManager", ""))
+        except (ValueError, AttributeError):
+            named = ""
+        version = named.partition("@")[2].partition("+")[0] if named.startswith("bun@") else ""
+        found.append(f"bun@{version or 'latest'}")
     return found
 
 

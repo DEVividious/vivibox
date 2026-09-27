@@ -78,6 +78,7 @@ def test_the_build_files_suggest_what_to_prepare_a_new_tasks_clone_with(tmp_path
 YARN = "yarn install --immutable && yarn test"
 YARN_CLASSIC = "yarn install --frozen-lockfile && yarn test"
 PNPM = "pnpm install --frozen-lockfile && pnpm test"
+BUN = "bun install --frozen-lockfile && bun run test"
 
 
 @pytest.mark.parametrize(
@@ -91,6 +92,9 @@ PNPM = "pnpm install --frozen-lockfile && pnpm test"
         ("{}", {"yarn.lock": ""}, YARN_CLASSIC),
         ("{}", {"pnpm-lock.yaml": ""}, PNPM),
         ("not json", {"pnpm-lock.yaml": ""}, PNPM),
+        ("{}", {"bun.lock": ""}, BUN),
+        ("{}", {"bun.lockb": ""}, BUN),
+        ('{"packageManager": "bun@1.3.2"}', {}, BUN),
     ],
 )
 def test_node_projects_are_tested_with_their_own_package_manager(tmp_path, package, files, verify):
@@ -502,3 +506,27 @@ def test_go_and_rust_projects_get_their_toolchain_their_tests_and_a_build(tmp_pa
     (rust / "rust-toolchain").write_text("1.85\n")
     assert init.detect(rust).tools == ["rust@1.85"]
     assert init.detect(make_repo(tmp_path / "plain")).tools == []
+
+
+def test_a_bun_project_gets_bun_from_mise_and_installs_by_its_lockfile(tmp_path):
+    """The image has no bun: an agent that installed it itself had it in its own home, and the
+    gate, with a fresh one, did not."""
+    web = make_repo(tmp_path / "web")
+    (web / "package.json").write_text('{"scripts": {"test": "vitest"}}')
+    (web / "bun.lock").write_text("")
+    found = init.detect(web)
+    assert found.tools == ["bun@latest"] and found.prepare == ["bun install --frozen-lockfile"]
+    (web / "package.json").write_text('{"packageManager": "bun@1.3.2", "scripts": {"test": "vitest"}}')
+    assert init.detect(web).tools == ["bun@1.3.2"]
+    assert init.with_dependencies(web, ["bun run test"]) == ["bun install --frozen-lockfile", "bun run test"]
+    assert init.with_dependencies(web, ["bun install && bun run test"]) == ["bun install && bun run test"]
+
+
+def test_go_before_toolchains_gets_a_go_that_builds_it(tmp_path):
+    """Before Go 1.21 the go line was a floor that nothing enforced: cobra says go 1.15, and its
+    tests use os.WriteFile from 1.16. Any Go since builds such a module."""
+    go = make_repo(tmp_path / "cli")
+    (go / "go.mod").write_text("module example.com/cli\n\ngo 1.15\n")
+    assert init.detect(go).tools == ["go@latest"]
+    (go / "go.mod").write_text("module example.com/cli\n\ngo 1.21.0\n")
+    assert init.detect(go).tools == ["go@1.21.0"]

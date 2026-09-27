@@ -135,9 +135,11 @@ from nothing. Nothing is set up by just running `vivibox` somewhere.
 The pod comes with Node, npm, Python, uv and Java 21 ready to run (uv's downloads are shared
 between tasks, and Python writes no `__pycache__` into the clone), and `mise` installs any other
 toolchain a task needs. For Go and Rust, `init` reads the version from `go.mod` (its `toolchain`
-line, else its `go` line) or `rust-toolchain.toml`, and writes it to the project file as
-`tools = ["go@1.25.3"]`: the pod installs it for the agent and the gate, into caches shared
-between tasks, with `go test ./...` or `cargo test` as the suggested verification. Nothing is
+line, else its `go` line from Go 1.21 on; an older `go` line was only a floor, so the latest Go)
+or `rust-toolchain.toml`, and for bun from `packageManager` in `package.json`, else the latest,
+and writes it to the project file as `tools = ["go@1.25.3"]`: the pod installs it for the agent
+and the gate, into caches shared between tasks, with `go test ./...`, `cargo test` or
+`bun run test` as the suggested verification. Nothing is
 written into your repository. A project that wants different versions of what the image has, or
 another language, can also commit its own `mise.toml`: the agent proposes it, the gate reads it,
 and you approve it as a build file before it reaches your checkout.

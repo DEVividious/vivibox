@@ -171,3 +171,26 @@ def test_a_python_environment_git_does_not_track_is_not_scanned(tmp_path):
     write(root, "venv/package.json", "{}")
     subprocess.run(["git", "-C", str(root), "add", "-f", "venv/package.json"], check=True)
     assert set(scan(root)) == {"pyproject.toml", "venv/package.json"}
+
+
+def test_what_git_ignores_and_does_not_track_is_not_scanned(tmp_path):
+    """A build's output (zustand's dist/package.json) never reaches your checkout: the review copy
+    is made from the commits. Stopping the task on it asked you to approve nothing. What git
+    tracks is scanned, ignored or not."""
+    root = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    write(root, ".gitignore", "dist/\n*.local.json\n")
+    write(root, "package.json", "{}")
+    write(root, "dist/package.json", "{}")
+    write(root, "web/.vscode/settings.local.json", "{}")
+    assert set(scan(root)) == {"package.json"}
+    write(root, "dist/esm/package.json", "{}")
+    subprocess.run(["git", "-C", str(root), "add", "-f", "dist/esm/package.json"], check=True)
+    assert set(scan(root)) == {"package.json", "dist/esm/package.json"}
+
+
+def test_bun_files_are_risky(repo):
+    """bun.lock decides what bun installs, and bunfig.toml can preload a script into every run."""
+    for name in ("bun.lock", "web/bun.lockb", "bunfig.toml"):
+        write(repo, name, "")
+    assert {"bun.lock", "web/bun.lockb", "bunfig.toml"} <= set(scan(repo))

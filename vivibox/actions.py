@@ -453,8 +453,10 @@ def _start(
     if supervise:
         start_supervisor(task)
     record_settings(task, project, config)
-    task.event("started", model=model)
-    return model
+    # The model the writing happens on: the planner's where the mode joins the two (P+W+R).
+    writes_on = role_of(task, mode_of(task, config).agents["writer"], config).model
+    task.event("started", model=writes_on)
+    return writes_on
 
 
 def supervising(task: Task) -> None:

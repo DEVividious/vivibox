@@ -96,6 +96,7 @@ First public version.
   the plan. The review stays in the panel while the writer fixes its notes. Headings of a
   review or a plan no longer stand larger than the panel's own, and the accepted plan leaves its
   criteria to their section, where they are ticked.
+- `vivibox new --flow <mode>` picks the task's orchestration mode, as the Flow row in `n`.
 
 ### Changed
 
@@ -142,6 +143,17 @@ First public version.
   readable; the focused field has an edge of the accent and selection is a blue-grey tint.
 
 ### Fixed
+
+- "Started … (model)" and the timeline's "started on" name the model the writing runs on in the
+  task's mode: the planner's in `single_agent`, where they named the writer's, which never ran.
+- `vivibox init` on a bun project (`bun.lock`): bun from mise in `tools`, `bun install
+  --frozen-lockfile` as the preparation, `bun run test` as the suggestion. The agent had
+  installed bun in its own home, which the gate does not have. `bun.lock`, `bun.lockb` and
+  `bunfig.toml` are risky files.
+- `vivibox init` on a Go module whose `go` line is older than 1.21 names the latest Go: that
+  line was a floor nothing enforced, and cobra's `go 1.15` got a Go its tests do not build on.
+- A build's output that git ignores (`dist/package.json`) no longer stops a task for approval
+  as a risky file: the review copy is made from the commits, and they never carry it.
 
 - A Rust project's build files are risky files, their changes waiting for your approval like
   `pom.xml`'s: `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain(.toml)`.

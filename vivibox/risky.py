@@ -30,7 +30,9 @@ DEFAULT_PATTERNS = (
     "package.json", ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs",
     # Lockfiles decide what an install puts on your host, and one added where the project had
     # none changes how it is verified.
-    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+    # bun's settings can preload a script into every run and point installs at another registry.
+    "bunfig.toml",
     # Rust: rust-analyzer runs build scripts and proc macros as it opens the project;
     # .cargo/config can set the compiler a build runs; the toolchain file picks what rustup
     # fetches; Cargo.lock decides the dependencies, and their build scripts, like a lockfile above.
@@ -105,10 +107,25 @@ def untracked(repo: Path, folder: Path) -> bool:
     return listed.returncode == 0 and not listed.stdout.strip()
 
 
+def ignored(repo: Path) -> set[str]:
+    """What git ignores and does not track, as paths from the root, a folder with a trailing /:
+    a build's output, which the commits never carry to your checkout. Nothing when git cannot say."""
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
+            cwd=repo, capture_output=True, text=True, timeout=30,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    return set(filter(None, listed.stdout.split("\0"))) if listed.returncode == 0 else set()
+
+
 def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
-    """Risky files in the working tree, with a digest of each; nested git repositories too."""
+    """Risky files in the working tree, with a digest of each; nested git repositories too. What
+    git ignores and does not track is left out: it never reaches your checkout."""
     patterns = (*DEFAULT_PATTERNS, *extra)
     found: dict[str, str] = {}
+    left_out = ignored(repo)
     for root, dirs, files in os.walk(repo):
         here = Path(root)
         rel_dir = here.relative_to(repo).as_posix()
@@ -117,10 +134,13 @@ def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
                 found[f"{rel_dir}/.git"] = NESTED_GIT
             if ".git" in dirs:
                 dirs.remove(".git")
+        prefix = "" if rel_dir == "." else f"{rel_dir}/"
         dirs[:] = sorted(
             d
             for d in dirs
-            if d not in SKIP_DIRS and not (d in ENVIRONMENT_DIRS and untracked(repo, here / d))
+            if d not in SKIP_DIRS
+            and f"{prefix}{d}/" not in left_out
+            and not (d in ENVIRONMENT_DIRS and untracked(repo, here / d))
         )
         # Symlinked directories are not followed by os.walk; list them as entries to be compared.
         for name in sorted([*files, *(d for d in dirs if (here / d).is_symlink())]):
@@ -128,7 +148,7 @@ def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
             is_link_dir = name in dirs
             # A symlinked directory is risky if a directory of that name would be (.idea -> elsewhere).
             probe = f"{rel}/x" if is_link_dir else rel
-            if name != ".git" and any(matches(probe, p) for p in patterns):
+            if name != ".git" and rel not in left_out and any(matches(probe, p) for p in patterns):
                 found[rel] = _digest(here / name)
     return found
 

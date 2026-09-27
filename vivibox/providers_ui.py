@@ -189,17 +189,28 @@ def row_label(name: str, said: str, on: bool) -> str:
 
 
 class ManageProviders(Dialog):
-    """Your providers and MCP servers: add a provider, import an opencode.json, or manage what is on."""
+    """Your providers and MCP servers: add a provider, import an opencode.json, or manage what is on.
+    What changes the list stands under it, adding first; the closing row is Close alone."""
 
     frame_title = "Providers & MCP"
+    hint_keys = (look.ESC_CLOSES,)
+    field_help = {
+        "add": "A provider opencode knows, with your key for it: its models are offered for a task.",
+        "import": "Every provider and MCP server of an opencode.json you already use, such as your "
+        "employer's endpoint.",
+        "manage": "Turn a provider or an MCP server off or on, or remove it with its key; Serena's mode.",
+        "close": "",
+    }
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with Vertical(classes="dialog form"):
             yield OptionList(id="providers", classes="catalog")
+            with Horizontal(classes="row actions"):
+                yield Button("Add provider…", variant="primary", compact=True, id="add")
+                yield Button("Import opencode.json…", compact=True, id="import")
+                yield Button("Manage…", compact=True, id="manage")
+            yield Label("", id="about", classes="wrap")
             with Horizontal(classes="buttons"):
-                yield Button("Add provider…", variant="primary", id="add")
-                yield Button("Import opencode.json…", id="import")
-                yield Button("Manage…", id="manage")
                 yield Button("Close", id="close")
 
     def on_mount(self) -> None:
@@ -329,24 +340,39 @@ class AddProvider(Dialog):
         self.importing = importing
         self.shown: list[tuple[str, str]] = []
 
+    frame_title = "Add a provider"
+    hint_keys = (("↑↓", "pick"), ("enter", "add"), look.ESC_CANCELS)
+    field_help = {
+        "search": "Type to search the providers opencode knows; the arrows pick one in the list.",
+        "import": "Or every provider of an opencode.json you already use, such as your employer's "
+        "endpoint, with its keys.",
+        "key": "Your key for the provider picked above. It is kept in your key store, never in a "
+        "file of vivibox's, and never shown.",
+    }
+
     def compose(self) -> ComposeResult:
-        self.frame_title = "Add a provider"
-        with Vertical(classes="dialog"):
-            yield Label("Type to search the providers opencode knows, arrows to pick.", classes="note")
-            yield Input(placeholder="search, e.g. deep", id="search")
-            yield OptionList(id="catalog", classes="catalog")
-            yield Input(
-                placeholder="API key for the provider picked above (not shown)", password=True, id="key"
-            )
-            yield Label("", id="problem", classes="problem")
+        with Vertical(classes="dialog form"):
+            # Import fills the provider another way, so it stands in the provider's row.
+            with Horizontal(classes="row"):
+                yield Label("Provider", classes="key")
+                yield Input(placeholder="search, e.g. deep", id="search", compact=True)
+                yield Button("Import opencode.json…", compact=True, id="import", classes="inline")
+            with Horizontal(classes="row"):
+                yield Label("", classes="key")
+                yield OptionList(id="catalog", classes="catalog")
+            with Horizontal(classes="row"):
+                yield Label("API key", classes="key")
+                yield Input(placeholder="not shown", password=True, id="key", compact=True)
+            yield Label("", id="problem", classes="problem wrap")
+            yield Label("", id="about", classes="wrap")
             with Horizontal(classes="buttons"):
                 yield Button("Add", variant="primary", id="add")
-                yield Button("Import opencode.json…", id="import")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#search", Input).focus()
         self.query_one("#import").display = self.importing
+        self.query_one("#problem").display = False  # a line only when there is something wrong
         if self.catalog is None:
             self.query_one("#catalog", OptionList).add_option(
                 Option("reading the providers opencode knows…", disabled=True)
@@ -405,7 +431,9 @@ class AddProvider(Dialog):
             else:
                 self.dismiss([])
         except (keys.KeyStoreError, ConfigError) as e:
-            self.query_one("#problem", Label).update(escape(str(e.args[0])))
+            problem = self.query_one("#problem", Label)
+            problem.update(escape(str(e.args[0])))
+            problem.display = True
 
     def imported(self, names: list[str]) -> None:
         if names:  # nothing imported: back to this dialog, to add a provider by name instead

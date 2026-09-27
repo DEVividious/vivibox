@@ -238,3 +238,29 @@ def test_at_eighty_columns_the_bar_keeps_every_key_of_finished_work(env):
         )
 
     run(scenario, size=(80, 24))
+
+
+def test_a_button_that_helps_fill_a_field_is_never_among_the_closing_ones(env, tmp_path):
+    """New folder…, Import opencode.json… and Add/Manage stood beside Select, Add or Close and read
+    as more ways to leave; they stand in the row of what they fill (§4)."""
+    cases = [
+        (lambda: browse.Browse("folder", "Pick", start=tmp_path), ["select", "cancel"], ["new-folder"]),
+        (lambda: providers_ui.AddProvider([("deepseek", "DeepSeek")]), ["add", "cancel"], ["import"]),
+        (lambda: providers_ui.ManageProviders(), ["close"], ["add", "import", "manage"]),
+    ]
+
+    async def scenario(app, pilot):
+        for make, closing, helpers in cases:
+            screen = make()
+            app.push_screen(screen)
+            await pilot.pause()
+            assert [b.id for b in screen.query(".buttons Button")] == closing, type(screen).__name__
+            for helper in helpers:
+                button = screen.query_one(f"#{helper}")
+                assert button.parent.has_class("row"), f"{helper} stands in a row of its own dialog"
+            dialog = screen.query_one(".dialog")
+            assert dialog.region.bottom <= app.size.height, "the closing row is on the screen"
+            app.pop_screen()
+            await pilot.pause()
+
+    run(scenario, size=(80, 24))

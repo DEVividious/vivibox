@@ -106,7 +106,9 @@ First public version.
   stopped, ✓ done, a spinner at work), the primary button tinted and solid once focused.
 - Every dialog is framed the same: its title in the top edge, its keys in the bottom one
   (`ctrl+s create  esc cancel`), buttons one line high. The pickers (logs, models, editors,
-  sessions, roles) are one list dialog; `i` is a form like `n`; `k` and a project's `e` align
+  sessions, roles) are one list dialog; `i`, the folder browser, Add a provider and Providers &
+  MCP are forms like `n`, their helper buttons (New folder…, Import opencode.json…, Manage…) in
+  the row they fill, never among the closing ones; `k` and a project's `e` align
   their rows under upper-case sections, mute what is only shown and mark with › what opens a
   screen.
 - The list: the project's name muted in a task's id, times as `now`, `12m`, `3h`, `2d`, numbers

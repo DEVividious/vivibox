@@ -45,7 +45,7 @@ ModalScreen { align: center middle; background: $background 70%; }
 .wrap { width: 100%; }
 .note, .files { color: $text-muted; }
 .files { margin: 1 0 0 0; }
-.problem { color: $error; }
+.problem { color: $error; margin-top: 1; }
 .heading { width: 100%; color: $text-muted; text-style: bold; }
 .group { padding: 1 0 0 0; color: $text-muted; text-style: bold; }
 
@@ -95,7 +95,9 @@ ToggleButton.-on > .toggle--button { color: $success; }
 /* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
 .catalog { height: auto; max-height: 40vh; }
 .found { height: auto; max-height: 30vh; }
-.tree { height: 60vh; background: transparent; }
+.tree { height: 1fr; min-height: 4; background: transparent; }
+/* The browser takes the screen's height, the tree what the rows under it leave. */
+.dialog.browse { height: 90%; }
 #suggestions { max-height: 8; border: round $faint; background: $panel; }
 #editors { max-height: 40vh; margin: 1 0; }
 /* The settings list grows with the terminal; settings.py leaves room under it for what the
@@ -132,6 +134,11 @@ ToggleButton.-on > .toggle--button { color: $success; }
 }
 .form Button.field:focus { background: $accent 15%; color: $foreground; text-style: none; }
 .form .buttons { margin-top: 1; }
+/* What changes a list stands under it, a row of buttons; the tree's verdict a rule below it. */
+.form .row.actions { margin-top: 1; }
+.form .row.actions > Button { margin: 0 1 0 0; }
+.form .row.picked { margin-top: 1; border-top: solid $faint; }
+.form .row > OptionList { width: 1fr; }
 /* Old roles rows, for the dialogs not yet a form. */
 .role { height: auto; }
 .role > .wrap { width: 1fr; }

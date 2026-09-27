@@ -91,7 +91,7 @@ class PathTree(DirectoryTree):
         if path is None:
             return label
         if (self.mode == JSON and path.is_file()) or (self.mode == FOLDER and is_repository(path)):
-            label.stylize("bold green")
+            label.stylize(f"bold {look.SUCCESS}")
         elif path.name.startswith("."):
             label.stylize("dim")
         return label
@@ -171,15 +171,19 @@ class Browse(Dialog):
 
     def compose(self) -> ComposeResult:
         self.frame_title = self.title_text
-        with Vertical(classes="dialog"):
+        with Vertical(classes="dialog form browse"):
             tree = PathTree(self.start, self.mode, id="tree", classes="tree")
             tree.auto_expand = False  # Enter picks; the arrows open and close
             yield tree
-            yield Label("", id="verdict")
+            # What the highlighted entry would be, and, for a folder, the button that makes one:
+            # it fills the same answer, so it stands in its row, not among the closing buttons.
+            with Horizontal(classes="row picked"):
+                yield Label("Picked", classes="key")
+                yield Label("", id="verdict", classes="value")
+                if self.mode == FOLDER:  # a project from scratch starts in a folder not made yet
+                    yield Button("New folder…", compact=True, id="new-folder", classes="inline")
             with Horizontal(classes="buttons"):
                 yield Button("Select", variant="primary", id="select")
-                if self.mode == FOLDER:  # a project from scratch starts in a folder not made yet
-                    yield Button("New folder…", id="new-folder")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:

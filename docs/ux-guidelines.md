@@ -178,8 +178,9 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 - The panel is a header (`<id> · <status>`), one line of where and how long (project, created,
   updated, the cost so far), `Next:`, what the state asks of the person, and then the same
   sections in the same order, each only when it has something: the newest review
-  (`#### Review n: …`), `#### Acceptance criteria n/N`, `#### Roles` (a row per agent: what it
-  runs on, its turns and its cost; roles one agent plays share a row) and `#### The plan`. A
+  (`#### Review n: …`), `#### Acceptance criteria n/N`, `#### Roles` (a line per agent: what it
+  runs on, its turns and its cost, the total last; roles one agent plays share a line; a list,
+  never a table, whose frame takes rows the panel does not have) and `#### The plan`. A
   plan under review is the body itself, not a section below it. A review's or a plan's own
   headings are bold lines, never larger than the section they are in; the accepted plan leaves
   its criteria to their section.

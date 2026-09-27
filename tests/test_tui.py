@@ -4278,8 +4278,10 @@ def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(e
         app.table.move_cursor(row=rows(app).index(task.id))
         await pilot.pause()
         app.action_details()  # a second app in one test gets no keys from the pilot
-        assert "| Reviewer | m (the writer's) | 1 | $0.02 |" in app.shown, "no role of its own: the writer's"
-        assert "| Total | | 3 | $0.16 |" in app.shown
+        assert "- **Reviewer** · m (the writer's) · 1 turn · $0.02" in app.shown, (
+            "no role of its own: the writer's"
+        )
+        assert "- **Total** · 3 turns · $0.16" in app.shown
 
     run(with_)
 

@@ -158,22 +158,24 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
 
 
 def roles_section(task: Task, st: TaskState) -> list[str]:
-    """Who plays each role, on what, and how many turns and dollars it took: one row per
-    conversation, so roles one agent plays together share a row."""
+    """Who plays each role, on what, and how many turns and dollars it took: a line per
+    conversation, so roles one agent plays together share one, and the total last. A list, not
+    a table: the table's frame took ten rows of a short panel for three agents."""
     rows = agents(task, st)
     if not rows or st.box:
         return []
     name = lambda roles: " + ".join(roles.split("-")).capitalize()  # noqa: E731
+    turns = lambda n: f"{n} turn{'' if n == 1 else 's'}"  # noqa: E731
     lines = [
         "",
         "#### Roles",
         "",
-        "| Role | Runs on | Turns | Cost |",
-        "|---|---|---|---|",
-        *(f"| {name(a.roles)} | {a.runs_on} | {a.turns} | {ui.money(a.cost)} |" for a in rows),
+        *(f"- **{name(a.roles)}** · {a.runs_on} · {turns(a.turns)} · {ui.money(a.cost)}" for a in rows),
     ]
     if len(rows) > 1:
-        lines.append(f"| Total | | {sum(a.turns for a in rows)} | {ui.money(sum(a.cost for a in rows))} |")
+        lines.append(
+            f"- **Total** · {turns(sum(a.turns for a in rows))} · {ui.money(sum(a.cost for a in rows))}"
+        )
     return lines
 
 

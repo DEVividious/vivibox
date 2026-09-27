@@ -21,10 +21,11 @@ def test_the_panel_counts_turns_and_cost_per_role(env):
           ("implement", "writer", 0.05), ("review", "reviewer", 0.02))  # fmt: skip
     shown = detail(task, task.read_state(), 3, running=True)
     assert "#### Roles" in shown
-    assert "| Planner | m | 2 | $0.03 |" in shown
-    assert "| Writer | m | 2 | $0.09 |" in shown
-    assert "| Reviewer | other/strong | 1 | $0.02 |" in shown
-    assert "| Total | | 5 | $0.14 |" in shown
+    assert "- **Planner** · m · 2 turns · $0.03" in shown
+    assert "- **Writer** · m · 2 turns · $0.09" in shown
+    assert "- **Reviewer** · other/strong · 1 turn · $0.02" in shown
+    assert "- **Total** · 5 turns · $0.14" in shown
+    assert "|---|" not in shown, "a line an agent: a table took ten rows for three"
     assert "planning + implementation" not in shown, "the split is the table now, not a sum to read"
 
 
@@ -38,8 +39,8 @@ def test_roles_one_agent_plays_share_a_row(env):
     ):
         task.event("turn", state=state, role=role, agent="planner", ok=True, cost=cost, tokens=1)
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "| Planner + writer + reviewer | m | 3 | $0.07 |" in shown
-    assert "| Writer |" not in shown and "| Total |" not in shown, "one row needs no total"
+    assert "- **Planner + writer + reviewer** · m · 3 turns · $0.07" in shown
+    assert "- **Writer**" not in shown and "- **Total**" not in shown, "one row needs no total"
 
 
 def test_turns_from_before_roles_were_recorded_count_by_state(env):
@@ -49,7 +50,10 @@ def test_turns_from_before_roles_were_recorded_count_by_state(env):
     task.event("turn", state="implement", cost=0.04, tokens=1)
     task.event("turn", state="review", cost=0.02, tokens=1)
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "| Planner | m | 1 | $0.03 |" in shown and "| Reviewer | other/strong | 1 | $0.02 |" in shown
+    assert (
+        "- **Planner** · m · 1 turn · $0.03" in shown
+        and "- **Reviewer** · other/strong · 1 turn · $0.02" in shown
+    )
 
 
 def test_the_sections_come_in_one_order(env):
@@ -135,8 +139,8 @@ def test_a_reviewer_without_a_role_of_its_own_runs_on_the_writers_model(env):
     table said "Reviewer | -" after a review, and nothing before one."""
     task = implementing()
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "| Reviewer | m (the writer's) | 0 | $0.00 |" in shown, "listed before its first turn"
+    assert "- **Reviewer** · m (the writer's) · 0 turns · $0.00" in shown, "listed before its first turn"
     turns(task, ("review", "reviewer", 0.02))
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "| Reviewer | m (the writer's) | 1 | $0.02 |" in shown
-    assert "| Reviewer | - |" not in shown
+    assert "- **Reviewer** · m (the writer's) · 1 turn · $0.02" in shown
+    assert "- **Reviewer** · - ·" not in shown

@@ -67,8 +67,13 @@ First public version.
 - A finished task keeps its timeline, its verification logs, its reviews and the supervisor's
   log with its plan, and `l` on its row reads them.
 
+- `init` suggests how a Python project is tested and prepared: `uv run --frozen pytest` and
+  `uv sync --frozen` with a `uv.lock`, else `pytest` in a throwaway environment from
+  `pyproject.toml` or the requirements files. uv's cache is shared between tasks and the gate.
+
 ### Fixed
 
+- Python in a pod writes no `__pycache__` folders, which stopped the gate as uncommitted files.
 - A task's row says what sent the writer on its fix turn (`implementing (round 1/3: 2 criteria
   not met)`), and the supervisor's window logs every change of state with its reason.
 - A commit whose message is about the task's files ("Record test red evidence", "Tick criteria")

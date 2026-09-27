@@ -127,3 +127,18 @@ def test_a_build_cache_hit_leaves_the_modules_files_in_place():
     text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
     args = text[text.index('MAVEN_ARGS="') :].split('"')[1]
     assert "-Dmaven.build.cache.lazyRestore=false" in args
+
+
+def test_python_gets_a_shared_uv_cache_and_writes_no_bytecode_into_the_clone():
+    """The gate's clone is fresh every time: without a shared cache uv downloads every package
+    again, and __pycache__ folders are untracked files that stop the build."""
+    from importlib.resources import files
+
+    from vivibox import pod
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    assert "UV_CACHE_DIR=/cache/uv" in text and "UV_PYTHON_INSTALL_DIR=/cache/uv/python" in text
+    assert "PYTHONDONTWRITEBYTECODE=1" in text and "/cache/uv" in text.split("mkdir -p /config")[1]
+    assert pod.CACHES["uv"] == "/cache/uv"
+    writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
+    assert " uv;" in writable.command

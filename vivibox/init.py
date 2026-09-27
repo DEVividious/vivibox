@@ -184,6 +184,26 @@ def package_manager(repo: Path) -> str:
     return "npm"
 
 
+# What a Python project's tests run with, and files that name more of what they need.
+REQUIREMENTS = ("requirements.txt", "requirements-dev.txt", "requirements-test.txt", "requirements/dev.txt")
+
+
+def python_candidates(repo: Path) -> list[tuple[str, str]]:
+    """uv, in the image: the environment its lockfile pins, else a throwaway one from the
+    project or its requirements. Nothing it writes shows in the clone (.venv ignores itself), so
+    neither the writer's clone nor the gate's gains an uncommitted file."""
+    pyproject = _read(repo / "pyproject.toml")
+    pytest = "" if "pytest" in pyproject else " --with pytest"
+    if (repo / "uv.lock").exists():
+        return [(f"uv run --frozen{pytest} pytest", "uv.lock")]
+    if pyproject:
+        return [("uv run --no-project --with-editable . --with pytest pytest", "pyproject.toml")]
+    if (repo / "requirements.txt").exists():
+        named = " ".join(f"--with-requirements {name}" for name in REQUIREMENTS if (repo / name).exists())
+        return [(f"uv run --no-project {named} --with pytest pytest", "requirements.txt")]
+    return []
+
+
 def prepare_suggestion(repo: Path) -> list[str]:
     """What to run once in a new task's clone before the writer: the build without its tests,
     so the writer starts on a built project and builds one module at a time. The build tool's
@@ -200,6 +220,8 @@ def prepare_suggestion(repo: Path) -> list[str]:
         return ["mvn -B install -DskipTests"]
     if (repo / "package.json").exists() and has_lockfile(repo):
         return [NODE_INSTALL[package_manager(repo)]]
+    if (repo / "uv.lock").exists():
+        return ["uv sync --frozen"]
     return []
 
 
@@ -220,6 +242,7 @@ def candidates(repo: Path) -> list[tuple[str, str]]:
         found.append(("mvn -B verify", "pom.xml"))
     if (repo / "package.json").exists():
         found += node_candidates(repo)
+    found += python_candidates(repo)
     return found + [c for c in ci_commands(repo) if c[0] not in {command for command, _ in found}]
 
 

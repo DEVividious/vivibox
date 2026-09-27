@@ -55,6 +55,7 @@ CACHES = {
     "npm": "/cache/npm",
     "mise": "/cache/mise",
     "corepack": "/cache/corepack",
+    "uv": "/cache/uv",
     # Maven's build cache extension puts its cache beside the local repository, /cache/m2.
     "build-cache": "/cache/build-cache",
 }

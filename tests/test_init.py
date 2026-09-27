@@ -414,3 +414,41 @@ def test_a_command_that_starts_in_a_folder_gets_its_install_there(tmp_path):
     assert init.with_dependencies(tmp_path, ["cd apps/other && yarn test"]) == [
         "cd apps/other && yarn test"
     ], "no lockfile there: nothing to install by"
+
+
+def python_project(path: Path, pyproject: str = "", **files: str) -> Path:
+    make_repo(path)
+    if pyproject:
+        (path / "pyproject.toml").write_text(pyproject)
+    for name, text in files.items():
+        (path / name.replace("__", ".").replace("_txt", ".txt")).write_text(text)
+    return path
+
+
+PYPROJECT = '[project]\nname = "shop"\nversion = "0.1.0"\n'
+
+
+def test_python_projects_are_tested_through_uv_without_leaving_files_behind(tmp_path):
+    """uv runs the tests in an environment from its lockfile, or a throwaway one from the project
+    or its requirements: nothing it writes shows as an uncommitted file in the clone."""
+    locked = python_project(
+        tmp_path / "a", PYPROJECT + '[dependency-groups]\ndev = ["pytest>=8"]\n', uv__lock=""
+    )
+    assert "uv.lock runs: uv run --frozen pytest" in init.detect(locked).notes
+    assert init.prepare_suggestion(locked) == ["uv sync --frozen"]
+    no_pytest = python_project(tmp_path / "b", PYPROJECT, uv__lock="")
+    assert "uv.lock runs: uv run --frozen --with pytest pytest" in init.detect(no_pytest).notes
+    unlocked = python_project(tmp_path / "c", PYPROJECT)
+    notes = init.detect(unlocked).notes
+    assert "pyproject.toml runs: uv run --no-project --with-editable . --with pytest pytest" in notes
+    assert init.prepare_suggestion(unlocked) == [], "a throwaway environment needs nothing prepared"
+    plain = python_project(tmp_path / "d", requirements_txt="flask\n")
+    assert (
+        "requirements.txt runs: uv run --no-project --with-requirements requirements.txt --with pytest pytest"
+        in init.detect(plain).notes
+    )
+    (plain / "requirements-dev.txt").write_text("pytest\n")
+    assert (
+        "requirements.txt runs: uv run --no-project --with-requirements requirements.txt"
+        " --with-requirements requirements-dev.txt --with pytest pytest" in init.detect(plain).notes
+    )

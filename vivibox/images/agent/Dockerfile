@@ -62,7 +62,7 @@ RUN mkdir -p /etc/mise \
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \
  && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack /cache/build-cache \
-    /cache/m2/installed \
+    /cache/m2/installed /cache/uv \
  && chown -R agent:agent /config /cache
 
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.
@@ -77,6 +77,9 @@ RUN groupadd -o -g "${GID}" agent \
 # another's build. A fresh volume takes its owner from the image, hence the directory above.
 # lazyRestore is off: on a build cache hit the extension would leave the module's target/ empty
 # until asked, and whatever reads the jar there, the next module or a packaging plugin, fails.
+# uv keeps its downloads, and the Pythons it fetches, in a shared cache too; it copies from there,
+# the cache being another volume than the clone. Python writes no __pycache__ into the clone,
+# where an untracked folder stops the gate's build.
 ENV HOME=/config \
     MAVEN_CONFIG= \
     MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true -Dmaven.build.cache.lazyRestore=false" \
@@ -87,6 +90,10 @@ ENV HOME=/config \
     COREPACK_HOME=/cache/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     MISE_DATA_DIR=/cache/mise \
+    UV_CACHE_DIR=/cache/uv \
+    UV_PYTHON_INSTALL_DIR=/cache/uv/python \
+    UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1 \
     PATH=/cache/mise/shims:$PATH
 
 USER agent

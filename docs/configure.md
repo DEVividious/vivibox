@@ -124,13 +124,16 @@ monorepo's root, gets no install, and the notes name each package with a test sc
 (`tsc: not found`) is a failure of the environment, not of the code: the task waits for you to
 put the install in front of the command. Otherwise: the command the gate runs (`bash gradlew
 test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
-when `packageManager` in `package.json` or the lockfile names them) and, when the build needs it,
+when `packageManager` in `package.json` or the lockfile names them; for Python, `pytest` through
+uv: `uv run --frozen pytest` with a `uv.lock`, else in a throwaway environment from
+`pyproject.toml` or the requirements files) and, when the build needs it,
 a JDK other than the image's Java 21, for example Java 17 for Gradle 7. It shows the file and writes
 it to `~/.config/vivibox/projects/<name>.toml` only when you confirm. For a folder that is empty or
 does not exist yet, it starts a git repository there with a first commit, so an app can be built
 from nothing. Nothing is set up by just running `vivibox` somewhere.
 
-The pod comes with Node, npm, Python, uv and Java 21 ready to run, and `mise` installs any other
+The pod comes with Node, npm, Python, uv and Java 21 ready to run (uv's downloads are shared
+between tasks, and Python writes no `__pycache__` into the clone), and `mise` installs any other
 toolchain a task needs. A project that wants different versions, or another language, commits its
 own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
 before it reaches your checkout.

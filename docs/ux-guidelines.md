@@ -26,7 +26,7 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | Thing | Word | Not |
 |---|---|---|
 | unit of work | task | job, run |
-| checks after implementation | verification | verify; "gate" only in code and docs/security.md |
+| checks after implementation | verification | verify; "gate" only in code, docs/security.md and the "verification gate timeout" setting |
 | a fix turn the writer is sent on, by the verification or the review | round | attempt, iteration, retry |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
 | removing a task | delete | rm, remove |
@@ -74,7 +74,7 @@ starts the pod when needed.
 ## 3. Keys
 
 - A key is a verb and the selected row is its object: `e` edits, `x` deletes, `o` opens in the
-  IDE, `n` makes a new task, `b` opens a box in a project, `w` watches an agent, or the verification while it runs, or enters a box. A letter has one verb; a pair of opposites may share one (`s` for
+  IDE / text editor, `n` makes a new task, `b` opens a box in a project, `w` watches an agent, or the verification while it runs, or enters a box. A letter has one verb; a pair of opposites may share one (`s` for
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
   agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.
@@ -133,6 +133,13 @@ starts the pod when needed.
   actual commits, using the latest subject with earlier changes as bullets, without copying the
   acceptance checklist. Once the work is applied, the separate
   commit dialog opens while the pod is cleaned up; accepting shows `accepting…` until it finishes.
+
+Settings name what a row is for, not its key: the editor section is "Manual review" and its row
+"IDE / text editor (o)", the same row on a project's screen, and the footer and `?` call `o` that
+too; "Notifications" groups desktop, ntfy topic, server and events; "rounds" says what the round
+limit is for; "verification gate timeout" shows minutes from a minute up (`30 min`), seconds below
+that (`45 s`), and its field takes minutes (`30m`) or seconds (`1800`). The keys in `config.toml`
+stay as they are.
 
 ## 5. Errors
 

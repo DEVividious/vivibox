@@ -152,6 +152,26 @@ def config_path() -> Path:
     return config_dir() / "config.toml"
 
 
+# The row for what o opens, in the settings and on a project: the tool, not the key alone.
+EDITOR_LABEL = "IDE / text editor (o)"
+
+
+def duration(seconds: int) -> str:
+    """A time limit as a person reads it: minutes from a minute up, else seconds."""
+    return f"{seconds / 60:g} min" if seconds >= 60 else f"{seconds} s"
+
+
+def parse_duration(text: str) -> int:
+    """Minutes as "30m", seconds as "1800" or "45s"; 0 for anything else."""
+    text = text.strip().lower()
+    try:
+        if text.endswith("m"):
+            return round(float(text[:-1]) * 60)
+        return int(text.removesuffix("s"))
+    except ValueError:
+        return 0
+
+
 class Settings(Rows):
     """Providers & MCP first, since a task cannot start without a model; then the roles' defaults,
     the review, the limits, and the machine's own settings, shown only."""
@@ -192,19 +212,20 @@ class Settings(Rows):
                 f"{config.orchestration}: {ORCHESTRATION_MODES[config.orchestration].flow}",
                 "orchestration",
             ),
-            ("Review", "", None),
+            ("Manual review", "", None),
             (
-                "editor for o",
+                EDITOR_LABEL,
                 editor if config.ide else f"{editor} (found here)" if editor else "none found",
                 "editor",
             ),
+            ("Notifications", "", None),
             ("desktop notifications", "on" if config.desktop_notifications else "off", "notifications"),
             ("ntfy topic", config.ntfy or "off", "ntfy"),
             ("ntfy server", config.ntfy_server, "ntfy_server"),
             ("ntfy events", config.ntfy_events, "ntfy_events"),
             ("Limits", "", None),
             ("rounds", str(config.max_rounds), "max_rounds"),
-            ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
+            ("verification gate timeout", duration(config.verify_timeout), "verify_timeout"),
             (
                 "cost_warning",
                 f"${config.cost_warning:.2f}" if config.cost_warning else "none",
@@ -337,22 +358,37 @@ class Settings(Rows):
                 "",
                 f"{mode.label}: {mode.flow}. {mode.when} {mode.tradeoff}",
             )
-        elif key in ("max_rounds", "verify_timeout"):
-            prompts = {
-                "max_rounds": ROUNDS_HELP,
-                "verify_timeout": "Seconds one verification command may take:",
-            }
-            now = {"max_rounds": config.max_rounds, "verify_timeout": config.verify_timeout}[key]
+        elif key == "max_rounds":
 
-            def typed(value: str | None) -> None:
+            def rounds_typed(value: str | None) -> None:
                 if value is None:
                     return
                 if not value.isdigit() or int(value) < 1:
-                    self.say(f"{key} must be a whole number of at least 1.")
+                    self.say("Rounds is a whole number of at least 1.")
                     return
-                self.write(key, int(value), "limits", f"{key} = {value} from the next start.")
+                self.write(key, int(value), "limits", f"{value} rounds from the next start.")
 
-            self.app.push_screen(Ask(prompts[key], str(now)), typed)
+            self.app.push_screen(Ask(ROUNDS_HELP, str(config.max_rounds)), rounds_typed)
+        elif key == "verify_timeout":
+
+            def timeout_typed(value: str | None) -> None:
+                if value is None:
+                    return
+                seconds = parse_duration(value)
+                if seconds < 1:
+                    self.say("The timeout is minutes (30m) or seconds (1800), at least 1 second.")
+                    return
+                self.write(key, seconds, "limits", f"verification gate timeout {duration(seconds)}.")
+
+            self.app.push_screen(
+                Ask(
+                    "How long one verification command may run before it is stopped:",
+                    duration(config.verify_timeout),
+                    "Minutes as 30m, or seconds as 1800. Past it the task waits for you, as on any"
+                    " failure outside the code.",
+                ),
+                timeout_typed,
+            )
         elif key in ("cost_warning", "cost_limit"):
             prompts = {
                 "cost_warning": "Dollars a task may cost before you are told (0 for none):",
@@ -417,7 +453,7 @@ class ProjectSettings(Rows):
             ("java", project.java or "21, the image's", "java"),
             ("pass_env", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
             (
-                "editor for o",
+                EDITOR_LABEL,
                 project.ide or f"config.toml's: {machine}" if machine else "none found",
                 "editor",
             ),

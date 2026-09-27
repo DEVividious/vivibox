@@ -70,6 +70,9 @@ First public version.
 ### Fixed
 
 - Task columns follow the current terminal width immediately after a resize.
+- Settings name what a row is for: "Manual review" and "IDE / text editor (o)" (in the footer
+  and `?` too), a "Notifications" group, and "verification gate timeout" shown in minutes and
+  edited as `30m` or `1800`.
 - New tasks require your Git name and email before opening the form, with commands to set them.
 - The plan's repair turn, and the review's, went on in a second session briefed as the role
   again, doing the first turn's work over: they continue the role's own conversation.

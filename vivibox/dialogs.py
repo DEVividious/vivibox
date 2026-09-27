@@ -393,7 +393,7 @@ HELP = """[b]Your decisions[/b], on the selected task
   d, Enter  show or hide its details
   e     edit the plan; with a manual planner, paste your chat's plan
   c, C  copy the planning prompt for a chat, or (Shift+c) for a CLI
-  o     open the review copy in your IDE
+  o     open the review copy in your IDE / text editor
   v     run the app in its pod, or stop it
   w     watch or talk to the agent; while verifying, its log (Ctrl-q leaves);
         with two conversations, asks which; in a box, a shell in it
@@ -407,13 +407,13 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]The selected project[/b] (Enter folds or unfolds its tasks)
   n     new task in it
   b     open a box: its pod for you to work in by hand, opencode included
-  e     its settings: verification, how to run it, java, pass_env, editor
-  o     open its repository in your IDE
+  e     its settings: verification, run, java, pass_env, IDE / text editor
+  o     open its repository in your IDE / text editor
   x     forget it, once it has no tasks
 
 [b]Anywhere[/b]
   i     set up a project
-  k     settings: providers & MCP, roles, editor for o, notifications, limits
+  k     settings: providers & MCP, roles, orchestration, editor, ntfy, limits
   h     show or hide the tasks you accepted
   H     Shift+h: show or hide the tasks you deleted (hidden to start with)
   q     quit

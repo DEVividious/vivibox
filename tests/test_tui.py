@@ -1936,8 +1936,10 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
             'model = "deepseek/deepseek-v4-flash"' in text and "# The manual." in text and "# Kept." in text
         )
         assert "deepseek-v4-flash" in labels(app)[writer], "the row says so at once"
-        # The editor for o.
-        editor = next(i for i, row in enumerate(labels(app)) if "editor for o" in row)
+        # The editor for o, under "Manual review"; the notifications under a heading of their own.
+        assert any("Manual review" in row for row in shown) and any("Notifications" in row for row in shown)
+        assert not any("editor for o" in row for row in shown), "the row names the tool, not the key"
+        editor = next(i for i, row in enumerate(labels(app)) if "IDE / text editor (o)" in row)
         app.screen.query_one("#rows", OptionList).highlighted = editor
         await pilot.press("enter")
         await pilot.pause()
@@ -1969,6 +1971,23 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         await pilot.pause()
         text = config.read_text()
         assert "[limits]\n# Kept.\nmax_rounds = 5\n" in text and app.config.max_rounds == 5
+        # The verification's time limit: minutes to read, minutes or seconds to type.
+        timeout = next(i for i, row in enumerate(labels(app)) if "verification gate timeout" in row)
+        assert "30 min" in labels(app)[timeout] and "1800" not in labels(app)[timeout]
+        app.screen.query_one("#rows", OptionList).highlighted = timeout
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "45m"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "verify_timeout = 2700" in config.read_text() and "45 min" in labels(app)[timeout]
+        app.screen.query_one("#rows", OptionList).highlighted = timeout
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "45"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "verify_timeout = 45" in config.read_text() and "45 s" in labels(app)[timeout]
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, settings.Settings)
@@ -2029,7 +2048,7 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.pause()
         assert load_project("demo").pass_env == ["NPM_TOKEN", "REPO_TOKEN"]
         assert "NPM_TOKEN, REPO_TOKEN" in labels(app)[row]
-        await go_to(app, pilot, "editor for o")
+        await go_to(app, pilot, "IDE / text editor (o)")
         assert isinstance(app.screen, dialogs.ChooseEditor)
         await pilot.press("down", "enter")  # after "the one in config.toml": VS Code
         await pilot.pause()

@@ -291,7 +291,7 @@ def test_early_stop_a_report_costs_an_attempt_and_the_next_turn_commits(bench):
             assert head(task.repo) == base, f"attempt {attempt}: the report turn committed nothing"
             sup.step()  # the verification
             spend(task)
-            assert task.read_state().iteration == attempt + 1, "an attempt spent"
+            assert task.read_state().rounds == attempt, "a round spent"
         feedback = (task.meta / "handoff" / "verify-feedback.md").read_text()
         assert "committed nothing" in feedback, "the second time, the feedback says so"
         sup.step()  # the turn that reads the feedback, without a prompt of ours
@@ -584,6 +584,55 @@ def test_review_a_test_that_proves_nothing_is_a_blocking_note_and_the_next_turn_
 # --- orchestration modes: the three flows that are not the default ---------------------------
 
 GOAL = "Add subtract(a, b) to calc.py, with a unit test in test_calc.py"
+
+
+def test_criteria_the_planners_first_draft_asks_no_command_to_pass(bench):
+    """A goal that invites it ("the tests pass"): the planner's brief says no build or test
+    command passing is a criterion, and the first draft passes acceptance, with no repair turn.
+    Planning only: the task stops once the plan is accepted."""
+    project(bench, "criteria", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
+    goal = "Add subtract(a, b) to calc.py, with a unit test in test_calc.py; all the tests must pass"
+    task, sup = begin("criteria", goal)
+    try:
+        st = drive(task, sup, {State.IMPLEMENT, State.CHECKPOINT_PLAN, State.CHECKPOINT_BLOCKED}, steps=3)
+        planning = [e["data"] for e in task.events() if e["type"] == "turn" and e["data"]["state"] == "plan"]
+        repairs = [t["kind"] for t in planning if t.get("kind", "").startswith("plan repair")]
+        assert not repairs, f"the first draft was refused: {repairs}"
+        assert st.state is State.IMPLEMENT, f"the plan was accepted: {st.state}, {st.problem}"
+    finally:
+        finish(task)
+
+
+def test_goal_met_the_planner_asks_instead_of_planning_tests(bench):
+    """The code already does what the goal asks: the planner writes the question, it does not
+    plan tests that cannot be seen failing first."""
+    done = TESTS + "\n    def test_add_negative(self):\n        self.assertEqual(add(-1, -2), -3)\n"
+    project(bench, "met", {"calc.py": CALC, "test_calc.py": done}, VERIFY)
+    task, sup = begin("met", "Add add(a, b) to calc.py that returns the sum, with unit tests")
+    try:
+        st = drive(task, sup, {State.IMPLEMENT, State.CHECKPOINT_PLAN, State.CHECKPOINT_BLOCKED}, steps=3)
+        asked = [p.name for p in (task.meta / "handoff").iterdir() if p.name.startswith("question")]
+        assert asked and st.state is State.CHECKPOINT_PLAN, f"asked, not planned: {st.state}, {asked}"
+    finally:
+        finish(task)
+
+
+def test_propose_from_the_pipeline_the_writer_starts_from_what_the_project_names(bench):
+    """No verification command, and the pipeline runs `python3 -m unittest discover -v`: the
+    writer, told what the project's files name, proposes the pipeline's command."""
+    from vivibox import proposal
+
+    ci = "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
+    ci += "      - uses: actions/checkout@v4\n      - run: python3 -m unittest discover -v\n"
+    files = {"calc.py": CALC, "test_calc.py": TESTS, ".github/workflows/ci.yml": ci}
+    project(bench, "pipeline", files, [])
+    task, sup = begin("pipeline", "Add subtract(a, b) to calc.py, with a unit test in test_calc.py")
+    try:
+        st = drive(task, sup, {State.CHECKPOINT_BLOCKED, State.CHECKPOINT_FINAL})
+        command = proposal.proposed(task)
+        assert command and "unittest discover" in command, f"the pipeline's command: {command!r} ({st.state})"
+    finally:
+        finish(task)
 
 
 def test_single_agent_one_conversation_plans_writes_reviews_itself_and_passes_the_gate(bench):

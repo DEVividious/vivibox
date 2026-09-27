@@ -67,6 +67,23 @@ def run(scenario, size=(140, 40)):
     asyncio.run(go())
 
 
+def test_columns_follow_each_terminal_resize(env):
+    from ux import screen_text
+
+    new_task("Resize task")
+
+    async def scenario(app, pilot):
+        for width in (80, 160, 70, 200):
+            await pilot.resize_terminal(width, 40)
+            await pilot.pause()
+            visible = screen_text(app)
+            assert ("CRITERIA" in visible) == (width >= 100)
+            assert ("CREATED" in visible) == (width >= 130)
+            assert "Resize task" in visible
+
+    run(scenario, size=(80, 40))
+
+
 def test_lists_tasks_waiting_for_you_first(env, monkeypatch):
     planning = new_task("Still planning")
     planning.event("started", model="m")

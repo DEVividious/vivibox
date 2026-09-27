@@ -69,6 +69,7 @@ First public version.
 
 ### Fixed
 
+- Task columns follow the current terminal width immediately after a resize.
 - The plan's repair turn, and the review's, went on in a second session briefed as the role
   again, doing the first turn's work over: they continue the role's own conversation.
 

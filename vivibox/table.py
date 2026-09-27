@@ -8,6 +8,7 @@ from datetime import datetime
 
 from rich.markup import escape
 from rich.text import Text
+from textual.events import Resize
 from textual.widgets import Static
 
 from . import actions, orchestration, ui
@@ -42,8 +43,8 @@ class TaskTable:
             else tuple(c for c in self.COLUMNS if c != "REVIEW")
         )
 
-    def set_columns(self) -> None:
-        wanted = self.columns_for(self.size.width)
+    def set_columns(self, width: int | None = None) -> None:
+        wanted = self.columns_for(self.size.width if width is None else width)
         if wanted == self.columns:
             return
         self.columns = wanted
@@ -56,9 +57,9 @@ class TaskTable:
         self.review_column, self.updated_column = by_name.get("REVIEW"), by_name.get("UPDATED")
         self.drawn = ()
 
-    def on_resize(self) -> None:
+    def on_resize(self, event: Resize) -> None:
         if self.table is not None:  # a resize before the view is built has nothing to lay out
-            self.set_columns()
+            self.set_columns(event.size.width)
             self.reload()
 
     def take_history(self, live: set[str], known: list[str]) -> None:

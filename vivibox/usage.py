@@ -78,16 +78,19 @@ def of_events(
     return used
 
 
-def gather(finished: bool = True, project: str = "", measure: bool = False) -> list[Usage]:
+def gather(
+    finished: bool = True, project: str = "", measure: bool = False, problems: list[str] | None = None
+) -> list[Usage]:
     """Every live task, newest first, then the finished ones from their archive when asked for.
-    measure: what the live tasks' pods use now, which takes Docker seconds."""
+    measure: what the live tasks' pods use now, which takes Docker seconds; why it could not be
+    measured goes to problems, when given."""
     rows = []
     live = [
         t
         for t in reversed(list_tasks(load_config().tasks_dir))
         if not project or t.read_state().project == project
     ]
-    found = resources.sample({t.id: t.root for t in live}) if measure and live else {}
+    found = resources.sample({t.id: t.root for t in live}, problems=problems) if measure and live else {}
     for task in live:
         used = of_events(task.id, task.read_state().project, task.events(), live=True)
         used.now = found.get(task.id)

@@ -84,15 +84,26 @@ def owner(name: str, task_ids: list[str], endings: tuple[str, ...]) -> tuple[str
     return None
 
 
-def sample(roots: dict[str, Path], run: Callable[[list[str]], str] | None = None) -> dict[str, Resources]:
-    """roots: each live task's folder, by its id. {} when Docker does not answer."""
+def sample(
+    roots: dict[str, Path],
+    run: Callable[[list[str]], str] | None = None,
+    problems: list[str] | None = None,
+) -> dict[str, Resources]:
+    """roots: each live task's folder, by its id. {} when Docker does not answer, with why in
+    problems, when given: a screen of dashes alone would read as pods doing nothing."""
     run = run or default_run
     ids = list(roots)
     found = {task_id: Resources() for task_id in ids}
     try:
         stats = run(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
         df = json.loads(run(["docker", "system", "df", "-v", "--format", "{{json .}}"]) or "{}")
-    except (Unavailable, ValueError):
+    except Unavailable as e:
+        if problems is not None:
+            problems.append(f"Docker did not answer: {e}")
+        return {}
+    except ValueError as e:
+        if problems is not None:
+            problems.append(f"docker system df gave something other than JSON: {e}")
         return {}
     for line in stats.splitlines():
         try:

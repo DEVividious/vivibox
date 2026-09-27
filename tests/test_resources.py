@@ -59,7 +59,9 @@ def test_docker_not_answering_leaves_the_figures_out(tmp_path):
     def run(command):
         raise resources.Unavailable("docker: not found")
 
-    assert resources.sample({"demo-1": tmp_path}, run=run) == {}
+    problems: list[str] = []
+    assert resources.sample({"demo-1": tmp_path}, run=run, problems=problems) == {}
+    assert problems == ["Docker did not answer: docker: not found"], "why, for the screen to say"
 
 
 def test_sizes_for_a_person():

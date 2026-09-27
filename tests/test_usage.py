@@ -143,7 +143,7 @@ def test_u_measures_the_pods_only_while_it_is_open(env, monkeypatch):
     task = new_task()
     sampled = []
 
-    def sample(roots, run=None):
+    def sample(roots, run=None, problems=None):
         sampled.append(sorted(roots))
         return {
             task.id: resources.Resources(
@@ -180,7 +180,7 @@ def test_vivibox_usage_json_has_each_containers_figures(env, capsys, monkeypatch
     monkeypatch.setattr(
         resources,
         "sample",
-        lambda roots, run=None: {
+        lambda roots, run=None, problems=None: {
             "demo-1": resources.Resources(
                 [resources.Container("agent", 12.5, 2**30, 2**34)], {"docker": 2 * 10**9}, 4096
             )
@@ -198,3 +198,32 @@ def test_vivibox_usage_json_has_each_containers_figures(env, capsys, monkeypatch
 def test_a_pod_that_is_down_has_no_cpu_or_memory_only_disk():
     used = usage.Usage("demo-1", "demo", live=True, now=resources.Resources([], {"docker": 2 * 10**9}, 0))
     assert usage.cells(used)[-3:] == ["-", "-", "2.0 GB"]
+
+
+def test_u_says_why_the_pods_figures_are_dashes_when_docker_does_not_answer(env, monkeypatch):
+    """Dashes alone read as pods doing nothing; with Docker down the screen says so, in a line of
+    its own above the note, cut to the dialog's width."""
+    from test_tui import new_task, run
+    from ux import screen_text
+
+    from vivibox import resources
+    from vivibox.usage_view import Usage
+
+    new_task()
+
+    def sample(roots, run=None, problems=None):
+        if problems is not None:
+            problems.append("Docker did not answer: Cannot connect to the Docker daemon")
+        return {}
+
+    monkeypatch.setattr(resources, "sample", sample)
+
+    async def scenario(app, pilot):
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert isinstance(app.screen, Usage)
+        text = " ".join(screen_text(app).split())
+        assert "CPU, RAM and DISK not measured: Docker did not answer: Cannot connect" in text
+
+    run(scenario)

@@ -137,11 +137,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 def cmd_usage(args: argparse.Namespace) -> int:
     """How long each role and the verification took, per task: live ones, then finished ones."""
-    rows = usage.gather(finished=not args.live, project=args.project or "", measure=True)
+    problems: list[str] = []
+    rows = usage.gather(finished=not args.live, project=args.project or "", measure=True, problems=problems)
     if args.json:
         print(json.dumps(usage.as_dicts(rows), indent=2))
     else:
         print(usage.report(rows), end="")
+    for problem in problems:
+        print(f"CPU, RAM and DISK not measured: {problem}", file=sys.stderr)
     return 0
 
 

@@ -31,32 +31,39 @@ class Usage(ModalScreen):
             table = DataTable(id="usage", cursor_type="row", zebra_stripes=True)
             table.add_columns(*usage.COLUMNS)
             yield table
+            yield Label("", id="usage-problem", classes="files")
             yield Label("Reading the tasks' events…", id="usage-note", classes="files")
 
     def on_mount(self) -> None:
         self.query_one(DataTable).focus()
         self.load()
-        self.set_interval(REFRESH_SECONDS, self.load)
+        self.timer = self.set_interval(REFRESH_SECONDS, self.load)
 
     @work(thread=True, exclusive=True)
     def load(self) -> None:
         if not self.measured:  # the first time: the times at once, without waiting for Docker
-            self.app.call_from_thread(self.show, usage.gather(finished=self.finished))
-        rows = usage.gather(finished=self.finished, measure=True)
+            self.app.call_from_thread(self.show, usage.gather(finished=self.finished), [])
+        problems: list[str] = []
+        rows = usage.gather(finished=self.finished, measure=True, problems=problems)
         self.measured = True
         if self.is_attached:
-            self.app.call_from_thread(self.show, rows)
+            self.app.call_from_thread(self.show, rows, problems)
 
-    def show(self, rows: list[usage.Usage]) -> None:
+    def show(self, rows: list[usage.Usage], problems: list[str]) -> None:
         if not self.is_attached:
             return
         table = self.query_one(DataTable)
         table.clear()
         for row in rows:
             table.add_row(*usage.cells(row), key=row.task)
-        # The same tasks as the list: the finished ones only while it shows them.
+        # The same tasks as the list: the finished ones only while it shows them; and why the
+        # pods' figures are dashes, when they are: without it dashes read as pods doing nothing.
         which = "Live and finished tasks, as the list shows them" if self.finished else "Live tasks"
         self.query_one("#usage-note", Label).update(f"{which if rows else 'No tasks yet'}. Esc closes.")
+        problem = self.query_one("#usage-problem", Label)
+        problem.update(f"CPU, RAM and DISK not measured: {problems[0][:70]}" if problems else "")
+        problem.display = bool(problems)
 
     def key_escape(self) -> None:
+        self.timer.stop()  # nothing is measured once the screen is closed
         self.dismiss()

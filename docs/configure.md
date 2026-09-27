@@ -134,9 +134,13 @@ from nothing. Nothing is set up by just running `vivibox` somewhere.
 
 The pod comes with Node, npm, Python, uv and Java 21 ready to run (uv's downloads are shared
 between tasks, and Python writes no `__pycache__` into the clone), and `mise` installs any other
-toolchain a task needs. A project that wants different versions, or another language, commits its
-own `mise.toml`: the agent proposes it, the gate reads it, and you approve it as a build file
-before it reaches your checkout.
+toolchain a task needs. For Go and Rust, `init` reads the version from `go.mod` (its `toolchain`
+line, else its `go` line) or `rust-toolchain.toml`, and writes it to the project file as
+`tools = ["go@1.25.3"]`: the pod installs it for the agent and the gate, into caches shared
+between tasks, with `go test ./...` or `cargo test` as the suggested verification. Nothing is
+written into your repository. A project that wants different versions of what the image has, or
+another language, can also commit its own `mise.toml`: the agent proposes it, the gate reads it,
+and you approve it as a build file before it reaches your checkout.
 
 `e` on the project's row opens its settings: what a new task runs first, the verification, how `v`
 runs it, its JDK, the variables its build needs from your shell, and the editor for its review
@@ -150,6 +154,7 @@ java = "17"                                     # empty for Java 21
 host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
 prepare = ["bash mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
+tools = ["go@1.25.3"]                           # optional, toolchains the image does not have
 ```
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's

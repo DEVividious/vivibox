@@ -31,10 +31,15 @@ def install_declared(pod: Pod, gate: bool = False) -> None:
     (pod.gate_exec if gate else pod.exec)("bash", "-c", "mise install --yes", check=False)
 
 
-def ensure(pod: Pod, java: str, gate: bool = False) -> None:
-    """In the agent container, or with gate=True in the gate container, which has its own /config."""
-    if not java:
-        return
-    spec = mise_spec(java)
-    script = f'mise install --yes {spec} >/dev/null && ln -sfn "$(mise where {spec})" {JDK_LINK}'
-    (pod.gate_exec if gate else pod.exec)("bash", "-c", script)
+def ensure(pod: Pod, java: str, gate: bool = False, tools: list[str] | tuple = ()) -> None:
+    """In the agent container, or with gate=True in the gate container, which has its own /config.
+    tools: the project's other toolchains, made global in the container's own mise configuration
+    (under /config), so the repository gets no mise.toml; the installs go to the shared cache."""
+    run = pod.gate_exec if gate else pod.exec
+    if java:
+        spec = mise_spec(java)
+        run(
+            "bash", "-c", f'mise install --yes {spec} >/dev/null && ln -sfn "$(mise where {spec})" {JDK_LINK}'
+        )
+    if tools:
+        run("bash", "-c", f"mise use --global --yes {' '.join(tools)}")

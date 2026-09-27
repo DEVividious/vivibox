@@ -32,6 +32,8 @@ class Detected:
     # What a new task's clone runs first, before the writer: a build without tests, suggested
     # by the build files; empty for nothing.
     prepare: list[str] = field(default_factory=list)
+    # Toolchains the image does not have that the build files ask for, as mise versions.
+    tools: list[str] = field(default_factory=list)
 
 
 def project_name(repo: Path) -> str:
@@ -242,6 +244,27 @@ def python_candidates(repo: Path) -> list[tuple[str, str]]:
     return []
 
 
+GO_VERSION = re.compile(r"^go\s+(\d+\.\d+(?:\.\d+)?)\s*$", re.MULTILINE)
+GO_TOOLCHAIN = re.compile(r"^toolchain\s+go(\d+\.\d+(?:\.\d+)?)\s*$", re.MULTILINE)
+RUST_CHANNEL = re.compile(r"""^\s*channel\s*=\s*["']([\w.+-]+)["']""", re.MULTILINE)
+
+
+def tools_for(repo: Path) -> list[str]:
+    """The Go or Rust a project's files ask for, as mise versions: go.mod's toolchain line, else
+    its go line; the channel of rust-toolchain.toml, or the legacy rust-toolchain file, else stable."""
+    found = []
+    if (repo / "go.mod").exists():
+        text = _read(repo / "go.mod")
+        version = GO_TOOLCHAIN.search(text) or GO_VERSION.search(text)
+        found.append(f"go@{version.group(1) if version else 'latest'}")
+    if (repo / "Cargo.toml").exists():
+        channel = RUST_CHANNEL.search(_read(repo / "rust-toolchain.toml"))
+        legacy = _read(repo / "rust-toolchain").strip()
+        name = channel.group(1) if channel else legacy if re.fullmatch(r"[\w.+-]+", legacy) else "stable"
+        found.append(f"rust@{name}")
+    return found
+
+
 def prepare_suggestion(repo: Path) -> list[str]:
     """What to run once in a new task's clone before the writer: the build without its tests,
     so the writer starts on a built project and builds one module at a time. The build tool's
@@ -260,6 +283,10 @@ def prepare_suggestion(repo: Path) -> list[str]:
         return [NODE_INSTALL[package_manager(repo)]]
     if (repo / "uv.lock").exists():
         return ["uv sync --frozen"]
+    if (repo / "go.mod").exists():
+        return ["go build ./..."]
+    if (repo / "Cargo.toml").exists():
+        return ["cargo test --no-run"]
     return []
 
 
@@ -281,6 +308,10 @@ def candidates(repo: Path) -> list[tuple[str, str]]:
     if (repo / "package.json").exists():
         found += node_candidates(repo)
     found += python_candidates(repo)
+    if (repo / "go.mod").exists():
+        found.append(("go test ./...", "go.mod"))
+    if (repo / "Cargo.toml").exists():
+        found.append(("cargo test", "Cargo.toml"))
     return found + [c for c in ci_commands(repo) if c[0] not in {command for command, _ in found}]
 
 
@@ -403,6 +434,8 @@ def detect(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
     found.demo = detect_demo(repo)
     found.prepare = prepare_suggestion(repo)
+    found.tools = tools_for(repo)
+    found.notes += [f"{tool}: not in the image; the pod installs it with mise" for tool in found.tools]
     level = source_level(repo)
     newest = IMAGE_JAVA
     # What the build files name is a note, never the verification: a pipeline often builds with
@@ -436,7 +469,10 @@ def render(found: Detected) -> str:
     repo = f"~/{found.repo.relative_to(home)}" if found.repo.is_relative_to(home) else str(found.repo)
     demo = ", ".join(f'"{c}"' for c in found.demo)
     prepare = ", ".join(f'"{c}"' for c in found.prepare)
+    tools = ", ".join(f'"{t}"' for t in found.tools)
     return (
         f'repo = "{repo}"\nverify = {verify}\nprepare = [{prepare}]\ndemo = [{demo}]\n'
-        f'java = "{found.java}"\nrisky_extra = []\nhost_services = []\npass_env = []\n'
+        f'java = "{found.java}"\n'
+        + (f"tools = [{tools}]\n" if found.tools else "")
+        + "risky_extra = []\nhost_services = []\npass_env = []\n"
     )

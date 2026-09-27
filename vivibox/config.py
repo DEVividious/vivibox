@@ -81,6 +81,8 @@ NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
 TASK_NETWORK_BITS = 28
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
+# A toolchain as mise names it, <tool>@<version>: "go@1.25.3", "rust@stable".
+TOOL = re.compile(r"^[a-z][a-z0-9-]*@[A-Za-z0-9][A-Za-z0-9.+_-]*$")
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Set by vivibox in the pod: passing your own value would break the pod, not configure the project.
@@ -169,6 +171,9 @@ class Project:
     # Commands run once in a task's clone while the plan is made, e.g. an install without tests, so
     # the writer builds one module instead of the whole project; its first turn waits for them.
     prepare: list[str] = field(default_factory=list)
+    # Toolchains the image does not have, as mise versions ("go@1.25.3"), installed in the pod for
+    # the agent and for the gate; nothing is written into the repository.
+    tools: list[str] = field(default_factory=list)
 
 
 def config_dir() -> Path:
@@ -341,10 +346,13 @@ def load_project(name: str, base: Path | None = None) -> Project:
         raise ConfigError(f'{path}: pass_env must be a list of variable names, e.g. ["NPM_TOKEN"]')
     if reserved := sorted(set(pass_env) & RESERVED_ENV):
         raise ConfigError(f"{path}: pass_env: vivibox sets {', '.join(reserved)} in the pod itself")
+    tools = data.get("tools", [])
+    if not isinstance(tools, list) or not all(isinstance(t, str) and TOOL.match(t) for t in tools):
+        raise ConfigError(f'{path}: tools must be a list of mise versions, e.g. ["go@1.25.3"]')
     verify_timeout = data.get("verify_timeout", 0)
     if not isinstance(verify_timeout, int) or verify_timeout < 0:
         raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
     return Project(
         name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build,
-        prepare,
+        prepare, tools,
     )  # fmt: skip

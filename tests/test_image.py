@@ -141,7 +141,7 @@ def test_python_gets_a_shared_uv_cache_and_writes_no_bytecode_into_the_clone():
     assert "PYTHONDONTWRITEBYTECODE=1" in text and "/cache/uv" in text.split("mkdir -p /config")[1]
     assert pod.CACHES["uv"] == "/cache/uv"
     writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
-    assert " uv;" in writable.command
+    assert " uv " in writable.command
 
 
 def test_pip_installs_only_into_a_virtual_environment():
@@ -152,3 +152,21 @@ def test_pip_installs_only_into_a_virtual_environment():
     text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
     assert "PIP_REQUIRE_VIRTUALENV=1" in text
     assert any("PIP_REQUIRE_VIRTUALENV" in check.command for check in image.checks(1000, 1000))
+
+
+def test_go_and_rust_keep_their_downloads_and_builds_in_shared_caches():
+    """The gate's home is fresh every time: without these every verification downloads the
+    modules, the crates and Rust itself again."""
+    from importlib.resources import files
+
+    from vivibox import pod
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    for setting in ("GOMODCACHE=/cache/go/mod", "GOCACHE=/cache/go/build", "GOFLAGS=-modcacherw",
+                    "CARGO_HOME=/cache/cargo", "RUSTUP_HOME=/cache/rustup"):  # fmt: skip
+        assert setting in text, setting
+    made = text.split("mkdir -p /config")[1].split("&&")[0]
+    assert all(d in made for d in ("/cache/go", "/cache/cargo", "/cache/rustup"))
+    assert {"go", "cargo", "rustup"} <= set(pod.CACHES)
+    writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
+    assert " go cargo rustup;" in writable.command

@@ -113,7 +113,7 @@ def checks(uid: int, gid: int) -> list[Check]:
         ),
         Check(
             "caches are writable",
-            "cd /cache && for d in m2 m2/installed gradle npm mise corepack build-cache uv;"
+            "cd /cache && for d in m2 m2/installed gradle npm mise corepack build-cache uv go cargo rustup;"
             " do touch $d/.w || exit 1; done; echo ok",
             "ok",
         ),

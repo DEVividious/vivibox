@@ -72,6 +72,11 @@ First public version.
   `pyproject.toml` or the requirements files, with the dependency group or extra that has
   pytest. uv's cache is shared between tasks and the gate.
 
+- Go and Rust projects: `init` writes the toolchain their files ask for to the project file
+  (`tools = ["go@1.25.3"]`, `rust@stable`), which the pod installs with mise for the agent and
+  the gate, and suggests `go test ./...` or `cargo test` and a build to prepare with. Go's and
+  Cargo's downloads and builds, and Rust itself, are kept in caches shared between tasks.
+
 ### Fixed
 
 - `pip install` in a pod outside a virtual environment is refused: it installed into mise's

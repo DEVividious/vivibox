@@ -424,9 +424,11 @@ def _start(
     changed = opencode.prepare(task, model, project.verify, used)
     on_step("starting the pod…")
     pod.up()
-    if project.java:
-        on_step(f"installing Java {project.java}…")
-    toolchain.ensure(pod, project.java)
+    if project.java or project.tools:
+        on_step(
+            f"installing {', '.join(([f'Java {project.java}'] if project.java else []) + project.tools)}…"
+        )
+    toolchain.ensure(pod, project.java, tools=project.tools)
     prepare.begin(task, project, pod)
     on_step("starting opencode…")
     harness = opencode.OpenCode(pod)

@@ -21,3 +21,35 @@ def test_java_setting_is_validated(tmp_path, value):
     (tmp_path / "projects" / "p.toml").write_text(f'repo = "/r"\nverify = ["x"]\njava = "{value}"\n')
     with pytest.raises(ConfigError):
         load_project("p", tmp_path)
+
+
+def test_tools_are_mise_versions_and_nothing_else(tmp_path):
+    (tmp_path / "projects").mkdir()
+    path = tmp_path / "projects" / "p.toml"
+    path.write_text('repo = "/r"\nverify = ["x"]\ntools = ["go@1.25.3", "rust@stable"]\n')
+    assert load_project("p", tmp_path).tools == ["go@1.25.3", "rust@stable"]
+    for bad in ('["go@1.25; rm -rf /"]', '["go"]', '"go@1.25"', '["$(id)@1"]'):
+        path.write_text(f'repo = "/r"\nverify = ["x"]\ntools = {bad}\n')
+        with pytest.raises(ConfigError):
+            load_project("p", tmp_path)
+
+
+class Recording:
+    def __init__(self):
+        self.agent, self.gate = [], []
+
+    def exec(self, *cmd, check=True):
+        self.agent.append(cmd[-1])
+
+    def gate_exec(self, *cmd, check=True):
+        self.gate.append(cmd[-1])
+
+
+def test_a_projects_tools_are_installed_for_the_agent_and_the_gate():
+    pod = Recording()
+    toolchain.ensure(pod, "", tools=["go@1.25.3"])
+    toolchain.ensure(pod, "", gate=True, tools=["go@1.25.3", "rust@stable"])
+    assert pod.agent == ["mise use --global --yes go@1.25.3"]
+    assert pod.gate == ["mise use --global --yes go@1.25.3 rust@stable"]
+    toolchain.ensure(pod, "")
+    assert len(pod.agent) == 1, "no tools, nothing to install"

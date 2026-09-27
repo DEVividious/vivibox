@@ -141,6 +141,15 @@ def test_gate_passes_when_everything_is_done(task):
     assert task.events()[-1]["type"] == "gate"
 
 
+def test_the_gate_installs_the_projects_tools_before_its_commands(task):
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add health endpoint")
+    pod = FakePod()
+    gate.run_gate(task, pod, ["go test ./..."], [], tools=["go@1.25.3"])
+    assert pod.commands == ["mise install --yes", "mise use --global --yes go@1.25.3", "go test ./..."]
+
+
 def test_gate_stops_at_first_failing_command_and_writes_feedback(task):
     gate.accept_plan(task)
     result = gate.run_gate(task, FakePod(fail={"lint"}), ["lint", "test"], [])

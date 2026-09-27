@@ -87,7 +87,7 @@ def start_box(task_id: str) -> None:
     model = actions.role_of(task, "writer", config).model
     opencode.prepare(task, model, project.verify, used)
     pod.up()
-    toolchain.ensure(pod, project.java)
+    toolchain.ensure(pod, project.java, tools=project.tools)
     prepare.begin(task, project, pod)
     if task.read_state().paused:
         task.set_paused(False)

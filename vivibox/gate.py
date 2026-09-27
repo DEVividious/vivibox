@@ -578,6 +578,7 @@ def run_gate(
     no_build: bool = False,
     no_command: str = "",
     narrowed: str = "",
+    tools: list[str] | tuple = (),
 ) -> GateResult:
     """timeout: seconds one command may take; 0 for no limit. no_build: the project has said it
     has nothing to build, so build files it gains are not pointed out. no_command: why there is no
@@ -622,7 +623,7 @@ def run_gate(
                 for command, source in result.build_files:
                     out.write(f"# {source} names `{command}`, and the project runs nothing yet: pick it\n")
     elif not _reuse(task, result, head, commands):
-        _build(task, pod, commands, java, head, result, timeout)
+        _build(task, pod, commands, java, head, result, timeout, tools)
     # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.
     accepted = (task.meta / ACCEPTED_PLAN).exists()
     result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
@@ -639,7 +640,14 @@ def run_gate(
 
 
 def _build(
-    task: Task, pod: Pod, commands: list[str], java: str, head: str, result: GateResult, timeout: float = 0
+    task: Task,
+    pod: Pod,
+    commands: list[str],
+    java: str,
+    head: str,
+    result: GateResult,
+    timeout: float = 0,
+    tools: list[str] | tuple = (),
 ) -> None:
     values = pod.passed_values()
     # Written as it goes, from before the container comes up: the log is what there is to look
@@ -650,7 +658,7 @@ def _build(
         pod.gate_up()
         try:
             toolchain.install_declared(pod, gate=True)
-            toolchain.ensure(pod, java, gate=True)
+            toolchain.ensure(pod, java, gate=True, tools=tools)
             for command in commands:
                 out.write(f"# started {time.strftime('%H:%M:%S')}\n$ {command}\n")
                 out.flush()

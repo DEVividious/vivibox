@@ -113,7 +113,7 @@ def test_a_task_and_a_box_start_the_preparation_once_their_pod_is_up(env, monkey
     monkeypatch.setattr(opencode, "provider_of", lambda model: "p")
     order = []
     monkeypatch.setattr(Pod, "up", lambda self: order.append("up"))
-    monkeypatch.setattr(toolchain, "ensure", lambda pod, java: order.append("java"))
+    monkeypatch.setattr(toolchain, "ensure", lambda pod, java, tools=(): order.append("java"))
 
     def began(task, project, pod):
         order.append(("prepare", project.prepare))

@@ -62,7 +62,7 @@ RUN mkdir -p /etc/mise \
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \
  && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack /cache/build-cache \
-    /cache/m2/installed /cache/uv \
+    /cache/m2/installed /cache/uv /cache/go /cache/cargo /cache/rustup \
  && chown -R agent:agent /config /cache
 
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.
@@ -81,7 +81,9 @@ RUN groupadd -o -g "${GID}" agent \
 # the cache being another volume than the clone. Python writes no __pycache__ into the clone,
 # where an untracked folder stops the gate's build. pip installs only into a virtual environment:
 # mise's Python is in the cache every task shares, and a package installed there by one task
-# was on every other task's import path, the gate's too.
+# was on every other task's import path, the gate's too. Go's modules and build cache, and Rust's
+# toolchains and crates, which a project's tools setting brings, are shared the same way; Go's
+# module cache is left writable so a volume can be emptied.
 ENV HOME=/config \
     MAVEN_CONFIG= \
     MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true -Dmaven.build.cache.lazyRestore=false" \
@@ -97,6 +99,11 @@ ENV HOME=/config \
     UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_REQUIRE_VIRTUALENV=1 \
+    GOMODCACHE=/cache/go/mod \
+    GOCACHE=/cache/go/build \
+    GOFLAGS=-modcacherw \
+    CARGO_HOME=/cache/cargo \
+    RUSTUP_HOME=/cache/rustup \
     PATH=/cache/mise/shims:$PATH
 
 USER agent

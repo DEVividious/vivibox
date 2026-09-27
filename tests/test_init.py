@@ -69,7 +69,7 @@ def test_the_build_files_suggest_what_to_prepare_a_new_tasks_clone_with(tmp_path
     assert init.prepare_suggestion(web) == ["pnpm install --frozen-lockfile"]
     other = make_repo(tmp_path / "svc")
     (other / "go.mod").write_text("module svc\n")
-    assert init.prepare_suggestion(other) == [], "no Go in the image: nothing to suggest"
+    assert init.prepare_suggestion(other) == ["go build ./..."], "the project's Go is installed for it"
     assert 'prepare = ["mvn -B install -DskipTests"]' in init.render(init.detect(maven)), (
         "in the project file"
     )
@@ -476,3 +476,29 @@ def test_python_tests_run_with_the_group_or_the_extra_that_has_pytest(tmp_path):
     assert "uv.lock runs: uv run --frozen --extra test pytest" in init.detect(both).notes
     broken = python_project(tmp_path / "d", "[project\n", uv__lock="")
     assert "uv.lock runs: uv run --frozen --with pytest pytest" in init.detect(broken).notes
+
+
+def test_go_and_rust_projects_get_their_toolchain_their_tests_and_a_build(tmp_path):
+    """The image has no Go or Rust: the project file names the version its files ask for, and
+    the pod installs it with mise, for the agent and for the gate; nothing is written into the
+    repository."""
+    go = make_repo(tmp_path / "svc")
+    (go / "go.mod").write_text("module example.com/svc\n\ngo 1.24.2\n\ntoolchain go1.25.3\n")
+    found = init.detect(go)
+    assert found.tools == ["go@1.25.3"], "the toolchain line wins over the language version"
+    assert "go.mod runs: go test ./..." in found.notes and found.prepare == ["go build ./..."]
+    assert 'tools = ["go@1.25.3"]' in init.render(found)
+    assert "go@1.25.3: not in the image; the pod installs it with mise" in found.notes
+    (go / "go.mod").write_text("module example.com/svc\n\ngo 1.24\n")
+    assert init.detect(go).tools == ["go@1.24"]
+    rust = make_repo(tmp_path / "crate")
+    (rust / "Cargo.toml").write_text('[package]\nname = "crate"\n')
+    found = init.detect(rust)
+    assert found.tools == ["rust@stable"] and found.prepare == ["cargo test --no-run"]
+    assert "Cargo.toml runs: cargo test" in found.notes
+    (rust / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.89.0"\n')
+    assert init.detect(rust).tools == ["rust@1.89.0"]
+    (rust / "rust-toolchain.toml").unlink()
+    (rust / "rust-toolchain").write_text("1.85\n")
+    assert init.detect(rust).tools == ["rust@1.85"]
+    assert init.detect(make_repo(tmp_path / "plain")).tools == []

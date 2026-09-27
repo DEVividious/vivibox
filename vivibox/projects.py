@@ -151,6 +151,7 @@ def setup_project(
         prepare=[c.strip() for c in prepare if c.strip()]
         if prepare is not None
         else project_init.prepare_suggestion(top),
+        tools=project_init.tools_for(top),
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(project_init.render(found))

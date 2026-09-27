@@ -111,8 +111,12 @@ starts the pod when needed.
   models, the trade-off and the legend on hover. The reviewer's model row shows only where the
   mode has a reviewer of its own.
 - A button that helps fill a field stands in that field's row, compact, or is the last entry of
-  that field's list ("+ set up another project…"). The closing row holds one
+  that field's list ("+ set up another project…"); compact, it is a band of the accent colour
+  (Attach…), never bare bold text. The closing row holds one
   primary button, then Cancel, then the key that presses the primary button.
+- Every field of a form starts in the same column and has a band of its own: a list, a picker
+  (Branch, its text flush with the lists'), a checkbox (its empty box visible on the band), a
+  number (Rounds). A value with no band reads as text, not as something to change.
 - Focus is one signal: the focused control's text is drawn as the cursor block; a text box shows
   it by its frame.
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
@@ -145,6 +149,12 @@ too; "Notifications" groups desktop, ntfy topic, server and events; "rounds" say
 limit is for; "verification gate timeout" shows minutes from a minute up (`30 min`), seconds below
 that (`45 s`), and its field takes minutes (`30m`) or seconds (`1800`). The keys in `config.toml`
 stay as they are.
+
+Under the list of `k`, and of a project's `e`, a line says what the highlighted row does, for
+someone who has not read the docs (what one round is, what `cost_warning` does). It follows the
+highlight and the value: orchestration describes the mode it is on, with the legend of its
+symbols, and Enter moving to the next mode changes the line, not a notification. A notification
+confirms a change; it never carries a description, which is gone before it is read.
 
 ## 5. Errors
 

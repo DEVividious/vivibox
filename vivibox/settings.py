@@ -25,6 +25,7 @@ from .config import (
     JAVA,
     NTFY_LEVELS,
     NTFY_TOPIC,
+    ORCHESTRATION_LEGEND,
     ORCHESTRATION_MODES,
     RESERVED_ENV,
     ROUNDS_HELP,
@@ -105,11 +106,35 @@ class Rows(Dialog):
     def open(self, key: str) -> None:
         raise NotImplementedError
 
+    def about(self, key: str) -> str:
+        """What the row does, in words, for the line under the list; "" for nothing to say."""
+        return ""
+
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.TITLE_TEXT, id="title")
             yield OptionList(id="rows")
-            yield Label("Enter changes the highlighted one · Esc closes", classes="files")
+            yield Label("Enter changes the highlighted one · Esc closes", classes="files rows-hint")
+            # Read while choosing: a notification with the same words is gone before it is read.
+            yield Label("", id="about")
+
+    # Around the list: the dialog's frame and padding, the title, the list's frame, the hint, and
+    # the most a description takes (#about's max-height).
+    AROUND = 2 + 2 + 1 + 2 + 1 + 7
+
+    def on_resize(self) -> None:
+        """The list as tall as the screen leaves once the description has its lines: a tall
+        terminal shows every row, a short one scrolls the list, never the description away."""
+        room = int(self.size.height * 0.9) - self.AROUND
+        self.query_one(OptionList).styles.max_height = max(4, room)
+
+    @on(OptionList.OptionHighlighted)
+    def highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        self.explain(event.option_index)
+
+    def explain(self, index: int | None) -> None:
+        key = self.keys[index] if index is not None and index < len(self.keys) else None
+        self.query_one("#about", Label).update(escape(self.about(key)) if key else "")
 
     def on_mount(self) -> None:
         self.fill()
@@ -130,6 +155,8 @@ class Rows(Dialog):
                 options.add_option(Option(f"  {escape(label)}  [dim]{escape(ui.shorten(value, 60))}[/]"))
         first = next((i for i, key in enumerate(self.keys) if key), 0)
         options.highlighted = was if was is not None and was < len(self.keys) and self.keys[was] else first
+        # The same row after a change says what it does now (the next orchestration mode).
+        self.explain(options.highlighted)
 
     @on(OptionList.OptionSelected)
     def chose(self, event: OptionList.OptionSelected) -> None:
@@ -146,6 +173,54 @@ class Rows(Dialog):
         """The file itself, in your editor, for what has no row."""
         with self.app.suspend():
             edit_in_editor(path)
+
+
+# What a row of k does, in the words of someone who has not read the docs.
+ROLE_ABOUT = {
+    "planner": "The planner reads the task and the repository and writes the plan you accept: "
+    "the approach and the acceptance criteria. A strong model pays off here; a task can pick "
+    "another one in n.",
+    "writer": "The writer changes the code, commits, and fixes what the verification or the "
+    "review sent back. It takes the most turns, so a cheaper model fits.",
+    "reviewer": "The reviewer reads the work once the verification passed and writes notes; "
+    "blocking ones send it back to the writer. Best on another model family than the writer's.",
+}
+SETTINGS_ABOUT = {
+    "providers": "Where the models come from: the providers you have keys for, and the MCP servers "
+    "the agents may use. A task cannot start without a provider for its models.",
+    "add-reviewer": "No reviewer model of its own: the writer's model reviews. Enter picks one, best "
+    "from another model family than the writer's.",
+    "editor": "What o opens the review copy with, where the agent's work shows as uncommitted "
+    "changes, like your own.",
+    "notifications": "A desktop notification when a task needs you. Enter turns it on or off.",
+    "ntfy": "Messages on your phone through ntfy: its app subscribes to this topic, a name nobody "
+    "guesses. Empty: off.",
+    "ntfy_server": "The ntfy server the messages go through: ntfy.sh, unless you run your own.",
+    "max_rounds": "One round is one fix turn of the writer: after a failed verification, or after a "
+    "review with blocking notes. The first implementation is not a round. When a task has used its "
+    "rounds it stops for you, and your reply gives it as many again.",
+    "verify_timeout": "How long one verification command may run before it is stopped. Past it "
+    "the task waits for you, and no round is spent.",
+    "cost_warning": "When a task has cost this many dollars, you are told once and the task goes "
+    "on. None: you are never told.",
+    "cost_limit": "When a task has cost this many dollars, it stops before its next turn and waits "
+    "for you. None: no limit.",
+    "file": "config.toml in your editor, for what has no row here.",
+}
+# The same for a project's rows (e on its row).
+PROJECT_ABOUT = {
+    "prepare": "What a new task's clone runs once while the plan is made, usually a build "
+    "without tests, so the writer starts on a built project. The writer's first turn waits for it.",
+    "verify": "The command that proves the work: the gate runs it on a fresh clone of the "
+    "commits after every turn of the writer. Empty: the next task's writer proposes one.",
+    "demo": "How v runs the project in its pod so you can look at it.",
+    "java": "The JDK this project builds with, when not the image's Java 21, e.g. 17 for an older Gradle.",
+    "pass_env": "Variables the build needs from your shell, such as a package registry token: "
+    "the agent and the gate get their values from the shell vivibox was started in.",
+    "editor": "What o opens this project's review copies with, when not config.toml's.",
+    "file": "The project file in your editor, for services on your host the agent may reach "
+    "(host_services), extra risky files (risky_extra) and toolchains (tools).",
+}
 
 
 def config_path() -> Path:
@@ -237,6 +312,21 @@ class Settings(Rows):
             ("network pool", config.network_pool, None),
             ("edit config.toml in your editor…", " ", "file"),
         ]
+
+    def about(self, key: str) -> str:
+        config = self.app.config
+        if key == "orchestration":
+            mode = ORCHESTRATION_MODES[config.orchestration]
+            # The models it suits are on n's hover; here what fits in a short terminal.
+            return f"{mode.label}: {mode.flow}. {mode.when} {mode.tradeoff}\n{ORCHESTRATION_LEGEND}"
+        if key == "ntfy_events":
+            return (
+                "What your phone is told: decisions, when a task needs you (a plan, the work, a "
+                "question, a failure); all, every stage too. Enter switches between them."
+            )
+        if key.startswith("role:"):
+            return ROLE_ABOUT.get(key.removeprefix("role:"), "")
+        return SETTINGS_ABOUT.get(key, "")
 
     @staticmethod
     def found_editor() -> str:
@@ -351,13 +441,9 @@ class Settings(Rows):
         elif key == "orchestration":
             names = list(ORCHESTRATION_MODES)
             name = names[(names.index(config.orchestration) + 1) % len(names)]
-            mode = ORCHESTRATION_MODES[name]
-            self.write(
-                "agent_orchestration_mode",
-                name,
-                "",
-                f"{mode.label}: {mode.flow}. {mode.when} {mode.tradeoff}",
-            )
+            # What the mode means is under the list, on the row it stays on: nothing to notify.
+            configfile.set_value(config_path(), "agent_orchestration_mode", name, "")
+            self.reread()
         elif key == "max_rounds":
 
             def rounds_typed(value: str | None) -> None:
@@ -427,6 +513,9 @@ class ProjectSettings(Rows):
 
     def path(self) -> Path:
         return config_dir() / "projects" / f"{self.project_name}.toml"
+
+    def about(self, key: str) -> str:
+        return PROJECT_ABOUT.get(key, "")
 
     def rows(self) -> list[Row]:
         project = load_project(self.project_name)

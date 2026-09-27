@@ -99,6 +99,11 @@ First public version.
 
 ### Fixed
 
+- Under `k` and a project's `e`, a line under the list says what the highlighted setting does
+  (what a round is, what `cost_warning` does, the orchestration mode it is on with its legend);
+  switching the orchestration no longer puts its description in a notification.
+- In `n`, Kind, Branch and Build start in one column, each on a band of its own; Rounds has a
+  band like the lists, and Attach… looks like a button.
 - The pod has a C compiler (gcc): Rust's build scripts failed with "linker `cc` not found", and a
   Python package built from source had none either.
 - `pip install` in a pod outside a virtual environment is refused: it installed into mise's

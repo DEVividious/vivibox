@@ -144,7 +144,10 @@ class NewTask(Dialog):
                         )  # fmt: skip
                     with Horizontal(classes="row"):
                         yield Label("Branch", classes="key")
-                        yield Button("Current…", compact=True, id="base-ref")
+                        branch = Button("Current…", compact=True, id="base-ref")
+                        # Its text flush with the lists' above it; Textual's CSS takes no 0 here.
+                        branch.styles.line_pad = 0
+                        yield branch
                     with Horizontal(classes="row", id="build-row"):
                         yield Label("Build", classes="key")
                         yield Checkbox(

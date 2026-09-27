@@ -2419,6 +2419,33 @@ def test_lists_in_a_group_stand_a_row_apart_unless_the_terminal_is_short(env, si
     run(scenario, size=size)
 
 
+@pytest.mark.parametrize("size", [(146, 38), (80, 24)])
+def test_every_field_of_the_new_task_form_starts_in_one_column_and_looks_like_one(env, size):
+    """Kind, Branch and Build stood a column apart, one under another, and read as overlapping;
+    Rounds and Attach, with no band of their own, read as text rather than as a field and a
+    button."""
+    with_code("demo")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        dialog = app.screen
+        fields = ["#project", "#kind", "#base-ref", "#no-build", "#plan", "#orchestration"]
+        columns = {name: dialog.query_one(name).region.x for name in fields}
+        assert len(set(columns.values())) == 1, columns
+        branch, build = dialog.query_one("#base-ref").region, dialog.query_one("#no-build").region
+        assert branch.right == dialog.query_one("#kind").region.right, "the Branch field is as wide as a list"
+        assert build.x == branch.x and build.right == branch.right, "Build is a band as wide too"
+        page = dialog.query_one(".dialog").styles.background
+        for name in ("#no-build", "#max-rounds", "#attach"):
+            band = dialog.query_one(name).styles.background
+            assert band.a > 0 and band != page, f"{name} has no band of its own"
+
+    run(scenario, size=size)
+
+
 def test_attach_stands_with_the_description_and_create_is_the_only_primary_button(env):
     """Attach fills the description, so it stands under it, in the task's group, not among the
     lists; the buttons that close the dialog are Create and Cancel, and Create alone is primary."""

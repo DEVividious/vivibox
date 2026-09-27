@@ -3,7 +3,11 @@ DataTable { height: 1fr; }
 HeaderIcon { display: none; }
 /* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
 .catalog { height: auto; max-height: 40vh; }
+/* The settings list grows with the terminal; settings.py leaves room under it for what the
+   highlighted row does (#about). */
 #rows { height: auto; max-height: 75vh; }
+#about { height: auto; max-height: 7; width: 100%; color: $text; }
+.rows-hint { margin: 0; }
 .tree { height: 60vh; }
 .found { height: auto; max-height: 30vh; }
 .group { padding: 1 0 0 0; text-style: bold; }
@@ -45,16 +49,26 @@ HeaderIcon { display: none; }
 .form.plain .title { display: none; }
 .form .key { width: 14; color: $text-muted; }
 .form .hint { width: 1fr; color: $text-muted; }
-.form #max-rounds { width: 6; }
+/* Rounds is a field: a band like the lists', not a number standing in the text. */
+.form #max-rounds { width: 6; background: $boost; color: $text; text-style: bold; }
 .form .key.rounds { width: 8; text-align: right; margin-right: 1; }
 .form.tight .hint-row { display: none; }
 .dialog.form { max-height: 100%; }
 .form .row > Select, .form .row > TextArea { width: 1fr; }
 .form .row > Button { margin: 0 2 0 0; min-width: 9; }
-.form #base-ref { width: 1fr; text-align: left; content-align: left middle; text-style: none; color: $text; padding: 0 1; }
+/* A button that helps fill a field is a button: a band of the accent colour, not bold text. */
+.form #attach { background: $accent-muted; color: $text; padding: 0 1; }
+.form #attach:hover { background: $accent; }
+/* Branch is a field that opens a list: flush with the lists above it, their width, their band. */
+.form #base-ref { width: 1fr; margin: 0; border: none; text-align: left; content-align: left middle; text-style: none; color: $text; padding: 0; }
+.form .row > Checkbox { width: 1fr; background: $boost; padding: 0; }
+/* On a band the box has to stand out from the band, not from the dialog; off, it stays empty
+   (its mark in the box's own colour), on, the mark is the success colour. */
+.form .row > Checkbox > .toggle--button { color: $panel-lighten-3; background: $panel-lighten-3; }
+.form .row > Checkbox.-on > .toggle--button { color: $text-success; }
 .form .buttons > .keys { width: auto; padding: 1 0; }
 .form Select > SelectCurrent, .form #base-ref { background: $boost; }
-.form .row:odd > Select > SelectCurrent, .form .row:odd > #base-ref { background: $panel; }
+.form .row:odd > Select > SelectCurrent, .form .row:odd > #base-ref, .form .row:odd > Checkbox { background: $panel; }
 /* An open list is framed and set apart: bare, it ended right above the next row, whose value read
    as one more of its options. */
 .form Select > SelectOverlay.-textual-compact { border: round $accent !important; background: $panel; }

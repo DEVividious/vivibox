@@ -169,16 +169,16 @@ files when they open it.
 ### Orchestration modes
 
 How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where the
-gate runs, is its orchestration mode: config.toml's `agent_orchestration_mode`, the row under `k`,
-or the row under `n` for one task. Roles joined with `+` are one agent in one conversation, on
-the first role's model; `→` is then; `⇄` is rounds of fixes.
+verification runs, is its orchestration mode: config.toml's `agent_orchestration_mode`, the Flow
+row under `k`, or the Flow row under `n` for one task. Steps joined with `+` are one agent in one
+conversation, on the first role's model; `→` is then; `⇄` is rounds of fixes.
 
-| Mode | Flow | When |
-|---|---|---|
-| `single_agent` | P+W+R → Gate | small, routine, cheap tasks; no independent review |
-| `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
-| `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
-| `supervisor_worker` | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
+| Mode | In the view | Flow | When |
+|---|---|---|---|
+| `single_agent` | One agent | plan+write+review → verify | small, routine, cheap tasks; no independent review |
+| `planner_executor` | Planner, then writer | plan → write+review → verify | a good plan matters and the implementation is routine |
+| `planner_maker_checker` (default) | Planner, writer, reviewer | plan → write → verify → review ⇄ write | an independent review at every round |
+| `supervisor_worker` | Planner supervises writer | plan → write → verify → planner reviews ⇄ write | hard, multi-step changes under a strong model's constant supervision |
 
 Every mode plans first and stops for your acceptance of the plan (`--auto` does not). Then:
 

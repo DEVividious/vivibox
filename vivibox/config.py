@@ -29,35 +29,35 @@ class Orchestration:
     tradeoff: str
 
 
-# How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where
-# the verification (Gate) runs. Roles joined with + are one agent in one conversation, on the
-# model of the first of them; ⇄ is rounds of fixes, up to limits.max_rounds.
+# How a task is shared between the planner, the writer and the reviewer, and where the
+# verification runs, in the words the view shows. Steps joined with + are one agent in one
+# conversation, on the model of the first of them; ⇄ is rounds of fixes, up to limits.max_rounds.
 ORCHESTRATION_MODES = {
     "single_agent": Orchestration(
-        "Single agent",
-        "P+W+R → Gate",
+        "One agent",
+        "plan+write+review → verify",
         "Small, routine, cheap tasks.",
         "One model for everything: the planner's, which has to be an opencode model.",
         "Cheapest and fastest; no independent review.",
     ),
     "planner_executor": Orchestration(
-        "Planner and executor",
-        "P → W+R → Gate",
+        "Planner, then writer",
+        "plan → write+review → verify",
         "A good plan matters and the implementation is routine.",
         "A strong planner; a cheaper writer, which reviews its own work before the gate.",
         "The plan gets the strong model; the review is the writer's own.",
     ),
     "planner_maker_checker": Orchestration(
-        "Planner, maker, checker",
-        "P → W → Gate → R ⇄ W",
+        "Planner, writer, reviewer",
+        "plan → write → verify → review ⇄ write",
         "An independent review at every round; the default.",
         "A strong planner; a cheaper writer; a reviewer cheaper than or a little stronger than the "
         "writer, best of another family; without [roles.reviewer] it runs on the writer's model.",
         "The most turns and cost per task; the most checks.",
     ),
     "supervisor_worker": Orchestration(
-        "Supervisor and worker",
-        "P → W → Gate → (P+R) ⇄ W",
+        "Planner supervises writer",
+        "plan → write → verify → planner reviews ⇄ write",
         "Hard, multi-step changes under a strong model's constant supervision.",
         "A strong supervisor, which plans and then, with the plan still in its conversation, "
         "reviews a cheaper worker's work in the same pod, without editing; only work the gate "
@@ -67,8 +67,8 @@ ORCHESTRATION_MODES = {
 }
 DEFAULT_ORCHESTRATION = "planner_maker_checker"
 ORCHESTRATION_LEGEND = (
-    "P planner · W writer · R reviewer · Gate the verification (build, tests, criteria, commits) · "
-    "+ roles in one agent and one conversation · → then · ⇄ rounds of fixes, up to max_rounds"
+    "verify: the build, the tests, the criteria and the commits · a+b: one agent does both, in one "
+    "conversation · ⇄ rounds of fixes, up to Rounds"
 )
 DEFAULT_MAX_ROUNDS = 3
 # What the view says of limits.max_rounds.

@@ -22,7 +22,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
-from . import actions, keys, providers, ui
+from . import actions, keys, look, providers, ui
 from .browse import JSON, Browse, shown_path
 from .config import ConfigError
 from .widgets import Confirm, Dialog
@@ -32,7 +32,7 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
     """The providers whose name or id holds what you typed, as (id, label). What you typed is
     offered as a name of its own too, for a provider the list lacks or a list that could not be read."""
     text = typed.strip().casefold()
-    found = [(pid, f"{escape(name)}  [dim]{escape(pid)}[/]") for pid, name in catalog
+    found = [(pid, f"{escape(name)}  {look.muted(pid)}") for pid, name in catalog
              if text in pid.casefold() or text in name.casefold()]  # fmt: skip
     if text and text not in {pid for pid, _ in found}:
         found.append((text, f"use “{escape(text)}” as the provider's name"))
@@ -40,8 +40,8 @@ def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str
 
 
 STATUS = {
-    "replaces": "  [yellow]differs from yours: tick to overwrite[/]",
-    "same": "  [dim]same as yours[/]",
+    "replaces": f"  [{look.WAITING}]differs from yours: tick to overwrite[/]",
+    "same": f"  [{look.MUTED}]same as yours[/]",
     "builtin": "  comes with vivibox; set its mode in Manage",
 }
 
@@ -49,7 +49,7 @@ STATUS = {
 def import_label(f: providers.Found) -> str:
     """One line per provider or server, short enough that what it says of yours stays in view."""
     if f.status == "builtin":  # greyed whole: there is nothing here to choose
-        return f"[dim]{escape(f.name)}  {escape(ui.shorten(f.what, 40))}{STATUS['builtin']}[/]"
+        return look.muted(f"{f.name}  {ui.shorten(f.what, 40)}{STATUS['builtin']}")
     what, key = escape(ui.shorten(f.what, 48)), escape(ui.shorten(f.key, 30))
     return f"{escape(f.name)}  {what}, key {key}{STATUS.get(f.status, '')}"
 
@@ -64,8 +64,9 @@ class ChooseImport(Dialog):
         self.source, self.reading = source, reading
 
     def compose(self) -> ComposeResult:
+        self.frame_title = "Import from opencode"
         with Vertical(classes="dialog"):
-            yield Label(f"In {escape(shown_path(self.source))}; untick what to leave out.")
+            yield Label(f"In {escape(shown_path(self.source))}; untick what to leave out.", classes="wrap")
             for kind, heading in ((providers.PROVIDER, "Providers"), (providers.MCP, "MCP servers")):
                 rows = [
                     Selection(
@@ -110,12 +111,13 @@ class ImportSource(Dialog):
         self.found = found
 
     def compose(self) -> ComposeResult:
+        self.frame_title = "Import from opencode"
         with Vertical(classes="dialog"):
             if self.found:
                 yield Label("Import from an opencode configuration:")
             else:
                 yield Label("No opencode configuration where opencode keeps one, nor one just downloaded.")
-            rows = [f"{escape(shown_path(p))}  [dim]{n} to bring over[/]" for p, n in self.found]
+            rows = [f"{escape(shown_path(p))}  {look.muted(f'{n} to bring over')}" for p, n in self.found]
             yield OptionList(*rows, "Browse…", id="sources")
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
@@ -182,16 +184,17 @@ SERENA_MODE_SAID = {
 
 
 def row_label(name: str, said: str, on: bool) -> str:
-    state = "" if on else "  [yellow]off[/]"
-    return f"{escape(name)}  [dim]{escape(ui.shorten(said, 70))}[/]{state}"
+    state = "" if on else f"  {look.colored('off', look.WAITING)}"
+    return f"{escape(name)}  {look.muted(ui.shorten(said, 70))}{state}"
 
 
 class ManageProviders(Dialog):
     """Your providers and MCP servers: add a provider, import an opencode.json, or manage what is on."""
 
+    frame_title = "Providers & MCP"
+
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Providers & MCP")
             yield OptionList(id="providers", classes="catalog")
             with Horizontal(classes="buttons"):
                 yield Button("Add provider…", variant="primary", id="add")
@@ -237,8 +240,11 @@ class ManageItems(Dialog):
     every task. Unticking keeps it, and its key, for later; Remove takes it away. Save applies."""
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Tick what is on; Remove takes the highlighted one away with its secrets.")
+        self.frame_title = "Manage providers & MCP"
+        with Vertical(classes="dialog form"):
+            yield Label(
+                "Tick what is on; Remove takes the highlighted one away with its secrets.", classes="wrap"
+            )
             yield Label("A change reaches a task the next time it starts.", classes="files")
             self.rows = [r for r in provider_rows() if r[1] != providers.SERENA]
             yield SelectionList[int](
@@ -246,12 +252,13 @@ class ManageItems(Dialog):
                 id="items",
                 classes="catalog",
             )
-            with Horizontal(classes="role"):
-                yield Label("Serena", classes="role-name")
+            with Horizontal(classes="row"):
+                yield Label("Serena", classes="key")
                 yield Select(
                     [(said, mode) for mode, said in SERENA_MODE_SAID.items()],
                     value=providers.serena_mode(),
                     allow_blank=False,
+                    compact=True,
                     id="serena-mode",
                 )
             with Horizontal(classes="buttons"):
@@ -323,14 +330,15 @@ class AddProvider(Dialog):
         self.shown: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
+        self.frame_title = "Add a provider"
         with Vertical(classes="dialog"):
-            yield Label("Add a provider: type to search the ones opencode knows, arrows to pick")
+            yield Label("Type to search the providers opencode knows, arrows to pick.", classes="note")
             yield Input(placeholder="search, e.g. deep", id="search")
             yield OptionList(id="catalog", classes="catalog")
             yield Input(
                 placeholder="API key for the provider picked above (not shown)", password=True, id="key"
             )
-            yield Label("", id="problem")
+            yield Label("", id="problem", classes="problem")
             with Horizontal(classes="buttons"):
                 yield Button("Add", variant="primary", id="add")
                 yield Button("Import opencode.json…", id="import")
@@ -397,7 +405,7 @@ class AddProvider(Dialog):
             else:
                 self.dismiss([])
         except (keys.KeyStoreError, ConfigError) as e:
-            self.query_one("#problem", Label).update(f"[red]{e.args[0]}[/]")
+            self.query_one("#problem", Label).update(escape(str(e.args[0])))
 
     def imported(self, names: list[str]) -> None:
         if names:  # nothing imported: back to this dialog, to add a provider by name instead

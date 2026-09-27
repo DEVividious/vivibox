@@ -237,7 +237,7 @@ def test_the_orchestration_modes_are_the_four_of_the_decision(tmp_path):
     assert list(ORCHESTRATION_MODES) == modes
     for name, mode in ORCHESTRATION_MODES.items():
         assert mode.label and "→" in mode.flow and mode.when and mode.models and mode.tradeoff, name
-    assert "⇄" in ORCHESTRATION_LEGEND and "max_rounds" in ORCHESTRATION_LEGEND
+    assert "⇄" in ORCHESTRATION_LEGEND and "Rounds" in ORCHESTRATION_LEGEND
     text = 'tasks_dir = "/t"\nagent_orchestration_mode = "supervisor_worker"\n[limits]\nmax_rounds = 4\n'
     text += ROLES
     config = load_config(write(tmp_path / "config.toml", text))

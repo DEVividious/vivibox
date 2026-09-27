@@ -1,85 +1,142 @@
-DataTable { height: 1fr; }
+/* vivibox's look: the tokens are in look.py (the theme), what they mean in docs/ux-guidelines.md
+   §10. Focus is the accent; selection is a lighter surface; status is a mark and a colour;
+   the primary action is the one tinted button. */
+
+Screen { background: $background; }
 /* The header's icon opens Textual's command palette, which vivibox does not use. */
 HeaderIcon { display: none; }
-/* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
-.catalog { height: auto; max-height: 40vh; }
-/* The settings list grows with the terminal; settings.py leaves room under it for what the
-   highlighted row does (#about). */
-#rows { height: auto; max-height: 75vh; }
-#about { height: auto; max-height: 7; width: 100%; color: $text; }
-.rows-hint { margin: 0; }
-.tree { height: 60vh; }
-.found { height: auto; max-height: 30vh; }
-.group { padding: 1 0 0 0; text-style: bold; }
+
+/* --- The list --------------------------------------------------------------------------- */
+#topbar { dock: top; height: 1; padding: 0 1; background: $background; color: $text-muted; }
+DataTable { height: 1fr; background: $background; scrollbar-size-vertical: 1; }
+DataTable > .datatable--header { background: $background; color: $text-muted; text-style: bold; }
+DataTable > .datatable--header-hover { background: $background; }
+/* The row the cursor is on: a lighter surface, the cell's own colours kept. */
+DataTable > .datatable--cursor { background: $selection; color: $foreground; text-style: none; }
+DataTable:blur > .datatable--cursor { background: $panel; }
+DataTable > .datatable--hover { background: $panel; }
+DataTable > .datatable--even-row, DataTable > .datatable--odd-row { background: $background; }
 #empty { height: 1fr; padding: 2 4; color: $text-muted; }
-#detail { height: 60%; border-top: solid $primary; padding: 0 1; }
+#detail { height: 60%; border-top: solid $faint; padding: 0 1; background: $background; }
 #detail.hidden { display: none; }
-.dialog { width: 90; max-width: 100%; height: auto; max-height: 90%; border: thick $primary; background: $surface;
-          padding: 1 2; }
-.dialog.help { width: 76; }
-.dialog TextArea { height: 8; }
+/* In the panel a key or a command is inline code: drawn as keys are everywhere, in the accent. */
+#detail MarkdownBlock > .code_inline { background: transparent; color: $accent; text-style: bold; }
+#detail MarkdownFence { background: $panel; }
+/* The command bar: keys in the accent, what they do muted, a thin rule between groups. */
+Footer { background: $background; }
+Footer.-compact FooterKey { margin-right: 1; }
+Footer .bar-rule { width: auto; color: $faint; margin: 0 1 0 0; }
+Footer .bar-spacer { width: 1fr; min-width: 1; }
+FooterKey.-decision .footer-key--description { color: $foreground; }
+FooterKey.-decision .footer-key--key { color: $warning; }
+
+/* --- dialogs: one frame, title in its top edge, keys in its bottom edge ------------------- */
+ModalScreen { align: center middle; background: $background 70%; }
+.dialog {
+    width: 90; max-width: 100%; height: auto; max-height: 90%;
+    background: $surface; border: round $faint; padding: 1 2;
+    border-title-color: $foreground; border-title-style: bold; border-title-align: left;
+    border-subtitle-color: $text-muted; border-subtitle-align: right;
+}
+.dialog.narrow { width: 64; }
+.dialog.help { width: 88; }
+.dialog.usage { width: 110; }
+/* Text in a dialog: a question in the foreground, help and notes muted. */
+.wrap { width: 100%; }
+.note, .files { color: $text-muted; }
+.files { margin: 1 0 0 0; }
+.problem { color: $error; }
+.heading { width: 100%; color: $text-muted; text-style: bold; }
+.group { padding: 1 0 0 0; color: $text-muted; text-style: bold; }
+
+/* Buttons: one line. Secondary on a band of the panel, primary tinted with the accent; the one
+   with focus is solid, so it is clear where Enter goes. */
+.dialog Button {
+    height: 1; min-width: 8; width: auto; padding: 0 1; margin: 0 1 0 0; border: none;
+    background: $panel; color: $foreground; text-style: none;
+}
+.dialog Button:hover { background: $selection; }
+.dialog Button.-primary { background: $accent 25%; color: $foreground; text-style: bold; }
+.dialog Button.-error { background: $error 20%; color: $foreground; }
+.dialog Button:focus { background: $accent; color: $background; text-style: bold; }
+.dialog Button.-error:focus { background: $error; color: $background; }
+.dialog Button:disabled { background: $panel; color: $faint; }
+.buttons { height: auto; margin-top: 1; }
+.buttons > .keys { width: 1fr; text-align: right; color: $text-muted; }
+
+/* Fields: a text field is a band; a list is its value and a mark, the band only with focus. */
+.dialog Input { height: 1; border: none; padding: 0 1; background: $panel; }
+.dialog Input:focus { background: $accent 15%; }
+.dialog Input.-invalid { background: $error 15%; }
+.dialog Input > .input--placeholder { color: $faint; }
+.dialog TextArea { height: 8; border: round $faint; background: $surface; padding: 0 1; }
+.dialog TextArea:focus { border: round $accent; }
+.dialog TextArea > .text-area--placeholder { color: $faint; }
 .dialog TextArea.description { height: 10; }
 .dialog TextArea.criteria { height: 6; }
-#suggestions { max-height: 8; border: none; background: $boost; }
+.dialog Select > SelectCurrent { background: transparent; padding: 0 1; }
+.dialog Select > SelectCurrent .arrow { color: $faint; }
+.dialog Select:focus > SelectCurrent { background: $accent 15%; }
+.dialog Select:focus > SelectCurrent .arrow { color: $accent; }
+.dialog Select > SelectOverlay { border: round $faint; background: $panel; }
+.dialog Select > SelectOverlay.-textual-compact { border: round $faint !important; background: $panel; }
+.dialog Checkbox { background: transparent; border: none; padding: 0; }
+.dialog Checkbox:focus { background: $accent 15%; }
+ToggleButton > .toggle--button { color: $panel-lighten-2; background: $panel-lighten-2; }
+ToggleButton.-on > .toggle--button { color: $success; }
+
+/* Lists in a dialog: the highlighted row a lighter surface, bold while the list has focus. */
+.dialog OptionList, .dialog SelectionList { border: none; background: transparent; padding: 0; }
+.dialog OptionList:focus, .dialog SelectionList:focus { border: none; background-tint: transparent; }
+.dialog OptionList > .option-list--option-highlighted { background: $selection; color: $foreground; text-style: none; }
+.dialog OptionList:focus > .option-list--option-highlighted { background: $selection; text-style: bold; }
+.dialog OptionList > .option-list--option-hover { background: $panel; }
+.dialog OptionList > .option-list--option-disabled { color: $foreground; }
+/* Lists grow with the terminal: a tall one shows everything, a short one scrolls. */
+.catalog { height: auto; max-height: 40vh; }
+.found { height: auto; max-height: 30vh; }
+.tree { height: 60vh; background: transparent; }
+#suggestions { max-height: 8; border: round $faint; background: $panel; }
 #editors { max-height: 40vh; margin: 1 0; }
-.buttons { height: auto; margin-top: 1; }
+/* The settings list grows with the terminal; settings.py leaves room under it for what the
+   highlighted row does (#about), set apart by a rule. */
+#rows { height: auto; max-height: 75vh; }
+#about { height: auto; max-height: 8; width: 100%; color: $text-muted; border-top: solid $faint; padding: 1 0 0 0; margin-top: 1; }
+.dialog.short #about { max-height: 4; padding: 0; margin: 0; }
 .fields { height: auto; }
-.wrap { width: 100%; }
-/* Text beside a button takes what the button leaves. */
-.role > .wrap { width: 1fr; }
-.role > Button { margin-left: 2; }
-.buttons Button { margin-right: 2; }
-.files { color: $text-muted; margin: 1 0; }
+
+/* --- Forms: sections, a column of labels, one field per row -------------------------------- */
+.dialog.form { max-height: 100%; }
+.form .section { height: auto; margin-top: 1; }
+.form .section.first, .form #task { margin-top: 0; }
+.form.tight .section { margin-top: 0; }
+.form .title { width: 100%; color: $text-muted; text-style: bold; }
+.form.plain .title { display: none; }
+.form .row { height: auto; }
+.form .key { width: 14; color: $text-muted; padding: 0 0 0 0; }
+/* The row that has the keys: its label in the accent. */
+.form .row.-focused > .key { color: $accent; text-style: bold; }
+/* The goal's label on its first line of text, inside the frame. */
+.form #task-row > .key { padding-top: 1; }
+.form .hint { width: 1fr; color: $text-muted; }
+.form.tight .hint-row { display: none; }
+.form .row > Select, .form .row > TextArea, .form .row > Input { width: 1fr; }
+.form .row > .value { width: 1fr; padding: 0 1; }
+.form #max-rounds { width: 6; }
+.form .key.rounds { width: 9; text-align: right; margin-right: 1; }
+.form .row > Button.inline { margin: 0 0 0 1; }
+/* A field that opens its own picker (Branch) is drawn as a list is: its value and a mark. */
+.form Button.field {
+    width: 1fr; background: transparent; color: $foreground; text-align: left;
+    content-align: left middle; padding: 0; margin: 0; text-style: none;
+}
+.form Button.field:focus { background: $accent 15%; color: $foreground; text-style: none; }
+.form .buttons { margin-top: 1; }
+/* Old roles rows, for the dialogs not yet a form. */
 .role { height: auto; }
-.role > Label { padding: 1 0; }
+.role > .wrap { width: 1fr; }
+.role > Label { padding: 0 0; }
 .role > .role-name { width: 10; }
 .role > Select { width: 1fr; }
-/* A form: a column of labels, one field per row, only the description and the buttons boxed. */
-.dialog.form { max-width: 100%; }
-.form .section { height: auto; margin-top: 1; }
-.form #task { margin-top: 0; }
-.form .row { height: auto; }
-/* Lists of a group a row apart, unless the terminal is short (fit() decides). */
-.form .row.gap { margin-top: 1; }
-.form.tight .row.gap { margin-top: 0; }
-.form.tight .section { margin-top: 0; }
-/* A group has a heading, and its fields are bands, every other one darker, so rows stay apart
-   even where a short terminal leaves no blank row between them. On a short terminal the
-   headings go too: every field on the screen comes first. */
-.form .title { width: 100%; text-style: bold; color: $primary; margin-bottom: 1; }
-.form.plain .title { display: none; }
-.form .key { width: 14; color: $text-muted; }
-.form .hint { width: 1fr; color: $text-muted; }
-/* Rounds is a field: a band like the lists', not a number standing in the text. */
-.form #max-rounds { width: 6; background: $boost; color: $text; text-style: bold; }
-.form .key.rounds { width: 8; text-align: right; margin-right: 1; }
-.form.tight .hint-row { display: none; }
-.dialog.form { max-height: 100%; }
-.form .row > Select, .form .row > TextArea { width: 1fr; }
-.form .row > Button { margin: 0 2 0 0; min-width: 9; }
-/* A button that helps fill a field is a button: a band of the accent colour, not bold text. */
-.form #attach { background: $accent-muted; color: $text; padding: 0 1; }
-.form #attach:hover { background: $accent; }
-/* Branch is a field that opens a list: flush with the lists above it, their width, their band. */
-.form #base-ref { width: 1fr; margin: 0; border: none; text-align: left; content-align: left middle; text-style: none; color: $text; padding: 0; }
-.form .row > Checkbox { width: 1fr; background: $boost; padding: 0; }
-/* On a band the box has to stand out from the band, not from the dialog; off, it stays empty
-   (its mark in the box's own colour), on, the mark is the success colour. */
-.form .row > Checkbox > .toggle--button { color: $panel-lighten-3; background: $panel-lighten-3; }
-.form .row > Checkbox.-on > .toggle--button { color: $text-success; }
-.form .buttons > .keys { width: auto; padding: 1 0; }
-.form Select > SelectCurrent, .form #base-ref { background: $boost; }
-.form .row:odd > Select > SelectCurrent, .form .row:odd > #base-ref, .form .row:odd > Checkbox { background: $panel; }
-/* An open list is framed and set apart: bare, it ended right above the next row, whose value read
-   as one more of its options. */
-.form Select > SelectOverlay.-textual-compact { border: round $accent !important; background: $panel; }
-/* Focus is one signal: the focused control's text as the cursor block, as on a button. */
-.form Select:focus > SelectCurrent > Static#label {
-    color: $block-cursor-foreground; background: $block-cursor-background; text-style: bold;
-}
-/* Every dialog sits in the middle of the screen, the ones still to be written too. */
-ModalScreen { align: center middle; }
-/* A toggle that is off shows an empty box: Textual draws its mark in a darker shade of the box,
-   which in these colours read as ticked. On, the mark is the success colour. */
-ToggleButton > .toggle--button { color: $panel; }
-ToggleButton.-on > .toggle--button { color: $text-success; }
+#topbar > #state { width: 1fr; }
+#topbar > #clock { width: auto; color: $text-muted; }

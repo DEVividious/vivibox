@@ -64,19 +64,20 @@ Several tasks run at once, each in its own pod. Everything the view does is also
 
 ## Orchestration modes
 
-How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where the
-gate runs, is one setting, `agent_orchestration_mode`: in `config.toml`, under `k`, and per task
-under `n`.
+How a task is shared between the planner, the writer and the reviewer, and where the
+verification runs, is one setting, `agent_orchestration_mode`: in `config.toml`, the Flow row
+under `k`, and per task the Flow row under `n`.
 
-| Mode | Flow | When |
-|---|---|---|
-| `single_agent` | P+W+R → Gate | small, routine, cheap tasks |
-| `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
-| `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
-| `supervisor_worker` | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
+| Mode | In the view | Flow | When |
+|---|---|---|---|
+| `single_agent` | One agent | plan+write+review → verify | small, routine, cheap tasks |
+| `planner_executor` | Planner, then writer | plan → write+review → verify | a good plan matters and the implementation is routine |
+| `planner_maker_checker` (default) | Planner, writer, reviewer | plan → write → verify → review ⇄ write | an independent review at every round |
+| `supervisor_worker` | Planner supervises writer | plan → write → verify → planner reviews ⇄ write | hard, multi-step changes under a strong model's constant supervision |
 
-Legend: `+` roles in one agent and one conversation, on the first role's model; `→` then; `⇄`
-rounds of fixes, up to `max_rounds`; Gate the verification (build, tests, criteria, commits).
+Legend: `a+b` one agent does both, in one conversation, on the first role's model; `→` then; `⇄`
+rounds of fixes, up to `max_rounds`; verify: the verification (build, tests, criteria, commits).
+Below, P, W and R are the planner, the writer and the reviewer.
 
 - A writer that reviews its own work (W+R) gets a turn after each of its turns to read the diff
   as a reviewer would, before the gate; nothing else reviews it.

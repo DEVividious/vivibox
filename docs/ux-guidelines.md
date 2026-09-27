@@ -3,7 +3,7 @@
 Read this before changing anything a person sees: the view (`vivibox/tui.py`, `vivibox/table.py`,
 `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
 `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
-`vivibox/branches.py`, `vivibox/usage_view.py`),
+`vivibox/branches.py`, `vivibox/usage_view.py`), their look (`vivibox/look.py`, `vivibox/vivibox.tcss`),
 `vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.
@@ -26,13 +26,15 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | Thing | Word | Not |
 |---|---|---|
 | unit of work | task | job, run |
-| checks after implementation | verification | verify; "gate" only in code, docs/security.md and the "verification gate timeout" setting |
+| checks after implementation | verification ("verify" as a step of a flow) | "gate", which stays in code and docs/security.md |
 | a fix turn the writer is sent on, by the verification or the review | round | attempt, iteration, retry |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
 | removing a task | delete | rm, remove |
 | the copy you review | review copy | worktree |
 | agent container and its Docker sidecar | pod | container, sandbox |
-| running the project for you to look at | run app, stop app | demo, "it" |
+| running the project for you to look at | run app, stop app; the list's column APP | demo, "it" |
+| the roles | planner, writer, reviewer | maker, checker, executor, worker, supervisor |
+| how the roles share a task | flow (the mode's name, e.g. "Planner, writer, reviewer") | orchestration, outside config.toml's key |
 
 Status labels, the only ones allowed:
 
@@ -84,11 +86,13 @@ starts the pod when needed.
   move between fields. A dialog that cannot send what it was given stays open and says why.
 - Red is for a button that stops, deletes or forgets. Such a dialog with lasting loss opens with
   Cancel focused.
-- The footer shows only keys that do something for the selected row, decisions first, then the
-  row's actions, then `n`, `i`, `?` and `q`; everything else is under `?`. The header counts what
-  waits for you and what works, what `h` and `H` hide, and what today's tasks have cost; first of
-  all it says, in red, what would keep every task from starting (Docker down, a provider without a key). At 80 columns the whole
-  footer fits. A key named in any text is a key the footer offers at that moment: ask the same
+- The footer is a command bar of the keys that do something for the selected row, in three
+  groups: decisions, their words in the foreground, then a rule and the row's actions, and at
+  the right end `n`, `i`, `?` and `q`; everything else is under `?`. On a narrow terminal the
+  keys that work anywhere lose their words first, then the longest words shorten to their first. The bar above the list counts what
+  waits for you and what works, what `h` and `H` hide, and what today's tasks have cost, each in
+  its meaning's colour; first of all it says, in red, what would keep every task from starting
+  (Docker down, a provider without a key). At 80 columns every key of the footer fits. A key named in any text is a key the footer offers at that moment: ask the same
   function that enables the key (`watchable`, `check_action`), never repeat its condition.
 - The list is projects with their tasks under them. Enter on a project folds or unfolds it, and
   that choice is kept. A folded project's status says how many tasks wait, and projects with a
@@ -99,29 +103,37 @@ starts the pod when needed.
 
 ## 4. Dialogs
 
-- A dialog is a form: a column of one-word labels on the left, one field per row. A list or a
-  checkbox is one row with no frame; the only boxes are a multi-line text and the buttons that
-  close the dialog. Related fields form a group under a heading, and a blank row separates
-  groups; the lists of a group stand a blank row apart too, and every other field is drawn a
-  shade darker, so rows stay apart where no blank row fits. On a short terminal the headings go
-  first, then the rows between the lists and between the groups, before the multi-line text
-  shrinks below three lines.
-  Roles stand in the order they work: planner, writer, reviewer, and under them the Orchestration
-  list, with Rounds at its right: the mode's name on the list, its flow in symbols on the hint
-  line under it (which goes with the blank rows on a short terminal), and when it fits, the
-  models, the trade-off and the legend on hover. The reviewer's model row shows only where the
-  mode has a reviewer of its own.
-- A button that helps fill a field stands in that field's row, compact, or is the last entry of
-  that field's list ("+ set up another project…"); compact, it is a band of the accent colour
-  (Attach…), never bare bold text. The closing row holds one
-  primary button, then Cancel, then the key that presses the primary button.
-- Every field of a form starts in the same column and has a band of its own: a list, a picker
-  (Branch, its text flush with the lists'), a checkbox (its empty box visible on the band), a
-  number (Rounds). A value with no band reads as text, not as something to change.
-- Focus is one signal: the focused control's text is drawn as the cursor block; a text box shows
-  it by its frame.
+- Every dialog is a `widgets.Dialog`: a frame of one thin line, its title in the top edge
+  (`New task`, `Delete demo-5?`, `Reply · demo-5`), the keys that close it in the bottom edge
+  (`ctrl+s create  esc cancel`), and a padding of one line and two columns. Its content is the
+  size it needs, 90 columns at most; on a small terminal it takes the screen less a line. No
+  sentence among the fields names a key.
+- A dialog that picks one of a list is a `widgets.Choose`: names in a column, what each is muted
+  beside it, Enter takes, Esc leaves. The logs, the models, the editors, the sessions and the
+  roles are this one dialog.
+- A form is a column of one-word labels on the left, one field per row, under upper-case
+  section headings (TASK, WORKFLOW; PROJECT, FOR ITS TASKS), a blank row between sections and
+  none between rows. The only boxes are a multi-line text and an open list. A text field and a
+  button have a band; a list is its value and a faint ▼, its band only with focus. On a short
+  terminal the headings go first, then the flow's steps and the blank row between sections,
+  before the multi-line text shrinks below three lines of text.
+  Roles stand in the order they work: planner, writer, reviewer, and under them Flow (the
+  orchestration mode) with Rounds at its right: the mode's name on the list, its steps in words
+  on the line under it (`plan → write → verify → review ⇄ write`), and when it fits, the models,
+  the trade-off and the legend on hover. The reviewer's model row shows only where the mode has
+  a reviewer of its own. Build is a list of two answers (build and test the work; nothing to
+  build or test), not a box to tick.
+- A button that helps fill a field stands in that field's row, compact (Attach…, Browse…,
+  Change…), or is the last entry of that field's list ("+ set up another project…"). The closing
+  row holds one primary button, then Cancel; the key that presses the primary button is in the
+  frame.
+- Every field of a form starts in the same column; Branch, a field that opens a picker, is drawn
+  as a list is, flush with the lists and their width.
+- A field's help is one place: the line under the fields (`#about`, after a rule) says what the
+  focused field is for (`Dialog.field_help`), or in `k` what the highlighted row does. The form
+  itself stays one word per label.
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
-  text gives way first, down to one line, before anything scrolls.
+  text gives way first, down to three lines, before anything scrolls.
 - A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall
   one it shows everything, on a short one it scrolls. Its height is a share of the screen (`vh`),
   never a fixed number of lines.
@@ -142,20 +154,24 @@ starts the pod when needed.
   and a new one named after the task (`feature/`, `bugfix/` or no prefix by the task's kind, a
   number when taken); a task started on `main` or `master` has the new branch chosen, and the
   start branch says "(your main branch)". The checkout stays on the branch committed on.
-- Esc on an open list closes the list, never the dialog under it.
+- Esc works from the inside out: an open list closes, then the dialog, then the one under it;
+  never the dialog under an open list.
 
-Settings name what a row is for, not its key: the editor section is "Manual review" and its row
-"IDE / text editor (o)", the same row on a project's screen, and the footer and `?` call `o` that
-too; "Notifications" groups desktop, ntfy topic, server and events; "rounds" says what the round
-limit is for; "verification gate timeout" shows minutes from a minute up (`30 min`), seconds below
-that (`45 s`), and its field takes minutes (`30m`) or seconds (`1800`). The keys in `config.toml`
-stay as they are.
+Settings name what a row is for, not its key, in words, never `snake_case`: the editor section is
+"Review copy" and its row "IDE / text editor (o)", the same row on a project's screen, and the
+footer and `?` call `o` that too; "Notifications" groups desktop, ntfy topic, server and events;
+"rounds" says what the round limit is for; "verification timeout" shows minutes from a minute up
+(`30 min`), seconds below that (`45 s`), and its field takes minutes (`30m`) or seconds (`1800`);
+"cost warning", "cost limit", "tasks folder"; a project's "preparation", "run app (v)",
+"variables". The keys in `config.toml` stay as they are. A row's name and value stand in two
+columns under an upper-case section; a row that is only shown is muted, a row that opens a
+screen of its own ends in a muted ›, and a value is cut to the dialog's width, never wrapped.
 
 Under the list of `k`, and of a project's `e`, a line says what the highlighted row does, for
 someone who has not read the docs (what one round is, what `cost_warning` does). It follows the
-highlight and the value: orchestration describes the mode it is on, its name in bold, its flow
-alone on the next line in the accent colour, when it fits and what it costs a line each, the
-legend of the symbols last and muted, and Enter moving to the next mode changes the line, not a notification. A change shows
+highlight and the value: flow describes the mode it is on, its name in bold, its steps
+alone on the next line in bold, when it fits and what it costs a line each, the legend of the
+signs last, and Enter moving to the next mode changes the line, not a notification. A change shows
 on its row, and when it applies ("from a task's next start") is on that line before it is made:
 no notification says the new value again. A notification is for what the screen does not show,
 such as a value refused and why; it never carries a description, which is gone before it is read.
@@ -221,10 +237,52 @@ text exactly matches an accepted criterion can mark its checkbox complete; unrel
 steps never satisfy acceptance criteria. Pending, reopened or cancelled todos never clear verified
 criteria. The writer can clear a checkbox in the checklist itself; verification still reads that file.
 
+## 10. Look
+
+`vivibox/look.py` holds the palette and builds the Textual theme from it; the stylesheet uses the
+theme's variables and the code the constants, by meaning, never a hue by name
+(`tests/test_look.py` fails on `[yellow]` in a view module).
+
+| Token | Means | Used for |
+|---|---|---|
+| background, surface, panel | where things stand | the list; a dialog; a field's band |
+| foreground | what you read | values, goals, a live task |
+| muted | what explains | labels, headings, metadata, hints, help, finished tasks |
+| faint | what is out of play | placeholders, frames, the dot of an empty cell, the project in an id |
+| accent | what takes your keys | the focused field's label and band, a focused button, a key in a hint |
+| selection | where the cursor is | the row under the cursor in the list and in a dialog's list |
+| working | an agent or the verification at work | a working status, "N working" |
+| warning | waits for you | ● statuses, "N waiting for you" |
+| error | failed, refused, destroys | ✕ statuses, a problem, the Delete button |
+| success | done, passed | ✓ done, a ticked box |
+
+- **Focus** is the accent: the focused row's label, in bold, and its field's band; a focused
+  button is solid accent. One row at a time (`.row.-focused`, set by `Dialog`).
+- **Selection** is a lighter surface that keeps the row's colours: a status reads the same under
+  the cursor (`cursor_foreground_priority="renderable"`).
+- **Status** is a mark and a word, so it reads without colour: ● waits for you, ✕ failed, ○ nobody
+  runs it, ‖ you stopped it, ✓ done, – deleted, the spinner at work (`look.MARKS`).
+- **Primary action** is the one tinted button of a dialog; solid when focused, so Enter's target
+  is the solid thing on the screen. A destructive one is tinted red.
+- Text has five levels: a dialog's title (bold, in its frame); a section heading (upper case,
+  bold, muted); a label (muted); a value (foreground); help and metadata (muted).
+- Space: a dialog's padding is one line and two columns; one blank row between sections, none
+  between rows; the help under a rule, a blank row above its text.
+- A key is named as `key action`, the key bold in the accent, the action muted (`look.hints`),
+  in the footer and in a dialog's frame alike; a key in running text is inline code, drawn the
+  same way in the panel.
+- An empty state says so in muted italics with the key that fills it (`no tasks yet  n new task`).
+- The list: a project row is its name in bold after a muted ▾ or ▸; a task is indented, the
+  project's part of its id faint; figures and times (`now`, `12m`, `3h`, `2d`) on the right; a
+  faint dot for nothing; finished tasks muted. Columns go with the width: under 100, TASK,
+  STATUS and GOAL; under 130, CRITERIA, COST (one figure) and UPDATED too; from 130, APP, PLAN,
+  IMPL, REVIEW (where someone other than the writer reviews) and CREATED. The goal takes what
+  is left and ends in an ellipsis.
+
 ## Known gaps
 
 Rules above that the code does not meet yet. Remove a line when it is fixed.
 
-- §4: only the new task dialog is a form. The other dialogs (`NewProject`, `AddProvider`,
-  `ManageItems`, `Browse`, the replies) still frame every field and keep helper buttons among the
-  closing ones.
+- §4: `AddProvider`, `ManageProviders` and `Browse` keep helper buttons (Import…, Manage…, New
+  folder…) in the closing row, and `ChooseImport` and `ManageItems` are lists with a note rather
+  than forms.

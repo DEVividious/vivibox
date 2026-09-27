@@ -11,16 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from textual import on
-from textual.app import ComposeResult
-from textual.containers import Vertical
-from textual.screen import ModalScreen
-from textual.widgets import Label, OptionList
-
-from . import prepare, reviewing, timeline, transcript
+from . import look, prepare, reviewing, timeline, transcript
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
+from .widgets import Choose
 
 COMMAND = re.compile(r"^\$ (.+)$", re.MULTILINE)
 VERIFICATION_OVER = (
@@ -149,29 +144,17 @@ def archived_entries(kept: Path) -> list[Entry]:
     return found
 
 
-class ChooseLog(ModalScreen["list[str] | None"]):
-    """Which log to read. Arrows pick, Enter opens it in your pager, Escape leaves."""
+class ChooseLog(Choose):
+    """Which log to read. Enter opens it in your pager."""
+
+    hint_keys = (("enter", "open"), look.ESC_CLOSES)
 
     def __init__(self, found: list[Entry], start: int = 0):
-        super().__init__()
-        self.found, self.start = found, start
+        super().__init__("Logs", [(e.label, e.said) for e in found], start=start)
+        self.found = found
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Read:")
-            yield OptionList(*[f"{e.label}  [dim]{e.said}[/]" for e in self.found], id="logs")
-
-    def on_mount(self) -> None:
-        options = self.query_one(OptionList)
-        options.highlighted = self.start
-        options.focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.found[event.option_index].command)
-
-    def key_escape(self) -> None:
-        self.dismiss(None)
+    def picked(self, index: int) -> list[str]:
+        return self.found[index].command
 
 
 def follow_verification(

@@ -18,7 +18,7 @@ from textual.widgets import (
     Label,
 )
 
-from . import actions, providers
+from . import actions, look, providers
 from .config import ConfigError
 from .widgets import Dialog
 
@@ -125,8 +125,8 @@ class NameFolder(Dialog):
         self.folder = parent
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label(f"New folder in {escape(shown_path(self.folder))}:")
+        with Vertical(classes="dialog narrow"):
+            yield Label(f"New folder in {escape(shown_path(self.folder))}:", classes="wrap")
             yield Input(placeholder="name", id="name")
             with Horizontal(classes="buttons"):
                 yield Button("Create", variant="primary", id="create")
@@ -167,12 +167,11 @@ class Browse(Dialog):
         self.mode, self.title_text = mode, title
         self.start = start or browse_start()
 
+    hint_keys = (("→", "open"), ("←", "close"), ("backspace", "up"), ("enter", "pick"), look.ESC_CANCELS)
+
     def compose(self) -> ComposeResult:
+        self.frame_title = self.title_text
         with Vertical(classes="dialog"):
-            yield Label(f"[b]{escape(self.title_text)}[/]")
-            yield Label(
-                "→ opens a folder · ← closes it · Enter or Select picks · Backspace goes up", classes="files"
-            )
             tree = PathTree(self.start, self.mode, id="tree", classes="tree")
             tree.auto_expand = False  # Enter picks; the arrows open and close
             yield tree
@@ -238,8 +237,8 @@ class Browse(Dialog):
             verdict.update("")
             return
         ok, said = self.judged(path)
-        colour = "green" if ok else "red" if path.is_file() else "dim"
-        verdict.update(f"[{colour}]{escape(said)}[/]")
+        colour = look.SUCCESS if ok else look.ERROR if path.is_file() else look.MUTED
+        verdict.update(look.colored(said, colour))
 
     @on(DirectoryTree.FileSelected)
     def file_picked(self, event: DirectoryTree.FileSelected) -> None:

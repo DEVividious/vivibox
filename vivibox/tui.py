@@ -16,11 +16,11 @@ import time
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
-from textual.widgets import DataTable, Header, Markdown, Static
+from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, ide, probe, ui
+from . import actions, code, ide, look, probe, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -124,8 +124,14 @@ class Vivibox(
         Binding("ctrl+q", "leave_note", "Leave", show=False, priority=True),
     ]
 
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """look.py's own tokens, which the stylesheet uses, known before the theme is set."""
+        return look.CUSTOM
+
     def __init__(self):
         super().__init__()
+        self.register_theme(look.THEME)
+        self.theme = look.THEME.name
         self.config = load_config()
         self.executor = LeavingExecutor()
         self.shown = ""
@@ -162,8 +168,12 @@ class Vivibox(
         self.catalog: list[tuple[str, str]] | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        yield DataTable(id="tasks", cursor_type="row", zebra_stripes=True)
+        with Horizontal(id="topbar"):
+            yield Static("", id="state")
+            yield Static("", id="clock")
+        yield DataTable(
+            id="tasks", cursor_type="row", cursor_foreground_priority="renderable"
+        )  # the cursor keeps a row's own colours: a status reads the same under it
         yield Static("", id="empty")  # in the table's place while there is nothing to list
         with VerticalScroll(id="detail", classes="hidden"):
             yield Markdown("", id="detail-text")

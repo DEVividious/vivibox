@@ -10,9 +10,9 @@ from pathlib import Path
 from textual import events, on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Checkbox, Input, Label, OptionList, Select, TextArea
+from textual.widgets import Button, Input, Label, OptionList, Select, TextArea
 
-from . import actions, context, orchestration, panel, repo
+from . import actions, context, look, orchestration, panel, repo
 from .browse import ANY, Browse, shown_path
 from .config import (
     ORCHESTRATION_LEGEND,
@@ -120,13 +120,16 @@ class NewTask(Dialog):
         self.available = available
         self.base_ref = "HEAD"
 
+    frame_title = "New task"
+    hint_keys = (("ctrl+s", "create"), look.ESC_CANCELS)
+
     def compose(self) -> ComposeResult:
         names = panel.projects()
         chosen = self.preselect if self.preselect in names else names[0]
         with Vertical(classes="dialog form"):
             with Fields(classes="fields"):
                 with Vertical(id="task", classes="section"):
-                    yield Label("Task", classes="title")
+                    yield Label("TASK", classes="title")
                     # A list even with one project in it: the dialog looks the same however many
                     # you have. What is not on it is set up from it, like a provider from a model list.
                     with Horizontal(classes="row"):
@@ -135,7 +138,7 @@ class NewTask(Dialog):
                             [*((n, n) for n in names), (NEW_PROJECT, NEW_PROJECT)],
                             value=chosen, allow_blank=False, compact=True, id="project",
                         )  # fmt: skip
-                    with Horizontal(classes="row gap", id="kind-row"):
+                    with Horizontal(classes="row", id="kind-row"):
                         yield Label("Kind", classes="key")
                         yield Select(
                             [("Feature: new behaviour", "feature"), ("Bug: something works wrong", "bug"),
@@ -144,15 +147,15 @@ class NewTask(Dialog):
                         )  # fmt: skip
                     with Horizontal(classes="row"):
                         yield Label("Branch", classes="key")
-                        branch = Button("Current…", compact=True, id="base-ref")
-                        # Its text flush with the lists' above it; Textual's CSS takes no 0 here.
-                        branch.styles.line_pad = 0
-                        yield branch
+                        yield Button("Current…", compact=True, id="base-ref", classes="field")
+                    # What the verification does with the work: build and test it, or nothing to
+                    # build (research, a ticket's analysis). A list, so both answers are named.
                     with Horizontal(classes="row", id="build-row"):
                         yield Label("Build", classes="key")
-                        yield Checkbox(
-                            "Nothing to build or test: research, a ticket analysis",
-                            compact=True, id="no-build",
+                        yield Select(
+                            [("Build and test the work", False),
+                             ("Nothing to build or test: research, a ticket analysis", True)],
+                            value=False, allow_blank=False, compact=True, id="no-build",
                         )  # fmt: skip
                     suggestions = OptionList(id="suggestions")
                     suggestions.display = False
@@ -166,11 +169,11 @@ class NewTask(Dialog):
                     yield suggestions
                     # Attach fills the description, so it stands under it, not among the lists.
                     with Horizontal(classes="row"):
-                        yield Label("", classes="key")
-                        yield Button("Attach…", compact=True, id="attach")
-                        yield Label("or @path, for a copy of a file or folder.", classes="hint")
+                        yield Label("Files", classes="key")
+                        yield Button("Attach…", compact=True, id="attach", classes="inline")
+                        yield Label(" or @path in the goal, for a copy", classes="hint")
                 with Vertical(id="planning", classes="section"):
-                    yield Label("Agents", classes="title")
+                    yield Label("WORKFLOW", classes="title")
                     # One question, not two boxes that could both be ticked.
                     with Horizontal(classes="row"):
                         yield Label("Plan", classes="key")
@@ -187,18 +190,18 @@ class NewTask(Dialog):
                     for name in sorted(config.roles, key=lambda n: (order.get(n, 9), n)):
                         offered = actions.choices(name, config, self.available)
                         configured = actions.configured_choice(config, name)
-                        with Horizontal(classes="row gap"):
+                        with Horizontal(classes="row"):
                             yield Label(name.capitalize(), classes="key")
                             options = [(actions.choice_label(c, configured), c) for c in offered]
                             yield Select(
                                 options, value=configured, allow_blank=False, compact=True,
                                 id=f"role-{name}", classes="model",
                             )  # fmt: skip
-                    # How the roles share the work: the mode's name on the list, its flow in symbols
-                    # under it (together they would wrap at 80 columns), and when it fits, the models,
-                    # the trade-off and the legend on hover.
-                    with Horizontal(classes="row gap"):
-                        yield Label("Orchestration", classes="key")
+                    # How the roles share the work: the mode's name on the list, its steps under it
+                    # (together they would wrap at 80 columns), and when it fits, the models, the
+                    # trade-off and the legend on hover.
+                    with Horizontal(classes="row"):
+                        yield Label("Flow", classes="key")
                         yield Select(
                             [(m.label, name) for name, m in ORCHESTRATION_MODES.items()],
                             value=config.orchestration, allow_blank=False, compact=True, id="orchestration",
@@ -209,14 +212,13 @@ class NewTask(Dialog):
                             str(config.max_rounds), id="max-rounds", compact=True, type="integer",
                             tooltip=ROUNDS_HELP,
                         )  # fmt: skip
-                    # One line on when the mode fits; it goes first when the terminal is short.
+                    # The mode's steps; they go first when the terminal is short.
                     with Horizontal(classes="row hint-row"):
                         yield Label("", classes="key")
                         yield Label(mode_line(config.orchestration), classes="hint", id="orchestration-hint")
             with Horizontal(classes="buttons"):
-                yield Button("Create", variant="primary", id="create")
+                yield Button("Create task", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
-                yield Label("ctrl+s creates the task", classes="hint keys")
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed) -> None:
@@ -246,13 +248,13 @@ class NewTask(Dialog):
                 },
                 "orchestration": self.query_one("#orchestration", Select).value,
                 "max_rounds": int(self.query_one("#max-rounds", Input).value or 0),
-                "no_build": self.query_one("#no-build", Checkbox).value,
+                "no_build": bool(self.query_one("#no-build", Select).value),
                 "base_ref": self.base_ref,
             }
         )
 
     # The dialog's frame, padding and buttons: what the fields leave room for.
-    CHROME = 9
+    CHROME = 7
     # Lines of terminal under which the dialog takes all but a line of the screen.
     SHORT = 30
 
@@ -283,8 +285,8 @@ class NewTask(Dialog):
     def fit(self) -> None:
         """The description as tall as the screen leaves after the other rows, a line at least, so
         the whole form stays in view and the description scrolls inside itself. Before the
-        description would shrink below three lines, the groups' headings go, then the blank rows
-        between the lists of a group and the one between the groups."""
+        description would shrink below three lines, the sections' headings go, then the flow's
+        steps and the blank row between the sections."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
         dialog = self.query_one(".dialog")
@@ -293,20 +295,19 @@ class NewTask(Dialog):
         room = (height - 2 if height < self.SHORT else int(height * 0.9)) - self.CHROME
         fields.styles.max_height = max(5, room)
         # Counted, not measured: a measure is the last layout's, whatever class the dialog has
-        # been given since. A row is a line. The blank rows (between the lists, between the two
-        # groups) and a hint row go together when the terminal is short.
+        # been given since. A row is a line; the description is three lines of text at least, and
+        # its frame takes two more.
         rows = [row for row in self.query(".row") if row.id != "task-row" and not row.has_class("hint-row")]
         rows = [row for row in rows if row.display]
-        hints = len(self.query(".hint-row"))
-        # The blank rows between the lists, and the one the second group stands below the first.
-        gaps = len([row for row in rows if row.has_class("gap")]) + 1
-        titles = 2 * len(self.query(".title"))  # a heading and the blank row under it
-        spare = room - len(rows) - 3
-        plain, tight = spare < gaps + titles + hints, spare < gaps + hints
+        # The blank row between the sections and the flow's steps go together.
+        spacing = len(self.query(".section")) - 1 + len(self.query(".hint-row"))
+        titles = len(self.query(".title"))
+        spare = room - len(rows) - 3 - 2
+        plain, tight = spare < spacing + titles, spare < spacing
         dialog.set_class(plain, "plain")
         dialog.set_class(tight, "tight")
-        taken = len(rows) + (0 if tight else gaps + hints) + (0 if plain else titles)
-        goal.styles.height = max(3, min(12, room - taken))
+        taken = len(rows) + (0 if tight else spacing) + (0 if plain else titles)
+        goal.styles.height = max(3, min(14, room - taken))
         goal.focus()
 
     @on(Select.Changed, "#project")

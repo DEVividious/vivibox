@@ -12,21 +12,19 @@ from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Input,
     Label,
-    OptionList,
     Select,
     Static,
     TextArea,
 )
 
-from . import actions, ide, version
+from . import actions, ide, look, version
 from .browse import FOLDER, Browse, shown_path
 from .verify_ui import AskVerify
-from .widgets import Dialog, EdgeTextArea
+from .widgets import Choose, Dialog, EdgeTextArea
 
 NO_PROJECTS = """No projects yet, so your agents are sitting idle.
 
@@ -42,14 +40,16 @@ class DeleteTask(Dialog):
         super().__init__()
         self.title_text, self.about, self.goes, self.stays, self.warning = title, about, goes, stays, warning
 
+    hint_keys = (("enter", "choose"), look.ESC_CANCELS)
+
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label(f"[b]{escape(self.title_text)}[/]")
+        self.frame_title = self.title_text
+        with Vertical(classes="dialog narrow"):
             yield Label(escape(self.about), classes="wrap")
             if self.warning:
-                yield Label(f"[yellow]{escape(self.warning)}[/]", classes="wrap")
-            yield Label(f"[red]Deleted:[/] {escape(self.goes)}", classes="wrap")
-            yield Label(f"[green]Kept:[/] {escape(self.stays)}", classes="wrap")
+                yield Label(look.colored(self.warning, look.WAITING), classes="wrap files")
+            yield Label(f"[b {look.ERROR}]Deleted[/]  {escape(self.goes)}", classes="wrap files")
+            yield Label(f"[b {look.SUCCESS}]Kept[/]     {escape(self.stays)}", classes="wrap")
             with Horizontal(classes="buttons"):
                 yield Button("Delete", variant="error", id="yes")
                 yield Button("Cancel", id="no")
@@ -69,14 +69,17 @@ NOTHING_TO_SEND = "Write a comment first, or leave with Cancel."
 
 
 class Reply(Dialog):
+    hint_keys = (("ctrl+s", "send"), look.ESC_CANCELS)
+
     def __init__(self, task_id: str, prompt: str = ""):
         super().__init__()
         self.task_id = task_id
+        self.frame_title = f"Reply · {task_id}"
         self.prompt = prompt or f"Your comment for the agent on {task_id}"
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"{self.prompt} (ctrl+s sends):")
+            yield Label(f"{self.prompt}:", classes="wrap")
             yield EdgeTextArea(id="comment")
             with Horizontal(classes="buttons"):
                 yield Button("Send", variant="primary", id="send")
@@ -109,16 +112,23 @@ class ReplyWithCriteria(Dialog):
     """Sending finished or stuck work back: a comment, and criteria for what you found. A remark is
     something the agent may act on; a criterion is something the gate holds the work to."""
 
+    hint_keys = (("ctrl+s", "send"), look.ESC_CANCELS)
+
     def __init__(self, task_id: str):
         super().__init__()
         self.task_id = task_id
+        self.frame_title = f"Reply · {task_id}"
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"Your comment for the agent on {self.task_id} (ctrl+s sends):")
+            yield Label(f"Your comment for the agent on {self.task_id}:", classes="wrap")
             yield EdgeTextArea(id="comment")
-            yield Label("New acceptance criteria, one per line (optional). The gate checks them like the")
-            yield Label("ones you accepted, and the agent ticks them when they are met.")
+            yield Label("New acceptance criteria, one per line (optional)", classes="wrap files")
+            yield Label(
+                "The verification checks them like the ones you accepted, and the agent ticks them when "
+                "they are met.",
+                classes="wrap note",
+            )
             yield EdgeTextArea(id="criteria", classes="criteria")
             with Horizontal(classes="buttons"):
                 yield Button("Send", variant="primary", id="send")
@@ -160,23 +170,43 @@ class NewProject(Dialog):
     test it is yours to type, or left to the first task's writer, who proposes the command it ran;
     what the build files name is only a note."""
 
+    frame_title = "New project"
+    hint_keys = (("enter", "set up"), look.ESC_CANCELS)
+    field_help = {
+        "browse": "The project's folder: a repository you already have, or an empty folder to start "
+        "one in. It starts on the folder vivibox was started in.",
+        "name": "What the list, n and the command line call the project.",
+        "change": "The command that proves a task's work: it runs on a fresh clone after every turn "
+        "of the writer. Left empty, the first task's writer proposes one for you to accept.",
+        "change-prepare": "What a new task's clone runs once, before the writer's first turn: "
+        "usually a build without tests.",
+        "create": "",
+        "cancel": "",
+    }
+
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Folder of the project: where you started vivibox, or another you browse to.")
-            with Horizontal(classes="role"):
-                yield Label("", id="path", classes="wrap")
-                yield Button("Browse…", id="browse")
-            yield Label("Name")
-            yield Input(id="name")
-            yield Label("Verification")
-            with Horizontal(classes="role"):
-                yield Label("", id="verify", classes="wrap")
-                yield Button("Change…", id="change")
-            yield Label("Prepare: what a new task's clone runs first, before the writer")
-            with Horizontal(classes="role"):
-                yield Label("", id="prepare", classes="wrap")
-                yield Button("Change…", id="change-prepare")
-            yield Label("", id="notes")
+        with Vertical(classes="dialog form"):
+            with Vertical(classes="section first"):
+                yield Label("PROJECT", classes="title")
+                with Horizontal(classes="row"):
+                    yield Label("Folder", classes="key")
+                    yield Label("", id="path", classes="value")
+                    yield Button("Browse…", compact=True, id="browse", classes="inline")
+                with Horizontal(classes="row"):
+                    yield Label("Name", classes="key")
+                    yield Input(id="name", compact=True)
+            with Vertical(classes="section"):
+                yield Label("FOR ITS TASKS", classes="title")
+                with Horizontal(classes="row"):
+                    yield Label("Verification", classes="key")
+                    yield Label("", id="verify", classes="value")
+                    yield Button("Change…", compact=True, id="change", classes="inline")
+                with Horizontal(classes="row"):
+                    yield Label("Preparation", classes="key")
+                    yield Label("", id="prepare", classes="value")
+                    yield Button("Change…", compact=True, id="change-prepare", classes="inline")
+            yield Label("", id="notes", classes="files wrap")
+            yield Label("", id="about", classes="wrap")
             with Horizontal(classes="buttons"):
                 yield Button("Set up", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
@@ -193,7 +223,7 @@ class NewProject(Dialog):
     def look(self, where: Path) -> None:
         """Following the folder you point at: its name, and what setting it up would mean."""
         self.where = where
-        self.query_one("#path", Label).update(f"[b]{escape(shown_path(where))}[/]")
+        self.query_one("#path", Label).update(escape(shown_path(where)))
         found = actions.propose_project(where)
         root = actions.git_root(where)
         self.taken = actions.project_at(root) if root else ""
@@ -265,112 +295,62 @@ class NewProject(Dialog):
         self.dismiss({})
 
 
-class ChooseEditor(ModalScreen["str | None"]):
-    """What to open review copies with, from the editors found here: arrows pick, Enter takes,
-    Escape (None) leaves it as it is. first: a row before them, with the command it stands for
-    ("" for config.toml's own)."""
+class ChooseEditor(Choose):
+    """What to open review copies with, from the editors found here. Dismisses with its command;
+    None leaves it as it is. first: a row before them, with the command it stands for ("" for
+    config.toml's own)."""
 
     def __init__(self, found: list[ide.Editor], first: tuple[str, str] | None = None):
-        super().__init__()
-        self.found = found
+        rows = [(e.label, "") for e in found]
         self.commands = [e.command for e in found]
-        self.labels = [e.label for e in found]
         if first:
-            self.labels.insert(0, first[0])
+            rows.insert(0, (first[0], ""))
             self.commands.insert(0, first[1])
+        super().__init__("Open the review copy with", rows)
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Open the review copy with:")
-            yield OptionList(*self.labels, id="editors")
-
-    def on_mount(self) -> None:
-        self.query_one(OptionList).focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.commands[event.option_index])
-
-    def key_escape(self) -> None:
-        self.dismiss(None)
+    def picked(self, index: int) -> str:
+        return self.commands[index]
 
 
-class ChooseSession(ModalScreen[str]):
-    """Which conversation w opens when the task has two. Arrows pick, Enter takes, Escape leaves."""
+class ChooseSession(Choose):
+    """Which conversation w opens when the task has two."""
 
     def __init__(self, rows: list[tuple[str, str]]):
-        super().__init__()
+        super().__init__("Look at", rows, none="")
         self.rows = rows
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Look at:")
-            yield OptionList(*[f"{role}  {doing}" for role, doing in self.rows], id="sessions")
-
-    def on_mount(self) -> None:
-        self.query_one(OptionList).focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.rows[event.option_index][0])
-
-    def key_escape(self) -> None:
-        self.dismiss("")
+    def picked(self, index: int) -> str:
+        return self.rows[index][0]
 
 
-class ChooseRole(ModalScreen[str]):
-    """Which role to put on another model for this task. Arrows pick, Enter takes, Escape leaves."""
+class ChooseRole(Choose):
+    """Which role to put on another model for this task."""
 
     def __init__(self, rows: list[tuple[str, str, bool]]):
-        super().__init__()
+        shown = [(name, model + ("  (this task)" if own else "")) for name, model, own in rows]
+        super().__init__(
+            "Run this task's roles on", shown, note="A change applies the next time the task starts.", none=""
+        )
         self.rows = rows
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label("Run this task's roles on:")
-            labels = [f"{name}  {model}" + ("  (this task)" if own else "") for name, model, own in self.rows]
-            yield OptionList(*labels, id="roles")
-            yield Label("A change applies the next time the task starts.")
-
-    def on_mount(self) -> None:
-        self.query_one(OptionList).focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.rows[event.option_index][0])
-
-    def key_escape(self) -> None:
-        self.dismiss("")
+    def picked(self, index: int) -> str:
+        return self.rows[index][0]
 
 
-class ChooseModel(ModalScreen["actions.Choice | None"]):
+class ChooseModel(Choose):
     """What one role runs on, from what you can run: planning yourself, or a model of a provider
     you have a key for. None leaves it alone; config.toml's own choice gives the role back to it."""
 
     def __init__(self, role: str, offered: list, configured, current, available: dict | None = None):
-        super().__init__()
-        self.role, self.offered, self.configured, self.current = role, offered, configured, current
-        self.available = available
+        rows = [
+            (actions.choice_label(c, configured, available), "now" if c == current else "") for c in offered
+        ]
+        start = offered.index(current) if current in offered else 0
+        super().__init__(f"Run the {role} on", rows, start=start)
+        self.offered = offered
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Label(f"Run {self.role} on:")
-            labels = [
-                actions.choice_label(c, self.configured, self.available)
-                + ("  ← now" if c == self.current else "")
-                for c in self.offered
-            ]
-            yield OptionList(*labels, id="models")
-
-    def on_mount(self) -> None:
-        self.query_one(OptionList).focus()
-
-    @on(OptionList.OptionSelected)
-    def chose(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.offered[event.option_index])
-
-    def key_escape(self) -> None:
-        self.dismiss(None)
+    def picked(self, index: int):
+        return self.offered[index]
 
 
 NEW_PROJECT = "+ set up another project…"
@@ -422,9 +402,22 @@ HELP = """[b]Your decisions[/b], on the selected task
 """
 
 
-class Help(ModalScreen):
+def help_text() -> str:
+    """HELP with its keys in the accent colour and its headings muted, as keys and headings are
+    everywhere else."""
+    lines = []
+    for line in HELP.splitlines():
+        if m := re.match(r"^  (\S(?:[^ ]| (?=\S))*)(\s{2,}.*)$", line):
+            line = f"  [b {look.ACCENT}]{m.group(1)}[/]{m.group(2)}"
+        lines.append(line.replace("[b]", f"[b {look.MUTED}]").replace("[/b]", "[/]"))
+    return "\n".join(lines)
+
+
+class Help(Dialog):
     """Every key, and when it does something. The footer shows only what applies right now.
     note: a line about this machine, such as what o opens with."""
+
+    frame_title = "Keys"
 
     def __init__(self, note: str = ""):
         super().__init__()
@@ -433,11 +426,10 @@ class Help(ModalScreen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="dialog help"):
             # The build first, where it is seen without scrolling: a bug report starts with it.
-            yield Label(f"vivibox {version.current()}", classes="files")
-            yield Static(HELP, id="help")
+            yield Label(f"vivibox {version.current()}", classes="note")
+            yield Static(help_text(), id="help")
             if self.note:
-                yield Label(self.note, id="note")
-            yield Label("Esc closes.", classes="files")
+                yield Label(self.note, id="note", classes="note")
 
     def key_escape(self) -> None:
         self.dismiss()
@@ -451,28 +443,32 @@ class CommitWork(Dialog):
     started on or on a new one, or leave it for your IDE. Dismisses with the message, the branch
     and whether to create it; {} leaves it uncommitted."""
 
+    hint_keys = (("ctrl+s", "commit"), ("esc", "leave uncommitted"))
+
     def __init__(self, done: actions.Finished):
         super().__init__()
         self.done = done
 
     def compose(self) -> ComposeResult:
         choices = actions.branch_choices(self.done)
+        self.frame_title = f"Commit · {self.done.task_id}"
         with Vertical(classes="dialog form plain"):
-            yield Label(f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:")
+            yield Label(
+                f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:", classes="wrap"
+            )
             yield Label(self.done.status.rstrip() or "(no changes)", classes="files")
-            with Horizontal(classes="row gap"):
+            with Horizontal(classes="row"):
                 yield Label("Branch", classes="key")
                 yield Select(
                     choices, value=actions.default_branch(self.done) if choices else Select.BLANK,
                     allow_blank=not choices, compact=True, id="branch",
                 )  # fmt: skip
-            with Horizontal(classes="row gap"):
+            with Horizontal(classes="row files"):
                 yield Label("Message", classes="key")
                 yield EdgeTextArea(self.done.message, id="message")
             with Horizontal(classes="buttons"):
                 yield Button("Commit", variant="primary", id="commit")
                 yield Button("Leave uncommitted", id="later")
-                yield Label("ctrl+s commits", classes="hint keys")
 
     def on_mount(self) -> None:
         self.query_one("#branch").focus()

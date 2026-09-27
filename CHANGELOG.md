@@ -97,6 +97,27 @@ First public version.
   review or a plan no longer stand larger than the panel's own, and the accepted plan leaves its
   criteria to their section, where they are ticked.
 
+### Changed
+
+- The view has one look: a theme of its own (`vivibox/look.py`) with neutral surfaces and one
+  accent for what takes your keys. Focus, selection, status and the primary button are drawn
+  apart: the focused field's label and band in the accent, the row under the cursor a lighter
+  surface that keeps its colours, a status a mark and a word (● waits for you, ✕ failed, ‖
+  stopped, ✓ done, a spinner at work), the primary button tinted and solid once focused.
+- Every dialog is framed the same: its title in the top edge, its keys in the bottom one
+  (`ctrl+s create  esc cancel`), buttons one line high. The pickers (logs, models, editors,
+  sessions, roles) are one list dialog; `i` is a form like `n`; `k` and a project's `e` align
+  their rows under upper-case sections, mute what is only shown and mark with › what opens a
+  screen.
+- The list: the project's name muted in a task's id, times as `now`, `12m`, `3h`, `2d`, numbers
+  on the right, a dot for nothing, finished tasks muted; a medium terminal shows the cost as
+  one figure (COST); DEMO is APP. Above it a bar says what waits and what works in their
+  colours; the footer groups decisions, the row's keys and the keys that work anywhere.
+- Words: the modes are "One agent", "Planner, then writer", "Planner, writer, reviewer" and
+  "Planner supervises writer", their steps in words (`plan → write → verify → review ⇄ write`);
+  the form calls the mode Flow; Build is a list of two answers; settings say "cost limit",
+  "verification timeout", "tasks folder", "Review copy".
+
 ### Fixed
 
 - The orchestration mode under `k` reads in lines: its name, its flow on a line of its own, when

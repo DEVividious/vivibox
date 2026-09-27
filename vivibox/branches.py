@@ -39,11 +39,11 @@ class BranchPicker(Dialog):
         self.ready = False
 
     def compose(self) -> ComposeResult:
+        self.frame_title = "Branch to start from"
         with Vertical(classes="dialog"):
-            yield Label("Branch to start from")
             yield Input(placeholder="Type a branch name, path or ticket number", id="branch-query")
             yield OptionList(id="branch-options", classes="catalog")
-            yield Label("Loading branches…", id="branch-count")
+            yield Label("Loading branches…", id="branch-count", classes="note")
             with Horizontal(classes="buttons"):
                 yield Button("Use branch", variant="primary", id="choose", disabled=True)
                 yield Button("Cancel", id="cancel")

@@ -35,9 +35,9 @@ def test_the_highlighted_setting_says_what_it_does_under_the_list(env):
         await pilot.pause()
         for name, said in (
             ("rounds", "One round is one fix turn of the writer"),
-            ("cost_warning", "you are told once"),
-            ("cost_limit", "stops before its next turn"),
-            ("verification gate timeout", "one verification command"),
+            ("cost warning", "you are told once"),
+            ("cost limit", "stops before its next turn"),
+            ("verification timeout", "one verification command"),
             ("planner", "writes the plan you accept"),
             ("ntfy events", "decisions"),
         ):
@@ -53,13 +53,13 @@ def test_orchestration_describes_the_mode_it_is_on_and_enter_moves_on_without_a_
         app.available = AVAILABLE
         await pilot.press("k")
         await pilot.pause()
-        pick(app, "orchestration")
+        pick(app, "flow")
         await pilot.pause()
         now = ORCHESTRATION_MODES["planner_maker_checker"]
         lines = about(app).splitlines()
         assert lines[0] == now.label and lines[1] == now.flow, "the name, then the flow on a line of its own"
         assert now.when in about(app) and now.tradeoff in about(app)
-        assert "P planner" in lines[-2] and "⇄" in lines[-1], "the legend last, two short lines"
+        assert "a+b" in lines[-1] and "⇄" in lines[-1], "the signs last, on a short line"
         before = len(app._notifications)
         await pilot.press("enter")
         await pilot.pause()
@@ -79,7 +79,7 @@ def test_a_projects_settings_say_what_they_do_too(env):
         pick(app, "java")
         await pilot.pause()
         assert "JDK" in about(app)
-        pick(app, "pass_env")
+        pick(app, "variables")
         await pilot.pause()
         assert "your shell" in about(app)
 
@@ -104,13 +104,13 @@ def test_a_change_shows_on_its_row_and_its_description_not_in_a_notification(env
         app.screen.query_one(Input).value = "5"
         await pilot.press("enter")
         await pilot.pause()
-        assert any(text.strip().startswith("rounds  5") for text in labels(app))
+        assert ["rounds", "5"] in [text.split() for text in labels(app)]
         assert len(app._notifications) == before
         pick(app, "desktop notifications")
         await pilot.press("enter")
         await pilot.pause()
         assert len(app._notifications) == before
-        pick(app, "cost_limit")
+        pick(app, "cost limit")
         await pilot.pause()
         assert "next turn" in about(app)
 
@@ -134,7 +134,7 @@ def test_a_projects_changes_show_on_their_rows_without_a_notification(env):
         app.screen.query_one(Input).value = "17"
         await pilot.press("enter")
         await pilot.pause()
-        assert any(text.strip().startswith("java  17") for text in labels(app))
+        assert ["java", "17"] in [text.split() for text in labels(app)]
         assert len(app._notifications) == before
 
     run(scenario, notifications=True)

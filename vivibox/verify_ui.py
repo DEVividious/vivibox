@@ -8,6 +8,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Checkbox, Input, Label
 
+from . import look
 from .widgets import Dialog
 
 WRITER = "let the writer find the command and propose it after the work"
@@ -16,6 +17,9 @@ WRITER = "let the writer find the command and propose it after the work"
 class AskVerify(Dialog):
     """One command, Enter takes it. Or the box, taken the moment it is ticked: the next task's
     writer finds one and proposes it once its work is done. Escape leaves it as it is."""
+
+    frame_title = "Verification"
+    hint_keys = (("enter", "save"), look.ESC_CANCELS)
 
     def __init__(
         self, name: str, verify: list[str], no_build: bool = False, heading: str = "", writer_box: bool = True
@@ -31,7 +35,7 @@ class AskVerify(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.heading, classes="wrap")
-            yield Input(" && ".join(self.verify), id="command")
+            yield Input(" && ".join(self.verify), id="command", compact=True)
             if self.writer_box:
                 yield Checkbox(WRITER, value=not self.verify and not self.no_build, id="writer")
             if self.no_build:

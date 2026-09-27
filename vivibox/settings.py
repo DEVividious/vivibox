@@ -18,7 +18,7 @@ from textual.content import Content
 from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
-from . import actions, configfile, ide, opencode, ui
+from . import actions, configfile, ide, look, opencode, ui
 from . import init as project_init
 from .config import (
     DEFAULT_NTFY_SERVER,
@@ -48,6 +48,8 @@ Row = tuple[str, str, str | None]
 class Ask(Dialog):
     """One value on one line: Enter takes it, Escape leaves it as it is."""
 
+    hint_keys = (("enter", "save"), look.ESC_CANCELS)
+
     def __init__(self, prompt: str, value: str, hint: str = ""):
         super().__init__()
         self.prompt, self.value, self.hint = prompt, value, hint
@@ -55,7 +57,7 @@ class Ask(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.prompt, classes="wrap")
-            yield Input(self.value, id="value")
+            yield Input(self.value, id="value", compact=True)
             if self.hint:
                 yield Label(self.hint, classes="files wrap")
 
@@ -73,13 +75,15 @@ class Ask(Dialog):
 class AskLines(Dialog):
     """A list, one entry per line: ctrl+s takes it, Escape leaves it as it is."""
 
+    hint_keys = (("ctrl+s", "save"), look.ESC_CANCELS)
+
     def __init__(self, prompt: str, lines: list[str], hint: str = ""):
         super().__init__()
         self.prompt, self.lines, self.hint = prompt, lines, hint
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"{self.prompt} (ctrl+s saves)", classes="wrap")
+            yield Label(self.prompt, classes="wrap")
             yield EdgeTextArea("\n".join(self.lines), id="lines")
             if self.hint:
                 yield Label(self.hint, classes="files wrap")
@@ -99,6 +103,11 @@ class Rows(Dialog):
     is drawn again after every change, so a row always says what the file says."""
 
     TITLE_TEXT = ""
+    hint_keys = (("enter", "change"), look.ESC_CLOSES)
+    # Rows that open a screen of their own rather than change a value: marked with ›.
+    NAVIGATE = {"providers", "file"}
+    # The widest the name column gets.
+    NAME_WIDTH = 26
 
     def rows(self) -> list[Row]:
         raise NotImplementedError
@@ -112,21 +121,24 @@ class Rows(Dialog):
         return ""
 
     def compose(self) -> ComposeResult:
+        self.frame_title = self.TITLE_TEXT
         with Vertical(classes="dialog"):
-            yield Label(self.TITLE_TEXT, id="title")
             yield OptionList(id="rows")
-            yield Label("Enter changes the highlighted one · Esc closes", classes="files rows-hint")
             # Read while choosing: a notification with the same words is gone before it is read.
             yield Label("", id="about")
 
-    # Around the list: the dialog's frame and padding, the title, the list's frame, the hint, and
-    # the most a description takes (#about's max-height).
-    AROUND = 2 + 2 + 1 + 2 + 1 + 7
+    # Around the list: the dialog's frame and padding, and the most the description takes with
+    # its rule and the blank rows around it (#about); on a short terminal, the rule and three lines.
+    AROUND = 2 + 2 + 8 + 3
+    AROUND_SHORT = 2 + 2 + 3 + 1
+    SHORT = 30
 
     def on_resize(self) -> None:
         """The list as tall as the screen leaves once the description has its lines: a tall
         terminal shows every row, a short one scrolls the list, never the description away."""
-        room = int(self.size.height * 0.9) - self.AROUND
+        short = self.size.height < self.SHORT
+        self.query_one(".dialog").set_class(short, "short")
+        room = int(self.size.height * 0.9) - (self.AROUND_SHORT if short else self.AROUND)
         self.query_one(OptionList).styles.max_height = max(4, room)
 
     @on(OptionList.OptionHighlighted)
@@ -147,14 +159,28 @@ class Rows(Dialog):
         was = options.highlighted
         options.clear_options()
         self.keys: list[str | None] = []
-        for label, value, key in self.rows():
+        rows = self.rows()
+        width = min(
+            max((len(label) for label, value, key in rows if value or key), default=0), self.NAME_WIDTH
+        )
+        # What a value has of the dialog's width once the frame, the indent, the name and the mark
+        # have theirs: cut there, it never wraps under the names.
+        room = max(12, min(90, self.app.size.width) - 2 - 4 - 1 - 2 - width - 2 - 3)
+        for i, (label, value, key) in enumerate(rows):
             self.keys.append(key)
             if not value and key is None:
-                options.add_option(Option(f"[b]{escape(label)}[/b]", disabled=True))
+                # A section: its name as every heading is drawn, a blank line above all but the first.
+                gap = "\n" if i else ""
+                options.add_option(Option(f"{gap}[b {look.MUTED}]{escape(label.upper())}[/]", disabled=True))
             elif key is None:
-                options.add_option(Option(f"  {escape(label)}  [dim]{escape(value)}[/]", disabled=True))
+                # Shown, not changed here: muted, with nothing to open.
+                options.add_option(
+                    Option(f"  {look.muted(label.ljust(width))}  {look.muted(value)}", disabled=True)
+                )
             else:
-                options.add_option(Option(f"  {escape(label)}  [dim]{escape(ui.shorten(value, 60))}[/]"))
+                mark = f"  {look.muted('›')}" if key in self.NAVIGATE else ""
+                shown = escape(ui.shorten(value.strip(), room)) if value.strip() else ""
+                options.add_option(Option(f"  {escape(label.ljust(width))}  {shown}{mark}"))
         first = next((i for i, key in enumerate(self.keys) if key), 0)
         options.highlighted = was if was is not None and was < len(self.keys) and self.keys[was] else first
         # The same row after a change says what it does now (the next orchestration mode).
@@ -177,12 +203,9 @@ class Rows(Dialog):
             edit_in_editor(path)
 
 
-# The symbols of a mode's flow, in two lines that fit 80 columns (config.ORCHESTRATION_LEGEND says
-# the same at length, on n's hover).
-FLOW_LEGEND = (
-    "P planner · W writer · R reviewer · Gate the verification · → then\n"
-    "+ roles in one agent and one conversation · ⇄ rounds of fixes"
-)
+# The signs of a mode's flow, in a line that fits 80 columns (config.ORCHESTRATION_LEGEND says the
+# same at length, on n's hover).
+FLOW_LEGEND = "a+b one agent does both, in one conversation · ⇄ rounds of fixes, up to rounds"
 # What a row of k does, in the words of someone who has not read the docs.
 ROLE_ABOUT = {
     "planner": "The planner reads the task and the repository and writes the plan you accept: "
@@ -270,8 +293,8 @@ class Settings(Rows):
         editor = config.ide or self.found_editor()
         return [
             ("Providers & MCP", "", None),
-            ("providers & MCP", f"{len(on)} on: {', '.join(on)}" if on else "none yet", "providers"),
-            ("Roles, by default", "", None),
+            ("providers", f"{len(on)} on: {', '.join(on)}" if on else "none yet", "providers"),
+            ("Default roles", "", None),
             *(
                 (
                     name,
@@ -293,12 +316,8 @@ class Settings(Rows):
                     )
                 ]
             ),
-            (
-                "orchestration",
-                f"{config.orchestration}: {ORCHESTRATION_MODES[config.orchestration].flow}",
-                "orchestration",
-            ),
-            ("Manual review", "", None),
+            ("flow", ORCHESTRATION_MODES[config.orchestration].label, "orchestration"),
+            ("Review copy", "", None),
             (
                 EDITOR_LABEL,
                 editor if config.ide else f"{editor} (found here)" if editor else "none found",
@@ -311,17 +330,17 @@ class Settings(Rows):
             ("ntfy events", config.ntfy_events, "ntfy_events"),
             ("Limits", "", None),
             ("rounds", str(config.max_rounds), "max_rounds"),
-            ("verification gate timeout", duration(config.verify_timeout), "verify_timeout"),
+            ("verification timeout", duration(config.verify_timeout), "verify_timeout"),
             (
-                "cost_warning",
+                "cost warning",
                 f"${config.cost_warning:.2f}" if config.cost_warning else "none",
                 "cost_warning",
             ),
-            ("cost_limit", f"${config.cost_limit:.2f}" if config.cost_limit else "none", "cost_limit"),
+            ("cost limit", f"${config.cost_limit:.2f}" if config.cost_limit else "none", "cost_limit"),
             ("Machine, in config.toml", "", None),
-            ("tasks_dir", str(config.tasks_dir), None),
+            ("tasks folder", str(config.tasks_dir), None),
             ("network pool", config.network_pool, None),
-            ("edit config.toml in your editor…", " ", "file"),
+            ("config.toml", "open in your editor", "file"),
         ]
 
     def about(self, key: str) -> str | Content:
@@ -333,7 +352,7 @@ class Settings(Rows):
             return Content.assemble(
                 (mode.label, "bold"),
                 "\n",
-                (mode.flow, "bold $accent"),
+                (mode.flow, "bold $foreground"),
                 f"\n{mode.when}\n{mode.tradeoff}\n",
                 (FLOW_LEGEND, "$text-muted"),
             )
@@ -525,7 +544,7 @@ class ProjectSettings(Rows):
     def __init__(self, name: str):
         super().__init__()
         self.project_name = name
-        self.TITLE_TEXT = f"Project {name}"
+        self.TITLE_TEXT = f"Project · {name}"
 
     def path(self) -> Path:
         return config_dir() / "projects" / f"{self.project_name}.toml"
@@ -544,25 +563,21 @@ class ProjectSettings(Rows):
             verify = actions.WRITER_PROPOSES
         machine = config.ide or Settings.found_editor()
         return [
-            (
-                "prepare, once per task",
-                " && ".join(project.prepare) or NOTHING_TO_PREPARE,
-                "prepare",
-            ),
+            ("preparation", " && ".join(project.prepare) or NOTHING_TO_PREPARE, "prepare"),
             ("verification", verify, "verify"),
             (
-                "run it, for v",
+                "run app (v)",
                 ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
                 "demo",
             ),
             ("java", project.java or "21, the image's", "java"),
-            ("pass_env", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
+            ("variables", ", ".join(project.pass_env) or "nothing from your shell", "pass_env"),
             (
                 EDITOR_LABEL,
                 project.ide or f"config.toml's: {machine}" if machine else "none found",
                 "editor",
             ),
-            ("edit the project file, for host_services and risky_extra…", " ", "file"),
+            ("project file", "open in your editor", "file"),
         ]
 
     def changed(self) -> None:

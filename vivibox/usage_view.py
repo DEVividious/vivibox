@@ -9,15 +9,15 @@ from __future__ import annotations
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import DataTable, Label
 
 from . import usage
+from .widgets import Dialog
 
 REFRESH_SECONDS = 10.0
 
 
-class Usage(ModalScreen):
+class Usage(Dialog):
     """finished: the accepted and deleted tasks too, as the list shows them after h."""
 
     def __init__(self, finished: bool = False):
@@ -26,9 +26,9 @@ class Usage(ModalScreen):
         self.measured = False
 
     def compose(self) -> ComposeResult:
+        self.frame_title = "Usage · how long each role and the verification took"
         with Vertical(classes="dialog usage"):
-            yield Label("Usage: how long each role and the verification took", classes="title")
-            table = DataTable(id="usage", cursor_type="row", zebra_stripes=True)
+            table = DataTable(id="usage", cursor_type="row")
             table.add_columns(*usage.COLUMNS)
             yield table
             yield Label("", id="usage-problem", classes="files")

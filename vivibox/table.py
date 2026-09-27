@@ -4,14 +4,16 @@ task rows, the spinner and the header's counts. Mixed into the app in tui.py.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 
 from rich.markup import escape
 from rich.text import Text
+from textual.content import Content
 from textual.events import Resize
 from textual.widgets import Static
 
-from . import actions, orchestration, ui
+from . import actions, look, orchestration, ui
 from .dialogs import NO_PROJECTS
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
@@ -22,13 +24,32 @@ def finished_on(stamp: str):
     return datetime.fromisoformat(stamp).astimezone().date()
 
 
+def short_ago(ts: str) -> str:
+    """How long ago, in a few characters: "now", "12m", "3h", "2d"; the list has many of them."""
+    since = ui.ago(ts)
+    if since == "just now":
+        return "now"
+    number, unit, _ = since.split(" ")
+    return f"{number}{unit[0]}"
+
+
+# Columns whose figures line up on the right, so they can be compared down the list.
+RIGHT = {"CRITERIA", "COST", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED"}
+# What an empty cell shows: a faint dot, not a dash in the foreground on every row.
+NONE = look.faint("·")
+# A project with no task yet: said as an empty state, with the key that fills it.
+EMPTY_PROJECT = f"[i {look.MUTED}]no tasks yet[/]  [{look.ACCENT}]n[/] [{look.MUTED}]new task[/]"
+
+
 class TaskTable:
-    # The columns a terminal has room for, narrowest first: task, status and goal always.
-    COLUMNS = ("TASK", "STATUS", "DEMO", "CRITERIA", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED", "GOAL")
+    # The columns a terminal has room for, narrowest first: task, status and goal always. What a
+    # task cost is one figure where the terminal has room for one more column (COST), and each
+    # role's share apart where it has room for all (PLAN, IMPL, REVIEW), not a sum to read.
+    COLUMNS = ("TASK", "STATUS", "APP", "CRITERIA", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED", "GOAL")
 
     NARROW = ("TASK", "STATUS", "GOAL")
 
-    MEDIUM = ("TASK", "STATUS", "CRITERIA", "UPDATED", "GOAL")
+    MEDIUM = ("TASK", "STATUS", "CRITERIA", "COST", "UPDATED", "GOAL")
 
     def columns_for(self, width: int) -> tuple[str, ...]:
         if width < 100:
@@ -50,9 +71,12 @@ class TaskTable:
         self.columns = wanted
         table = self.table
         table.clear(columns=True)
-        keys = table.add_columns(*wanted)
+        keys = [
+            table.add_column(Text(name, justify="right") if name in RIGHT else name, key=name)
+            for name in wanted
+        ]
         by_name = dict(zip(wanted, keys, strict=True))
-        self.status_column, self.demo_column = by_name["STATUS"], by_name.get("DEMO")
+        self.status_column, self.demo_column = by_name["STATUS"], by_name.get("APP")
         self.plan_column, self.impl_column = by_name.get("PLAN"), by_name.get("IMPL")
         self.review_column, self.updated_column = by_name.get("REVIEW"), by_name.get("UPDATED")
         self.drawn = ()
@@ -96,13 +120,12 @@ class TaskTable:
         so a collapsed project still says what waits for you."""
         waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in tasks)
         working = sum(self.busy(st) for _, st in tasks)
-        parts = [f"[yellow]{waiting} waiting for you[/]"] * bool(waiting)
-        parts += [f"[cyan]{working} working[/]"] * bool(working)
-        parts += [f"[grey50]{len(tasks) - waiting - working} stopped[/]"] * bool(
-            len(tasks) - waiting - working
-        )
-        parts += [f"[green]{done} done[/]"] * bool(done)
-        return " · ".join(parts) or "[grey50]no tasks · n creates one[/]"
+        stopped = len(tasks) - waiting - working
+        parts = [look.colored(f"{waiting} waiting for you", look.WAITING)] * bool(waiting)
+        parts += [look.colored(f"{working} working", look.WORKING)] * bool(working)
+        parts += [look.muted(f"{stopped} stopped")] * bool(stopped)
+        parts += [look.muted(f"{done} done")] * bool(done)
+        return look.muted(" · ").join(parts) or EMPTY_PROJECT
 
     def fill_table(self, pairs: list, selected: str | None) -> None:
         table = self.table
@@ -117,35 +140,42 @@ class TaskTable:
             # project needs its row to say what waits, in a few characters.
             waiting = sum(self.views[st.id].group == "Waiting for you" for _, st in own)
             status = (
-                f"[red]{escape(problem)}[/]" if problem
-                else f"[yellow]{waiting} waiting for you[/]" if folded and waiting
+                f"[{look.ERROR}]✕ {escape(problem)}[/]" if problem
+                else f"[{look.WAITING}]● {waiting} waiting for you[/]" if folded and waiting
                 else ""
             )  # fmt: skip
+            fold = look.muted("▸" if folded else "▾")
             planned.append((
-                {"TASK": f"[b]{'▸' if folded else '▾'} {escape(name)}[/]", "STATUS": status, "GOAL": summary},
+                {"TASK": f"{fold} [b]{escape(name)}[/]", "STATUS": status, "GOAL": summary},
                 PROJECT_ROW + name,
             ))  # fmt: skip
             if folded:
                 continue
             for task, st in own:
-                plan, impl, review = ui.cost_cells(ui.cost(task))
                 # During a turn, when the agent last finished a step: the sign it is at work.
                 live = task.live_turn()
+                ticked = criteria(task)
+                spent = ui.cost(task)
+                plan, impl, review = self.cost_cells(spent)
                 planned.append((
-                    {"TASK": f"  {st.id}", "STATUS": self.status(st), "DEMO": self.demo_cell(st.id),
-                     "CRITERIA": criteria(task), "PLAN": plan, "IMPL": impl, "REVIEW": review,
-                     "CREATED": ui.ago(st.created), "UPDATED": ui.ago(live["at"] if live else st.updated),
-                     "GOAL": st.goal},
+                    {"TASK": self.task_name(st.id, name), "STATUS": self.status(st),
+                     "APP": self.demo_cell(st.id), "CRITERIA": NONE if ticked == "-" else ticked,
+                     "COST": self.total_cell(spent), "PLAN": plan, "IMPL": impl, "REVIEW": review,
+                     "CREATED": short_ago(st.created),
+                     "UPDATED": short_ago(live["at"] if live else st.updated), "GOAL": escape(st.goal)},
                     st.id,
                 ))  # fmt: skip
             for entry in done:
-                plan, impl, review = ui.cost_cells(ui.finished_spend(entry))
+                # A finished task is history: muted, so the live ones stand out.
+                spent = ui.finished_spend(entry)
+                plan, impl, review = self.cost_cells(spent, muted=True)
                 planned.append((
-                    {"TASK": f"  {entry['id']}",
-                     "STATUS": "[grey50]  deleted[/]" if entry.get("deleted") else "[green]  done[/]",
-                     "DEMO": "-", "CRITERIA": "-", "PLAN": plan, "IMPL": impl, "REVIEW": review,
-                     "CREATED": ui.ago(entry["created"]) if entry.get("created") else "-",
-                     "UPDATED": ui.ago(entry["finished"]), "GOAL": entry["title"]},
+                    {"TASK": self.task_name(entry["id"], name, finished=True),
+                     "STATUS": look.finished_badge(bool(entry.get("deleted"))),
+                     "APP": NONE, "CRITERIA": NONE, "COST": self.total_cell(spent, muted=True),
+                     "PLAN": plan, "IMPL": impl, "REVIEW": review,
+                     "CREATED": look.muted(short_ago(entry["created"])) if entry.get("created") else NONE,
+                     "UPDATED": look.muted(short_ago(entry["finished"])), "GOAL": look.muted(entry["title"])},
                     entry["id"],
                 ))  # fmt: skip
         # The goal gets what the other columns leave: a goal that runs off the screen is a goal
@@ -160,8 +190,12 @@ class TaskTable:
         goal_width = max(self.size.width - taken - 3, 16)
         ids = [key for _, key in planned]
         for cells, key in planned:
-            cells = {**cells, "GOAL": ui.shorten(cells.get("GOAL", ""), goal_width)}
-            table.add_row(*(cells.get(name, "") for name in self.columns), key=key)
+            goal = Text.from_markup(cells.get("GOAL", ""))
+            goal.truncate(goal_width, overflow="ellipsis")
+            table.add_row(
+                *(goal if name == "GOAL" else self.cell(name, cells.get(name, "")) for name in self.columns),
+                key=key,
+            )
         empty = self.query_one("#empty", Static)
         table.display, empty.display = bool(ids), not ids
         if ids and self.focused is None:  # hiding the list took its focus; the arrows are for it
@@ -192,43 +226,81 @@ class TaskTable:
         self.refresh_bindings()
         self.look_at_pods([st.id for _, st in pairs])
 
+    @staticmethod
+    def cell(column: str, markup: str) -> Text:
+        return Text.from_markup(markup, justify="right" if column in RIGHT else "left")
+
+    @staticmethod
+    def task_name(task_id: str, project: str, finished: bool = False) -> str:
+        """A task under its project: indented, the project's name in its id muted, so the number is
+        what the eye finds."""
+        prefix = f"{project}-"
+        rest = task_id.removeprefix(prefix) if task_id.startswith(prefix) else task_id
+        shown = look.muted(rest) if finished else escape(rest)
+        return f"  {look.faint(prefix) if rest != task_id else ''}{shown}"
+
+    @staticmethod
+    def cost_cells(spent: ui.Spend, muted: bool = False) -> tuple[str, ...]:
+        """PLAN, IMPL and REVIEW: a figure each, a faint dot for none."""
+        return tuple(
+            NONE if cell == "-" else look.muted(cell) if muted else cell for cell in ui.cost_cells(spent)
+        )
+
+    @staticmethod
+    def total_cell(spent: ui.Spend, muted: bool = False) -> str:
+        if not spent:
+            return NONE
+        return look.muted(ui.money(spent.total)) if muted else ui.money(spent.total)
+
     def demo_cell(self, task_id: str) -> str:
         """Whether this task is serving anything, on the row itself: the list is what you look at.
         The addresses stay in the panel, where they are clickable and all of them fit; a single port
         here would have to pick one of a front end and a back end, and pick it silently."""
         view = self.pods.get(task_id)
         if view is None or not view.address or not (state := view.state):
-            return "-"
-        color = {"live": "green", "local": "yellow", "starting": "yellow", "stopped": "red"}[state]
+            return NONE
+        color = {
+            "live": look.SUCCESS,
+            "local": look.WAITING,
+            "starting": look.WAITING,
+            "stopped": look.ERROR,
+        }[state]
         # How many came up separates "the back end died" from "everything is there".
         count = f" ×{len(view.reachable)}" if len(view.reachable) > 1 else ""
         return f"[{color}]{state}{count}[/]"
 
     def set_sub_title(self) -> None:
         # First what would keep every task from starting: Docker down, a provider without a key.
-        parts = [self.machine_note] if self.machine_note else []
-        parts.append(f"{self.waiting} waiting for you" if self.waiting else "nothing waiting for you")
+        parts = [(self.machine_note, f"bold {look.ERROR}")] if self.machine_note else []
+        if self.waiting:
+            parts.append((f"● {self.waiting} waiting for you", f"bold {look.WAITING}"))
+        else:
+            parts.append(("nothing waiting for you", look.MUTED))
         if self.working:
-            parts.append(f"{self.working} working")
+            parts.append((f"{self.working} working", look.WORKING))
         # What h and H keep out of sight, so a list that looks short is not a surprise.
-        parts += [f"{count} {kind} hidden" for kind, count in sorted(self.hidden.items())]
+        parts += [(f"{count} {kind} hidden", look.MUTED) for kind, count in sorted(self.hidden.items())]
         # The limits are in dollars and every row shows its own figure; the day's sum is here.
         if self.spent_today:
-            parts.append(f"${self.spent_today:.2f} today")
+            parts.append((f"${self.spent_today:.2f} today", look.MUTED))
         if self.code_changed:
-            parts.append(CODE_CHANGED)
-        self.sub_title = " · ".join(parts)
+            parts.append((CODE_CHANGED, look.WAITING))
+        self.sub_title = " · ".join(text.removeprefix("● ") for text, _ in parts)
         # The window's title, for the taskbar: how many wait for you.
         self.title = f"vivibox ({self.waiting})" if self.waiting else "vivibox"
+        # The line above the list: the same words, each in its meaning's colour.
+        pieces: list = [("vivibox", "bold")]
+        for text, style in parts:
+            pieces += [("   " if len(pieces) == 1 else "  ·  ", look.FAINT), (text, style)]
+        with contextlib.suppress(Exception):  # before the view is built there is no bar to draw on
+            self.query_one("#state", Static).update(Content.assemble(*pieces))
 
     def status(self, st: TaskState) -> str:
         seen = self.seen(st)
-        color = {"yellow": "yellow", "cyan": "cyan", "dim": "grey50", "green": "green"}[ui.COLORS[seen.group]]
-        text = seen.status
+        spinner = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else ""
         if doing := self.starting.get(st.id):
-            color, text = "cyan", doing
-        mark = SPINNER[self.frame % len(SPINNER)] if self.busy(st) else " "
-        return f"[{color}]{mark} {text}[/]"
+            return f"[{look.WORKING}]{spinner or ' '} {escape(doing)}[/]"
+        return look.badge(seen, spinner)
 
     def spin(self) -> None:
         """Turns the spinner of busy tasks between full refreshes, touching only their status cells."""
@@ -236,4 +308,6 @@ class TaskTable:
         table = self.table
         for _, st in self.pairs:
             if self.busy(st):
-                table.update_cell(st.id, self.status_column, self.status(st))
+                table.update_cell(st.id, self.status_column, self.cell("STATUS", self.status(st)))
+        with contextlib.suppress(Exception):
+            self.query_one("#clock", Static).update(datetime.now().strftime("%H:%M"))

@@ -17,6 +17,7 @@ from vivibox import (
     browse,
     dialogs,
     gate,
+    look,
     newtask,
     panel,
     providers_ui,
@@ -152,7 +153,7 @@ def test_prepare_is_one_line_saved_with_enter_and_its_words_are_all_on_the_scree
         await pilot.pause()
         assert isinstance(app.screen, settings.Ask)
         assert app.screen.query_one(Input).value == "npm ci && npm run build"
-        shown = " ".join(screen_text(app).replace("█", " ").split())
+        shown = " ".join(screen_text(app).replace("█", " ").replace("│", " ").split())
         assert "the writer's first turn waits for it" in shown and "Empty: nothing." in shown
         app.screen.query_one(Input).value = "bash mvnw -B install -DskipTests"
         await pilot.press("enter")
@@ -552,7 +553,8 @@ def test_a_narrowed_command_is_shown_with_its_selection(env):
 
 def test_a_task_with_nothing_to_build_is_said_so_when_it_is_made(env, monkeypatch):
     """A ticket to analyse, facts to gather: nothing to build, and you know it before the planner
-    does. The box puts verify = false in the task's plan; the project keeps building the rest."""
+    does. Build's second answer puts verify = false in the task's plan; the project keeps building
+    the rest."""
     from vivibox import proposal
 
     monkeypatch.setattr("vivibox.actions.start", lambda task_id, resume=False, on_step=None: task_id)
@@ -561,9 +563,10 @@ def test_a_task_with_nothing_to_build_is_said_so_when_it_is_made(env, monkeypatc
         await pilot.press("n")
         await pilot.pause()
         app.screen.query_one("#goal", TextArea).text = "Analyse PAY-123"
-        box = app.screen.query_one("#no-build", Checkbox)
-        assert not box.value and "nothing to build" in str(box.label).lower()
-        box.value = True
+        build = app.screen.query_one("#no-build", Select)
+        assert build.value is False, "building and testing is where the form starts"
+        assert any("nothing to build" in str(label).lower() for label, _ in build._options)
+        build.value = True
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -928,7 +931,7 @@ def test_i_asks_what_to_prepare_a_new_tasks_clone_with_and_suggests_it(env, tmp_
     async def scenario(app, pilot):
         await pilot.press("i")
         await pilot.pause()
-        assert "Prepare" in screen_text(app) and "bash mvnw -B install -DskipTests" in screen_text(app)
+        assert "Preparation" in screen_text(app) and "bash mvnw -B install -DskipTests" in screen_text(app)
         app.screen.query_one("#change-prepare").press()
         await pilot.pause()
         field = app.screen.query_one("#value", Input)
@@ -1009,7 +1012,7 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
         app.reload()
         await pilot.pause()
         assert app.check_action("new", ()) and app.table.display
-        assert "no tasks · n creates one" in cell(app, 0, "GOAL"), "the project row says"
+        assert "no tasks yet  n new task" in cell(app, 0, "GOAL"), "the project row says"
 
     run(scenario)
 
@@ -1202,10 +1205,10 @@ def test_the_row_says_whether_that_task_is_serving_anything(env, monkeypatch):
     monkeypatch.setattr(tui, "pod_views", lambda ids: {i: answer[0] for i in ids})
 
     def cell(app):
-        return str(app.table.get_row(task.id)[2])
+        return cell_of(app, task.id, "APP")
 
     async def scenario(app, pilot):
-        assert await until(pilot, lambda: cell(app) == "-"), "nothing started yet"
+        assert await until(pilot, lambda: cell(app) == "·"), "nothing started yet"
         answer[0] = panel.PodView("198.51.100.2", [Listener(8000, True)], demo=True)
         assert await until(pilot, lambda: "live" in cell(app)), "it is serving"
         assert "8000" not in cell(app), "the address belongs in the panel, where all of it fits"
@@ -1273,11 +1276,9 @@ def test_the_list_says_when_you_asked_for_a_task_not_only_when_it_last_moved(env
 
     async def scenario(app, pilot):
         app.reload()
-        row = app.table.get_row(task.id)
         # Not ui.ago() recomputed here: that races the minute boundary and says nothing extra.
-        assert row[7] == "just now", "CREATED, and the task was made a moment ago"
-        assert row[8] == "just now", "UPDATED"
-        assert [str(c.label) for c in app.table.columns.values()][7] == "CREATED"
+        assert cell_of(app, task.id, "CREATED") == "now", "CREATED, and the task was made a moment ago"
+        assert cell_of(app, task.id, "UPDATED") == "now", "UPDATED"
 
     run(scenario)
 
@@ -1298,8 +1299,8 @@ def test_a_finished_task_keeps_when_you_asked_for_it(env):
     async def scenario(app, pilot):
         app.show_done = True
         app.reload()
-        assert app.table.get_row("demo-9")[7] == "just now"
-        assert app.table.get_row("demo-8")[7] == "-"
+        assert cell_of(app, "demo-9", "CREATED") == "now"
+        assert cell_of(app, "demo-8", "CREATED") == "·"
 
     run(scenario)
 
@@ -1483,7 +1484,7 @@ def test_the_running_turns_cost_and_last_step_show_in_the_row_and_the_panel(env,
         app.reload()
         await pilot.pause()
         assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04", "the turn so far"
-        assert str(app.table.get_cell(task.id, app.updated_column)) == "just now"
+        assert str(app.table.get_cell(task.id, app.updated_column)) == "now"
         await pilot.press("d")
         await pilot.pause()
         assert "last step just now" in app.shown
@@ -1987,9 +1988,9 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         await pilot.pause()
         assert isinstance(app.screen, settings.Settings)
         shown = labels(app)
-        assert "Providers & MCP" in shown[0] and "serena" in shown[1], "providers first, as before"
+        assert "PROVIDERS & MCP" in shown[0] and "serena" in shown[1], "providers first, as before"
         assert any("code {path} (found here)" in row for row in shown), "o's editor, found, not chosen yet"
-        assert any("tasks_dir" in row for row in shown) and any("network pool" in row for row in shown)
+        assert any("tasks folder" in row for row in shown) and any("network pool" in row for row in shown)
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, providers_ui.ManageProviders), "the first row is the old k"
@@ -2008,8 +2009,8 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
             'model = "deepseek/deepseek-v4-flash"' in text and "# The manual." in text and "# Kept." in text
         )
         assert "deepseek-v4-flash" in labels(app)[writer], "the row says so at once"
-        # The editor for o, under "Manual review"; the notifications under a heading of their own.
-        assert any("Manual review" in row for row in shown) and any("Notifications" in row for row in shown)
+        # The editor for o, under "Review copy"; the notifications under a heading of their own.
+        assert any("REVIEW COPY" in row for row in shown) and any("NOTIFICATIONS" in row for row in shown)
         assert not any("editor for o" in row for row in shown), "the row names the tool, not the key"
         editor = next(i for i, row in enumerate(labels(app)) if "IDE / text editor (o)" in row)
         app.screen.query_one("#rows", OptionList).highlighted = editor
@@ -2044,7 +2045,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         text = config.read_text()
         assert "[limits]\n# Kept.\nmax_rounds = 5\n" in text and app.config.max_rounds == 5
         # The verification's time limit: minutes to read, minutes or seconds to type.
-        timeout = next(i for i, row in enumerate(labels(app)) if "verification gate timeout" in row)
+        timeout = next(i for i, row in enumerate(labels(app)) if "verification timeout" in row)
         assert "30 min" in labels(app)[timeout] and "1800" not in labels(app)[timeout]
         app.screen.query_one("#rows", OptionList).highlighted = timeout
         await pilot.press("enter")
@@ -2096,9 +2097,9 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.press("e")
         await pilot.pause()
         assert isinstance(app.screen, settings.ProjectSettings)
-        assert labels(app)[0].strip().startswith("prepare"), "what a new task does first, first"
+        assert labels(app)[0].strip().startswith("preparation"), "what a new task does first, first"
         assert labels(app)[1].strip().startswith("verification") and "true" in labels(app)[1]
-        await go_to(app, pilot, "run it")
+        await go_to(app, pilot, "run app")
         assert isinstance(app.screen, settings.AskLines)
         app.screen.query_one(TextArea).text = "npm install\nnpm start\n"
         await pilot.press("ctrl+s")
@@ -2109,12 +2110,12 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.press("enter")
         await pilot.pause()
         assert load_project("demo").java == "17"
-        row = await go_to(app, pilot, "pass_env")
+        row = await go_to(app, pilot, "variables")
         app.screen.query_one(Input).value = "PATH"
         await pilot.press("enter")
         await pilot.pause()
         assert load_project("demo").pass_env == [], "a variable vivibox sets itself is refused"
-        await go_to(app, pilot, "pass_env")
+        await go_to(app, pilot, "variables")
         app.screen.query_one(Input).value = "NPM_TOKEN, REPO_TOKEN"
         await pilot.press("enter")
         await pilot.pause()
@@ -2125,7 +2126,7 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         await pilot.press("down", "enter")  # after "the one in config.toml": VS Code
         await pilot.pause()
         assert load_project("demo").ide == "code {path}"
-        await go_to(app, pilot, "edit the project file")
+        await go_to(app, pilot, "project file")
         assert opened == [path]
 
     run(scenario)
@@ -2394,16 +2395,16 @@ def test_with_a_reviewer_the_whole_new_task_form_fits_a_short_terminal(env, size
         dialog = app.screen
         assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "nothing to scroll"
         shown = screen_text(app)
-        for word in ("Kind", "Branch", "Build", "Attach…", "Reviewer", "Orchestration", "Rounds", "Create"):
+        for word in ("Kind", "Branch", "Build", "Attach…", "Reviewer", "Flow", "Rounds", "Create"):
             assert word in shown, f"{word} not on the screen at {size}"
         assert dialog.query_one("#goal").region.height >= 3
 
     run(scenario, size=size)
 
 
-@pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), False)])
+@pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), True), ((80, 24), False)])
 def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_working_order(env, size, headed):
-    """Task and Agents head the two groups on a tall terminal and go first on a short one (§4);
+    """TASK and WORKFLOW head the two sections on a tall terminal and go first on a short one (§4);
     the roles stand as they work, planner, writer, reviewer, with the orchestration under them."""
     from ux import screen_text
 
@@ -2415,7 +2416,7 @@ def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_wor
         await pilot.pause()
         await pilot.pause()
         shown = screen_text(app)
-        assert ("Agents" in shown) is headed, shown
+        assert ("WORKFLOW" in shown) is headed, shown
         rows = [app.screen.query_one(f"#role-{r}").region.y for r in ("planner", "writer", "reviewer")]
         assert rows == sorted(rows), rows
         assert app.screen.query_one("#orchestration").region.y > rows[-1]
@@ -2424,10 +2425,12 @@ def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_wor
     run(scenario, size=size)
 
 
-@pytest.mark.parametrize(("size", "apart"), [((146, 38), 2), ((100, 30), 2), ((80, 24), 1)])
-def test_lists_in_a_group_stand_a_row_apart_unless_the_terminal_is_short(env, size, apart):
-    """A blank row between the lists of a group keeps them from reading as one block (§4). On a
-    short terminal the rows between them go before the description shrinks below three lines."""
+@pytest.mark.parametrize("size", [(146, 38), (100, 30), (80, 24)])
+def test_the_rows_of_a_section_stand_one_under_another_at_every_size(env, size):
+    """With no band on a list, lists stand one under another without reading as one block (§4):
+    the form's height is the same whatever the terminal, and a short one shrinks the description,
+    never below three lines."""
+    apart = 1
     with_code("demo")  # the kind is asked too: the whole form, as on a project with code
 
     async def scenario(app, pilot):
@@ -2462,9 +2465,10 @@ def test_every_field_of_the_new_task_form_starts_in_one_column_and_looks_like_on
         assert len(set(columns.values())) == 1, columns
         branch, build = dialog.query_one("#base-ref").region, dialog.query_one("#no-build").region
         assert branch.right == dialog.query_one("#kind").region.right, "the Branch field is as wide as a list"
-        assert build.x == branch.x and build.right == branch.right, "Build is a band as wide too"
+        assert build.x == branch.x and build.right == branch.right, "Build is a list as wide too"
+        # What you type in and what you press has a band; a list is its value and its mark.
         page = dialog.query_one(".dialog").styles.background
-        for name in ("#no-build", "#max-rounds", "#attach"):
+        for name in ("#max-rounds", "#attach"):
             band = dialog.query_one(name).styles.background
             assert band.a > 0 and band != page, f"{name} has no band of its own"
 
@@ -2484,7 +2488,8 @@ def test_attach_stands_with_the_description_and_create_is_the_only_primary_butto
         task = dialog.query_one("#task")
         goal, attach = task.query_one("#goal"), task.query_one("#attach")
         assert attach.region.y >= goal.region.y + goal.region.height, "Attach is under the description"
-        assert {s.id for s in task.query(Select)} == {"project", "kind"}, "planning's lists are elsewhere"
+        lists = {s.id for s in task.query(Select)}
+        assert lists == {"project", "kind", "no-build"}, "the workflow's lists are elsewhere"
         assert [b.id for b in dialog.query(Button) if b.variant == "primary"] == ["create"]
         assert [b.id for b in dialog.query(".buttons Button")] == ["create", "cancel"]
 
@@ -2528,7 +2533,7 @@ def test_an_open_list_in_the_new_task_form_is_framed_apart_from_the_rows_under_i
         lines = screen_text(app).splitlines()
         last = next(i for i, line in enumerate(lines) if "--draft" in line)
         assert "╰" in lines[last + 1], "the frame closes under the last option"
-        top = next(i for i, line in enumerate(lines) if "╭" in line)
+        top = max(i for i, line in enumerate(lines[:last]) if "╭" in line)  # the dialog is framed too
         assert top < last and "Stop for my review" in lines[top + 1]
 
     run(scenario, size=size)
@@ -2807,9 +2812,10 @@ def test_deleting_a_task_says_what_goes_and_what_stays_and_cancel_comes_first(en
         dialog = app.screen
         assert isinstance(dialog, dialogs.DeleteTask)
         said = " ".join(str(w.render()) for w in dialog.query(Label))
-        assert "Delete demo-1?" in said and "Try the other approach" in said and "$0.20 + $0.00" in said
-        assert "Deleted:" in said and "none of its work reaches your repository" in said
-        assert "Kept:" in said and "a line in the history" in said
+        assert "Delete demo-1?" in str(dialog.query_one(".dialog").border_title), "the question is the title"
+        assert "Try the other approach" in said and "$0.20 + $0.00" in said
+        assert "Deleted" in said and "none of its work reaches your repository" in said
+        assert "Kept" in said and "a line in the history" in said
         await pilot.press("enter")  # Cancel has the focus: Enter out of habit deletes nothing
         await pilot.pause()
         assert task.root.exists()
@@ -2830,7 +2836,7 @@ def test_an_imported_serena_is_greyed_and_says_it_comes_with_vivibox(env, tmp_pa
     path.write_text('{"mcp": {"serena": {"type": "local", "command": ["serena", "start-mcp-server"]}}}')
     (found,) = providers.read_opencode(path, env={}).found
     label = providers_ui.import_label(found)
-    assert label.startswith("[dim]") and "comes with vivibox; set its mode in Manage" in label
+    assert label.startswith(f"[{look.MUTED}]") and "comes with vivibox; set its mode in Manage" in label
 
 
 def test_a_folder_is_described_before_you_pick_it(env, tmp_path):
@@ -3486,6 +3492,12 @@ def rows(app) -> list[str]:
     return [str(key.value).removeprefix(panel.PROJECT_ROW) for key in app.table.rows]
 
 
+def cell_of(app, key: str, column: str) -> str:
+    """A task's cell by the row's key and the column's name, as the text it shows."""
+    names = [c.label.plain for c in app.table.columns.values()]
+    return str(app.table.get_row(key)[names.index(column)])
+
+
 def cell(app, row: int, column: str) -> str:
     """A cell by the column's name: which columns there are depends on the terminal's width."""
     names = [c.label.plain for c in app.table.columns.values()]
@@ -3527,7 +3539,7 @@ def test_a_project_with_no_tasks_is_a_row_that_says_so(env):
         app.reload()
         await pilot.pause()
         assert rows(app) == ["demo"] and app.table.display
-        assert "no tasks · n creates one" in cell(app, 0, "GOAL")
+        assert "no tasks yet  n new task" in cell(app, 0, "GOAL")
         assert app.check_action("new", ()) and app.check_action("details", ())
         await pilot.press("d")
         await pilot.pause()
@@ -4230,16 +4242,16 @@ def test_k_sets_the_cost_limits_in_dollars(env):
     async def scenario(app, pilot):
         await pilot.press("k")
         await pilot.pause()
-        assert "none" in row(app, "cost_limit") and "none" in row(app, "cost_warning")
-        await answer(app, pilot, "cost_limit", "two")
+        assert "none" in row(app, "cost limit") and "none" in row(app, "cost warning")
+        await answer(app, pilot, "cost limit", "two")
         assert "cost_limit =" not in config.read_text(), "refused: dollars"
-        await answer(app, pilot, "cost_limit", "2.5")
+        await answer(app, pilot, "cost limit", "2.5")
         text = config.read_text()
-        assert "cost_limit = 2.5" in text and "# Kept." in text and "$2.50" in row(app, "cost_limit")
-        await answer(app, pilot, "cost_warning", "1")
-        assert "cost_warning = 1" in config.read_text() and "$1.00" in row(app, "cost_warning")
-        await answer(app, pilot, "cost_limit", "0")
-        assert "cost_limit = 0" in config.read_text() and "none" in row(app, "cost_limit")
+        assert "cost_limit = 2.5" in text and "# Kept." in text and "$2.50" in row(app, "cost limit")
+        await answer(app, pilot, "cost warning", "1")
+        assert "cost_warning = 1" in config.read_text() and "$1.00" in row(app, "cost warning")
+        await answer(app, pilot, "cost limit", "0")
+        assert "cost_limit = 0" in config.read_text() and "none" in row(app, "cost limit")
 
     run(scenario)
 
@@ -4266,8 +4278,8 @@ def test_the_settings_list_grows_with_the_terminal_and_fits_a_short_one(env):
         await pilot.pause()
         dialog = app.screen.query_one(".dialog")
         assert dialog.region.height <= app.size.height, "the dialog fits"
-        hint = app.screen.query_one(".files")
-        assert hint.region.y + hint.region.height <= app.size.height, "its hint is on the screen"
+        about = app.screen.query_one("#about")
+        assert about.region.y + about.region.height <= app.size.height, "what the row does is on the screen"
         assert app.screen.query_one("#rows", OptionList).max_scroll_y > 0, "the rows scroll instead"
 
     run(tall, size=(140, 60))
@@ -4304,7 +4316,7 @@ def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(e
         assert app.columns == (
             "TASK",
             "STATUS",
-            "DEMO",
+            "APP",
             "CRITERIA",
             "PLAN",
             "IMPL",
@@ -4412,20 +4424,20 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
         assert mode.value == "planner_maker_checker", "config.toml's mode, ready to keep or change"
         labels = [str(t) for t, _ in mode._options]
         assert labels == [
-            "Single agent",
-            "Planner and executor",
-            "Planner, maker, checker",
-            "Supervisor and worker",
+            "One agent",
+            "Planner, then writer",
+            "Planner, writer, reviewer",
+            "Planner supervises writer",
         ]
         hint = str(app.screen.query_one("#orchestration-hint", Label).render())
-        assert hint == "P → W → Gate → R ⇄ W"
+        assert hint == "plan → write → verify → review ⇄ write"
         assert "⇄ rounds of fixes" in str(mode.tooltip) and "the default" in str(mode.tooltip), "on hover"
         assert reviewer.parent.display and reviewer.value == (OC, "other/strong")
         mode.value = "single_agent"
         await pilot.pause()
         assert not reviewer.parent.display, "no reviewer of its own to pick a model for"
         hint = str(app.screen.query_one("#orchestration-hint", Label).render())
-        assert hint == "P+W+R → Gate"
+        assert hint == "plan+write+review → verify"
         mode.value = "supervisor_worker"
         await pilot.pause()
         assert not reviewer.parent.display, "the planner reviews"
@@ -4474,7 +4486,7 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
         assert "the writer's model" in row(app, "reviewer") and not any(
             "review mode" in r for r in labels(app)
         )
-        assert "planner_maker_checker: P → W → Gate → R ⇄ W" in row(app, "orchestration")
+        assert "Planner, writer, reviewer" in row(app, "flow")
         pick(app, "reviewer")
         await pilot.press("enter")
         await pilot.pause()
@@ -4485,13 +4497,13 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
         assert "[roles.reviewer]" in text and 'model = "deepseek/deepseek-v4-flash"' in text
         assert "\nmode = " not in text.split("[roles.reviewer]")[1], "no review mode any more"
         assert "deepseek-v4-flash" in row(app, "reviewer")
-        pick(app, "orchestration")
+        pick(app, "flow")
         await pilot.press("enter")
         await pilot.pause()
         text = config.read_text()
         assert 'agent_orchestration_mode = "supervisor_worker"' in text, "the next mode, at the top level"
         assert text.index("agent_orchestration_mode") < text.index("["), "before any table"
-        assert "supervisor_worker: P → W → Gate → (P+R) ⇄ W" in row(app, "orchestration")
+        assert "Planner supervises writer" in row(app, "flow")
         pick(app, "rounds")
         await pilot.press("enter")
         await pilot.pause()
@@ -4592,20 +4604,21 @@ def test_projects_keep_their_order_whatever_their_tasks_do(env, monkeypatch):
 def test_an_unticked_box_shows_no_mark(env):
     """Textual draws the toggle's X in a darker shade of its own background when it is off, and
     in the view's colours that shade was visible: the box of a new task looked ticked, and
-    "Nothing to build" looked chosen. Off, the mark has the colour of its box; on, it is seen."""
+    "Nothing to build" looked chosen. Off, the mark has the colour of its box; on, it is seen.
+    The box left in the view is the verification's "let the writer find the command"."""
 
     async def scenario(app, pilot):
-        app.reload()
-        app.table.move_cursor(row=rows(app).index("demo"))
-        await pilot.pause()
-        await pilot.press("n")
+        app.push_screen(AskVerify("demo", ["make test"]))
         await pilot.pause()
         box = app.screen.query_one(Checkbox)
         assert not box.value
         off = box.get_component_rich_style("toggle--button")
         assert off.color == off.bgcolor, "an unticked box shows no mark"
-        box.value = True
+        app.pop_screen()
+        app.push_screen(AskVerify("demo", []))  # ticking dismisses; with no command it opens ticked
         await pilot.pause()
+        box = app.screen.query_one(Checkbox)
+        assert box.value
         on = box.get_component_rich_style("toggle--button")
         assert on.color != on.bgcolor, "a ticked box shows its mark"
 
@@ -4628,7 +4641,7 @@ def test_i_is_offered_on_every_row_and_the_header_has_no_palette_icon(env):
         app.table.move_cursor(row=rows(app).index(task.id))
         await pilot.pause()
         assert "new_project" in keys(app), "and on a task's"
-        assert not app.query_one(HeaderIcon).display
+        assert not app.query(HeaderIcon), "no header with the palette's icon: the bar is vivibox's"
 
     run(scenario)
 

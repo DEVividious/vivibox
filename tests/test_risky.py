@@ -140,3 +140,19 @@ def test_the_agents_instruction_files_are_risky(repo):
     write(repo, "AGENTS.md", "# Rules\n")
     write(repo, "web/CLAUDE.md", "# Rules\n")
     assert {"AGENTS.md", "web/CLAUDE.md"} <= set(scan(repo))
+
+
+def test_a_python_environment_git_does_not_track_is_not_scanned(tmp_path):
+    """uv sync makes .venv in the clone, with thousands of packages and their package.json: git
+    ignores it, so none of it reaches your checkout. One tracked file in it would, so a folder
+    with a tracked file is scanned like any other."""
+    root = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    write(root, "pyproject.toml", "[project]\n")
+    write(root, ".venv/.gitignore", "*\n")
+    write(root, ".venv/lib/python3.13/site-packages/pyright/dist/package.json", "{}")
+    write(root, ".tox/py/Makefile")
+    assert set(scan(root)) == {"pyproject.toml"}
+    write(root, "venv/package.json", "{}")
+    subprocess.run(["git", "-C", str(root), "add", "-f", "venv/package.json"], check=True)
+    assert set(scan(root)) == {"pyproject.toml", "venv/package.json"}

@@ -74,6 +74,8 @@ First public version.
 
 ### Fixed
 
+- A Python environment in the clone (`uv sync`'s `.venv`, `.tox`) no longer stops a task for risky
+  files: it is skipped while git tracks nothing in it.
 - Python in a pod writes no `__pycache__` folders, which stopped the gate as uncommitted files.
 - A task's row says what sent the writer on its fix turn (`implementing (round 1/3: 2 criteria
   not met)`), and the supervisor's window logs every change of state with its reason.

@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,19 @@ DEFAULT_PATTERNS = (
     "conftest.py", "Makefile", "junit-platform.properties",
 )  # fmt: skip
 SKIP_DIRS = {"node_modules", "target", ".gradle"}
+# A tool's environment in the clone (uv sync's .venv, tox's): thousands of installed packages with
+# their own package.json and Makefile. Skipped only while git tracks nothing in it, so none of it
+# can reach your checkout; one tracked file and it is scanned like any other folder.
+ENVIRONMENT_DIRS = {
+    ".venv",
+    "venv",
+    ".tox",
+    ".nox",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+}
 NESTED_GIT = "nested git repository"
 
 
@@ -75,6 +89,18 @@ def _digest(path: Path) -> str:
     return digest
 
 
+def untracked(repo: Path, folder: Path) -> bool:
+    """Whether git tracks nothing under folder; False when git cannot say."""
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "--", folder.relative_to(repo).as_posix()],
+            cwd=repo, capture_output=True, text=True, timeout=30,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return listed.returncode == 0 and not listed.stdout.strip()
+
+
 def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
     """Risky files in the working tree, with a digest of each; nested git repositories too."""
     patterns = (*DEFAULT_PATTERNS, *extra)
@@ -87,7 +113,11 @@ def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
                 found[f"{rel_dir}/.git"] = NESTED_GIT
             if ".git" in dirs:
                 dirs.remove(".git")
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        dirs[:] = sorted(
+            d
+            for d in dirs
+            if d not in SKIP_DIRS and not (d in ENVIRONMENT_DIRS and untracked(repo, here / d))
+        )
         # Symlinked directories are not followed by os.walk; list them as entries to be compared.
         for name in sorted([*files, *(d for d in dirs if (here / d).is_symlink())]):
             rel = name if rel_dir == "." else f"{rel_dir}/{name}"

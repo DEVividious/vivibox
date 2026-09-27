@@ -163,6 +163,8 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 - Anything slower than half a second shows a verb and the spinner in the task's status
   (`busy_with`), and its key is off until it ends.
 - A state that can last minutes shows how long it has lasted.
+- What costs Docker seconds (`docker stats`, `docker system df`) is asked only by the screen that
+  shows it, in its own thread, while it is open: `u`. The list and the panel never wait for it.
 
 ## 7. The next step is always visible
 

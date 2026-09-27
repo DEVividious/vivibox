@@ -3,10 +3,22 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from vivibox import usage
+import pytest
+
+from vivibox import resources, usage
 from vivibox.cli import main
 
 T0 = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def no_docker(monkeypatch):
+    """Docker's figures are measured by a test that asks for them; the rest never reach Docker."""
+
+    def unavailable(command):
+        raise resources.Unavailable("not in a test")
+
+    monkeypatch.setattr(resources, "default_run", unavailable)
 
 
 def at(seconds: float) -> str:
@@ -71,7 +83,17 @@ def test_vivibox_usage_prints_a_row_per_task_and_json_for_a_note(env, capsys):
     capsys.readouterr()
     assert main(["usage"]) == 0
     out = capsys.readouterr().out
-    assert out.splitlines()[0].split() == ["TASK", "PLAN", "WRITE", "REVIEW", "GATE", "TOTAL"]
+    assert out.splitlines()[0].split() == [
+        "TASK",
+        "PLAN",
+        "WRITE",
+        "REVIEW",
+        "GATE",
+        "TOTAL",
+        "CPU",
+        "RAM",
+        "DISK",
+    ]
     assert out.splitlines()[1].startswith("demo-1")
     assert main(["usage", "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)
@@ -109,3 +131,70 @@ def test_help_names_u():
     from vivibox import dialogs
 
     assert "\n  u     " in dialogs.HELP
+
+
+def test_u_measures_the_pods_only_while_it_is_open(env, monkeypatch):
+    from test_tui import new_task, run
+    from ux import screen_text
+
+    from vivibox import resources
+    from vivibox.usage_view import Usage
+
+    task = new_task()
+    sampled = []
+
+    def sample(roots, run=None):
+        sampled.append(sorted(roots))
+        return {
+            task.id: resources.Resources(
+                [resources.Container("agent", 12.5, 2**30, 2**34)], {"docker": 2 * 10**9}, 0
+            )
+        }
+
+    monkeypatch.setattr(resources, "sample", sample)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert not sampled, "the list never waits for Docker"
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert sampled == [[task.id]]
+        text = screen_text(app)
+        assert all(column in text for column in ("CPU", "RAM", "DISK")) and "12%" in text and "2.0 GB" in text
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, Usage)
+        app.reload()
+        await pilot.pause()
+        assert len(sampled) == 1
+
+    run(scenario)
+
+
+def test_vivibox_usage_json_has_each_containers_figures(env, capsys, monkeypatch):
+    from vivibox import resources
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    monkeypatch.setattr(
+        resources,
+        "sample",
+        lambda roots, run=None: {
+            "demo-1": resources.Resources(
+                [resources.Container("agent", 12.5, 2**30, 2**34)], {"docker": 2 * 10**9}, 4096
+            )
+        },
+    )
+    capsys.readouterr()
+    assert main(["usage", "--json"]) == 0
+    row = json.loads(capsys.readouterr().out)[0]
+    assert row["resources"]["containers"] == [
+        {"role": "agent", "cpu": 12.5, "memory": 2**30, "memory_limit": 2**34}
+    ]
+    assert row["resources"]["volumes"] == {"docker": 2 * 10**9} and row["resources"]["files"] == 4096
+
+
+def test_a_pod_that_is_down_has_no_cpu_or_memory_only_disk():
+    used = usage.Usage("demo-1", "demo", live=True, now=resources.Resources([], {"docker": 2 * 10**9}, 0))
+    assert usage.cells(used)[-3:] == ["-", "-", "2.0 GB"]

@@ -137,7 +137,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 def cmd_usage(args: argparse.Namespace) -> int:
     """How long each role and the verification took, per task: live ones, then finished ones."""
-    rows = usage.gather(finished=not args.live, project=args.project or "")
+    rows = usage.gather(finished=not args.live, project=args.project or "", measure=True)
     if args.json:
         print(json.dumps(usage.as_dicts(rows), indent=2))
     else:

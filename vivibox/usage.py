@@ -1,18 +1,20 @@
 """How long a task took, from its events: each role's turns (turn_started to turn), the
-verifications, and the whole of it from its creation to done, or to now while it lives. What u
-shows and `vivibox usage` prints, for a note to paste the numbers into.
+verifications, and the whole of it from its creation to done, or to now while it lives; and, when
+asked, what a live task's pod uses now (resources.py). What u shows and `vivibox usage` prints,
+for a note to paste the numbers into.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 
-from . import actions, stats, ui
+from . import actions, resources, stats, ui
 from .config import load_config
 from .task import list_tasks
 
-COLUMNS = ("TASK", "PLAN", "WRITE", "REVIEW", "GATE", "TOTAL")
+TIMES = ("PLAN", "WRITE", "REVIEW", "GATE", "TOTAL")
+COLUMNS = ("TASK", *TIMES, "CPU", "RAM", "DISK")
 # A role's turns come from the states it works in, for events written before turns named their role.
 ROLE_OF_STATE = {**dict.fromkeys(ui.PLANNING_STATES, "planner"), "review": "reviewer"}
 COLUMN_OF_ROLE = {"planner": "plan", "writer": "write", "reviewer": "review"}
@@ -29,6 +31,8 @@ class Usage:
     review: float = 0.0
     gate: float = 0.0
     total: float = 0.0
+    # What its pod uses now; None when not measured, or finished.
+    now: resources.Resources | None = None
 
 
 def seconds_between(start: str, end: str | datetime) -> float:
@@ -74,14 +78,20 @@ def of_events(
     return used
 
 
-def gather(finished: bool = True, project: str = "") -> list[Usage]:
-    """Every live task, newest first, then the finished ones from their archive when asked for."""
+def gather(finished: bool = True, project: str = "", measure: bool = False) -> list[Usage]:
+    """Every live task, newest first, then the finished ones from their archive when asked for.
+    measure: what the live tasks' pods use now, which takes Docker seconds."""
     rows = []
-    live = list_tasks(load_config().tasks_dir)
-    for task in reversed(live):
-        st = task.read_state()
-        if not project or st.project == project:
-            rows.append(of_events(task.id, st.project, task.events(), live=True))
+    live = [
+        t
+        for t in reversed(list_tasks(load_config().tasks_dir))
+        if not project or t.read_state().project == project
+    ]
+    found = resources.sample({t.id: t.root for t in live}) if measure and live else {}
+    for task in live:
+        used = of_events(task.id, task.read_state().project, task.events(), live=True)
+        used.now = found.get(task.id)
+        rows.append(used)
     if finished:
         ids = {task.id for task in live}
         for entry in actions.history(limit=None):
@@ -106,7 +116,14 @@ def duration(seconds: float) -> str:
 
 
 def cells(used: Usage) -> list[str]:
-    return [used.task, *(duration(getattr(used, c.lower())) for c in COLUMNS[1:])]
+    now = used.now
+    running = bool(now and now.containers)  # a pod that is down uses its disk and nothing else
+    measured = [
+        f"{now.cpu:.0f}%" if running else "-",
+        resources.size(now.memory) if running else "-",
+        resources.size(now.disk) if now else "-",
+    ]
+    return [used.task, *(duration(getattr(used, c.lower())) for c in TIMES), *measured]
 
 
 def report(rows: list[Usage]) -> str:
@@ -126,4 +143,10 @@ def report(rows: list[Usage]) -> str:
 
 
 def as_dicts(rows: list[Usage]) -> list[dict]:
-    return [{k: round(v, 1) if isinstance(v, float) else v for k, v in asdict(u).items()} for u in rows]
+    """Seconds for the times; the pod's figures per container and volume, in bytes."""
+    found = []
+    for u in rows:
+        row = {f.name: getattr(u, f.name) for f in fields(u) if f.name != "now"}
+        row = {k: round(v, 1) if isinstance(v, float) else v for k, v in row.items()}
+        found.append({**row, "resources": resources.as_dict(u.now) if u.now else None})
+    return found

@@ -1,5 +1,7 @@
-"""The u screen: how long each role and the verification took, one task a row. Read in a thread,
-so the list behind it never waits for it, and again every few seconds while it is open.
+"""The u screen: how long each role and the verification took, one task a row, and what each
+live task's pod uses now. Read in a thread of the screen's own, the times first and Docker's
+figures when they come, and again every ten seconds while it is open: the list behind it never
+waits for Docker, and nothing is measured once it is closed.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ class Usage(ModalScreen):
     def __init__(self, finished: bool = False):
         super().__init__()
         self.finished = finished
+        self.measured = False
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog usage"):
@@ -37,10 +40,16 @@ class Usage(ModalScreen):
 
     @work(thread=True, exclusive=True)
     def load(self) -> None:
-        rows = usage.gather(finished=self.finished)
-        self.app.call_from_thread(self.show, rows)
+        if not self.measured:  # the first time: the times at once, without waiting for Docker
+            self.app.call_from_thread(self.show, usage.gather(finished=self.finished))
+        rows = usage.gather(finished=self.finished, measure=True)
+        self.measured = True
+        if self.is_attached:
+            self.app.call_from_thread(self.show, rows)
 
     def show(self, rows: list[usage.Usage]) -> None:
+        if not self.is_attached:
+            return
         table = self.query_one(DataTable)
         table.clear()
         for row in rows:

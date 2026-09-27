@@ -83,6 +83,9 @@ First public version.
 - `u` shows how long each task took, one a row: its planner's, writer's and reviewer's turns,
   its verifications and the whole task; `vivibox usage [--json]` prints the same. A
   verification's event says how many seconds it took.
+- `u` and `vivibox usage` show what each live task's pod uses now: CPU and memory of its
+  containers and the disk of its volumes and folder, measured in a thread only while `u` is
+  open; `--json` has them per container and per volume.
 
 ### Fixed
 

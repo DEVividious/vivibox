@@ -21,7 +21,7 @@ them all:
 | `h` / `H` | show or hide the tasks you have accepted, or the ones you deleted, listed below the live ones; the deleted ones start hidden, the header counts what is out of sight, and both choices are kept for the next time |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; its verification is a command you type, or left to the first task's writer, with what its build files and pipeline (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) run in its notes |
 | `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the verification then checks the criteria and the commits only), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
-| `u` | usage: one task a row, how long its planner, writer and reviewer took (their turns added up), its verifications, and the whole task from its creation to done or to now; the finished tasks too while the list shows them (`h`). `vivibox usage [--json]` prints the same |
+| `u` | usage: one task a row, how long its planner, writer and reviewer took (their turns added up), its verifications, and the whole task from its creation to done or to now; for a live task, what its pod uses now: CPU and memory of its containers, the disk of its volumes and its folder, measured every ten seconds while `u` is open and never otherwise; the finished tasks too while the list shows them (`h`). `vivibox usage [--json]` prints the same |
 | `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
 | `a` | accept the plan; the writer's verification command, kept for the project (the field `e` shows, prefilled, Enter keeps it); or the finished work, which lands in your checkout; then commit it with the suggested message, or leave it uncommitted |
 | `r` | reply: reject, ask for changes, or answer the agent's question; when the work has come back to you, also add acceptance criteria for what you found |
@@ -307,8 +307,10 @@ changing a word of a prompt.
 
 `vivibox usage` prints how long each task took, one a row: `PLAN`, `WRITE` and `REVIEW` add up
 the role's turns, `GATE` the verifications, `TOTAL` runs from the task's creation to done, or to
-now while it lives. `--live` leaves the finished ones out, `--project` narrows it, `--json` gives
-seconds for a note or a script.
+now while it lives; `CPU`, `RAM` and `DISK` are what a live task's pod uses now (one `docker stats
+--no-stream` for every container, `docker system df -v` for the volumes, `du` for the task's
+folder). `--live` leaves the finished ones out, `--project` narrows it, `--json` gives seconds,
+and bytes per container and per volume, for a note or a script.
 
 ### When a task costs too much
 

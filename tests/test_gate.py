@@ -57,8 +57,9 @@ class FakePod:
     def gate_down(self):
         self.up = False
 
-    def gate_exec(self, *cmd, check=True, timeout=None):
+    def gate_exec(self, *cmd, check=True, timeout=None, workdir=""):
         assert self.up, "commands run in the gate container"
+        self.calls = [*getattr(self, "calls", []), list(cmd)]
         self.commands.append(cmd[-1])
         rc = 1 if cmd[-1] in self.fail else 0
         return subprocess.CompletedProcess(cmd, rc, stdout=f"output of {cmd[-1]}\n{self.output}", stderr="")
@@ -400,6 +401,28 @@ def test_a_toolchain_changed_since_builds_again(task):
     task.transition(State.VERIFY)
     gate.run_gate(task, pod, ["bun run test"], [], java="17", tools=["bun@latest"])
     assert pod.commands.count("bun run test") == 3, "another JDK is another toolchain"
+
+
+def test_the_fresh_clone_has_the_projects_submodules(task):
+    """The angular realworld app imports its theme from a submodule: the writer's clone had it,
+    the gate's did not, and the build failed on a file the writer could not commit."""
+    gate.accept_plan(task)
+    implementing(task)
+    (task.repo / ".gitmodules").write_text(
+        '[submodule "realworld"]\n\tpath = realworld\n\turl = https://x/y.git\n'
+    )
+    commit(task.repo, "Add the submodule file")
+    pod = FakePod()
+    gate.run_gate(task, pod, ["npm test"], [])
+    ran = [" ".join(c) for c in pod.calls]
+    assert ran[0].startswith("git submodule update --init --recursive") and ran[-1].endswith("npm test")
+    task.transition(State.IMPLEMENT)
+    commit(task.repo, "Another change")
+    task.transition(State.VERIFY)
+    down = FakePod(fail={"--recursive"})
+    result = gate.run_gate(task, down, ["npm test"], [])
+    assert "submodules" in result.environment and "npm test" not in down.commands
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "for you, no attempt spent"
 
 
 def test_a_new_commit_or_a_changed_command_builds_again(task):

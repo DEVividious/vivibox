@@ -160,6 +160,9 @@ First public version.
 - A turn that committed nothing builds again when the project's toolchain changed since (a tool
   or a JDK given to it): the reused failure had spent the writer's rounds on what no commit of
   its could change.
+- The gate's fresh clone has the project's git submodules, as the task's clone has them: the
+  Angular RealWorld app's build read its theme from one. A submodule that cannot be fetched is
+  a failure of the environment.
 
 - A Rust project's build files are risky files, their changes waiting for your approval like
   `pom.xml`'s: `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain(.toml)`.

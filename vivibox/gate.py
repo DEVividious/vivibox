@@ -665,6 +665,15 @@ def _build(
         out.flush()
         pod.gate_up()
         try:
+            if (task.repo / ".gitmodules").exists():
+                # As the task's clone has them, and the project's pipeline (actions/checkout's
+                # submodules: true): a build that reads a submodule's files fails without them.
+                fetched = pod.gate_exec("git", "submodule", "update", "--init", "--recursive", check=False)
+                out.write(f"$ git submodule update --init --recursive\n{fetched.stdout}{fetched.stderr}")
+                if fetched.returncode != 0:
+                    result.environment = "the project's submodules could not be fetched into the fresh clone"
+                    result.commands.append(CommandResult(commands[0], False, 0.0, fetched.stderr[-400:]))
+                    return
             toolchain.install_declared(pod, gate=True)
             toolchain.ensure(pod, java, gate=True, tools=tools)
             for command in commands:

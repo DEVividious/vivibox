@@ -585,6 +585,7 @@ def run_gate(
     command when there should be one; the task then waits for you, with no attempt spent.
     narrowed: the selection of tests in the command the writer proposed (narrowed_proposal); the
     build is not run and the writer is told to propose the whole one."""
+    began = time.monotonic()
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
@@ -635,7 +636,8 @@ def run_gate(
     result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
     built = {"commit": head, "commands": commands} if not result.build_skipped else {}
     reused = {"reused": result.log.name} if result.unchanged else {}
-    task.event("gate", iteration=st.iteration, **result.summary(), **built, **reused)
+    took = {"seconds": round(time.monotonic() - began, 1)}
+    task.event("gate", iteration=st.iteration, **result.summary(), **built, **reused, **took)
     return result
 
 

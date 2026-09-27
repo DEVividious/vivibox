@@ -80,6 +80,9 @@ First public version.
   (`tools = ["go@1.25.3"]`, `rust@stable`), which the pod installs with mise for the agent and
   the gate, and suggests `go test ./...` or `cargo test` and a build to prepare with. Go's and
   Cargo's downloads and builds, and Rust itself, are kept in caches shared between tasks.
+- `u` shows how long each task took, one a row: its planner's, writer's and reviewer's turns,
+  its verifications and the whole task; `vivibox usage [--json]` prints the same. A
+  verification's event says how many seconds it took.
 
 ### Fixed
 

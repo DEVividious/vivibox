@@ -22,6 +22,7 @@ from . import (
     stats,
     timeline,
     ui,
+    usage,
     version,
 )
 from . import init as project_init
@@ -131,6 +132,16 @@ def cmd_stats(args: argparse.Namespace) -> int:
         print(json.dumps(stats.as_dict(found), indent=2))
     else:
         print(stats.report(found), end="")
+    return 0
+
+
+def cmd_usage(args: argparse.Namespace) -> int:
+    """How long each role and the verification took, per task: live ones, then finished ones."""
+    rows = usage.gather(finished=not args.live, project=args.project or "")
+    if args.json:
+        print(json.dumps(usage.as_dicts(rows), indent=2))
+    else:
+        print(usage.report(rows), end="")
     return 0
 
 
@@ -571,6 +582,12 @@ def parser() -> argparse.ArgumentParser:
     stat.add_argument("--since", help="only events from this date on (YYYY-MM-DD)")
     stat.add_argument("--json", action="store_true", help="as JSON, for a script")
     stat.set_defaults(func=cmd_stats)
+
+    use = sub.add_parser("usage", help="how long each role and the verification took, per task")
+    use.add_argument("--project", help="only this project's tasks")
+    use.add_argument("--live", action="store_true", help="only the tasks not finished yet")
+    use.add_argument("--json", action="store_true", help="as JSON, for a note or a script")
+    use.set_defaults(func=cmd_usage)
 
     status = sub.add_parser("status", help="list tasks, or show one task")
     status.add_argument("task", nargs="?", help="task id")

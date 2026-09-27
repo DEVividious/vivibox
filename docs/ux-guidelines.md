@@ -3,7 +3,7 @@
 Read this before changing anything a person sees: the view (`vivibox/tui.py`, `vivibox/table.py`,
 `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
 `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
-`vivibox/branches.py`),
+`vivibox/branches.py`, `vivibox/usage_view.py`),
 `vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.

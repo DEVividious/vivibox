@@ -414,6 +414,7 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]Anywhere[/b]
   i     set up a project
   k     settings: providers & MCP, roles, orchestration, editor, ntfy, limits
+  u     usage: how long each role and the verification took, per task
   h     show or hide the tasks you accepted
   H     Shift+h: show or hide the tasks you deleted (hidden to start with)
   q     quit

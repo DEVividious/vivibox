@@ -139,6 +139,7 @@ def test_gate_passes_when_everything_is_done(task):
     assert "output of mvn -B verify" in result.log.read_text()
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_FINAL
     assert task.events()[-1]["type"] == "gate"
+    assert isinstance(task.events()[-1]["data"]["seconds"], float), "how long it took, for u"
 
 
 def test_the_gate_installs_the_projects_tools_before_its_commands(task):

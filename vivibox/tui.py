@@ -67,6 +67,7 @@ from .settings import Settings
 from .states import State
 from .table import TaskTable
 from .task import Task, TaskState, list_tasks
+from .usage_view import Usage
 from .widgets import Confirm
 
 # How often the view asks whether Docker answers.
@@ -116,6 +117,7 @@ class Vivibox(
         Binding("h", "toggle_done", "Show/hide accepted", show=False),
         Binding("H", "toggle_deleted", "Show/hide deleted", show=False),
         Binding("k", "settings", "Settings", show=False),
+        Binding("u", "usage", "Usage", show=False),
         Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
         # Textual binds Ctrl-q to quit; here it is the key that leaves the agent's window.
@@ -202,6 +204,9 @@ class Vivibox(
 
     def action_settings(self) -> None:
         self.push_screen(Settings())
+
+    def action_usage(self) -> None:
+        self.push_screen(Usage(finished=self.show_done))
 
     def offer_restart(self) -> None:
         """After a reboot the tasks that were at work have no supervisor. Asked once, on start,

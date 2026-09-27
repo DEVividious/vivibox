@@ -170,3 +170,14 @@ def test_go_and_rust_keep_their_downloads_and_builds_in_shared_caches():
     assert {"go", "cargo", "rustup"} <= set(pod.CACHES)
     writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
     assert " go cargo rustup;" in writable.command
+
+
+def test_there_is_a_c_compiler_for_build_scripts_and_native_packages():
+    """Every Rust crate with a build script links with cc, and so does a Python package built
+    from source: without one the first Rust task's build failed with "linker `cc` not found"."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    packages = text.split("apt-get install -y --no-install-recommends")[1].split("&&")[0].split()
+    assert {"gcc", "libc6-dev"} <= set(packages)
+    assert any(check.command.startswith("cc --version") for check in image.checks(1000, 1000))

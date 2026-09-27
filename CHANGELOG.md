@@ -79,6 +79,8 @@ First public version.
 
 ### Fixed
 
+- The pod has a C compiler (gcc): Rust's build scripts failed with "linker `cc` not found", and a
+  Python package built from source had none either.
 - `pip install` in a pod outside a virtual environment is refused: it installed into mise's
   Python, shared by every task and the gate, and put one task's clone on the others' import path.
 - A Python environment in the clone (`uv sync`'s `.venv`, `.tox`) no longer stops a task for risky

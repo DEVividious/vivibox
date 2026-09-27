@@ -123,6 +123,7 @@ def checks(uid: int, gid: int) -> list[Check]:
         Check("Node and npm", "node -v && npm -v", "v24."),
         Check("corepack", "corepack --version", "."),
         Check("git", "git --version", "git version"),
+        Check("a C compiler, for Rust's build scripts and native packages", "cc --version | head -1", "cc ("),
         Check("docker client and compose", "docker --version && docker compose version", "Docker Compose"),
         Check("no docker daemon in the image", "command -v dockerd || echo none", "none"),
         Check("opencode", "opencode --version", "."),

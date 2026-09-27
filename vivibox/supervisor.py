@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, manual, orchestration, proposal, reviewing, ui
+from . import brief, feedback, gate, manual, orchestration, proposal, reviewing, ui
 from .config import DEFAULT_VERIFY_TIMEOUT, Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
@@ -572,7 +572,7 @@ class Supervisor:
         if result.passed:
             self.task.set_verified_commit(result.commit)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
-            gate.write_feedback(self.task, result)
+            feedback.write_feedback(self.task, result)
         if result.environment:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
             self.task.transition(target, reason="verification could not run")

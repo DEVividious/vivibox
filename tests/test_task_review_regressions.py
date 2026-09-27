@@ -173,6 +173,19 @@ def test_proposed_subject_describes_implementation_after_test_first_commit(env):
     )
 
 
+def test_a_commit_about_the_tasks_files_is_left_out_of_the_proposed_body(env):
+    """On a work laptop the commit a proposed listed "- Record test red evidence": a subject about
+    red.md, which never reaches the repository's history. Older tasks may still have such
+    commits; the gate refuses new ones."""
+    source = load_project("demo").repo
+    base = git(source, "rev-parse", "HEAD")
+    for subject in ("Add subtract with a test", "Record test red evidence", "Tick criteria"):
+        git(source, "commit", "--allow-empty", "-m", subject)
+    assert review.suggested_message(source, base, "HEAD", "Add subtraction") == (
+        "Add subtraction\n\n- Add subtract with a test"
+    )
+
+
 def test_latest_subject_is_kept_when_it_repeats_an_earlier_commit(env):
     source = load_project("demo").repo
     base = git(source, "rev-parse", "HEAD")

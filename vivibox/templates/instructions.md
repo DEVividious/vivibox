@@ -30,8 +30,9 @@ verification starts the moment you stop.
 Each of these is checked when a turn ends; a change that breaks one comes back in
 `/task/handoff/verify-feedback.md`.
 
-- A commit message is one line, at most 72 characters, describing the change. No body, no
-  `Co-Authored-By`, no signature, no mention of AI tools.
+- A commit message is one line, at most 72 characters, describing the change in the code, never
+  the task's own files (`red.md`, `criteria.md`). No body, no `Co-Authored-By`, no signature, no
+  mention of AI tools.
 - Never skip or switch off a test to get the build through: no `@Disabled`, `skipITs`, `it.skip`,
   `.only`, excluded test classes or skipping flags, for your own tests or ones that were there. A
   test that does not run checks nothing. If a test cannot run here because of something outside

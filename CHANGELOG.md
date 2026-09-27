@@ -69,6 +69,8 @@ First public version.
 
 ### Fixed
 
+- A commit whose message is about the task's files ("Record test red evidence", "Tick criteria")
+  is refused by the gate, and the commit `a` proposes leaves such lines out of its body.
 - Task columns follow the current terminal width immediately after a resize.
 - Settings name what a row is for: "Manual review" and "IDE / text editor (o)" (in the footer
   and `?` too), a "Notifications" group, and "verification gate timeout" shown in minutes and
@@ -79,6 +81,7 @@ First public version.
 
 ### Internal
 
+- The gate's feedback text moves to `vivibox/feedback.py`.
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
 - `vivibox auth` and `vivibox models` live in `cli_providers.py`, under the size limit.
 - `CHANGELOG.md` is written as the work is done: a change under `vivibox/` changes it in the

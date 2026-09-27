@@ -2,7 +2,7 @@
 
 Read this before changing anything an agent reads: the prompts in `vivibox/supervisor.py`,
 `vivibox/manual.py` and `vivibox/demo.py`, the templates in `vivibox/templates/`, and the
-feedback the gate writes in `vivibox/gate.py`. The supervisor's turn prompts live in
+feedback the gate writes in `vivibox/feedback.py`. The supervisor's turn prompts live in
 `vivibox/prompts.py`. The rules can be checked, and
 `tests/test_prompt_rules.py` checks the mechanical ones. A change to a rule updates the table
 here in the same commit.
@@ -32,6 +32,7 @@ broken, next to the line that broke it.
 | Rule in the brief | Checked by |
 |---|---|
 | a commit message is one line, at most 72 characters, without co-author or AI signature | `gate.commit_problems` |
+| a commit message describes the change in the code, never the task's files (`red.md`, `criteria.md`) | `gate.commit_problems` |
 | criteria are ticked with their exact text | `gate.missing_criteria` |
 | no test is switched off | `gate.switched_off_tests` |
 | no invisible characters | `gate.hidden_characters` |

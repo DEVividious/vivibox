@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from conftest import make_repo
 
-from vivibox import gate, repo
+from vivibox import feedback, gate, repo
 from vivibox.risky import Approvals
 from vivibox.states import State
 from vivibox.task import create_task
@@ -108,6 +108,13 @@ def test_criteria_need_an_accepted_plan(task):
         ("Add health endpoint\n\nCo-Authored-By: Claude <noreply@anthropic.com>", "co-author"),
         ("Add endpoint (generated with Claude Code)", "co-author"),
         ("x" * 73, "longer than 72"),
+        ("Record test red evidence", "task's files"),
+        ("Add red.md for the new tests", "task's files"),
+        ("Tick the acceptance criteria", "task's files"),
+        ("Mark criteria.md items done", "task's files"),
+        ("Update /task/handoff/criteria.md", "task's files"),
+        ("Validate search criteria on the orders page", None),
+        ("Handle a red build badge in the README", None),
     ],
 )
 def test_commit_rules(task, message, problem):
@@ -141,7 +148,7 @@ def test_gate_stops_at_first_failing_command_and_writes_feedback(task):
     assert not result.passed
     assert gate.next_state(result, 1, 3) is State.IMPLEMENT
     assert gate.next_state(result, 3, 3) is State.CHECKPOINT_BLOCKED
-    gate.write_feedback(task, result)
+    feedback.write_feedback(task, result)
     text = (task.meta / "handoff" / "verify-feedback.md").read_text()
     assert "Command failed: `lint`" in text and "Criterion not ticked: endpoint returns 200" in text
 
@@ -203,7 +210,7 @@ def test_hidden_characters_fail_the_gate(task):
     (task.repo / "Main.java").write_text("x‮y\n")
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert not result.passed and result.hidden_characters == ["Main.java:1 U+202E"]
-    gate.write_feedback(task, result)
+    feedback.write_feedback(task, result)
     assert "Invisible character" in (task.meta / "handoff" / "verify-feedback.md").read_text()
 
 
@@ -221,7 +228,7 @@ def test_uncommitted_changes_fail_the_gate(task):
     result = gate.run_gate(task, pod, ["true"], [])
     assert not result.passed and result.uncommitted == ["Forgotten.java"]
     assert not getattr(pod, "up", False), "no gate container is left behind"
-    assert "Not committed" in gate.feedback(result)
+    assert "Not committed" in feedback.feedback(result)
 
 
 def test_a_plan_is_accepted_without_a_word_on_how_the_project_is_built(task):
@@ -293,9 +300,9 @@ def test_a_switched_off_test_fails_the_gate(task, path, text):
     commit(task.repo, "Add a test")
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert not result.passed and result.switched_off == [f"{path}:1: {text.strip()}"]
-    gate.write_feedback(task, result)
-    feedback = (task.meta / "handoff" / "verify-feedback.md").read_text()
-    assert "Test switched off" in feedback and "question.md" in feedback, "ask instead"
+    feedback.write_feedback(task, result)
+    written = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert "Test switched off" in written and "question.md" in written, "ask instead"
 
 
 @pytest.mark.parametrize(
@@ -325,7 +332,7 @@ def test_the_feedback_quotes_what_the_build_said(task):
     result = gate.run_gate(
         task, FakePod(fail={"mvn -B verify"}, output=f"{noise}\n{said}"), ["mvn -B verify"], []
     )
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "expected 81.2 but was 0" in text and "BUILD FAILURE" in text, "the lines that say why"
     assert "Downloading artifact" not in text, "not the whole log"
     assert "/task/handoff/verify.log" in text
@@ -339,14 +346,14 @@ def test_a_reworded_criterion_is_named_in_the_feedback(task):
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert result.missing_criteria == ["endpoint returns 200"]
     assert result.reworded == {"endpoint returns 200": "endpoint returns HTTP 200"}
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "reworded" in text and "restore this exact line" in text and "endpoint returns 200" in text
     assert "Criterion not ticked: endpoint returns 200" not in text, "one reason, not two"
 
 
 def test_the_feedback_lists_at_most_twenty_uncommitted_files(task):
     result = gate.GateResult(Path("/dev/null"), uncommitted=[f"f{i}.txt" for i in range(35)])
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "f19.txt" in text and "f20.txt" not in text and "15 more" in text
 
 
@@ -362,7 +369,7 @@ def test_nothing_new_committed_reuses_the_last_build(task):
     assert pod.commands.count("npm test") == 1, "the same commit builds the same way; not built again"
     assert [(c.command, c.ok) for c in again.commands] == [("npm ci", True), ("npm test", False)]
     assert again.log == first.log
-    text = gate.feedback(again)
+    text = feedback.feedback(again)
     assert "committed nothing" in text and "expected 1 but was 2" in text, "told, with the old result"
     assert task.events()[-1]["data"]["reused"] == first.log.name
 
@@ -406,7 +413,7 @@ def test_what_makes_a_build_meaningless_is_reported_before_it_is_built(task, lea
     pod = FakePod()
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     assert not result.passed and "mvn -B verify" not in pod.commands, "the build would prove nothing"
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "build was not run" in text and result.log.exists()
     assert task.events()[-1]["data"]["build_skipped"]
 
@@ -449,7 +456,7 @@ def test_a_failure_of_the_environment_is_told_from_one_of_the_code(task, said):
     result = gate.run_gate(task, FakePod(fail={"mvn -B verify"}, output=said), ["mvn -B verify"], [])
     assert result.environment, "outside the code"
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED, "no attempt of the agent's is spent"
-    assert "Verification could not run" in gate.feedback(result)
+    assert "Verification could not run" in feedback.feedback(result)
 
 
 def test_a_failing_test_is_a_failure_of_the_code(task):
@@ -557,7 +564,7 @@ def test_a_test_file_changed_without_red_evidence_fails_the_gate(task):
     commit(task.repo, "Add a test")
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert result.no_red_evidence == ["test/math.test.js"] and not result.passed
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "red.md" in text and "test/math.test.js" in text
     (task.meta / "handoff" / "red.md").write_text("## math.test.js > adds\nexpected 1, got undefined\n")
     assert gate.run_gate(task, FakePod(), ["true"], []).passed, "named by its file name is enough"
@@ -617,7 +624,7 @@ def test_removed_tests_are_counted_for_you(tmp_path):
     assert result.removed_tests == ['test/math.test.js: test("subtracts", () => {});']
     assert result.passed, "for you to see at review, not a failure"
     assert t.events()[-1]["data"]["removed_tests"] == 1
-    assert "subtracts" not in gate.feedback(result), "not for the agent, which would put it back"
+    assert "subtracts" not in feedback.feedback(result), "not for the agent, which would put it back"
 
 
 def test_a_certificate_failure_deep_in_a_maven_log_is_of_the_environment(task):
@@ -750,7 +757,7 @@ def test_the_feedback_is_markdown_that_keeps_its_list_out_of_the_code_block():
     said = "sh: 1: tsc: not found\n> tsc && vitest run"
     result.commands = [gate.CommandResult("npm test", False, 0.1, said)]
     result.no_red_evidence = ["test/a.test.ts", "test/b.test.ts"]
-    tokens = MarkdownIt().parse(gate.feedback(result))
+    tokens = MarkdownIt().parse(feedback.feedback(result))
     fences = [t.content for t in tokens if t.type == "fence"]
     assert len(fences) == 1 and "tsc: not found" in fences[0] and "No red evidence" not in fences[0]
     assert sum(t.type == "list_item_open" for t in tokens) == 3, "the command and the two files"
@@ -868,7 +875,7 @@ def test_a_proposal_narrowed_to_the_writers_tests_is_refused_before_the_build(ta
     assert not result.passed and result.narrowed == "-Dtest=PetTests"
     assert "narrowed" in result.log.read_text() and "-Dtest=PetTests" in result.log.read_text()
     assert task.events()[-1]["data"]["narrowed"] == "-Dtest=PetTests"
-    text = gate.feedback(result)
+    text = feedback.feedback(result)
     assert "-Dtest=PetTests" in text and "whole project" in text and "verify-proposal.md" in text
     assert gate.next_state(result, 1, 3) is State.IMPLEMENT, "the writer's to fix: an attempt spent"
 

@@ -273,8 +273,14 @@ def suggested_message(
     summary, else the goal's first line when it fits), and the body lists every commit the agent
     made, in order. Never the acceptance checklist, never a truncated ticket."""
     log = repo.git("log", "--reverse", "--format=%s", f"{base}..{commit}", cwd=source).stdout
+    # A subject about the task's files (an older task's "Record test red evidence") says nothing
+    # in the project's history, so it is left out; the gate refuses such commits now.
     subjects = list(
-        dict.fromkeys(p.strip() for p in log.splitlines() if p.strip() and not gate.AI_MARKERS.search(p))
+        dict.fromkeys(
+            p.strip()
+            for p in log.splitlines()
+            if p.strip() and not gate.AI_MARKERS.search(p) and not gate.TASK_FILES.search(p)
+        )
     )
     fits = lambda line: line and len(line) <= gate.MAX_SUBJECT  # noqa: E731
     first = next(

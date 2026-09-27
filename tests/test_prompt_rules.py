@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import actions, brief, gate, manual, reviewing, risky, supervisor
+from vivibox import actions, brief, feedback, gate, manual, reviewing, risky, supervisor
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
 # The brief each role gets: the common part and its own, as the agent reads them.
@@ -107,7 +107,7 @@ def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
             setattr(result, field.name, {marker: marker})
         else:
             setattr(result, field.name, [marker])
-        assert marker in gate.feedback(result), f"{field.name} fails the gate but the agent is not told"
+        assert marker in feedback.feedback(result), f"{field.name} fails the gate but the agent is not told"
 
 
 def test_the_templates_placeholder_is_the_one_the_gate_refuses():

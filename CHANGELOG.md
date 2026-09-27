@@ -69,7 +69,8 @@ First public version.
 
 - `init` suggests how a Python project is tested and prepared: `uv run --frozen pytest` and
   `uv sync --frozen` with a `uv.lock`, else `pytest` in a throwaway environment from
-  `pyproject.toml` or the requirements files. uv's cache is shared between tasks and the gate.
+  `pyproject.toml` or the requirements files, with the dependency group or extra that has
+  pytest. uv's cache is shared between tasks and the gate.
 
 ### Fixed
 

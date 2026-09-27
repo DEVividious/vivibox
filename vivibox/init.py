@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -188,16 +189,53 @@ def package_manager(repo: Path) -> str:
 REQUIREMENTS = ("requirements.txt", "requirements-dev.txt", "requirements-test.txt", "requirements/dev.txt")
 
 
+PYTEST = re.compile(r"^\s*pytest\b(?![-_.\w])")
+
+
+def _has_pytest(requirements) -> bool:
+    return isinstance(requirements, list) and any(
+        isinstance(r, str) and PYTEST.match(r) for r in requirements
+    )
+
+
+def pytest_source(pyproject: str) -> tuple[str, str]:
+    """Where a pyproject.toml has pytest: ("group", name) for a dependency group, ("extra", name)
+    for an optional dependency, ("", "") for neither, or when the file does not parse."""
+    try:
+        data = tomllib.loads(pyproject)
+    except tomllib.TOMLDecodeError:
+        return "", ""
+    groups = data.get("dependency-groups") or {}
+    extras = (data.get("project") or {}).get("optional-dependencies") or {}
+    # dev is what `uv run` installs anyway; any other group or extra has to be asked for.
+    if _has_pytest(groups.get("dev")):
+        return "dev", ""
+    for name, requirements in groups.items():
+        if _has_pytest(requirements):
+            return "group", name
+    for name, requirements in extras.items():
+        if _has_pytest(requirements):
+            return "extra", name
+    return "", ""
+
+
 def python_candidates(repo: Path) -> list[tuple[str, str]]:
     """uv, in the image: the environment its lockfile pins, else a throwaway one from the
-    project or its requirements. Nothing it writes shows in the clone (.venv ignores itself), so
-    neither the writer's clone nor the gate's gains an uncommitted file."""
+    project or its requirements, with the group or extra that has pytest. Nothing it writes
+    shows in the clone (.venv ignores itself), so neither the writer's clone nor the gate's
+    gains an uncommitted file."""
     pyproject = _read(repo / "pyproject.toml")
-    pytest = "" if "pytest" in pyproject else " --with pytest"
+    kind, name = pytest_source(pyproject) if pyproject else ("", "")
     if (repo / "uv.lock").exists():
-        return [(f"uv run --frozen{pytest} pytest", "uv.lock")]
+        with_ = {"dev": "", "group": f" --group {name}", "extra": f" --extra {name}"}.get(
+            kind, " --with pytest"
+        )
+        return [(f"uv run --frozen{with_} pytest", "uv.lock")]
     if pyproject:
-        return [("uv run --no-project --with-editable . --with pytest pytest", "pyproject.toml")]
+        # An extra is installed with the project; a group needs a project environment, so the
+        # throwaway one gets pytest alone.
+        project = f"'.[{name}]'" if kind == "extra" else ". --with pytest"
+        return [(f"uv run --no-project --with-editable {project} pytest", "pyproject.toml")]
     if (repo / "requirements.txt").exists():
         named = " ".join(f"--with-requirements {name}" for name in REQUIREMENTS if (repo / name).exists())
         return [(f"uv run --no-project {named} --with pytest pytest", "requirements.txt")]

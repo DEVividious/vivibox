@@ -452,3 +452,27 @@ def test_python_projects_are_tested_through_uv_without_leaving_files_behind(tmp_
         "requirements.txt runs: uv run --no-project --with-requirements requirements.txt"
         " --with-requirements requirements-dev.txt --with pytest pytest" in init.detect(plain).notes
     )
+
+
+def test_python_tests_run_with_the_group_or_the_extra_that_has_pytest(tmp_path):
+    """Pallets keep pytest in a `tests` dependency group, humanize in a `tests` extra: a plain
+    `uv run pytest` installs neither and finds no pytest."""
+    grouped = python_project(
+        tmp_path / "a",
+        PYPROJECT + '[dependency-groups]\ndev = ["ruff"]\ntests = ["freezegun", "pytest"]\n',
+        uv__lock="",
+    )
+    assert "uv.lock runs: uv run --frozen --group tests pytest" in init.detect(grouped).notes
+    extra = python_project(
+        tmp_path / "b", PYPROJECT + '[project.optional-dependencies]\ntests = ["pytest>=9", "pytest-cov"]\n'
+    )
+    assert (
+        "pyproject.toml runs: uv run --no-project --with-editable '.[tests]' pytest"
+        in init.detect(extra).notes
+    )
+    both = python_project(
+        tmp_path / "c", PYPROJECT + '[project.optional-dependencies]\ntest = ["pytest"]\n', uv__lock=""
+    )
+    assert "uv.lock runs: uv run --frozen --extra test pytest" in init.detect(both).notes
+    broken = python_project(tmp_path / "d", "[project\n", uv__lock="")
+    assert "uv.lock runs: uv run --frozen --with pytest pytest" in init.detect(broken).notes

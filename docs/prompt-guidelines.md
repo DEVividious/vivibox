@@ -16,7 +16,7 @@ here in the same commit.
   and goes as the first message of that role's conversation (`brief.role_text`), because a
   system prompt per agent would replace the harness's own, which teaches a model its tools.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
-  `SUPERVISE_PROMPT`, …): what to do now, which files to read and write, and the sentence that ends
+  …): what to do now, which files to read and write, and the sentence that ends
   the turn. A role's part of the brief is one file per agent: a role's own, or the roles one agent
   plays in one conversation (`roles/writer-reviewer.md`, `roles/planner-writer-reviewer.md`,
   `roles/planner-reviewer.md`, chosen by the orchestration mode).
@@ -118,9 +118,9 @@ the commit that changed the prompt:
   the gate; no review state.
 - planner and executor: the same fake test, planted before the writer's own review turn; that
   turn makes it real before the gate.
-- supervisor and worker: the same fake test, read by the supervisor in the pod before any build;
-  its blocking note goes to the worker, the fix comes back to it, and the gate runs once it
-  accepts; the supervisor's turns change no commit.
+- supervisor and worker: the same fake test, past a green gate, read by the supervisor in the
+  pod; its blocking note goes to the worker, the fix comes back through the gate, and the second
+  round accepts; the supervisor's turns change no commit.
 - prepared: a Maven project of three modules, installed once by `prepare`; the task changes two
   of them, one depending on the other. The writer works on the modules it changes, together, and
   builds the whole reactor once at most, as its last check; the evidence stays out of the

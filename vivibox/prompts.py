@@ -113,14 +113,3 @@ Look for what the verification cannot see: a test that cannot fail, a criterion 
 met, behaviour the plan rules out, red evidence that is not what the test showed. Fix what you
 find and commit, and keep the ticks true; leave what is right alone. End the turn when that is
 done and committed, or when a question is in /task/handoff/question.md."""
-
-# The supervisor (P+R) reads the worker's turn in the pod, before any verification.
-SUPERVISE_PROMPT = """The worker ended its turn. The verification has not run yet: the orchestrator
-runs it once you accept the work, so do not build or test. Read /task/plan.md,
-/task/handoff/criteria.md, /task/handoff/red.md and /task/handoff/comments.md, then the work
-itself: `git diff {base}..HEAD` in the repository you are in. Write /task/review/review.md with
-two sections. Under "## Blocking": what keeps the work from being what the plan says, or from
-proving it: a test that cannot fail, a criterion ticked but not met, behaviour the plan rules out.
-Under "## Not blocking": the rest. Each note is one line, "path:line — what is wrong and what
-would make it right"; a section may be empty. Do not report what the verification checks:
-commits, ticks, switched-off tests, red evidence named. End the turn when the review is written."""

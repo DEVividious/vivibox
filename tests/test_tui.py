@@ -4317,7 +4317,7 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
         text = config.read_text()
         assert 'agent_orchestration_mode = "supervisor_worker"' in text, "the next mode, at the top level"
         assert text.index("agent_orchestration_mode") < text.index("["), "before any table"
-        assert "supervisor_worker: (P+R) ⇄ W → Gate" in row(app, "orchestration")
+        assert "supervisor_worker: P → W → Gate → (P+R) ⇄ W" in row(app, "orchestration")
         pick(app, "rounds")
         await pilot.press("enter")
         await pilot.pause()

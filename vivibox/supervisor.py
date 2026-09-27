@@ -32,7 +32,6 @@ from .prompts import (
     REVIEW_PROMPT,
     REVIEW_REPAIR_PROMPT,
     SELF_REVIEW_PROMPT,
-    SUPERVISE_PROMPT,
 )
 from .risky import Change
 from .states import State, waits_for_user
@@ -534,20 +533,10 @@ class Supervisor:
         if self._asks_for_command():
             self._command_checkpoint(st)
             return
-        if self.mode.supervisor and not self._after_red_gate():
-            # The supervisor reads every turn before any verification; only a turn that fixes a
-            # red gate goes straight back to the gate, and the supervisor sees it once it is green.
-            self.task.transition(State.REVIEW, reason="the worker's turn is over")
-            return
         self.task.transition(State.VERIFY)
 
     def _self_review_prompt(self, st: TaskState) -> str:
         return SELF_REVIEW_PROMPT.format(base=st.base_commit)
-
-    def _after_red_gate(self) -> bool:
-        """Whether the writer's turn just over was sent by a red verification."""
-        entered = next((e for e in reversed(self.task.events()) if e["type"] == "state"), None)
-        return bool(entered) and entered["data"].get("previous") == str(State.VERIFY)
 
     def _command_checkpoint(self, st: TaskState) -> None:
         """The command the writer proposed is what the task is about to be verified with: yours to
@@ -609,10 +598,9 @@ class Supervisor:
             self.task.transition(target, reason="verification still failing")
             self.ports.notify(
                 self.task.id,
-                f"verification still failing after {st.rounds} fix turn{'s' if st.rounds != 1 else ''}"
-                + self._unresolved(),
+                f"verification still failing after {st.rounds} fix turn{'s' if st.rounds != 1 else ''}",
             )
-        elif self.mode.separate_reviewer and self.reviewer is not None:
+        elif self.mode.supervisor or (self.mode.separate_reviewer and self.reviewer is not None):
             self.last_gate = result
             self.task.transition(State.REVIEW, reason="verification passed")
         elif target is State.APPROVAL_RISKY:
@@ -622,20 +610,7 @@ class Supervisor:
             )
         else:
             self.task.transition(target, reason="verification passed")
-            self.ports.notify(self.task.id, self._review_message(result) + self._unresolved(), kind="review")
-
-    def _unresolved(self) -> str:
-        """The supervisor's last word on the work, when it had one the worker did not get to act
-        on: the work comes to you with it, verified or not."""
-        if not self.mode.supervisor or not (last := reviewing.latest(self.task)):
-            return ""
-        text = last.read_text()
-        n = int(reviewing.NUMBERED.match(last.name).group(1))
-        if problem := reviewing.problem(text):
-            return f"; supervisor round {n} unreadable ({problem})"
-        if not (blocking := reviewing.parse_review(text).blocking):
-            return f"; supervisor round {n}: no blocking notes"
-        return f"; supervisor round {n}: {_notes(len(blocking))} unresolved"
+            self.ports.notify(self.task.id, self._review_message(result), kind="review")
 
     def _head_moved(self, st: TaskState) -> bool:
         """The commits are not the ones the verification ran on (you talked to the agent under w,
@@ -650,23 +625,23 @@ class Supervisor:
         return True
 
     def _review(self, st: TaskState) -> None:
-        """A round of the reviewer's, kept as handoff/review-N.md. In the review container it is a
-        fresh clone and a fresh conversation after a green gate; the supervisor reads in the pod,
-        in its own conversation, before any gate. Blocking notes go back to the writer while it
-        has rounds; then the work goes on, to you or to the gate, with the notes."""
-        if self.mode.separate_reviewer and self._head_moved(st):
+        """A round of the reviewer's after a green gate, kept as handoff/review-N.md: in the review
+        container a fresh clone and a fresh conversation, or the supervisor in the pod, on the
+        worker's clone, in the conversation it planned in. Blocking notes go back to the writer
+        while it has rounds; then the work comes to you, with the notes."""
+        if self._head_moved(st):
             return
         n = st.reviews + 1
         if self.mode.supervisor:
             out = self.task.meta / "review"
             out.mkdir(exist_ok=True)
             (out / "review.md").unlink(missing_ok=True)  # the last round's, or the supervisor reads it
-            text = self._review_turns(st, n, out, SUPERVISE_PROMPT)
+            text = self._review_turns(st, n, out)
         else:
             out = self.ports.review_up()
             try:
                 self.task.set_session("reviewer", "")  # the last round's server is gone with its container
-                text = self._review_turns(st, n, out, REVIEW_PROMPT)
+                text = self._review_turns(st, n, out)
             finally:
                 self.ports.review_down()
         if text is None:
@@ -688,25 +663,17 @@ class Supervisor:
             self.task.transition(State.IMPLEMENT, reason=f"review {n}: {blocking} blocking")
             print(f"[{time.strftime('%H:%M:%S')}] {said}, back to the writer", flush=True)
             return
-        if self.mode.supervisor:
-            # Accepted, or out of rounds: the verification, and then the work comes to you with the
-            # notes. Nothing reaches you unverified.
-            accepted = not blocking and not problem
-            reason = "supervisor accepted the work" if accepted else f"{said}, no rounds left"
-            self.task.transition(State.VERIFY, reason=reason)
-            print(f"[{time.strftime('%H:%M:%S')}] {reason}", flush=True)
-            return
         if self._head_moved(self.task.read_state()):
             return
         self._checkpoint(
             State.CHECKPOINT_FINAL, f"{self._review_message(self.last_gate)}; {said}", kind="review"
         )
 
-    def _review_turns(self, st: TaskState, n: int, out: Path, prompt: str) -> str | None:
+    def _review_turns(self, st: TaskState, n: int, out: Path) -> str | None:
         """The reviewer's turn, and one more when what it wrote is not a review; None when a turn
         failed and the task stopped."""
         st = self.task.read_state()
-        prompt = prompt.format(base=st.base_commit)
+        prompt = REVIEW_PROMPT.format(base=st.base_commit)
         if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
             prompt = REVIEW_AGAIN_PREFIX + prompt
         if self._turn(st, prompt, role="reviewer") is None:

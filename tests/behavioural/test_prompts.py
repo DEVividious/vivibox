@@ -631,10 +631,10 @@ def test_planner_executor_the_self_review_makes_a_fake_test_real_before_the_gate
         finish(task)
 
 
-def test_supervisor_worker_the_planner_reviews_in_the_pod_before_the_gate_and_commits_nothing(bench):
-    """(P+R) ⇄ W: the supervisor's blocking note on the fake test goes to the worker before any
-    build; the worker's fix goes to the supervisor again; accepted, the gate runs. The supervisor
-    changes no commit of the clone's."""
+def test_supervisor_worker_the_planner_reviews_green_work_in_the_pod_and_commits_nothing(bench):
+    """P → W → Gate → (P+R) ⇄ W: past a green gate, the supervisor's blocking note on the fake test
+    goes to the worker; the fix comes back through the gate; the second round accepts. The
+    supervisor changes no commit of the clone's."""
     project(bench, "supervised", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
     task, sup = begin("supervised", GOAL, "supervisor_worker")
     try:
@@ -642,7 +642,10 @@ def test_supervisor_worker_the_planner_reviews_in_the_pod_before_the_gate_and_co
         assert st.state is State.IMPLEMENT
         plant_a_fake_test(task)
         before = head(task.repo)
-        task.transition(State.REVIEW, reason="the worker's turn is over")
+        task.transition(State.VERIFY)
+        sup.step()  # the gate: green, the fake test runs and passes
+        spend(task)
+        assert task.read_state().state is State.REVIEW, f"the gate let it through: {task.read_state()}"
         sup.step()  # the supervisor, in the pod
         spend(task)
         review = (task.meta / "handoff" / "review-1.md").read_text()
@@ -654,15 +657,14 @@ def test_supervisor_worker_the_planner_reviews_in_the_pod_before_the_gate_and_co
         assert [e["data"]["agent"] for e in task.events() if e["type"] == "turn"][-1] == "planner"
         sup.step()  # the worker fixes it
         spend(task)
-        assert task.read_state().state is State.REVIEW, "back to the supervisor, not to the gate"
+        assert task.read_state().state is State.VERIFY, "through the gate before the supervisor again"
         assert "assertTrue(True)" not in (task.repo / "test_calc.py").read_text(), "made real"
-        sup.step()  # the supervisor accepts
-        spend(task)
-        assert task.read_state().state is State.VERIFY and task.read_state().reviews == 2
         sup.step()  # the gate
+        spend(task)
+        sup.step()  # the supervisor accepts
         spend(task)
         st = task.read_state()
         assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY), f"ended in {st.state}"
-        assert not any(e["type"] == "turn" and e["data"]["state"] == "verify" for e in task.events())
+        assert st.reviews == 2
     finally:
         finish(task)

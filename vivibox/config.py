@@ -57,12 +57,12 @@ ORCHESTRATION_MODES = {
     ),
     "supervisor_worker": Orchestration(
         "Supervisor and worker",
-        "(P+R) ⇄ W → Gate",
+        "P → W → Gate → (P+R) ⇄ W",
         "Hard, multi-step changes under a strong model's constant supervision.",
-        "A strong supervisor, which plans and then reads every turn of a cheaper worker in the "
-        "same pod, without editing.",
-        "The strong model reads every round, so it costs more of it; the build runs only once the "
-        "supervisor accepts, so a build error surfaces late.",
+        "A strong supervisor, which plans and then, with the plan still in its conversation, "
+        "reviews a cheaper worker's work in the same pod, without editing; only work the gate "
+        "passed reaches it.",
+        "The strong model reads every round, so it costs more of it than a cheap reviewer would.",
     ),
 }
 DEFAULT_ORCHESTRATION = "planner_maker_checker"

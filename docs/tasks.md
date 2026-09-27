@@ -174,7 +174,7 @@ the first role's model; `→` is then; `⇄` is rounds of fixes.
 | `single_agent` | P+W+R → Gate | small, routine, cheap tasks; no independent review |
 | `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
 | `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
-| `supervisor_worker` | (P+R) ⇄ W → Gate | hard, multi-step changes under a strong model's constant supervision |
+| `supervisor_worker` | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
 
 Every mode plans first and stops for your acceptance of the plan (`--auto` does not). Then:
 
@@ -195,13 +195,13 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   runs again and the reviewer reads again, with what the writer answered where it disagreed
   (`review-N-reply.md`) read first. No blocking notes, and the work comes to you, the notes with
   it. Without `[roles.reviewer]` the reviewer runs on the writer's model.
-- **The supervisor** of `supervisor_worker` is the planner, and reads every turn of the worker's
-  in the same pod, on the same clone, before any build: it changes nothing and commits nothing,
-  and writes the same `review-N.md`. Blocking notes go back to the worker; when it accepts, the
-  gate runs, and green, the work comes to you. A red gate goes back to the worker and straight
-  to the gate again: the supervisor does not read a fix until it is green. Out of rounds, the
-  gate runs anyway, and the work comes to you with the supervisor's unresolved notes, verified
-  or, red, with both.
+- **The supervisor** of `supervisor_worker` is the planner: after a green gate it reads the
+  worker's work in the same pod, on the same clone, with the plan still in its conversation, and
+  writes the same `review-N.md`; it changes nothing and commits nothing. The rounds go as the
+  reviewer's do: blocking notes back to the worker, the gate again, the supervisor again, until it
+  accepts or the rounds are out. Nothing the gate would catch reaches it: a red gate goes back to
+  the worker by itself. What differs from `planner_maker_checker` is who reviews and where, not
+  where the gate stands.
 
 One limit, `max_rounds` (3 in config.toml, or the task's own from `n`), counts the fix turns the
 writer gets before the work comes to you: a red gate is one, a review with blocking notes is

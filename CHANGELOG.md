@@ -23,10 +23,10 @@ First public version.
 - Orchestration modes (`agent_orchestration_mode`, in `config.toml`, under `k` and per task under
   `n`): `single_agent` (P+W+R → Gate), `planner_executor` (P → W+R → Gate),
   `planner_maker_checker` (P → W → Gate → R ⇄ W, the default) and `supervisor_worker`
-  ((P+R) ⇄ W → Gate). Roles joined in one agent share one conversation and the first role's
-  model, and a writer that reviews its own work gets a self-review turn before every
-  verification; a supervisor reads every turn of the worker's in the pod, before the
-  verification, and a red verification goes back to the worker and to the verification again.
+  (P → W → Gate → (P+R) ⇄ W). Roles joined in one agent share one conversation and the first
+  role's model; a writer that reviews its own work gets a self-review turn before every
+  verification; a supervisor, the planner, reviews the worker's work after a green
+  verification in the pod, with the plan still in its conversation.
   One limit, `limits.max_rounds` (3), counts the fix turns the writer gets, from the
   verification or from a review, before the work comes to you; your reply gives them back.
   `max_iterations`, `max_reviews` and the reviewer's `mode` are read no more, and a file that

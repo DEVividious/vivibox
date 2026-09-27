@@ -73,7 +73,7 @@ under `n`.
 | `single_agent` | P+W+R → Gate | small, routine, cheap tasks |
 | `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
 | `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
-| `supervisor_worker` | (P+R) ⇄ W → Gate | hard, multi-step changes under a strong model's constant supervision |
+| `supervisor_worker` | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
 
 Legend: `+` roles in one agent and one conversation, on the first role's model; `→` then; `⇄`
 rounds of fixes, up to `max_rounds`; Gate the verification (build, tests, criteria, commits).
@@ -83,9 +83,11 @@ rounds of fixes, up to `max_rounds`; Gate the verification (build, tests, criter
 - The reviewer of `planner_maker_checker` reads in a container of its own, after a green gate;
   its blocking notes go back to the writer, through the gate again, until it has none. Without
   `[roles.reviewer]` it runs on the writer's model.
-- The supervisor of `supervisor_worker` plans, then reads every turn of the worker's in the pod,
-  before any build, and sends back what to change; when it accepts, the gate runs. A red gate
-  goes back to the worker and straight to the gate again.
+- The supervisor of `supervisor_worker` is the planner: it reviews the worker's work after a
+  green gate in the same pod, with the plan still in its conversation, and sends back what to
+  change until it accepts. The flow is `planner_maker_checker`'s; what differs is who reviews and
+  where: one strong session that planned, on the worker's clone, instead of a reviewer of its
+  own in a container of its own.
 - One limit, `max_rounds` (3), counts the fix turns the writer gets, from the gate or from a
   review, before the work comes to you; your reply gives them back.
 
@@ -94,7 +96,7 @@ than the writer, best of another family; in `supervisor_worker`, a strong superv
 of a strong model and plenty of a cheap one: `planner_maker_checker`, the strong one planning,
 the cheap one writing and reviewing. The trade-offs: `single_agent` is the cheapest and has no
 independent review; `planner_maker_checker` costs the most turns; `supervisor_worker` spends the
-strong model on every round and finds a build error late.
+strong model on every round.
 
 ## Models
 

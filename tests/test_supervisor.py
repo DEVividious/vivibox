@@ -1178,77 +1178,55 @@ def supervised(task, tmp_path, texts, results=(), max_rounds=2):
     return sup, notes, reviewer
 
 
-def test_the_supervisor_reads_every_turn_before_the_gate_and_the_gate_runs_once_it_accepts(task, tmp_path):
+def test_the_supervisor_reads_the_work_after_a_green_gate_in_the_pod_in_the_planners_conversation(
+    task, tmp_path
+):
+    """supervisor_worker: the flow is planner_maker_checker's; who reviews, and where, differs: the
+    planner's own conversation, on the worker's clone in the pod, no review container."""
     sup, notes, reviewer = supervised(task, tmp_path, [BLOCKING, CLEAN])
-    sup.step()  # implement: to the supervisor, not the gate
+    sup.step()  # implement: to the gate, as in every mode
+    assert task.read_state().state is State.VERIFY
+    sup.step()  # verify: green, and the supervisor reads
     assert task.read_state().state is State.REVIEW
     sup.step()  # supervisor: one blocking note
     st = task.read_state()
     assert (st.state, st.rounds, st.reviews) == (State.IMPLEMENT, 1, 1)
     assert reviewer.prompts[0].startswith(brief.role_text("planner-reviewer"))
-    assert (
-        "verification has not run yet" in reviewer.prompts[0]
-        and "/task/review/review.md" in reviewer.prompts[0]
-    )
+    assert reviewer.prompts[0].endswith(prompts.REVIEW_PROMPT.format(base=st.base_commit))
     assert st.sessions.get("planner") == "rev_1", "the supervisor's conversation is the planner's"
     sup.step()  # the worker, with the notes
-    assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT and task.read_state().state is State.REVIEW
+    assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT and task.read_state().state is State.VERIFY
+    sup.step()  # verify: green
     sup.step()  # supervisor: accepts
-    assert task.read_state().state is State.VERIFY and sup.lifecycle == [], "no review container"
-    assert (task.meta / "handoff" / "review-2.md").read_text() == CLEAN
-    sup.step()  # verify: green, yours
     st = task.read_state()
-    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
-    assert (
-        notes[-1].startswith("work ready for your review")
-        and "supervisor round 2: no blocking notes" in notes[-1]
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2 and sup.lifecycle == [], (
+        "no review container"
     )
+    assert (task.meta / "handoff" / "review-2.md").read_text() == CLEAN
+    assert notes[-1].startswith("work ready for your review") and "review 2: no blocking notes" in notes[-1]
 
 
-def test_after_a_red_gate_the_worker_goes_back_to_the_gate_and_the_supervisor_sees_it_green(task, tmp_path):
+def test_a_red_gate_goes_back_to_the_worker_and_the_supervisor_reads_only_green_work(task, tmp_path):
     sup, notes, reviewer = supervised(
-        task, tmp_path, [CLEAN, CLEAN], results=[gate_result(False), gate_result(True)]
+        task, tmp_path, [CLEAN], results=[gate_result(False), gate_result(True)]
     )
     sup.step()  # implement
-    sup.step()  # supervisor accepts
     sup.step()  # verify: red, round 1
-    assert task.read_state().state is State.IMPLEMENT
-    sup.step()  # the fix: straight back to the gate
-    assert sup.harness.prompts[-1] == prompts.FEEDBACK_PROMPT
-    assert task.read_state().state is State.VERIFY and len(reviewer.prompts) == 1
-    sup.step()  # verify: green, yours
+    assert task.read_state().state is State.IMPLEMENT and reviewer.prompts == []
+    sup.step()  # the fix: back to the gate
+    assert sup.harness.prompts[-1] == prompts.FEEDBACK_PROMPT and task.read_state().state is State.VERIFY
+    sup.step()  # verify: green
+    sup.step()  # the supervisor, once
     assert task.read_state().state is State.CHECKPOINT_FINAL and len(reviewer.prompts) == 1
 
 
-def test_out_of_rounds_the_supervisors_notes_go_through_the_gate_to_you(task, tmp_path):
-    """The last blocking review does not send the worker back; the gate runs, and the work comes to
-    you verified, with the supervisor's unresolved notes; or unverified, with both."""
-    sup, notes, reviewer = supervised(
-        task, tmp_path, [BLOCKING, BLOCKING], results=[gate_result(True)], max_rounds=1
-    )
-    for _ in range(4):  # implement, supervisor (round 1), the fix, supervisor: no rounds left
+def test_out_of_rounds_the_supervisors_notes_come_to_you_with_the_verified_work(task, tmp_path):
+    sup, notes, reviewer = supervised(task, tmp_path, [BLOCKING, BLOCKING], max_rounds=1)
+    for _ in range(6):  # implement, verify, supervisor (round 1), the fix, verify, supervisor
         sup.step()
     st = task.read_state()
-    assert (
-        st.state is State.VERIFY
-        and st.rounds == 1
-        and "no rounds left" in task.events()[-1]["data"]["reason"]
-    )
-    sup.step()  # verify: green
-    assert task.read_state().state is State.CHECKPOINT_FINAL
-    assert "supervisor round 2: 1 blocking note unresolved" in notes[-1]
-    # The other ending: the gate red, and no rounds left.
-    task2 = create_task(tmp_path / "t2", "demo", "Add health endpoint", TEMPLATE)
-    sup, notes, reviewer = supervised(
-        task2, tmp_path, [BLOCKING, BLOCKING], results=[gate_result(False)], max_rounds=1
-    )
-    for _ in range(5):
-        sup.step()
-    assert task2.read_state().state is State.CHECKPOINT_BLOCKED
-    assert (
-        notes[-1]
-        == "verification still failing after 1 fix turn; supervisor round 2: 1 blocking note unresolved"
-    )
+    assert (st.state, st.rounds, st.reviews) == (State.CHECKPOINT_FINAL, 1, 2)
+    assert "review 2: 1 blocking note" in notes[-1]
     assert not sup.step(), "no turn of the worker's: yours"
 
 
@@ -1257,14 +1235,13 @@ def test_the_supervisors_review_file_is_cleared_before_each_round(task, tmp_path
     (task.meta / "review" / "review.md").write_text(BLOCKING)
     reviewer.texts = []  # the supervisor writes nothing this round
     sup.step()  # implement
-    sup.step()  # supervisor: nothing written is not a review; asked once more, then on to the gate
-    assert len(reviewer.prompts) == 2 and task.read_state().state is State.VERIFY
-    assert "review 1 unreadable" in task.events()[-1]["data"]["reason"]
+    sup.step()  # verify: green
+    sup.step()  # supervisor: nothing written is not a review; asked once more, then yours
+    assert len(reviewer.prompts) == 2 and task.read_state().state is State.CHECKPOINT_FINAL
+    assert "review 1 unreadable" in notes[-1]
     assert BLOCKING not in (task.meta / "handoff" / "review-1.md").read_text(), (
         "the old round is not the new one"
     )
-    sup.step()  # verify: green, and the work comes to you saying what the supervisor's round was
-    assert "supervisor round 1 unreadable" in notes[-1]
 
 
 def test_a_mode_refuses_a_planner_it_cannot_run_on():

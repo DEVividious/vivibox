@@ -10,20 +10,20 @@ from pathlib import Path
 from textual import events, on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.content import Content
 from textual.widgets import Button, Input, Label, OptionList, Select, TextArea
 
-from . import actions, context, look, orchestration, panel, repo
+from . import actions, context, look, panel, repo
 from .browse import ANY, Browse, shown_path
 from .config import (
-    ORCHESTRATION_LEGEND,
     ORCHESTRATION_MODES,
-    ROUNDS_HELP,
     ConfigError,
     load_config,
     load_project,
 )
 from .dialogs import MENTION_AT_CURSOR, NEW_PROJECT
-from .widgets import Dialog, Fields, leave_at_edge
+from .settings import ROLE_ABOUT as ROLE_HELP
+from .widgets import ContextHelp, Dialog, Fields, follow_highlight, leave_at_edge
 
 
 class DescriptionArea(TextArea):
@@ -96,16 +96,47 @@ class DescriptionArea(TextArea):
         self.suggest()
 
 
-def mode_line(name: str) -> str:
-    """The line under the list: the mode's flow in symbols (the rest would wrap in the dialog)."""
-    return ORCHESTRATION_MODES[name].flow
-
-
-def mode_hint(name: str) -> str:
-    """What the form says of the mode picked on hover: when it fits, which models, at what price;
-    and the legend."""
+def mode_option(name: str) -> Content:
+    """A mode in the Flow list: its name, and beside it, muted, what tells it from the others."""
     mode = ORCHESTRATION_MODES[name]
-    return f"{mode.when} {mode.models} {mode.tradeoff}\n{ORCHESTRATION_LEGEND}"
+    return Content.assemble(mode.label, "  ", (mode.subtitle, look.MUTED))
+
+
+def short_model(choice) -> str:
+    """A role's model as the help names it: the model without its provider, or who plans."""
+    harness, model = choice
+    if harness == "manual":
+        return "you, in your own chat"
+    return model.rpartition("/")[2] or "no model yet"
+
+
+# What one round is, beside the number: a line, whatever the mode.
+ROUNDS_HINT = {
+    "single_agent": "fix turns after a failed verification",
+    "planner_executor": "fix turns after a failed verification",
+    "planner_maker_checker": "fix turns after a failed verification or review",
+    "supervisor_worker": "fix turns after a failed verification or supervision",
+}
+
+
+# What a field of the form is for, in the help under the fields while it has focus. Fields not
+# here say nothing of their own: the help shows the flow picked.
+FIELD_HELP = {
+    "no-build": look.Explained(
+        "Build",
+        "Whether the verification builds and tests the work. Nothing to build: the task's answer is "
+        "a text (research, a ticket's analysis) and only the criteria and the commits are checked.",
+    ),
+    "plan": look.Explained(
+        "Plan",
+        "Stop: you accept or change the plan before anything is written. --auto: the writer starts "
+        "on the planner's plan. --draft: the task waits for a plan you write.",
+    ),
+    "base-ref": look.Explained(
+        "Branch",
+        "The commit the task starts from. Another branch changes only the task's base, not your checkout.",
+    ),
+}
 
 
 class NewTask(Dialog):
@@ -174,6 +205,35 @@ class NewTask(Dialog):
                         yield Label(" or @path in the goal, for a copy", classes="hint")
                 with Vertical(id="planning", classes="section"):
                     yield Label("WORKFLOW", classes="title")
+                    # The flow first: how many agents there are, and so which models to pick.
+                    # Each option says in a few words what tells it from the others; the help
+                    # under the fields says the rest.
+                    config = load_config()
+                    with Horizontal(classes="row"):
+                        yield Label("Flow", classes="key")
+                        yield Select(
+                            [(mode_option(name), name) for name in ORCHESTRATION_MODES],
+                            value=config.orchestration, allow_blank=False, compact=True, id="orchestration",
+                        )  # fmt: skip
+                    # A row per agent the flow has, named as the flow names it (Agent, Executor,
+                    # Supervisor, Worker), on config.toml's model unless you pick another; the
+                    # roles one agent plays share its model and its session.
+                    order = {"planner": 0, "writer": 1, "reviewer": 2}
+                    for name in sorted(config.roles, key=lambda n: (order.get(n, 9), n)):
+                        offered = actions.choices(name, config, self.available)
+                        configured = actions.configured_choice(config, name)
+                        with Horizontal(classes="row agent"):
+                            yield Label(name.capitalize(), classes="key", id=f"agent-{name}")
+                            options = [(actions.choice_label(c, configured), c) for c in offered]
+                            yield Select(
+                                options, value=configured, allow_blank=False, compact=True,
+                                id=f"role-{name}", classes="model",
+                            )  # fmt: skip
+                    # What one round is depends on the flow: said beside the number.
+                    with Horizontal(classes="row"):
+                        yield Label("Rounds", classes="key")
+                        yield Input(str(config.max_rounds), id="max-rounds", compact=True, type="integer")
+                        yield Label("", classes="hint", id="rounds-hint")
                     # One question, not two boxes that could both be ticked.
                     with Horizontal(classes="row"):
                         yield Label("Plan", classes="key")
@@ -183,39 +243,9 @@ class NewTask(Dialog):
                              ("Only create the task, to write the plan myself (--draft)", "draft")],
                             value="review", allow_blank=False, compact=True, id="plan",
                         )  # fmt: skip
-                    # Each role on config.toml's choice unless you pick another; m changes it later.
-                    # In the order they work: the planner, the writer, then the reviewer.
-                    config = load_config()
-                    order = {"planner": 0, "writer": 1, "reviewer": 2}
-                    for name in sorted(config.roles, key=lambda n: (order.get(n, 9), n)):
-                        offered = actions.choices(name, config, self.available)
-                        configured = actions.configured_choice(config, name)
-                        with Horizontal(classes="row"):
-                            yield Label(name.capitalize(), classes="key")
-                            options = [(actions.choice_label(c, configured), c) for c in offered]
-                            yield Select(
-                                options, value=configured, allow_blank=False, compact=True,
-                                id=f"role-{name}", classes="model",
-                            )  # fmt: skip
-                    # How the roles share the work: the mode's name on the list, its steps under it
-                    # (together they would wrap at 80 columns), and when it fits, the models, the
-                    # trade-off and the legend on hover.
-                    with Horizontal(classes="row"):
-                        yield Label("Flow", classes="key")
-                        yield Select(
-                            [(m.label, name) for name, m in ORCHESTRATION_MODES.items()],
-                            value=config.orchestration, allow_blank=False, compact=True, id="orchestration",
-                            tooltip=mode_hint(config.orchestration),
-                        )  # fmt: skip
-                        yield Label("Rounds", classes="key rounds")
-                        yield Input(
-                            str(config.max_rounds), id="max-rounds", compact=True, type="integer",
-                            tooltip=ROUNDS_HELP,
-                        )  # fmt: skip
-                    # The mode's steps; they go first when the terminal is short.
-                    with Horizontal(classes="row hint-row"):
-                        yield Label("", classes="key")
-                        yield Label(mode_line(config.orchestration), classes="hint", id="orchestration-hint")
+            # Under the fields, in one place whatever has focus: the flow highlighted, with the
+            # models picked, or what the focused field is for.
+            yield ContextHelp(id="about", classes="context")
             with Horizontal(classes="buttons"):
                 yield Button("Create task", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
@@ -257,57 +287,122 @@ class NewTask(Dialog):
     CHROME = 7
     # Lines of terminal under which the dialog takes all but a line of the screen.
     SHORT = 30
+    # The help under the fields: its rule and two lines, or its rule and all of it.
+    HELP_SHORT, HELP_FULL = 3, 9
+    # The description's lines at least (three of text in a frame), and at most.
+    GOAL_MIN, GOAL_MAX = 5, 14
 
     def on_mount(self) -> None:
         self.for_project(str(self.query_one("#project", Select).value))
-        self.reviewer_follows_mode()
+        self.follow_mode()
+        follow_highlight(self, self.query_one("#orchestration", Select), self.flow_highlighted)
         self.call_after_refresh(self.fit)
+
+    def mode(self) -> str:
+        return str(self.query_one("#orchestration", Select).value)
 
     @on(Select.Changed, "#orchestration")
     def mode_changed(self, event: Select.Changed) -> None:
-        self.reviewer_follows_mode()
-        self.query_one("#orchestration-hint", Label).update(mode_line(str(event.value)))
-        event.select.tooltip = mode_hint(str(event.value))
+        self.follow_mode()
         self.call_after_refresh(self.fit)
 
-    def reviewer_follows_mode(self) -> None:
-        """The reviewer's model row only where the mode has a reviewer of its own; the other modes
-        have the planner or the writer review."""
-        if self.query("#role-reviewer"):
-            separate = orchestration.MODES[
-                str(self.query_one("#orchestration", Select).value)
-            ].separate_reviewer
-            self.query_one("#role-reviewer", Select).parent.display = separate
+    @on(Select.Changed, ".model")
+    def model_changed(self) -> None:
+        self.query_one(ContextHelp).explain(self.flow_help(self.mode()))
+
+    def flow_highlighted(self, index: int | None) -> None:
+        """While the Flow list is open, the help says what the highlighted flow is, to compare;
+        closed, what the flow picked is."""
+        names = list(ORCHESTRATION_MODES)
+        name = names[index] if index is not None and index < len(names) else self.mode()
+        self.query_one(ContextHelp).explain(self.flow_help(name))
+
+    def follow_mode(self) -> None:
+        """A row per agent of the flow, named as the flow names it: roles one agent plays have
+        one model, so one row; a flow without a reviewer of its own has no reviewer's row. What
+        Rounds counts is said beside it."""
+        mode = ORCHESTRATION_MODES[self.mode()]
+        agents = {role: name for role, name, _ in mode.agents}
+        for row in self.query(".agent"):
+            role = row.query_one(Select).id.removeprefix("role-")
+            row.display = role in agents
+            if role in agents:
+                row.query_one(".key", Label).update(agents[role])
+        self.query_one("#rounds-hint", Label).update(ROUNDS_HINT[self.mode()])
+        self.query_one(ContextHelp).explain(self.flow_help(self.mode()))
+
+    def flow_help(self, name: str) -> look.Explained:
+        """A flow in the help, on the models picked in the form."""
+        models = {
+            s.id.removeprefix("role-"): short_model(s.value) for s in self.query(".model").results(Select)
+        }
+        rounds = self.query_one("#max-rounds", Input).value or "0"
+        return look.flow(name, models, int(rounds))
+
+    def help_for(self, widget) -> str | look.Explained | None:
+        """The focused field's help; the flow picked for a field with none of its own."""
+        if widget.id in FIELD_HELP:
+            return FIELD_HELP[widget.id]
+        if widget.id == "max-rounds":
+            mode = ORCHESTRATION_MODES[self.mode()]
+            return look.Explained(
+                "Rounds",
+                f"How many fix turns the writer gets on its own, after {mode.rounds}, before the "
+                "work comes to you with what sent it back; your reply gives it as many again. The "
+                "first implementation is not a round.",
+            )
+        if widget.id and widget.id.startswith("role-"):
+            role = widget.id.removeprefix("role-")
+            mode = ORCHESTRATION_MODES[self.mode()]
+            agent = next(((name, plays) for r, name, plays in mode.agents if r == role), (role, ""))
+            played = f" It plays the {agent[1]}, in one session, on this one model." if agent[1] else ""
+            return look.Explained(agent[0], ROLE_HELP.get(role, "") + played)
+        return self.flow_help(self.mode())
+
+    @on(Input.Changed, "#max-rounds")
+    def rounds_changed(self) -> None:
+        self.query_one(ContextHelp).explain(self.help_for(self.query_one("#max-rounds")))
 
     def on_resize(self) -> None:
         self.call_after_refresh(self.fit)
 
     def fit(self) -> None:
-        """The description as tall as the screen leaves after the other rows, a line at least, so
-        the whole form stays in view and the description scrolls inside itself. Before the
-        description would shrink below three lines, the sections' headings go, then the flow's
-        steps and the blank row between the sections."""
+        """Every field on the screen, the description scrolling inside itself. What the terminal
+        has beyond the rows and the description's three lines goes, in this order, to the help's
+        two lines, the blank row between the sections, the sections' headings, the rest of the
+        help, and the description."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
         dialog = self.query_one(".dialog")
-        # Nine tenths of the screen, or all but a line of it on a short one (under 30 lines).
+        about = self.query_one(ContextHelp)
         height = self.size.height
         room = (height - 2 if height < self.SHORT else int(height * 0.9)) - self.CHROME
-        fields.styles.max_height = max(5, room)
         # Counted, not measured: a measure is the last layout's, whatever class the dialog has
-        # been given since. A row is a line; the description is three lines of text at least, and
-        # its frame takes two more.
-        rows = [row for row in self.query(".row") if row.id != "task-row" and not row.has_class("hint-row")]
-        rows = [row for row in rows if row.display]
-        # The blank row between the sections and the flow's steps go together.
-        spacing = len(self.query(".section")) - 1 + len(self.query(".hint-row"))
-        titles = len(self.query(".title"))
-        spare = room - len(rows) - 3 - 2
-        plain, tight = spare < spacing + titles, spare < spacing
-        dialog.set_class(plain, "plain")
-        dialog.set_class(tight, "tight")
-        taken = len(rows) + (0 if tight else spacing) + (0 if plain else titles)
-        goal.styles.height = max(3, min(14, room - taken))
+        # been given since. A row is a line.
+        rows = [row for row in self.query(".row") if row.id != "task-row" and row.display]
+        spare = room - len(rows) - self.GOAL_MIN
+        gap, titles = len(self.query(".section")) - 1, len(self.query(".title"))
+        wanted = {
+            "help": self.HELP_SHORT,
+            "gap": gap,
+            "titles": titles,
+            "full": self.HELP_FULL - self.HELP_SHORT,
+        }
+        given = set()
+        for part, lines in wanted.items():
+            if part == "full" and "help" not in given:
+                break
+            if lines <= spare:
+                given.add(part)
+                spare -= lines
+        dialog.set_class("titles" not in given, "plain")
+        dialog.set_class("gap" not in given, "tight")
+        about.display = "help" in given
+        about.set_full("full" in given)
+        about.styles.height = self.HELP_FULL if "full" in given else self.HELP_SHORT
+        help_lines = self.HELP_FULL if "full" in given else self.HELP_SHORT if "help" in given else 0
+        fields.styles.max_height = max(5, room - help_lines)
+        goal.styles.height = min(self.GOAL_MAX, self.GOAL_MIN + spare)
         goal.focus()
 
     @on(Select.Changed, "#project")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from conftest import make_repo
+from rich.text import Text
 from textual.widgets import Checkbox, Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
@@ -1980,7 +1981,11 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
 
     def labels(app) -> list[str]:
         options = app.screen.query_one("#rows", OptionList)
-        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        # As they read: without their markup.
+        return [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
@@ -2081,7 +2086,11 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
 
     def labels(app) -> list[str]:
         options = app.screen.query_one("#rows", OptionList)
-        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        # As they read: without their markup.
+        return [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
 
     async def go_to(app, pilot, what: str):
         row = next(i for i, text in enumerate(labels(app)) if what in text)
@@ -2170,7 +2179,10 @@ def test_a_configured_model_the_provider_no_longer_offers_is_marked(env):
         await pilot.press("k")
         await pilot.pause()
         options = app.screen.query_one("#rows", OptionList)
-        rows = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        rows = [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
         writer = next(i for i, row in enumerate(rows) if row.strip().startswith("writer"))
         assert "not offered now" in rows[writer]
         options.highlighted = writer
@@ -2406,10 +2418,10 @@ def test_with_a_reviewer_the_whole_new_task_form_fits_a_short_terminal(env, size
     run(scenario, size=size)
 
 
-@pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), True), ((80, 24), False)])
+@pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), False), ((80, 24), False)])
 def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_working_order(env, size, headed):
     """TASK and WORKFLOW head the two sections on a tall terminal and go first on a short one (§4);
-    the roles stand as they work, planner, writer, reviewer, with the orchestration under them."""
+    the flow first, then its agents as they work, planner, writer, reviewer."""
     from ux import screen_text
 
     with_reviewer(env)
@@ -2423,7 +2435,7 @@ def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_wor
         assert ("WORKFLOW" in shown) is headed, shown
         rows = [app.screen.query_one(f"#role-{r}").region.y for r in ("planner", "writer", "reviewer")]
         assert rows == sorted(rows), rows
-        assert app.screen.query_one("#orchestration").region.y > rows[-1]
+        assert app.screen.query_one("#orchestration").region.y < rows[0], "the flow first"
         assert app.screen.query_one(widgets.Fields).max_scroll_y == 0, "every field in view"
 
     run(scenario, size=size)
@@ -2546,7 +2558,7 @@ def test_an_open_list_in_the_new_task_form_is_framed_apart_from_the_rows_under_i
 def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""
-    expected = ["goal", "attach", "plan", "role-planner", "role-writer", "orchestration", "max-rounds",
+    expected = ["goal", "attach", "orchestration", "role-planner", "role-writer", "max-rounds", "plan",
                 "create", "cancel", "project", "kind", "base-ref", "no-build", "goal"]  # fmt: skip
     with_code("demo")
 
@@ -4173,7 +4185,11 @@ def test_k_sets_the_ntfy_topic_its_server_and_what_goes_there(env):
 
     def labels(app) -> list[str]:
         options = app.screen.query_one("#rows", OptionList)
-        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        # As they read: without their markup.
+        return [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
 
     async def answer(app, pilot, row: str, value: str) -> None:
         index = next(i for i, text in enumerate(labels(app)) if row in text)
@@ -4229,7 +4245,11 @@ def test_k_sets_the_cost_limits_in_dollars(env):
 
     def labels(app) -> list[str]:
         options = app.screen.query_one("#rows", OptionList)
-        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        # As they read: without their markup.
+        return [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
 
     async def answer(app, pilot, row: str, value: str) -> None:
         index = next(i for i, text in enumerate(labels(app)) if row in text)
@@ -4406,9 +4426,9 @@ def test_the_final_checkpoint_shows_the_reviewers_notes_and_l_opens_them(env, mo
 
 
 def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env, monkeypatch):
-    """The Orchestration list stands where Review stood, on config.toml's mode with its flow in
-    symbols and a line on when under it; the reviewer's model row only where the mode has a
-    reviewer of its own; Rounds beside it. What the form sends names the mode and the rounds."""
+    """Flow heads the workflow, on config.toml's mode; each option says how many sessions and
+    what review; a model row per agent of the flow, named as the flow names it; the help under
+    the fields draws the flow. What the form sends names the mode and the rounds."""
     with_reviewer(env)
     calls = []
 
@@ -4428,24 +4448,38 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
         reviewer = app.screen.query_one("#role-reviewer", Select)
         assert mode.value == "planner_maker_checker", "config.toml's mode, ready to keep or change"
         labels = [str(t) for t, _ in mode._options]
-        assert labels == [
-            "One agent",
-            "Planner, then writer",
-            "Planner, writer, reviewer",
-            "Planner supervises writer",
-        ]
-        hint = str(app.screen.query_one("#orchestration-hint", Label).render())
-        assert hint == "plan → write → verify → review ⇄ write"
-        assert "⇄ rounds of fixes" in str(mode.tooltip) and "the default" in str(mode.tooltip), "on hover"
+        names = ["Single agent", "Planner → Executor", "Planner → Writer → Reviewer", "Supervisor ⇄ Worker"]
+        assert [label.split("  ")[0] for label in labels] == names, "names that say how the agents work"
+        assert all("session" in label.split("  ")[1] for label in labels), "and beside each, to compare"
+        assert not mode.tooltip, "no floating paragraph"
         assert reviewer.parent.display and reviewer.value == (OC, "other/strong")
-        mode.value = "single_agent"
+
+        def agents() -> list[str]:
+            """The model rows shown, by what the flow calls them."""
+            return [
+                str(row.query_one(".key", Label).render())
+                for row in app.screen.query(".agent")
+                if row.display
+            ]
+
+        help_ = app.screen.query_one(widgets.ContextHelp)
+        # A row per agent of the flow, as the flow names it; the diagram in the help says where
+        # the verification runs; Rounds says what one round is.
+        for name, shown, flow, rounds in (
+            ("planner_maker_checker", ["Planner", "Writer", "Reviewer"], "P → W → Gate → R ⇄ W", "or review"),
+            ("single_agent", ["Agent"], "P+W+R → Gate", "failed verification"),
+            ("planner_executor", ["Planner", "Executor"], "P → W+R → Gate", "failed verification"),
+            ("supervisor_worker", ["Supervisor", "Worker"], "P → W → Gate → (P+R) ⇄ W", "supervision"),
+        ):
+            mode.value = name
+            await pilot.pause()
+            assert agents() == shown, name
+            assert help_.said.diagram == flow, name
+            assert str(app.screen.query_one("#rounds-hint", Label).render()).endswith(rounds), name
+        assert help_.said.facts[1] == ("Models", "Supervisor m · Worker m")
+        app.screen.query_one("#role-planner", Select).value = (OC, "other/strong")
         await pilot.pause()
-        assert not reviewer.parent.display, "no reviewer of its own to pick a model for"
-        hint = str(app.screen.query_one("#orchestration-hint", Label).render())
-        assert hint == "plan+write+review → verify"
-        mode.value = "supervisor_worker"
-        await pilot.pause()
-        assert not reviewer.parent.display, "the planner reviews"
+        assert help_.said.facts[1] == ("Models", "Supervisor strong · Worker m"), "the models picked"
         mode.value = "planner_maker_checker"
         await pilot.pause()
         assert reviewer.parent.display
@@ -4475,7 +4509,11 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
 
     def labels(app) -> list[str]:
         options = app.screen.query_one("#rows", OptionList)
-        return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        # As they read: without their markup.
+        return [
+            Text.from_markup(str(options.get_option_at_index(i).prompt)).plain
+            for i in range(options.option_count)
+        ]
 
     def row(app, name: str) -> str:
         return next(text for text in labels(app) if text.strip().startswith(name))
@@ -4491,7 +4529,7 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
         assert "the writer's model" in row(app, "reviewer") and not any(
             "review mode" in r for r in labels(app)
         )
-        assert "Planner, writer, reviewer" in row(app, "flow")
+        assert "Planner → Writer → Reviewer" in row(app, "flow")
         pick(app, "reviewer")
         await pilot.press("enter")
         await pilot.pause()
@@ -4508,7 +4546,7 @@ def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
         text = config.read_text()
         assert 'agent_orchestration_mode = "supervisor_worker"' in text, "the next mode, at the top level"
         assert text.index("agent_orchestration_mode") < text.index("["), "before any table"
-        assert "Planner supervises writer" in row(app, "flow")
+        assert "Supervisor ⇄ Worker" in row(app, "flow")
         pick(app, "rounds")
         await pilot.press("enter")
         await pilot.pause()

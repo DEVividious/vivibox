@@ -129,7 +129,7 @@ class Rows(Dialog):
 
     # Around the list: the dialog's frame and padding, and the most the description takes with
     # its rule and the blank rows around it (#about); on a short terminal, the rule and three lines.
-    AROUND = 2 + 2 + 8 + 3
+    AROUND = 2 + 2 + 9 + 1
     AROUND_SHORT = 2 + 2 + 3 + 1
     SHORT = 30
 
@@ -171,16 +171,19 @@ class Rows(Dialog):
             if not value and key is None:
                 # A section: its name as every heading is drawn, a blank line above all but the first.
                 gap = "\n" if i else ""
-                options.add_option(Option(f"{gap}[b {look.MUTED}]{escape(label.upper())}[/]", disabled=True))
-            elif key is None:
-                # Shown, not changed here: muted, with nothing to open.
                 options.add_option(
-                    Option(f"  {look.muted(label.ljust(width))}  {look.muted(value)}", disabled=True)
+                    Option(f"{gap}[b {look.SECONDARY}]{escape(label.upper())}[/]", disabled=True)
+                )
+            elif key is None:
+                # Shown, not changed here: secondary, never the metadata gray, and nothing to open.
+                options.add_option(
+                    Option(f"  {look.secondary(label.ljust(width))}  {look.secondary(value)}", disabled=True)
                 )
             else:
                 mark = f"  {look.muted('›')}" if key in self.NAVIGATE else ""
                 shown = escape(ui.shorten(value.strip(), room)) if value.strip() else ""
-                options.add_option(Option(f"  {escape(label.ljust(width))}  {shown}{mark}"))
+                # The name a step quieter than its value: the value is what you read.
+                options.add_option(Option(f"  {look.secondary(label.ljust(width))}  {shown}{mark}"))
         first = next((i for i, key in enumerate(self.keys) if key), 0)
         options.highlighted = was if was is not None and was < len(self.keys) and self.keys[was] else first
         # The same row after a change says what it does now (the next orchestration mode).
@@ -203,9 +206,6 @@ class Rows(Dialog):
             edit_in_editor(path)
 
 
-# The signs of a mode's flow, in a line that fits 80 columns (config.ORCHESTRATION_LEGEND says the
-# same at length, on n's hover).
-FLOW_LEGEND = "a+b one agent does both, in one conversation · ⇄ rounds of fixes, up to rounds"
 # What a row of k does, in the words of someone who has not read the docs.
 ROLE_ABOUT = {
     "planner": "The planner reads the task and the repository and writes the plan you accept: "
@@ -346,16 +346,13 @@ class Settings(Rows):
     def about(self, key: str) -> str | Content:
         config = self.app.config
         if key == "orchestration":
-            mode = ORCHESTRATION_MODES[config.orchestration]
-            # The name, the flow on a line of its own, when it fits and what it costs, the symbols
-            # last; the models it suits are on n's hover. It fits 80×24.
-            return Content.assemble(
-                (mode.label, "bold"),
-                "\n",
-                (mode.flow, "bold $foreground"),
-                f"\n{mode.when}\n{mode.tradeoff}\n",
-                (FLOW_LEGEND, "$text-muted"),
-            )
+            # The same as under n's Flow, on config.toml's models; in two lines on a short terminal.
+            models = {
+                name: actions.choice_label(actions.configured_choice(config, name)).rpartition("/")[2]
+                for name in config.roles
+            }
+            said = look.flow(config.orchestration, models, config.max_rounds)
+            return said.lines(full=self.size.height >= self.SHORT)
         if key == "ntfy_events":
             return (
                 "What your phone is told: decisions, when a task needs you (a plan, the work, a "

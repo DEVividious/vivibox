@@ -20,55 +20,92 @@ DEFAULT_NTFY_SERVER = "https://ntfy.sh"
 
 @dataclass(frozen=True)
 class Orchestration:
-    """One way of sharing a task between the roles: what the view and the docs say about it."""
+    """One way of sharing a task between the roles: what the view and the docs say about it, in
+    the order the view shows it. P, W and R are the planner, the writer and the reviewer, Gate the
+    verification; roles joined with + are one agent: one session, one model."""
 
-    label: str
-    flow: str
-    when: str
-    models: str
+    label: str  # the mode's name in the view
+    subtitle: str  # a few words beside the name, to compare the four in the list
+    flow: str  # where each agent works and where the verification runs, in P, W, R and Gate
+    summary: str  # what happens, in a sentence
+    sessions: str
+    review: str
+    models: str  # the usual choice of models, whatever the ones picked
+    rounds: str  # what sends the writer back for a fix turn, the thing limits.max_rounds counts
+    best_for: str
     tradeoff: str
+    # The agents, in the order they work: the role whose model runs the agent, the agent's name
+    # in the view, and the roles it plays when it plays more than one.
+    agents: tuple[tuple[str, str, str], ...]
+    # The mode in a line, for a short terminal.
+    compact: str
 
 
 # How a task is shared between the planner, the writer and the reviewer, and where the
-# verification runs, in the words the view shows. Steps joined with + are one agent in one
-# conversation, on the model of the first of them; ⇄ is rounds of fixes, up to limits.max_rounds.
+# verification runs. Roles joined with + are one agent in one session, on the model of the
+# first of them; ⇄ is rounds of fixes, up to limits.max_rounds.
 ORCHESTRATION_MODES = {
     "single_agent": Orchestration(
-        "One agent",
-        "plan+write+review → verify",
-        "Small, routine, cheap tasks.",
-        "One model for everything: the planner's, which has to be an opencode model.",
-        "Cheapest and fastest; no independent review.",
+        "Single agent",
+        "1 session · reviews its own work",
+        "P+W+R → Gate",
+        "One agent plans, implements and reviews its own work, in one session.",
+        "1, shared by the planner, the writer and the reviewer",
+        "Its own, before every verification",
+        "One model for everything: the agent's, an opencode model",
+        "a failed verification",
+        "small, routine tasks",
+        "The least orchestration, but nobody else questions its assumptions.",
+        (("planner", "Agent", "planner + writer + reviewer"),),
+        "1 session · self-review · one model",
     ),
     "planner_executor": Orchestration(
-        "Planner, then writer",
-        "plan → write+review → verify",
-        "A good plan matters and the implementation is routine.",
-        "A strong planner; a cheaper writer, which reviews its own work before the gate.",
-        "The plan gets the strong model; the review is the writer's own.",
+        "Planner → Executor",
+        "2 sessions · strong plan, self-review",
+        "P → W+R → Gate",
+        "A planner plans; one executor implements and reviews its own work.",
+        "2: the planner; the executor, writer and reviewer in one",
+        "The executor's own, before every verification",
+        "A strong planner, used once; a cheaper executor",
+        "a failed verification",
+        "routine work that needs a good plan",
+        "A strong plan without an independent reviewer.",
+        (("planner", "Planner", ""), ("writer", "Executor", "writer + reviewer")),
+        "2 sessions · strong planner once · executor self-reviews",
     ),
     "planner_maker_checker": Orchestration(
-        "Planner, writer, reviewer",
-        "plan → write → verify → review ⇄ write",
-        "An independent review at every round; the default.",
-        "A strong planner; a cheaper writer; a reviewer cheaper than or a little stronger than the "
-        "writer, best of another family; without [roles.reviewer] it runs on the writer's model.",
-        "The most turns and cost per task; the most checks.",
+        "Planner → Writer → Reviewer",
+        "3 sessions · independent review",
+        "P → W → Gate → R ⇄ W",
+        "Three agents: plan, implement, and review only work that passed the Gate.",
+        "3, independent",
+        "Independent, after the verification passes",
+        "A strong planner, used once; a cheaper writer; a reviewer of another family",
+        "a failed verification or blocking reviewer notes",
+        "most larger programming tasks",
+        "The most turns per task, and the most checks.",
+        (("planner", "Planner", ""), ("writer", "Writer", ""), ("reviewer", "Reviewer", "")),
+        "3 sessions · independent review after Gate · strong planner once",
     ),
     "supervisor_worker": Orchestration(
-        "Planner supervises writer",
-        "plan → write → verify → planner reviews ⇄ write",
-        "Hard, multi-step changes under a strong model's constant supervision.",
-        "A strong supervisor, which plans and then, with the plan still in its conversation, "
-        "reviews a cheaper worker's work in the same pod, without editing; only work the gate "
-        "passed reaches it.",
-        "The strong model reads every round, so it costs more of it than a cheap reviewer would.",
+        "Supervisor ⇄ Worker",
+        "2 sessions · strong model every round",
+        "P → W → Gate → (P+R) ⇄ W",
+        "A strong supervisor plans, then reviews every round of a separate worker.",
+        "2: the supervisor, planner and reviewer in one; the worker",
+        "The supervisor's, after the verification passes",
+        "A strong supervisor, used again every round; a cheaper worker",
+        "a failed verification or blocking supervisor notes",
+        "hard, multi-step changes and refactors",
+        "Guidance with the plan in mind; the strong model is spent every round.",
+        (("planner", "Supervisor", "planner + reviewer"), ("writer", "Worker", "")),
+        "2 sessions · supervisor reviews after Gate · strong model every round",
     ),
 }
 DEFAULT_ORCHESTRATION = "planner_maker_checker"
 ORCHESTRATION_LEGEND = (
-    "verify: the build, the tests, the criteria and the commits · a+b: one agent does both, in one "
-    "conversation · ⇄ rounds of fixes, up to Rounds"
+    "P planner · W writer · R reviewer · Gate the verification (build, tests, criteria, commits) · "
+    "+ one agent, one session, one model · → then · ⇄ rounds of fixes, up to Rounds"
 )
 DEFAULT_MAX_ROUNDS = 3
 # What the view says of limits.max_rounds.

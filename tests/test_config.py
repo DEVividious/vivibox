@@ -236,7 +236,11 @@ def test_the_orchestration_modes_are_the_four_of_the_decision(tmp_path):
     modes = ["single_agent", "planner_executor", "planner_maker_checker", "supervisor_worker"]
     assert list(ORCHESTRATION_MODES) == modes
     for name, mode in ORCHESTRATION_MODES.items():
-        assert mode.label and "→" in mode.flow and mode.when and mode.models and mode.tradeoff, name
+        assert mode.label and mode.subtitle and "Gate" in mode.flow and mode.summary and mode.tradeoff, name
+        assert {role for role, _, _ in mode.agents} <= {"planner", "writer", "reviewer"}, name
+    # Where the verification runs: before the reviewer, never after it.
+    assert ORCHESTRATION_MODES["planner_maker_checker"].flow == "P → W → Gate → R ⇄ W"
+    assert ORCHESTRATION_MODES["supervisor_worker"].flow == "P → W → Gate → (P+R) ⇄ W"
     assert "⇄" in ORCHESTRATION_LEGEND and "Rounds" in ORCHESTRATION_LEGEND
     text = 'tasks_dir = "/t"\nagent_orchestration_mode = "supervisor_worker"\n[limits]\nmax_rounds = 4\n'
     text += ROLES

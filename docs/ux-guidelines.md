@@ -26,7 +26,7 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | Thing | Word | Not |
 |---|---|---|
 | unit of work | task | job, run |
-| checks after implementation | verification ("verify" as a step of a flow) | "gate", which stays in code and docs/security.md |
+| checks after implementation | verification; "Gate" only in a flow's diagram, where its legend says so | "gate" in a sentence, which stays in code and docs/security.md |
 | a fix turn the writer is sent on, by the verification or the review | round | attempt, iteration, retry |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
 | removing a task | delete | rm, remove |
@@ -34,7 +34,8 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | agent container and its Docker sidecar | pod | container, sandbox |
 | running the project for you to look at | run app, stop app; the list's column APP | demo, "it" |
 | the roles | planner, writer, reviewer | maker, checker, executor, worker, supervisor |
-| how the roles share a task | flow (the mode's name, e.g. "Planner, writer, reviewer") | orchestration, outside config.toml's key |
+| how the roles share a task | flow, by the mode's name: Single agent, Planner → Executor, Planner → Writer → Reviewer, Supervisor ⇄ Worker | orchestration, outside config.toml's key |
+| an agent that plays more than one role | the flow's name for it: Agent, Executor (writer + reviewer), Supervisor (planner + reviewer), Worker | "the planner" for the supervisor's row |
 
 Status labels, the only ones allowed:
 
@@ -115,14 +116,18 @@ starts the pod when needed.
   section headings (TASK, WORKFLOW; PROJECT, FOR ITS TASKS), a blank row between sections and
   none between rows. The only boxes are a multi-line text and an open list. A text field and a
   button have a band; a list is its value and a faint ▼, its band only with focus. On a short
-  terminal the headings go first, then the flow's steps and the blank row between sections,
-  before the multi-line text shrinks below three lines of text.
-  Roles stand in the order they work: planner, writer, reviewer, and under them Flow (the
-  orchestration mode) with Rounds at its right: the mode's name on the list, its steps in words
-  on the line under it (`plan → write → verify → review ⇄ write`), and when it fits, the models,
-  the trade-off and the legend on hover. The reviewer's model row shows only where the mode has
-  a reviewer of its own. Build is a list of two answers (build and test the work; nothing to
-  build or test), not a box to tick.
+  terminal the rest of the help goes first, then the headings, the blank row between sections
+  and the help's two lines, before the multi-line text shrinks below three lines of text.
+  The workflow starts with Flow (the orchestration mode): each option its name and, muted
+  beside it, what tells it from the others (`3 sessions · independent review`). Under it a
+  model row per agent of the flow, named as the flow names it: Agent alone for Single agent;
+  Planner and Executor; Planner, Writer and Reviewer; Supervisor and Worker. Roles one agent
+  plays share its session and its model, so they have one row; the help says which roles it
+  plays. Then Rounds, with what one round is in this flow beside the number (`fix turns after a
+  failed verification or review`), and Plan. The Flow list opens upward, over the rows above
+  it, so the help under the fields stays in view while you compare. No field has a tooltip.
+  Build is a list of two answers (build and test the work; nothing to build or test), not a box
+  to tick.
 - A button that helps fill a field stands in that field's row, compact (Attach…, Browse…,
   Change…, New folder… beside what the browser picked, Import opencode.json… beside the
   provider's search), or is the last entry of that field's list ("+ set up another project…").
@@ -135,9 +140,14 @@ starts the pod when needed.
   frame.
 - Every field of a form starts in the same column; Branch, a field that opens a picker, is drawn
   as a list is, flush with the lists and their width.
-- A field's help is one place: the line under the fields (`#about`, after a rule) says what the
-  focused field is for (`Dialog.field_help`), or in `k` what the highlighted row does. The form
-  itself stays one word per label.
+- A field's help is one place: under the fields, after a rule (`#about`), it says what the
+  focused field is for (`Dialog.field_help`, `Dialog.help_for`), or in `k` what the highlighted
+  row does. The form itself stays one word per label. Where an option needs comparing, the help
+  is structured (`look.Explained`, drawn by `widgets.ContextHelp`): its title, a badge and a
+  diagram on one line, a sentence, facts a line each (name and value), what it costs last; on a
+  shorter terminal the title and one compact line. A flow's help is `look.flow`, the same under
+  `n` and `k`, on the models picked; while a list is open, it follows the highlighted option
+  (`widgets.follow_highlight`).
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
   text gives way first, down to three lines, before anything scrolls.
 - A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall
@@ -251,27 +261,33 @@ theme's variables and the code the constants, by meaning, never a hue by name
 
 | Token | Means | Used for |
 |---|---|---|
-| background, surface, panel | where things stand | the list; a dialog; a field's band |
-| foreground | what you read | values, goals, a live task |
-| muted | what explains | labels, headings, metadata, hints, help, finished tasks |
-| faint | what is out of play | placeholders, frames, the dot of an empty cell, the project in an id |
-| accent | what takes your keys | the focused field's label and band, a focused button, a key in a hint |
-| selection | where the cursor is | the row under the cursor in the list and in a dialog's list |
+| background < surface < panel | where things stand, lighter as they come forward | the list; a dialog and the panel; a text field, an open list |
+| border | structure | a dialog's frame, a rule, a text field's frame |
+| foreground (off-white) | what you read | values, task names, goals, options, a help's title |
+| secondary | what explains it | labels, headings, table headers, a summary, costs, finished tasks, what is only shown |
+| muted | metadata | times, hints, placeholders, empty states, a help's facts' names |
+| faint | there, not read | the dot of an empty cell |
+| disabled | out of play | a control that does nothing now, dim as well |
+| accent | what takes your keys | the focused field's label and its edge, a focused button, a key in a hint |
+| selection | where the cursor is | a tint under the row the cursor is on, in the list and in a dialog's list |
 | working | an agent or the verification at work | a working status, "N working" |
 | warning | waits for you | ● statuses, "N waiting for you" |
 | error | failed, refused, destroys | ✕ statuses, a problem, the Delete button |
 | success | done, passed | ✓ done, a ticked box |
 
-- **Focus** is the accent: the focused row's label, in bold, and its field's band; a focused
-  button is solid accent. One row at a time (`.row.-focused`, set by `Dialog`).
-- **Selection** is a lighter surface that keeps the row's colours: a status reads the same under
-  the cursor (`cursor_foreground_priority="renderable"`).
+- **Focus** is the accent: the focused row's label, in bold, an edge of the accent on the left
+  of its field (every field keeps that column, empty, so nothing moves) and a faint tint; a text
+  field's frame; a focused button is solid accent. One row at a time (`.row.-focused`, set by
+  `Dialog`).
+- **Selection** is a tint (`selection`) that keeps the row's colours: a status reads the same
+  under the cursor (`cursor_foreground_priority="renderable"`).
 - **Status** is a mark and a word, so it reads without colour: ● waits for you, ✕ failed, ○ nobody
   runs it, ‖ you stopped it, ✓ done, – deleted, the spinner at work (`look.MARKS`).
 - **Primary action** is the one tinted button of a dialog; solid when focused, so Enter's target
   is the solid thing on the screen. A destructive one is tinted red.
 - Text has five levels: a dialog's title (bold, in its frame); a section heading (upper case,
-  bold, muted); a label (muted); a value (foreground); help and metadata (muted).
+  bold, secondary); a label (secondary); a value (foreground); metadata (muted). Ordinary
+  content is never muted: what is muted reads as secondary to something.
 - Space: a dialog's padding is one line and two columns; one blank row between sections, none
   between rows; the help under a rule, a blank row above its text.
 - A key is named as `key action`, the key bold in the accent, the action muted (`look.hints`),

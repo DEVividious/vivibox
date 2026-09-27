@@ -51,8 +51,9 @@ class DeleteTask(Dialog):
         with Vertical(classes="dialog narrow"):
             yield Label(escape(self.about), classes="wrap")
             if self.warning:
-                yield Label(look.colored(self.warning, look.WAITING), classes="wrap files")
-            yield Label(f"[b {look.ERROR}]Deleted[/]  {escape(self.goes)}", classes="wrap files")
+                yield Label(look.colored(self.warning, look.WAITING), classes="wrap spaced")
+            # What goes is read, not metadata: in the foreground, a row apart.
+            yield Label(f"[b {look.ERROR}]Deleted[/]  {escape(self.goes)}", classes="wrap spaced")
             yield Label(f"[b {look.SUCCESS}]Kept[/]     {escape(self.stays)}", classes="wrap")
             with Horizontal(classes="buttons"):
                 yield Button("Delete", variant="error", id="yes")

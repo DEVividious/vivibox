@@ -17,6 +17,50 @@ from textual.widgets.option_list import Option
 from . import look
 
 
+class ContextHelp(Label):
+    """The help under a dialog's fields, in the same place whatever has focus: what the focused
+    field is for, or what the highlighted option is (a look.Explained), set apart by a rule. Its
+    height is the dialog's to give: `full` shows everything, else a title line and one more."""
+
+    def __init__(self, **kwargs):
+        super().__init__("", **kwargs)
+        self.said: str | look.Explained = ""
+        self.full = True
+
+    def explain(self, said: str | look.Explained) -> None:
+        self.said = said
+        self.draw()
+
+    def set_full(self, full: bool) -> None:
+        if full != self.full:
+            self.full = full
+            self.draw()
+
+    def draw(self) -> None:
+        """Facts stand a line each, cut at the edge rather than wrapped under their names; a
+        sentence of help wraps."""
+        said = self.said
+        lines = isinstance(said, look.Explained) and bool(said.facts or not self.full)
+        self.set_class(lines, "-lines")
+        self.update(said.lines(self.full) if isinstance(said, look.Explained) else said)
+
+
+def follow_highlight(screen, select: Select, shown) -> None:
+    """Calls shown(index) as the highlight moves in select's open list, and shown(None) when the
+    list closes, so a help can say what the highlighted option is while you compare. Textual's
+    list stops its own highlight messages inside the select."""
+    from textual.widgets._select import SelectOverlay
+
+    overlay = select.query_one(SelectOverlay)
+
+    def moved(index: int | None) -> None:
+        if select.expanded and index is not None:
+            shown(index)
+
+    screen.watch(overlay, "highlighted", moved, init=False)
+    screen.watch(select, "expanded", lambda opened: opened or shown(None), init=False)
+
+
 class Fields(VerticalScroll, can_focus=False, inherit_bindings=False):
     """A dialog's fields, scrolling when the terminal is short. No keys of its own: the arrows move
     between fields, as everywhere in a dialog, and scrolling follows the field you are on."""
@@ -57,9 +101,19 @@ class Dialog(ModalScreen):
             if node.has_class("row"):
                 node.add_class("-focused")
                 break
-        if self.field_help:
+        said = self.help_for(event.widget)
+        if said is not None:
             for about in self.query("#about").results(Label):
-                about.update(self.field_help.get(event.widget.id or "", ""))
+                if isinstance(about, ContextHelp):
+                    about.explain(said)
+                else:
+                    about.update(said if isinstance(said, str) else said.title)
+
+    def help_for(self, widget) -> str | look.Explained | None:
+        """What the line under the fields says while this widget has focus; None leaves it."""
+        if not self.field_help:
+            return None
+        return self.field_help.get(widget.id or "", "")
 
     def reframe(self) -> None:
         """The frame's edges from frame_title and hint_keys, after either changed."""

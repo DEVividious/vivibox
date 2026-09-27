@@ -5,6 +5,7 @@ import inspect
 import re
 from pathlib import Path
 
+import pytest
 from test_tui import AVAILABLE, implementing, new_task, rows, run
 from textual.widgets import Input, Label, OptionList
 from textual.widgets._footer import FooterKey
@@ -26,6 +27,7 @@ from vivibox import (
     verify_ui,
     widgets,
 )
+from vivibox.config import ORCHESTRATION_MODES
 from vivibox.states import State
 
 VIEW = [
@@ -331,3 +333,106 @@ def test_the_help_says_whole_what_o_opens_with_on_this_machine(env, monkeypatch)
         assert indent(wrapped) == key.index("opens with"), "a wrapped line goes on under its words"
 
     run(scenario, size=(80, 24))
+
+
+def test_the_flow_help_follows_the_highlight_and_never_covers_the_form(env):
+    """Comparing the flows: the open list goes up over the rows above it, the help under the
+    fields says what the highlighted flow is, and neither covers the other or the buttons."""
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        flow = form.query_one("#orchestration")
+        flow.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        help_ = form.query_one(widgets.ContextHelp)
+        assert help_.said.title == "Planner → Writer → Reviewer" and help_.said.badge == "recommended"
+        await pilot.press("down")
+        await pilot.pause()
+        assert help_.said.title == "Supervisor ⇄ Worker", "the highlighted one, before it is picked"
+        assert help_.said.diagram.index("Gate") < help_.said.diagram.index("(P+R)")
+        overlay = flow.query_one("SelectOverlay")
+        assert overlay.region.bottom <= flow.region.y, "the list opens upward"
+        buttons = form.query_one(".buttons").region
+        assert help_.region.bottom <= buttons.y, "the help ends above the buttons"
+        assert not overlay.region.overlaps(help_.region), "the list leaves the help in view"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert help_.said.title == "Planner → Writer → Reviewer", "closed: the flow picked"
+
+    run(scenario, size=(120, 40))
+
+
+@pytest.mark.parametrize(("size", "shown"), [((120, 40), "full"), ((100, 30), "short"), ((80, 24), "none")])
+def test_the_help_under_the_fields_gives_way_on_a_smaller_terminal(env, size, shown):
+    """All of it on a tall terminal, the flow in two lines on a medium one, nothing on 80×24; the
+    fields never scroll."""
+    from textual.widgets import TextArea
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        form = app.screen
+        help_ = form.query_one(widgets.ContextHelp)
+        assert help_.display == (shown != "none")
+        assert help_.full == (shown == "full")
+        assert form.query_one(widgets.Fields).max_scroll_y == 0
+        assert form.query_one("#goal", TextArea).region.height >= 5, "three lines of the goal at least"
+        text = screen_text(app)
+        if shown == "full":
+            assert "Sessions" in text and "Best for" in text
+        if shown == "short":
+            assert "P → W → Gate → R ⇄ W" in text and "3 sessions · independent review" in text
+
+    run(scenario, size=size)
+
+
+def test_each_flow_explains_itself_in_the_same_shape():
+    for name in ORCHESTRATION_MODES:
+        said = look.flow(name, {"planner": "big", "writer": "small"}, 3)
+        assert [fact for fact, _ in said.facts] == ["Sessions", "Models", "Review", "Rounds", "Best for"]
+        assert "Gate" in said.diagram and said.compact, name
+        full = str(said.lines(True)).splitlines()
+        assert len(full) == 8 and all(len(line) <= 84 for line in full[2:]), (name, full)
+        assert len(str(said.lines(False)).splitlines()) == 2
+
+
+def test_labels_values_metadata_and_disabled_are_four_different_tones():
+    """Ordinary content never looks disabled: a value is the brightest text, a label a step
+    quieter, metadata a step more, and a disabled control quieter still and dim."""
+    tones = [look.FOREGROUND, look.SECONDARY, look.MUTED, look.DISABLED]
+    assert len(set(tones)) == 4
+
+    def light(color: str) -> float:
+        r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    assert [light(t) for t in tones] == sorted((light(t) for t in tones), reverse=True)
+    assert light(look.FOREGROUND) < light("#ffffff"), "off-white, not white"
+    layers = [look.BACKGROUND, look.SURFACE, look.PANEL]
+    assert [light(c) for c in layers] == sorted(light(c) for c in layers), "each layer lighter"
+    assert look.SELECTION != look.ACCENT, "selection is a tint, focus the accent"
+    css = Path(look.__file__).with_name("vivibox.tcss").read_text()
+    assert "text-area--placeholder { color: $text-muted; }" in css, "a placeholder is readable"
+    assert "Button:disabled" in css and "text-disabled-dim" in css
+
+
+def test_a_focused_field_has_an_edge_of_the_accent(env):
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        flow = app.screen.query_one("#orchestration")
+        flow.focus()
+        await pilot.pause()
+        edge = flow.styles.border_left
+        assert edge[0] == "outer" and edge[1].hex.lower() == look.ACCENT
+        plan = app.screen.query_one("#plan")
+        assert plan.styles.border_left[0] == "blank", "unfocused, the same column, empty"
+
+    run(scenario, size=(120, 40))

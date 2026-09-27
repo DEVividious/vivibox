@@ -123,8 +123,8 @@ class TaskTable:
         stopped = len(tasks) - waiting - working
         parts = [look.colored(f"{waiting} waiting for you", look.WAITING)] * bool(waiting)
         parts += [look.colored(f"{working} working", look.WORKING)] * bool(working)
-        parts += [look.muted(f"{stopped} stopped")] * bool(stopped)
-        parts += [look.muted(f"{done} done")] * bool(done)
+        parts += [look.secondary(f"{stopped} stopped")] * bool(stopped)
+        parts += [look.secondary(f"{done} done")] * bool(done)
         return look.muted(" · ").join(parts) or EMPTY_PROJECT
 
     def fill_table(self, pairs: list, selected: str | None) -> None:
@@ -161,8 +161,9 @@ class TaskTable:
                     {"TASK": self.task_name(st.id, name), "STATUS": self.status(st),
                      "APP": self.demo_cell(st.id), "CRITERIA": NONE if ticked == "-" else ticked,
                      "COST": self.total_cell(spent), "PLAN": plan, "IMPL": impl, "REVIEW": review,
-                     "CREATED": short_ago(st.created),
-                     "UPDATED": short_ago(live["at"] if live else st.updated), "GOAL": escape(st.goal)},
+                     "CREATED": look.muted(short_ago(st.created)),
+                     "UPDATED": look.muted(short_ago(live["at"] if live else st.updated)),
+                     "GOAL": escape(st.goal)},
                     st.id,
                 ))  # fmt: skip
             for entry in done:
@@ -175,7 +176,8 @@ class TaskTable:
                      "APP": NONE, "CRITERIA": NONE, "COST": self.total_cell(spent, muted=True),
                      "PLAN": plan, "IMPL": impl, "REVIEW": review,
                      "CREATED": look.muted(short_ago(entry["created"])) if entry.get("created") else NONE,
-                     "UPDATED": look.muted(short_ago(entry["finished"])), "GOAL": look.muted(entry["title"])},
+                     "UPDATED": look.muted(short_ago(entry["finished"])),
+                     "GOAL": look.secondary(entry["title"])},
                     entry["id"],
                 ))  # fmt: skip
         # The goal gets what the other columns leave: a goal that runs off the screen is a goal
@@ -236,21 +238,23 @@ class TaskTable:
         what the eye finds."""
         prefix = f"{project}-"
         rest = task_id.removeprefix(prefix) if task_id.startswith(prefix) else task_id
-        shown = look.muted(rest) if finished else escape(rest)
-        return f"  {look.faint(prefix) if rest != task_id else ''}{shown}"
+        shown = look.secondary(rest) if finished else escape(rest)
+        muted = look.muted if finished else look.secondary
+        return f"  {muted(prefix) if rest != task_id else ''}{shown}"
 
     @staticmethod
     def cost_cells(spent: ui.Spend, muted: bool = False) -> tuple[str, ...]:
         """PLAN, IMPL and REVIEW: a figure each, a faint dot for none."""
         return tuple(
-            NONE if cell == "-" else look.muted(cell) if muted else cell for cell in ui.cost_cells(spent)
+            NONE if cell == "-" else (look.muted if muted else look.secondary)(cell)
+            for cell in ui.cost_cells(spent)
         )
 
     @staticmethod
     def total_cell(spent: ui.Spend, muted: bool = False) -> str:
         if not spent:
             return NONE
-        return look.muted(ui.money(spent.total)) if muted else ui.money(spent.total)
+        return (look.muted if muted else look.secondary)(ui.money(spent.total))
 
     def demo_cell(self, task_id: str) -> str:
         """Whether this task is serving anything, on the row itself: the list is what you look at.

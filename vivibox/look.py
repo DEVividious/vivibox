@@ -7,25 +7,32 @@ Textual theme is built from the same palette, so the stylesheet's `$warning` and
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from rich.markup import escape
 from textual.content import Content
 from textual.theme import Theme
 
 from . import ui
 
-# Neutral surfaces, one accent for what takes your keys, and a colour per meaning.
-BACKGROUND = "#15171c"
-SURFACE = "#1b1e25"  # a dialog
-PANEL = "#23272f"  # a field's band
-SELECTION = "#2b313d"  # the row the cursor is on: lighter, never the accent
-FOREGROUND = "#d5d8de"
-MUTED = "#7d8390"  # metadata, hints, help
-FAINT = "#535966"  # placeholders, frames, what is out of play
-ACCENT = "#7aa2f7"  # the focused control, the primary button, a key in a hint
-WORKING = "#7dcfff"  # an agent or the verification at work
-WAITING = "#e0af68"  # something waits for you
-SUCCESS = "#9ece6a"  # done, passed
-ERROR = "#f7768e"  # failed, refused, destroys
+# Three dark layers, lighter as they come forward: the list, a dialog, a field in it. Text in four
+# steps: what you read, what explains it, metadata, what is out of play. One accent for what takes
+# your keys; a colour per meaning, never brighter than the text.
+BACKGROUND = "#15181e"  # the list
+SURFACE = "#1d2129"  # a dialog, the details panel
+PANEL = "#252a34"  # a field, an open list: what stands forward in a dialog
+BORDER = "#3b4352"  # a dialog's frame, a rule, a text field's frame
+SELECTION = "#29364a"  # the row the cursor is on: a tint, never the accent
+FOREGROUND = "#e6eaf0"  # what you read: values, task names, goals, options
+SECONDARY = "#aab2c0"  # what explains it: labels, headings, help, a summary, costs
+MUTED = "#7a8496"  # metadata: times, hints, placeholders, empty states
+FAINT = "#4e5767"  # a dot in an empty cell, the project in a task's id: there, not read
+DISABLED = "#5d6574"  # a control that does nothing now; drawn dim as well, unlike metadata
+ACCENT = "#79a9ff"  # the focused control, a key in a hint
+WORKING = "#7cc7e8"  # an agent or the verification at work
+WAITING = "#e2b563"  # something waits for you
+SUCCESS = "#95cf6f"  # done, passed
+ERROR = "#e17a85"  # failed, refused, destroys
 
 THEME = Theme(
     name="vivibox",
@@ -43,10 +50,18 @@ THEME = Theme(
     variables={
         "text-muted": MUTED,
         "foreground-muted": MUTED,
-        "text-disabled": FAINT,
-        "border": FAINT,
-        "border-blurred": FAINT,
-        **(CUSTOM := {"selection": SELECTION, "faint": FAINT}),
+        "text-disabled": DISABLED,
+        "border": BORDER,
+        "border-blurred": BORDER,
+        **(
+            CUSTOM := {
+                "selection": SELECTION,
+                "faint": FAINT,
+                "frame": BORDER,
+                "text-secondary": SECONDARY,
+                "text-disabled-dim": DISABLED,
+            }
+        ),
         "block-cursor-background": SELECTION,
         "block-cursor-foreground": FOREGROUND,
         "block-cursor-text-style": "none",
@@ -64,13 +79,13 @@ THEME = Theme(
         "footer-description-background": BACKGROUND,
         "footer-item-background": BACKGROUND,
         "scrollbar": PANEL,
-        "scrollbar-hover": FAINT,
+        "scrollbar-hover": BORDER,
         "scrollbar-active": MUTED,
         "scrollbar-background": BACKGROUND,
         "scrollbar-corner-color": BACKGROUND,
         # The details panel: its title and sections in the foreground, never the accent.
         **{f"markdown-h{n}-color": FOREGROUND for n in (1, 2, 3)},
-        **{f"markdown-h{n}-color": MUTED for n in (4, 5, 6)},
+        **{f"markdown-h{n}-color": SECONDARY for n in (4, 5, 6)},
         "button-foreground": FOREGROUND,
         "button-color-foreground": BACKGROUND,
         "button-focus-text-style": "bold",
@@ -84,7 +99,7 @@ MARKS = {
     ui.FAILED: ("✕", ERROR),
     ui.IDLE: ("○", WAITING),
     ui.AT_WORK: ("", WORKING),
-    ui.PARKED: ("‖", MUTED),
+    ui.PARKED: ("‖", SECONDARY),
     ui.FINISHED: ("✓", SUCCESS),
 }
 DELETED = ("–", FAINT)
@@ -105,6 +120,10 @@ def muted(text: str) -> str:
     return f"[{MUTED}]{escape(text)}[/]"
 
 
+def secondary(text: str) -> str:
+    return f"[{SECONDARY}]{escape(text)}[/]"
+
+
 def faint(text: str) -> str:
     return f"[{FAINT}]{escape(text)}[/]"
 
@@ -123,6 +142,71 @@ def hints(*pairs: tuple[str, str]) -> Content:
             parts.append("  ")
         parts += [(key, f"bold {ACCENT}"), " ", (what, MUTED)]
     return Content.assemble(*parts)
+
+
+@dataclass(frozen=True)
+class Explained:
+    """What a field or an option is, for the help under a dialog's fields (widgets.ContextHelp):
+    a title, a badge, a diagram and a sentence; facts as name and value; a last line of what it
+    costs you; and all of it in a line or two for a short terminal."""
+
+    title: str
+    summary: str = ""
+    badge: str = ""
+    diagram: str = ""
+    facts: tuple[tuple[str, str], ...] = ()
+    tradeoff: str = ""
+    compact: str = ""
+
+    def lines(self, full: bool) -> Content:
+        """Full: the title, its badge and diagram on one line, the summary, the facts, the
+        trade-off. Short: the title and diagram, then the compact line. In weight, the title
+        first, then the diagram and the summary, the facts, and the trade-off last."""
+        head: list = [(self.title, f"bold {FOREGROUND}")]
+        if self.diagram:
+            head += ["   ", (self.diagram, f"bold {SECONDARY}")]
+        if self.badge:
+            head += ["   ", (self.badge, SUCCESS)]
+        if not full:
+            return Content.assemble(*head, "\n", (self.compact or self.summary, SECONDARY))
+        parts: list = [*head]
+        if self.summary:
+            parts += ["\n", (self.summary, SECONDARY)]
+        width = max((len(name) for name, _ in self.facts), default=0) + 2
+        for name, value in self.facts:
+            parts += ["\n", (name.ljust(width), MUTED), (value, FOREGROUND)]
+        if self.tradeoff:
+            parts += ["\n", (self.tradeoff, MUTED)]
+        return Content.assemble(*parts)
+
+
+def flow(name: str, models: dict[str, str], rounds: int) -> Explained:
+    """An orchestration mode as the help shows it, under n's Flow and k's flow row: its diagram
+    and what it is, and the models it would run on (models: a role's model, by role; a mode's
+    reviewer without one is the writer's), roles one agent plays beside its model."""
+    from .config import DEFAULT_ORCHESTRATION, ORCHESTRATION_MODES
+
+    mode = ORCHESTRATION_MODES[name]
+    shown = []
+    # Which roles an agent plays is said by Sessions; here each agent and its model.
+    for role, agent, _ in mode.agents:
+        model = models.get(role) or f"{models.get('writer', '')} (the writer's)"
+        shown.append(f"{agent} {model}")
+    return Explained(
+        mode.label,
+        mode.summary,
+        badge="recommended" if name == DEFAULT_ORCHESTRATION else "",
+        diagram=mode.flow,
+        facts=(
+            ("Sessions", mode.sessions),
+            ("Models", " · ".join(shown)),
+            ("Review", mode.review),
+            ("Rounds", f"up to {rounds} fix turns after {mode.rounds}"),
+            ("Best for", mode.best_for),
+        ),
+        tradeoff=mode.tradeoff,
+        compact=mode.compact,
+    )
 
 
 # The keys every dialog names in its frame, by what closes it.

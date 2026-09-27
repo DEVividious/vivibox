@@ -121,6 +121,18 @@ First public version.
   the form calls the mode Flow; Build is a list of two answers; settings say "cost limit",
   "verification timeout", "tasks folder", "Review copy".
 
+- Flow under `n`: the modes are Single agent, Planner → Executor, Planner → Writer → Reviewer
+  and Supervisor ⇄ Worker, each with what tells it from the others (`3 sessions · independent
+  review`). A model row per agent of the flow, named as the flow names it (Agent, Executor,
+  Supervisor, Worker), not a planner, writer and reviewer where one agent plays two. Rounds says
+  what one round is in the flow. The floating paragraph on hover is gone: under the fields a
+  help says the highlighted flow in facts (sessions, the models picked, review, rounds, best
+  for) and its diagram, `P → W → Gate → R ⇄ W`; `k` says the same. The Flow list opens upward
+  so the help stays in view.
+- Contrast: three surfaces a step apart, off-white text for what you read, labels and headings
+  a step quieter (secondary), metadata quieter still, disabled controls dim; placeholders
+  readable; the focused field has an edge of the accent and selection is a blue-grey tint.
+
 ### Fixed
 
 - `?` showed what `o` opens with on a line of its own that a long command (JetBrains Toolbox's

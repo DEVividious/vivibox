@@ -52,9 +52,14 @@ def at_plan_checkpoint(task):
 
 
 def run(scenario, size=(140, 40)):
+    """A scenario on the view, once the view's own start-up work is over: the thread that reads
+    the models and the provider catalog at mount would otherwise finish during the scenario and
+    overwrite what it set (app.available, app.catalog), as it did on a slow CI runner."""
+
     async def go():
         app = Vivibox()
         async with app.run_test(size=size) as pilot:
+            await app.workers.wait_for_complete()
             await pilot.pause()
             await scenario(app, pilot)
 

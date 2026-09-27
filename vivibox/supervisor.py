@@ -516,12 +516,14 @@ class Supervisor:
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
             prompt = PROPOSE_PREFIX.format(minutes=max(1, round(self.verify_timeout / 60))) + prompt
-        if self._turn(st, prompt) is None:
+        # A self-review resumed after a stop is one on the record too.
+        resumed = prompt == self._self_review_prompt(st)
+        if self._turn(st, prompt, kind="self-review" if resumed else "") is None:
             return
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
             return
-        if self.mode.self_review and prompt != self._self_review_prompt(st):
+        if self.mode.self_review and not resumed:
             # The writer reads its own work before the gate does, in the same conversation. The
             # prompt is kept first, so a stop in between resumes here, not with the work over.
             set_next_prompt(self.task, self._self_review_prompt(st))

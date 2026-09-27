@@ -1088,6 +1088,7 @@ def test_a_self_review_follows_every_turn_of_the_writers_and_a_stop_between_resu
     sup.step()
     assert len(harness.prompts) == before + 1, "the review once, not the review and then another"
     assert task.read_state().state is State.VERIFY
+    assert task.events()[-2]["data"].get("kind") == "self-review", "on the record as what it was"
 
 
 def test_a_question_in_the_self_review_stops_for_you_before_the_gate(task):

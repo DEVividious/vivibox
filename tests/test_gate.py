@@ -384,6 +384,24 @@ def test_nothing_new_committed_reuses_the_last_build(task):
     assert task.events()[-1]["data"]["reused"] == first.log.name
 
 
+def test_a_toolchain_changed_since_builds_again(task):
+    """The same commit builds another way on another toolchain: bun the gate did not have, given
+    to the project after the build failed on it. The reused failure had spent two of the writer's
+    rounds on what nothing it commits could change."""
+    gate.accept_plan(task)
+    implementing(task)
+    pod = FakePod(fail={"bun run test"}, output="[ERROR] expected 1 but was 2")
+    gate.run_gate(task, pod, ["bun run test"], [])
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    gate.run_gate(task, pod, ["bun run test"], [], tools=["bun@latest"])
+    assert pod.commands.count("bun run test") == 2
+    task.transition(State.IMPLEMENT)
+    task.transition(State.VERIFY)
+    gate.run_gate(task, pod, ["bun run test"], [], java="17", tools=["bun@latest"])
+    assert pod.commands.count("bun run test") == 3, "another JDK is another toolchain"
+
+
 def test_a_new_commit_or_a_changed_command_builds_again(task):
     gate.accept_plan(task)
     implementing(task)

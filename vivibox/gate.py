@@ -512,12 +512,14 @@ def _said_in(log_text: str, command: str) -> str:
     return log_excerpt(m.group(1)) if m else ""
 
 
-def _reuse(task: Task, result: GateResult, head: str, commands: list[str]) -> bool:
-    """The last build's result again, when the agent committed nothing since and the commands are
-    the same: the same commit builds the same way, and a build is minutes."""
+def _reuse(task: Task, result: GateResult, head: str, commands: list[str], toolchain: list[str]) -> bool:
+    """The last build's result again, when the agent committed nothing since and the commands and
+    the toolchain are the same: the same commit builds the same way, and a build is minutes."""
     last = _last_build(task)
     if not _after_a_turn(task) or not last or last.get("commit") != head or last["commands"] != commands:
         return False
+    if last.get("toolchain", []) != toolchain:
+        return False  # a JDK or a tool given to the project since: the commit may build now
     if last.get("environment"):
         return False  # you fixed something outside the code; the same commit may build now
     log = task.meta / "log" / last["log"]
@@ -594,6 +596,8 @@ def run_gate(
     head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
     result = GateResult(log, commit=head)
     commands = init.with_dependencies(task.repo, commands)
+    # What the commands run on besides the image: another toolchain can build the same commit.
+    toolchain = [*((f"java@{java}",) if java else ()), *tools]
     # Before the build, the two things that would make it meaningless: it would build a tree that
     # is not what was committed, or run a suite with a test switched off.
     result.uncommitted = uncommitted(task.repo)
@@ -625,7 +629,7 @@ def run_gate(
             with log.open("a") as out:
                 for command, source in result.build_files:
                     out.write(f"# {source} names `{command}`, and the project runs nothing yet: pick it\n")
-    elif not _reuse(task, result, head, commands):
+    elif not _reuse(task, result, head, commands, toolchain):
         _build(task, pod, commands, java, head, result, timeout, tools)
     # Before the plan is accepted, the gate still runs the commands: a baseline check of the project.
     accepted = (task.meta / ACCEPTED_PLAN).exists()
@@ -636,7 +640,7 @@ def run_gate(
     result.no_red_evidence = red_evidence_missing(task, st.base_commit) if accepted else []
     result.removed_tests = removed_tests(task.repo, st.base_commit)
     result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
-    built = {"commit": head, "commands": commands} if not result.build_skipped else {}
+    built = {"commit": head, "commands": commands, "toolchain": toolchain} if not result.build_skipped else {}
     reused = {"reused": result.log.name} if result.unchanged else {}
     took = {"seconds": round(time.monotonic() - began, 1)}
     task.event("gate", iteration=st.iteration, **result.summary(), **built, **reused, **took)

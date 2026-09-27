@@ -248,3 +248,8 @@ def test_the_reviewers_turns_are_a_cost_of_their_own(tmp_path):
     assert ui.cost(task).review == 0.07, "the reviewer's running turn counts as review"
     assert ui.finished_cost({"cost": 0.51, "planning": 0.4, "review": 0.05}) == "$0.40 + $0.06 + $0.05"
     assert ui.activity(task.read_state(), 3) == "reviewing"
+
+
+def test_a_count_says_one_thing_or_many():
+    assert [ui.count(n, "turn") for n in (0, 1, 2)] == ["0 turns", "1 turn", "2 turns"]
+    assert ui.count(1, "blocking note") == "1 blocking note"

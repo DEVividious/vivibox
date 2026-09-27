@@ -139,7 +139,8 @@ def test_a_reviewer_without_a_role_of_its_own_runs_on_the_writers_model(env):
     table said "Reviewer | -" after a review, and nothing before one."""
     task = implementing()
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "- **Reviewer** · m (the writer's) · 0 turns · $0.00" in shown, "listed before its first turn"
+    assert "- **Reviewer** · m (the writer's) · not yet" in shown, "listed before its first turn"
+    assert "0 turns" not in shown and "$0.00" not in shown.split("#### Roles")[1]
     turns(task, ("review", "reviewer", 0.02))
     shown = detail(task, task.read_state(), 3, running=True)
     assert "- **Reviewer** · m (the writer's) · 1 turn · $0.02" in shown

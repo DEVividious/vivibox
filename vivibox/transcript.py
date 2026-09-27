@@ -9,6 +9,7 @@ import re
 import time
 from pathlib import Path
 
+from . import ui
 from .harness import Turn
 from .task import Task
 
@@ -61,7 +62,7 @@ def describe(log: Path, role: str) -> str:
     """A role's log in a line, for l: whose, how many turns, what they cost."""
     ends = FOOTER.findall(log.read_text(errors="replace"))
     failed = sum(1 for ok, _ in ends if ok == "failed")
-    said = [f"the {role}'s conversation", f"{len(ends)} turn{'s' if len(ends) != 1 else ''}"]
+    said = [f"the {role}'s conversation", ui.count(len(ends), "turn")]
     if failed:
         said.append(f"{failed} failed")
     said.append(f"${sum(float(cost) for _, cost in ends):.2f}")

@@ -150,7 +150,7 @@ def removed_tests(task: Task) -> list[str]:
                 return []
             return [
                 "",
-                f"**{n} test{'s' if n != 1 else ''} removed**; see whether the plan meant it:",
+                f"**{ui.count(n, 'test')} removed**; see whether the plan meant it:",
                 *(f"- `{g}`" for g in gone),
             ]
     return []

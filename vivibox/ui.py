@@ -98,6 +98,11 @@ class Spend:
         return f"{text} + ${self.review:.2f}" if self.review else text
 
 
+def count(n: int, noun: str) -> str:
+    """ "1 turn", "2 turns", "0 turns": every count the view, the logs and the notifications say."""
+    return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
 def money(amount: float) -> str:
     return f"${amount:.2f}"
 

@@ -92,7 +92,7 @@ First public version.
   `main`, and the checkout stays on the branch committed on. `vivibox accept` asks the same.
 - The details panel (`d`) has one layout in every state: the header, a line with the project,
   the times and the cost so far, `Next:`, what the state asks of you, then the newest review,
-  the acceptance criteria, a Roles list (a line per agent: what it runs on, its turns and its cost) and
+  the acceptance criteria, a Roles list (a line per agent: what it runs on, its turns and its cost, or "not yet") and
   the plan. The review stays in the panel while the writer fixes its notes. Headings of a
   review or a plan no longer stand larger than the panel's own, and the accepted plan leaves its
   criteria to their section, where they are ticked.
@@ -122,6 +122,7 @@ First public version.
 
 ### Internal
 
+- Counts ("1 turn", "2 turns") are said by one function, `ui.count`.
 - The details panel's sections live in `sections.py`; `panel.py` keeps the header and the states.
 - The gate's feedback text moves to `vivibox/feedback.py`.
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.

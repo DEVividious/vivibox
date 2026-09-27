@@ -157,6 +157,12 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
     return list(found.values())
 
 
+def used(turns: int, cost: float) -> str:
+    """An agent's turns and cost; "not yet" for one with neither (a reviewer before its first
+    review). A turn under way has a cost before it is counted, so its figure shows."""
+    return f"{ui.count(turns, 'turn')} · {ui.money(cost)}" if turns or cost else "not yet"
+
+
 def roles_section(task: Task, st: TaskState) -> list[str]:
     """Who plays each role, on what, and how many turns and dollars it took: a line per
     conversation, so roles one agent plays together share one, and the total last. A list, not
@@ -165,17 +171,14 @@ def roles_section(task: Task, st: TaskState) -> list[str]:
     if not rows or st.box:
         return []
     name = lambda roles: " + ".join(roles.split("-")).capitalize()  # noqa: E731
-    turns = lambda n: f"{n} turn{'' if n == 1 else 's'}"  # noqa: E731
     lines = [
         "",
         "#### Roles",
         "",
-        *(f"- **{name(a.roles)}** · {a.runs_on} · {turns(a.turns)} · {ui.money(a.cost)}" for a in rows),
+        *(f"- **{name(a.roles)}** · {a.runs_on} · {used(a.turns, a.cost)}" for a in rows),
     ]
     if len(rows) > 1:
-        lines.append(
-            f"- **Total** · {turns(sum(a.turns for a in rows))} · {ui.money(sum(a.cost for a in rows))}"
-        )
+        lines.append(f"- **Total** · {used(sum(a.turns for a in rows), sum(a.cost for a in rows))}")
     return lines
 
 

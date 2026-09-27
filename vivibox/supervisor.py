@@ -122,7 +122,7 @@ def _read(path: Path) -> str:
 
 
 def _notes(n: int) -> str:
-    return f"{n} blocking note{'s' if n != 1 else ''}"
+    return ui.count(n, "blocking note")
 
 
 def question(task: Task) -> str | None:
@@ -608,7 +608,7 @@ class Supervisor:
             self._go(target, f"verification still failing: {gate.why_red(result)}")
             self.ports.notify(
                 self.task.id,
-                f"verification still failing after {st.rounds} fix turn{'s' if st.rounds != 1 else ''}",
+                f"verification still failing after {ui.count(st.rounds, 'fix turn')}",
             )
         elif self.mode.supervisor or (self.mode.separate_reviewer and self.reviewer is not None):
             self.last_gate = result
@@ -698,7 +698,7 @@ class Supervisor:
     def _review_message(self, result: gate.GateResult | None = None) -> str:
         # Tests that went missing are said here, not to the agent, which would put them back.
         n = len(result.removed_tests) if result else 0
-        gone = f"; {n} test{'s' if n != 1 else ''} removed" if n else ""
+        gone = f"; {ui.count(n, 'test')} removed" if n else ""
         try:
             path = self.ports.prepare_review()
         except Exception as e:  # the work is done either way; the review copy is a convenience

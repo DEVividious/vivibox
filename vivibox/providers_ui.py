@@ -25,7 +25,7 @@ from textual.widgets.selection_list import Selection
 from . import actions, keys, look, providers, ui
 from .browse import JSON, Browse, shown_path
 from .config import ConfigError
-from .widgets import Confirm, Dialog
+from .widgets import Confirm, ContextHelp, Dialog
 
 
 def find_providers(catalog: list[tuple[str, str]], typed: str) -> list[tuple[str, str]]:
@@ -226,7 +226,7 @@ class ManageProviders(Dialog):
                 yield Button("Add provider…", variant="primary", compact=True, id="add")
                 yield Button("Import opencode.json…", compact=True, id="import")
                 yield Button("Manage…", compact=True, id="manage")
-            yield Label("", id="about", classes="wrap")
+            yield ContextHelp(2, id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Close", id="close")
 
@@ -304,7 +304,7 @@ class ManageItems(Dialog):
                     compact=True,
                     id="serena-mode",
                 )
-            yield Label("", id="about", classes="wrap")
+            yield ContextHelp(2, id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Save", variant="primary", id="save")
                 yield Button("Cancel", id="cancel")
@@ -399,7 +399,7 @@ class AddProvider(Dialog):
                 yield Label("API key", classes="key")
                 yield Input(placeholder="not shown", password=True, id="key", compact=True)
             yield Label("", id="problem", classes="problem wrap")
-            yield Label("", id="about", classes="wrap")
+            yield ContextHelp(3, id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Add", variant="primary", id="add")
                 yield Button("Cancel", id="cancel")

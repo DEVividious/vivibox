@@ -102,40 +102,64 @@ def mode_option(name: str) -> Content:
     return Content.assemble(mode.label, "  ", (mode.subtitle, look.MUTED))
 
 
-def short_model(choice) -> str:
-    """A role's model as the help names it: the model without its provider, or who plans."""
+def branch_label(name: str) -> Content:
+    """The branch, whole, and a muted › that says Enter opens a list, as a settings row that
+    opens a screen of its own says it."""
+    return Content.assemble(name, "  ", ("›", look.MUTED))
+
+
+def model_name(choice) -> str:
+    """A role's model as the help names it: the whole model, or who plans."""
     harness, model = choice
     if harness == "manual":
         return "you, in your own chat"
-    return model.rpartition("/")[2] or "no model yet"
+    return model or "no model yet"
 
 
-# What one round is, beside the number: a line, whatever the mode.
-ROUNDS_HINT = {
-    "single_agent": "fix turns after a failed verification",
-    "planner_executor": "fix turns after a failed verification",
-    "planner_maker_checker": "fix turns after a failed verification or review",
-    "supervisor_worker": "fix turns after a failed verification or supervision",
-}
-
-
-# What a field of the form is for, in the help under the fields while it has focus. Fields not
-# here say nothing of their own: the help shows the flow picked.
+# What each field of the form is for, in the help under the fields while it has focus. The flow
+# and the models say more, from what the form holds (NewTask.help_for).
 FIELD_HELP = {
-    "no-build": look.Explained(
-        "Build",
-        "Whether the verification builds and tests the work. Nothing to build: the task's answer is "
-        "a text (research, a ticket's analysis) and only the criteria and the commits are checked.",
+    "project": look.Explained(
+        "Project",
+        "The repository the task works on. Its last entry sets up another project.",
     ),
-    "plan": look.Explained(
-        "Plan",
-        "Stop: you accept or change the plan before anything is written. --auto: the writer starts "
-        "on the planner's plan. --draft: the task waits for a plan you write.",
+    "kind": look.Explained(
+        "Kind",
+        "What sort of change it is: the planner's brief, and the commit's branch prefix (feature/, bugfix/).",
     ),
     "base-ref": look.Explained(
         "Branch",
-        "The commit the task starts from. Another branch changes only the task's base, not your checkout.",
+        "The commit the task starts from; Enter opens the list of branches. Another branch changes "
+        "only the task's base, never your checkout.",
     ),
+    "no-build": look.Explained(
+        "Build",
+        "Whether the verification builds and tests the work. Nothing to build: the answer is a text "
+        "(research, a ticket's analysis), and only the criteria and the commits are checked.",
+    ),
+    "goal": look.Explained(
+        "Goal",
+        "What the agent should do: a line, or a whole ticket with its context and constraints. "
+        "Type @ for a file: one of the project is the one in the agent's clone; any other is "
+        "copied into the task, read-only. Files that look like credentials are refused.",
+    ),
+    "attach": look.Explained(
+        "Files",
+        "Attach… picks a file or a folder and adds it to the goal as @path. A file of the project "
+        "is the one in the agent's clone; any other is copied into the task, read-only.",
+    ),
+    "plan": look.Explained(
+        "Plan review",
+        "Stop: you accept or change the plan before anything is written. --auto: the writer starts "
+        "on the planner's plan. --draft: the task waits for a plan you write yourself.",
+    ),
+}
+# What one fix round is, by flow, for the help of Fix rounds.
+ROUND_IS = {
+    "single_agent": "after a failed verification",
+    "planner_executor": "after a failed verification",
+    "planner_maker_checker": "after a failed verification or the reviewer's blocking notes",
+    "supervisor_worker": "after a failed verification or the supervisor's blocking notes",
 }
 
 
@@ -178,7 +202,7 @@ class NewTask(Dialog):
                         )  # fmt: skip
                     with Horizontal(classes="row"):
                         yield Label("Branch", classes="key")
-                        yield Button("Current…", compact=True, id="base-ref", classes="field")
+                        yield Button(branch_label("Current"), compact=True, id="base-ref", classes="field")
                     # What the verification does with the work: build and test it, or nothing to
                     # build (research, a ticket's analysis). A list, so both answers are named.
                     with Horizontal(classes="row", id="build-row"):
@@ -202,12 +226,22 @@ class NewTask(Dialog):
                     with Horizontal(classes="row"):
                         yield Label("Files", classes="key")
                         yield Button("Attach…", compact=True, id="attach", classes="inline")
-                        yield Label(" or @path in the goal, for a copy", classes="hint")
+                        yield Label("or add @path in Goal", classes="hint")
                 with Vertical(id="planning", classes="section"):
                     yield Label("WORKFLOW", classes="title")
-                    # The flow first: how many agents there are, and so which models to pick.
+                    # In the order the task goes: whether you review the plan, then how the
+                    # agents share the work, which models they run on, and how many fix rounds
+                    # they get before the work comes to you.
+                    with Horizontal(classes="row"):
+                        yield Label("Plan review", classes="key")
+                        yield Select(
+                            [("Stop for my review of the plan", "review"),
+                             ("Accept the agent's plan without stopping (--auto)", "auto"),
+                             ("Only create the task, to write the plan myself (--draft)", "draft")],
+                            value="review", allow_blank=False, compact=True, id="plan",
+                        )  # fmt: skip
                     # Each option says in a few words what tells it from the others; the help
-                    # under the fields says the rest.
+                    # under the fields says the rest while Flow has focus.
                     config = load_config()
                     with Horizontal(classes="row"):
                         yield Label("Flow", classes="key")
@@ -229,23 +263,13 @@ class NewTask(Dialog):
                                 options, value=configured, allow_blank=False, compact=True,
                                 id=f"role-{name}", classes="model",
                             )  # fmt: skip
-                    # What one round is depends on the flow: said beside the number.
+                    # The number alone; what one round is, is the help's to say.
                     with Horizontal(classes="row"):
-                        yield Label("Rounds", classes="key")
+                        yield Label("Fix rounds", classes="key")
                         yield Input(str(config.max_rounds), id="max-rounds", compact=True, type="integer")
-                        yield Label("", classes="hint", id="rounds-hint")
-                    # One question, not two boxes that could both be ticked.
-                    with Horizontal(classes="row"):
-                        yield Label("Plan", classes="key")
-                        yield Select(
-                            [("Stop for my review of the plan", "review"),
-                             ("Accept the agent's plan without stopping (--auto)", "auto"),
-                             ("Only create the task, to write the plan myself (--draft)", "draft")],
-                            value="review", allow_blank=False, compact=True, id="plan",
-                        )  # fmt: skip
             # Under the fields, in one place whatever has focus: the flow highlighted, with the
             # models picked, or what the focused field is for.
-            yield ContextHelp(id="about", classes="context")
+            yield ContextHelp(id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Create task", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
@@ -287,8 +311,9 @@ class NewTask(Dialog):
     CHROME = 7
     # Lines of terminal under which the dialog takes all but a line of the screen.
     SHORT = 30
-    # The help under the fields: its rule and two lines, or its rule and all of it.
+    # The help under the fields, its rule included: two lines of text, or all of a flow's eight.
     HELP_SHORT, HELP_FULL = 3, 9
+    fitted = False
     # The description's lines at least (three of text in a frame), and at most.
     GOAL_MIN, GOAL_MAX = 5, 14
 
@@ -308,19 +333,20 @@ class NewTask(Dialog):
 
     @on(Select.Changed, ".model")
     def model_changed(self) -> None:
-        self.query_one(ContextHelp).explain(self.flow_help(self.mode()))
+        self.refresh_help()
 
     def flow_highlighted(self, index: int | None) -> None:
         """While the Flow list is open, the help says what the highlighted flow is, to compare;
-        closed, what the flow picked is."""
+        closed, it is the focused field's again."""
         names = list(ORCHESTRATION_MODES)
-        name = names[index] if index is not None and index < len(names) else self.mode()
-        self.query_one(ContextHelp).explain(self.flow_help(name))
+        if index is not None and index < len(names):
+            self.query_one(ContextHelp).explain(self.flow_help(names[index]))
+        else:
+            self.refresh_help()
 
     def follow_mode(self) -> None:
         """A row per agent of the flow, named as the flow names it: roles one agent plays have
-        one model, so one row; a flow without a reviewer of its own has no reviewer's row. What
-        Rounds counts is said beside it."""
+        one model, so one row; a flow without a reviewer of its own has no reviewer's row."""
         mode = ORCHESTRATION_MODES[self.mode()]
         agents = {role: name for role, name, _ in mode.agents}
         for row in self.query(".agent"):
@@ -328,49 +354,57 @@ class NewTask(Dialog):
             row.display = role in agents
             if role in agents:
                 row.query_one(".key", Label).update(agents[role])
-        self.query_one("#rounds-hint", Label).update(ROUNDS_HINT[self.mode()])
-        self.query_one(ContextHelp).explain(self.flow_help(self.mode()))
+        self.refresh_help()
 
     def flow_help(self, name: str) -> look.Explained:
         """A flow in the help, on the models picked in the form."""
-        models = {
-            s.id.removeprefix("role-"): short_model(s.value) for s in self.query(".model").results(Select)
-        }
+        selects = self.query(".model").results(Select)
+        models = {s.id.removeprefix("role-"): model_name(s.value) for s in selects}
         rounds = self.query_one("#max-rounds", Input).value or "0"
         return look.flow(name, models, int(rounds))
 
     def help_for(self, widget) -> str | look.Explained | None:
-        """The focused field's help; the flow picked for a field with none of its own."""
+        """What the focused field is for. The flow's details only while Flow has focus: elsewhere
+        its row says it in a line."""
+        if widget.id == "orchestration":
+            return self.flow_help(self.mode())
         if widget.id in FIELD_HELP:
             return FIELD_HELP[widget.id]
+        mode = ORCHESTRATION_MODES[self.mode()]
         if widget.id == "max-rounds":
-            mode = ORCHESTRATION_MODES[self.mode()]
+            rounds = self.query_one("#max-rounds", Input).value or "0"
             return look.Explained(
-                "Rounds",
-                f"How many fix turns the writer gets on its own, after {mode.rounds}, before the "
-                "work comes to you with what sent it back; your reply gives it as many again. The "
-                "first implementation is not a round.",
+                "Fix rounds",
+                f"Up to {rounds} fix turns of the writer {ROUND_IS[self.mode()]}, before the work "
+                "comes to you with what sent it back; your reply gives it as many again. The first "
+                "implementation is not a round.",
             )
         if widget.id and widget.id.startswith("role-"):
             role = widget.id.removeprefix("role-")
-            mode = ORCHESTRATION_MODES[self.mode()]
-            agent = next(((name, plays) for r, name, plays in mode.agents if r == role), (role, ""))
-            played = f" It plays the {agent[1]}, in one session, on this one model." if agent[1] else ""
-            return look.Explained(agent[0], ROLE_HELP.get(role, "") + played)
-        return self.flow_help(self.mode())
+            agent, plays = next(((a, p) for r, a, p in mode.agents if r == role), (role.capitalize(), ""))
+            shared = f" It plays the {plays}, in one session, on this one model." if plays else ""
+            return look.Explained(agent, ROLE_HELP.get(role, "") + shared)
+        return None
+
+    def refresh_help(self) -> None:
+        """The help again for what has focus, after what it depends on changed."""
+        if self.focused is not None and (said := self.help_for(self.focused)) is not None:
+            self.query_one(ContextHelp).explain(said)
 
     @on(Input.Changed, "#max-rounds")
     def rounds_changed(self) -> None:
-        self.query_one(ContextHelp).explain(self.help_for(self.query_one("#max-rounds")))
+        self.refresh_help()
 
     def on_resize(self) -> None:
         self.call_after_refresh(self.fit)
 
     def fit(self) -> None:
-        """Every field on the screen, the description scrolling inside itself. What the terminal
-        has beyond the rows and the description's three lines goes, in this order, to the help's
-        two lines, the blank row between the sections, the sections' headings, the rest of the
-        help, and the description."""
+        """The form's rectangle from the terminal alone, so that moving between fields never
+        resizes it: every field on the screen, the help under the fields a fixed number of lines
+        whatever it says, and the description what is left. Beyond the rows and a line of the
+        description, what the terminal has goes in this order to: the help's two lines, the
+        description's three, the blank row between the sections, the sections' headings, all of
+        the help, three more lines of the description, and the description again."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
         dialog = self.query_one(".dialog")
@@ -378,32 +412,39 @@ class NewTask(Dialog):
         height = self.size.height
         room = (height - 2 if height < self.SHORT else int(height * 0.9)) - self.CHROME
         # Counted, not measured: a measure is the last layout's, whatever class the dialog has
-        # been given since. A row is a line.
+        # been given since. A row is a line; the description is one line of text in a frame at
+        # least.
         rows = [row for row in self.query(".row") if row.id != "task-row" and row.display]
-        spare = room - len(rows) - self.GOAL_MIN
+        spare = room - len(rows) - 3
         gap, titles = len(self.query(".section")) - 1, len(self.query(".title"))
-        wanted = {
-            "help": self.HELP_SHORT,
-            "gap": gap,
-            "titles": titles,
-            "full": self.HELP_FULL - self.HELP_SHORT,
-        }
-        given = set()
-        for part, lines in wanted.items():
+        wanted = (
+            ("help", self.HELP_SHORT + 1),  # its rule, two lines, and the blank row above it
+            ("goal", 2),
+            ("gap", gap),
+            ("titles", titles),
+            ("full", self.HELP_FULL - self.HELP_SHORT),
+            ("goal", 3),
+        )
+        given: list[str] = []
+        for part, lines in wanted:
             if part == "full" and "help" not in given:
-                break
-            if lines <= spare:
-                given.add(part)
+                continue
+            if 0 < lines <= spare:
+                given.append(part)
                 spare -= lines
         dialog.set_class("titles" not in given, "plain")
         dialog.set_class("gap" not in given, "tight")
         about.display = "help" in given
-        about.set_full("full" in given)
-        about.styles.height = self.HELP_FULL if "full" in given else self.HELP_SHORT
-        help_lines = self.HELP_FULL if "full" in given else self.HELP_SHORT if "help" in given else 0
-        fields.styles.max_height = max(5, room - help_lines)
-        goal.styles.height = min(self.GOAL_MAX, self.GOAL_MIN + spare)
-        goal.focus()
+        help_lines = 0
+        if "help" in given:
+            help_lines = self.HELP_FULL if "full" in given else self.HELP_SHORT
+            about.reserve(help_lines - 1, full="full" in given)
+        fields.styles.max_height = max(5, room - help_lines - (1 if help_lines else 0))
+        extra = 2 * given.count("goal") + (1 if given.count("goal") == 2 else 0)
+        goal.styles.height = min(self.GOAL_MAX, 3 + extra + max(0, spare))
+        if not self.fitted:  # the description has the keys when the form opens, never again
+            self.fitted = True
+            goal.focus()
 
     @on(Select.Changed, "#project")
     def switched(self, event: Select.Changed) -> None:
@@ -416,7 +457,7 @@ class NewTask(Dialog):
         """An empty project has nothing that could work wrong, so what kind of task this is is not asked."""
         self.query_one("#kind-row").display = not actions.empty_project(name)
         self.base_ref = "HEAD"
-        self.query_one("#base-ref", Button).label = "Current…"
+        self.query_one("#base-ref", Button).label = branch_label("Current")
         with contextlib.suppress(ConfigError):
             self.query_one("#goal", DescriptionArea).repo = load_project(name).repo
             self.load_current_branch(name, load_project(name).repo)
@@ -435,12 +476,12 @@ class NewTask(Dialog):
             and self.base_ref == "HEAD"
             and self.query_one("#project", Select).value == project
         ):
-            self.query_one("#base-ref", Button).label = f"Current ({label})…"
+            self.query_one("#base-ref", Button).label = branch_label(f"Current ({label})")
 
     def branch_chosen(self, choice: tuple[str, str] | None) -> None:
         if choice:
             label, self.base_ref = choice
-            self.query_one("#base-ref", Button).label = label + "…"
+            self.query_one("#base-ref", Button).label = branch_label(label)
 
     def attach(self, path: Path | None) -> None:
         """The picked file or folder as an @mention, where the cursor is in the description."""

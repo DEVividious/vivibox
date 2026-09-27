@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, OptionList, Select, TextArea
+from textual.widgets import Button, Label, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 
 from . import look
@@ -19,13 +19,22 @@ from . import look
 
 class ContextHelp(Label):
     """The help under a dialog's fields, in the same place whatever has focus: what the focused
-    field is for, or what the highlighted option is (a look.Explained), set apart by a rule. Its
-    height is the dialog's to give: `full` shows everything, else a title line and one more."""
+    field is for, or what the highlighted option is (a look.Explained), set apart by a rule.
 
-    def __init__(self, **kwargs):
+    Its size never follows what it says: `lines` lines of text under the rule, set by the dialog
+    from the terminal (`reserve`), and what does not fit is cut. Focus changes the words, never
+    the dialog's rectangle. `full` draws an Explained whole, else in a title line and one more."""
+
+    def __init__(self, lines: int = 3, **kwargs):
         super().__init__("", **kwargs)
         self.said: str | look.Explained = ""
         self.full = True
+        self.reserve(lines)
+
+    def reserve(self, lines: int, full: bool | None = None) -> None:
+        """The lines of text it has, whatever it says; the rule above them is one more."""
+        self.styles.height = lines + 1
+        self.set_full(lines >= 4 if full is None else full)
 
     def explain(self, said: str | look.Explained) -> None:
         self.said = said
@@ -116,11 +125,23 @@ class Dialog(ModalScreen):
         return self.field_help.get(widget.id or "", "")
 
     def reframe(self) -> None:
-        """The frame's edges from frame_title and hint_keys, after either changed."""
-        for frame in self.query(".dialog").results():
-            frame.border_title = self.frame_title or None
-            frame.border_subtitle = look.hints(*self.hint_keys) if self.hint_keys else None
-            break
+        """The title in the frame's top edge; the keys at the right of the dialog's last row, the
+        closing buttons' row, or a row of their own: inside the dialog, a row above its frame,
+        not printed on the frame."""
+        frame = next(iter(self.query(".dialog").results()), None)
+        if frame is None:
+            return
+        frame.border_title = self.frame_title or None
+        said = look.hints(*self.hint_keys) if self.hint_keys else ""
+        if found := frame.query(".keys"):
+            found.first(Static).update(said)
+            return
+        keys = Static(said, classes="keys")
+        rows = [child for child in frame.children if child.has_class("buttons")]
+        if rows:
+            rows[-1].mount(keys)
+        else:
+            frame.mount(Horizontal(keys, classes="buttons footer"))
 
     async def handle_key(self, event: events.Key) -> bool:
         """Esc on an open list closes the list: the dialog's own Esc would run first and throw away

@@ -2159,7 +2159,7 @@ def test_o_opens_with_the_editor_the_repository_points_at(env, monkeypatch):
     async def scenario(app, pilot):
         await pilot.press("question_mark")
         await pilot.pause()
-        app.screen.query_one(".dialog").scroll_end(animate=False)
+        app.screen.query_one(".help-body").scroll_end(animate=False)
         await pilot.pause()
         note = " ".join(screen_text(app).replace("│", " ").split())
         assert "o opens with code {path}" in note and "k changes it" in note
@@ -2411,7 +2411,7 @@ def test_with_a_reviewer_the_whole_new_task_form_fits_a_short_terminal(env, size
         dialog = app.screen
         assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "nothing to scroll"
         shown = screen_text(app)
-        for word in ("Kind", "Branch", "Build", "Attach…", "Reviewer", "Flow", "Rounds", "Create"):
+        for word in ("Kind", "Branch", "Build", "Attach…", "Reviewer", "Flow", "Fix rounds", "Create"):
             assert word in shown, f"{word} not on the screen at {size}"
         assert dialog.query_one("#goal").region.height >= 3
 
@@ -2558,7 +2558,7 @@ def test_an_open_list_in_the_new_task_form_is_framed_apart_from_the_rows_under_i
 def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""
-    expected = ["goal", "attach", "orchestration", "role-planner", "role-writer", "max-rounds", "plan",
+    expected = ["goal", "attach", "plan", "orchestration", "role-planner", "role-writer", "max-rounds",
                 "create", "cancel", "project", "kind", "base-ref", "no-build", "goal"]  # fmt: skip
     with_code("demo")
 
@@ -4463,23 +4463,32 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
             ]
 
         help_ = app.screen.query_one(widgets.ContextHelp)
+        mode.focus()  # the flow's details are the help's while Flow has focus
+        await pilot.pause()
         # A row per agent of the flow, as the flow names it; the diagram in the help says where
-        # the verification runs; Rounds says what one round is.
-        for name, shown, flow, rounds in (
-            ("planner_maker_checker", ["Planner", "Writer", "Reviewer"], "P → W → Gate → R ⇄ W", "or review"),
-            ("single_agent", ["Agent"], "P+W+R → Gate", "failed verification"),
-            ("planner_executor", ["Planner", "Executor"], "P → W+R → Gate", "failed verification"),
-            ("supervisor_worker", ["Supervisor", "Worker"], "P → W → Gate → (P+R) ⇄ W", "supervision"),
+        # the verification runs.
+        for name, shown, flow in (
+            ("planner_maker_checker", ["Planner", "Writer", "Reviewer"], "P → W → Gate → R ⇄ W"),
+            ("single_agent", ["Agent"], "P+W+R → Gate"),
+            ("planner_executor", ["Planner", "Executor"], "P → W+R → Gate"),
+            ("supervisor_worker", ["Supervisor", "Worker"], "P → W → Gate → (P+R) ⇄ W"),
         ):
             mode.value = name
             await pilot.pause()
             assert agents() == shown, name
             assert help_.said.diagram == flow, name
-            assert str(app.screen.query_one("#rounds-hint", Label).render()).endswith(rounds), name
-        assert help_.said.facts[1] == ("Models", "Supervisor m · Worker m")
+        assert help_.said.facts[1:4] == (
+            ("Supervisor", "m"),
+            ("Shared", "Planner + Reviewer"),
+            ("Worker", "m"),
+        )
         app.screen.query_one("#role-planner", Select).value = (OC, "other/strong")
         await pilot.pause()
-        assert help_.said.facts[1] == ("Models", "Supervisor strong · Worker m"), "the models picked"
+        assert help_.said.facts[1] == ("Supervisor", "other/strong"), "the models picked"
+        # What one fix round is, said by Fix rounds' help, by the flow.
+        app.screen.query_one("#max-rounds").focus()
+        await pilot.pause()
+        assert "supervisor's blocking notes" in help_.said.summary
         mode.value = "planner_maker_checker"
         await pilot.pause()
         assert reviewer.parent.display

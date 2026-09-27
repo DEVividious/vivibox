@@ -140,7 +140,10 @@ def test_every_dialog_names_its_keys_in_its_frame(env):
             app.push_screen(screen)
             await pilot.pause()
             frame = screen.query_one(".dialog")
-            assert frame.border_subtitle and "esc" in str(frame.border_subtitle), type(screen).__name__
+            keys = frame.query_one(".keys")
+            assert "esc" in str(keys.render()), type(screen).__name__
+            assert keys.region.bottom < frame.region.bottom - 1, "inside the frame, not on it"
+            assert not frame.border_subtitle
             app.pop_screen()
             await pilot.pause()
 
@@ -320,7 +323,7 @@ def test_the_help_says_whole_what_o_opens_with_on_this_machine(env, monkeypatch)
     async def scenario(app, pilot):
         await pilot.press("question_mark")
         await pilot.pause()
-        app.screen.query_one(".dialog").scroll_end(animate=False)  # the section is the help's last
+        app.screen.query_one(".help-body").scroll_end(animate=False)  # the section is the help's last
         await pilot.pause()
         shown = " ".join(screen_text(app).replace("│", " ").split())
         assert "On this machine" in shown
@@ -368,8 +371,9 @@ def test_the_flow_help_follows_the_highlight_and_never_covers_the_form(env):
 
 @pytest.mark.parametrize(("size", "shown"), [((120, 40), "full"), ((100, 30), "short"), ((80, 24), "none")])
 def test_the_help_under_the_fields_gives_way_on_a_smaller_terminal(env, size, shown):
-    """All of it on a tall terminal, the flow in two lines on a medium one, nothing on 80×24; the
-    fields never scroll."""
+    """All of it on a tall terminal, two lines on a medium one, none on 80×24, where every field
+    comes first; the fields never scroll. What it says is the focused field's: the goal's, as the
+    form opens."""
     from textual.widgets import TextArea
 
     async def scenario(app, pilot):
@@ -384,10 +388,11 @@ def test_the_help_under_the_fields_gives_way_on_a_smaller_terminal(env, size, sh
         assert form.query_one(widgets.Fields).max_scroll_y == 0
         assert form.query_one("#goal", TextArea).region.height >= 5, "three lines of the goal at least"
         text = screen_text(app)
+        assert (help_.said.title == "Goal") if shown != "none" else True
         if shown == "full":
-            assert "Sessions" in text and "Best for" in text
+            assert "Type @ for a file" in text
         if shown == "short":
-            assert "P → W → Gate → R ⇄ W" in text and "3 sessions · independent review" in text
+            assert "What the agent should do" in text and "Type @ for a file" not in text
 
     run(scenario, size=size)
 
@@ -395,10 +400,16 @@ def test_the_help_under_the_fields_gives_way_on_a_smaller_terminal(env, size, sh
 def test_each_flow_explains_itself_in_the_same_shape():
     for name in ORCHESTRATION_MODES:
         said = look.flow(name, {"planner": "big", "writer": "small"}, 3)
-        assert [fact for fact, _ in said.facts] == ["Sessions", "Models", "Review", "Rounds", "Best for"]
+        names = [fact for fact, _ in said.facts]
+        agents = [agent for _, agent, _ in ORCHESTRATION_MODES[name].agents]
+        assert names[0] == "Review" and names[-2:] == ["Fix rounds", "Best for"], names
+        assert [n for n in names if n not in ("Review", "Shared", "Fix rounds", "Best for")] == agents
+        shared = [plays for _, _, plays in ORCHESTRATION_MODES[name].agents if plays]
+        assert names.count("Shared") == len(shared), "an agent that plays two roles says which"
         assert "Gate" in said.diagram and said.compact, name
         full = str(said.lines(True)).splitlines()
-        assert len(full) == 8 and all(len(line) <= 84 for line in full[2:]), (name, full)
+        assert len(full) <= 8 and all(len(line) <= 84 for line in full), (name, full)
+        assert "session" not in " ".join(full[2:]), "what the list says beside the name is not said again"
         assert len(str(said.lines(False)).splitlines()) == 2
 
 
@@ -436,3 +447,116 @@ def test_a_focused_field_has_an_edge_of_the_accent(env):
         assert plan.styles.border_left[0] == "blank", "unfocused, the same column, empty"
 
     run(scenario, size=(120, 40))
+
+
+@pytest.mark.parametrize("size", [(140, 45), (110, 32), (80, 24)])
+def test_moving_through_the_settings_never_resizes_the_dialog(env, size):
+    """Holding a key down in k: the help says what each row does, and the dialog's rectangle stays
+    exactly where it is, row after row, the flow's long help included."""
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("k")
+        await pilot.pause()
+        frame = app.screen.query_one(".dialog")
+        first = frame.region
+        options = app.screen.query_one("#rows", OptionList)
+        said = set()
+        for _ in range(options.option_count + 2):
+            await pilot.press("down")
+            await pilot.pause()
+            assert frame.region == first, f"row {options.highlighted}: {frame.region} != {first}"
+            said.add(str(app.screen.query_one(widgets.ContextHelp).render())[:20])
+            highlighted = options.highlighted
+            top = options.scroll_offset.y
+            assert top <= highlighted < top + options.scrollable_content_region.height + 1, "in view"
+        assert len(said) > 5, "the help's words changed; its size did not"
+
+    run(scenario, size=size)
+
+
+@pytest.mark.parametrize("size", [(140, 45), (120, 40), (100, 30), (80, 24)])
+def test_moving_through_the_new_task_form_never_resizes_it(env, size):
+    """Tab through every field, and open and close every list: the form's rectangle, and where
+    its buttons are, never move; Flow's details come and go inside the help's own lines."""
+    from textual.widgets import Select
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        form = app.screen
+        frame = form.query_one(".dialog")
+        first, buttons = frame.region, form.query_one(".buttons").region
+        seen = []
+        for _ in range(12):
+            await pilot.press("tab")
+            await pilot.pause()
+            seen.append(app.focused.id)
+            assert frame.region == first, f"{app.focused.id}: {frame.region} != {first}"
+            assert form.query_one(".buttons").region == buttons
+            if isinstance(app.focused, Select):
+                await pilot.press("enter")
+                await pilot.pause()
+                assert frame.region == first, f"{app.focused} open"
+                await pilot.press("escape")
+                await pilot.pause()
+                assert frame.region == first and isinstance(app.screen, type(form)), (
+                    "Esc closes the list only"
+                )
+        assert "orchestration" in seen and "max-rounds" in seen
+
+    run(scenario, size=size)
+
+
+def test_flow_details_only_while_flow_has_focus(env):
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        help_ = app.screen.query_one(widgets.ContextHelp)
+        assert help_.said.title == "Goal", "the description has the keys: its help, not the flow's"
+        app.screen.query_one("#orchestration").focus()
+        await pilot.pause()
+        assert help_.said.title == "Planner → Writer → Reviewer" and help_.said.diagram
+        app.screen.query_one("#role-writer").focus()
+        await pilot.pause()
+        assert help_.said.title == "Writer" and not help_.said.diagram, "gone once Flow has not"
+        app.screen.query_one("#max-rounds").focus()
+        await pilot.pause()
+        assert help_.said.title == "Fix rounds" and "Up to 3" in help_.said.summary
+
+    run(scenario, size=(120, 40))
+
+
+def test_the_branch_and_the_files_say_it_short_and_whole(env):
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        text = screen_text(app)
+        assert "Current (main)  ›" in text and "Current (main)…" not in text, "no ellipsis, room enough"
+        assert "Attach…" in text and "or add @path in Goal" in text
+        app.screen.query_one("#attach").focus()
+        await pilot.pause()
+        assert "copied into the task, read-only" in app.screen.query_one(widgets.ContextHelp).said.summary
+
+    run(scenario, size=(120, 40))
+
+
+def test_on_a_wide_terminal_the_goal_takes_the_rest_of_the_width(env):
+    new_task("A short goal")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        widths = sum(column.get_render_width(app.table) for column in app.table.columns.values())
+        assert widths >= app.size.width - 4, f"{widths} of {app.size.width} columns used"
+
+    run(scenario, size=(230, 50))
+
+
+def test_the_command_bar_reads_as_secondary_not_as_metadata(env):
+    assert look.THEME.variables["footer-description-foreground"] == look.SECONDARY
+    assert look.THEME.variables["footer-key-foreground"] == look.ACCENT

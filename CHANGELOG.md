@@ -129,6 +129,14 @@ First public version.
   help says the highlighted flow in facts (sessions, the models picked, review, rounds, best
   for) and its diagram, `P → W → Gate → R ⇄ W`; `k` says the same. The Flow list opens upward
   so the help stays in view.
+- Focus never resizes a dialog: `k`'s help has a fixed number of lines for the terminal, and
+  `n`'s too; moving between rows changes the words, not the frame. The keys that close a dialog
+  stand in its last row, inside the frame. In `n`, Flow's details show only while Flow has
+  focus; every field has a line of help instead. The workflow reads Plan review, Flow, the
+  agents' models, Fix rounds (the number alone). Branch shows the whole name and a › (`Current
+  (main)  ›`), Files says `or add @path in Goal`. `k` lists the flow first, then planner,
+  writer, reviewer. The list's goal column reaches the screen's edge; live task ids are in the
+  foreground; the command bar's words are the secondary tone.
 - Contrast: three surfaces a step apart, off-white text for what you read, labels and headings
   a step quieter (secondary), metadata quieter still, disabled controls dim; placeholders
   readable; the focused field has an edge of the accent and selection is a blue-grey tint.

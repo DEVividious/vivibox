@@ -64,7 +64,11 @@ ModalScreen { align: center middle; background: $background 60%; }
 .dialog Button.-error:focus { background: $error; color: $background; }
 .dialog Button:disabled { background: $surface; color: $text-disabled-dim; text-style: dim; }
 .buttons { height: auto; margin-top: 1; }
-.buttons > .keys { width: 1fr; text-align: right; color: $text-muted; }
+/* The keys that close a dialog, at the right of its last row, inside the frame. */
+.buttons > .keys { width: 1fr; height: 1; text-align: right; color: $text-muted; }
+.buttons.footer { height: 1; }
+.dialog.help { height: 90%; }
+.help-body { height: 1fr; }
 
 /* Fields: a text field is a band; a list is its value and a mark, the band only with focus. */
 .dialog Input { height: 1; border: none; padding: 0 1; background: $panel; }
@@ -112,12 +116,11 @@ ToggleButton.-on > .toggle--button { color: $success; }
 /* The settings list grows with the terminal; settings.py leaves room under it for what the
    highlighted row does (#about), set apart by a rule. */
 #rows { height: auto; max-height: 75vh; }
-#about { height: auto; max-height: 9; width: 100%; color: $text-secondary; border-top: solid $frame; padding: 1 0 0 0; margin-top: 1; }
-/* The help of a form: its height is the form's to give (NewTask.fit), its rule the only frame. */
-#about.context { max-height: 100%; padding: 0; margin-top: 1; }
+/* The help under a dialog's fields (the widgets module's context help): a rule, then as many lines as the dialog
+   reserves for it, whatever it says, so focus never resizes the dialog. */
+#about { width: 100%; color: $text-secondary; border-top: solid $frame; padding: 0; margin-top: 1; overflow: hidden; }
 #about.-lines { text-wrap: nowrap; text-overflow: ellipsis; }
 .form .row > .hint { text-wrap: nowrap; text-overflow: ellipsis; }
-.dialog.short #about { max-height: 4; padding: 0; margin: 0; }
 .fields { height: auto; }
 
 /* --- Forms: sections, a column of labels, one field per row -------------------------------- */

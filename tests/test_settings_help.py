@@ -57,14 +57,14 @@ def test_orchestration_describes_the_mode_it_is_on_and_enter_moves_on_without_a_
         await pilot.pause()
         now = ORCHESTRATION_MODES["planner_maker_checker"]
         lines = about(app).splitlines()
-        assert lines[0].split()[:5] == now.label.split() and now.flow in lines[0], "the name and the flow"
-        assert now.summary == lines[1] and now.tradeoff == lines[-1], "what it is first, what it costs last"
-        assert any(line.startswith("Sessions") for line in lines), "facts, a line each"
+        assert lines[0].startswith(now.label) and lines[1] == now.flow, "the name, then the flow"
+        assert any(line.startswith("Review") for line in lines), "facts, a line each"
+        assert lines[-1].startswith("Best for")
         before = len(app._notifications)
         await pilot.press("enter")
         await pilot.pause()
         after = ORCHESTRATION_MODES["supervisor_worker"]
-        assert after.label in about(app) and after.summary in about(app), "the mode it is on now"
+        assert after.label in about(app) and after.flow in about(app), "the mode it is on now"
         assert len(app._notifications) == before, "the description is under the list, not in a toast"
 
     run(scenario, notifications=True)

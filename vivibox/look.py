@@ -75,7 +75,8 @@ THEME = Theme(
         "footer-background": BACKGROUND,
         "footer-key-foreground": ACCENT,
         "footer-key-background": BACKGROUND,
-        "footer-description-foreground": MUTED,
+        # The command bar is secondary to the list, but read without squinting.
+        "footer-description-foreground": SECONDARY,
         "footer-description-background": BACKGROUND,
         "footer-item-background": BACKGROUND,
         "scrollbar": PANEL,
@@ -159,17 +160,19 @@ class Explained:
     compact: str = ""
 
     def lines(self, full: bool) -> Content:
-        """Full: the title, its badge and diagram on one line, the summary, the facts, the
-        trade-off. Short: the title and diagram, then the compact line. In weight, the title
-        first, then the diagram and the summary, the facts, and the trade-off last."""
+        """Full: the title and its badge, the diagram under them, the summary, the facts a line
+        each, the trade-off. Short: the title, diagram and badge on a line, then the compact
+        line. In weight, the title first, then the diagram and the summary, the facts, and the
+        trade-off last."""
         head: list = [(self.title, f"bold {FOREGROUND}")]
-        if self.diagram:
-            head += ["   ", (self.diagram, f"bold {SECONDARY}")]
-        if self.badge:
-            head += ["   ", (self.badge, SUCCESS)]
+        badge = ["   ", (self.badge, SUCCESS)] if self.badge else []
         if not full:
-            return Content.assemble(*head, "\n", (self.compact or self.summary, SECONDARY))
-        parts: list = [*head]
+            diagram = ["   ", (self.diagram, f"bold {SECONDARY}")] if self.diagram else []
+            rest = self.compact or self.summary
+            return Content.assemble(*head, *diagram, *badge, *(["\n", (rest, SECONDARY)] if rest else []))
+        parts: list = [*head, *badge]
+        if self.diagram:
+            parts += ["\n", (self.diagram, f"bold {SECONDARY}")]
         if self.summary:
             parts += ["\n", (self.summary, SECONDARY)]
         width = max((len(name) for name, _ in self.facts), default=0) + 2
@@ -181,30 +184,26 @@ class Explained:
 
 
 def flow(name: str, models: dict[str, str], rounds: int) -> Explained:
-    """An orchestration mode as the help shows it, under n's Flow and k's flow row: its diagram
-    and what it is, and the models it would run on (models: a role's model, by role; a mode's
-    reviewer without one is the writer's), roles one agent plays beside its model."""
+    """An orchestration mode as the help shows it, under n's Flow and k's flow row: its diagram,
+    where the review happens, each agent on a line with its model and, under an agent that plays
+    more than one role, which ones; the rounds and what it is for. What the Flow list already
+    says beside the name (how many sessions, whose review) is not said again. models: a role's
+    model, by role; a mode's reviewer without one is the writer's."""
     from .config import DEFAULT_ORCHESTRATION, ORCHESTRATION_MODES
 
     mode = ORCHESTRATION_MODES[name]
-    shown = []
-    # Which roles an agent plays is said by Sessions; here each agent and its model.
-    for role, agent, _ in mode.agents:
+    facts: list[tuple[str, str]] = [("Review", mode.review)]
+    for role, agent, plays in mode.agents:
         model = models.get(role) or f"{models.get('writer', '')} (the writer's)"
-        shown.append(f"{agent} {model}")
+        facts.append((agent, model))
+        if plays:
+            facts.append(("Shared", " + ".join(word.capitalize() for word in plays.split(" + "))))
+    facts += [("Fix rounds", f"Up to {rounds}"), ("Best for", mode.best_for.capitalize())]
     return Explained(
         mode.label,
-        mode.summary,
         badge="recommended" if name == DEFAULT_ORCHESTRATION else "",
         diagram=mode.flow,
-        facts=(
-            ("Sessions", mode.sessions),
-            ("Models", " · ".join(shown)),
-            ("Review", mode.review),
-            ("Rounds", f"up to {rounds} fix turns after {mode.rounds}"),
-            ("Best for", mode.best_for),
-        ),
-        tradeoff=mode.tradeoff,
+        facts=tuple(facts),
         compact=mode.compact,
     )
 

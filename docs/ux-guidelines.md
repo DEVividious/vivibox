@@ -104,9 +104,15 @@ starts the pod when needed.
 
 ## 4. Dialogs
 
+- **Focus never changes a dialog's rectangle.** Its size comes from the terminal and from what
+  you choose (a flow with more agents has more rows), never from which field or row has focus:
+  moving with the keys changes what the help says and where a list scrolls, not the frame, the
+  buttons or where the dialog is centred. `tests/test_look.py` walks `k` and `n` and holds the
+  rectangle to the pixel.
 - Every dialog is a `widgets.Dialog`: a frame of one thin line, its title in the top edge
-  (`New task`, `Delete demo-5?`, `Reply · demo-5`), the keys that close it in the bottom edge
-  (`ctrl+s create  esc cancel`), and a padding of one line and two columns. Its content is the
+  (`New task`, `Delete demo-5?`, `Reply · demo-5`), the keys that close it at the right of its
+  last row, inside the frame (`ctrl+s create  esc cancel`), and a padding of one line and two
+  columns. Its content is the
   size it needs, 90 columns at most; on a small terminal it takes the screen less a line. No
   sentence among the fields names a key.
 - A dialog that picks one of a list is a `widgets.Choose`: names in a column, what each is muted
@@ -118,14 +124,14 @@ starts the pod when needed.
   button have a band; a list is its value and a faint ▼, its band only with focus. On a short
   terminal the rest of the help goes first, then the headings, the blank row between sections
   and the help's two lines, before the multi-line text shrinks below three lines of text.
-  The workflow starts with Flow (the orchestration mode): each option its name and, muted
-  beside it, what tells it from the others (`3 sessions · independent review`). Under it a
-  model row per agent of the flow, named as the flow names it: Agent alone for Single agent;
-  Planner and Executor; Planner, Writer and Reviewer; Supervisor and Worker. Roles one agent
-  plays share its session and its model, so they have one row; the help says which roles it
-  plays. Then Rounds, with what one round is in this flow beside the number (`fix turns after a
-  failed verification or review`), and Plan. The Flow list opens upward, over the rows above
-  it, so the help under the fields stays in view while you compare. No field has a tooltip.
+  The workflow goes in the order the task does: Plan review, then Flow (the orchestration
+  mode), each option its name and, muted beside it, what tells it from the others (`3 sessions
+  · independent review`); under it a model row per agent of the flow, named as the flow names
+  it: Agent alone for Single agent; Planner and Executor; Planner, Writer and Reviewer;
+  Supervisor and Worker. Roles one agent plays share its session and its model, so they have
+  one row. Last, Fix rounds: the number alone; what one round is in this flow is its help. The
+  Flow list opens upward, over the rows above it, so the help under the fields stays in view
+  while you compare. No field has a tooltip, and no row carries a sentence after its value.
   Build is a list of two answers (build and test the work; nothing to build or test), not a box
   to tick.
 - A button that helps fill a field stands in that field's row, compact (Attach…, Browse…,
@@ -145,9 +151,14 @@ starts the pod when needed.
   row does. The form itself stays one word per label. Where an option needs comparing, the help
   is structured (`look.Explained`, drawn by `widgets.ContextHelp`): its title, a badge and a
   diagram on one line, a sentence, facts a line each (name and value), what it costs last; on a
-  shorter terminal the title and one compact line. A flow's help is `look.flow`, the same under
-  `n` and `k`, on the models picked; while a list is open, it follows the highlighted option
-  (`widgets.follow_highlight`).
+  shorter terminal the title and one compact line. The help has a fixed number of lines for the
+  terminal (`ContextHelp.reserve`), whatever it says; what does not fit is cut. Every field of
+  `n` has its help; the flow's details (the diagram, the review, each agent and its model,
+  `Shared` under an agent that plays two roles, the fix rounds, what it is best for) only while
+  Flow has focus or its list is open, where the help follows the highlighted option
+  (`widgets.follow_highlight`). A flow's help is `look.flow`, the same under `n` and `k`.
+  On a terminal too short for all the fields and the help's two lines, the help is not shown,
+  for that terminal, whatever has focus.
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
   text gives way first, down to three lines, before anything scrolls.
 - A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall
@@ -294,12 +305,15 @@ theme's variables and the code the constants, by meaning, never a hue by name
   in the footer and in a dialog's frame alike; a key in running text is inline code, drawn the
   same way in the panel.
 - An empty state says so in muted italics with the key that fills it (`no tasks yet  n new task`).
-- The list: a project row is its name in bold after a muted ▾ or ▸; a task is indented, the
-  project's part of its id faint; figures and times (`now`, `12m`, `3h`, `2d`) on the right; a
+- The list: a project row is its name in bold after a muted ▾ or ▸; a live task is indented, its
+  id whole in the foreground, a finished one secondary with its project's part muted; figures and times (`now`, `12m`, `3h`, `2d`) on the right; a
   faint dot for nothing; finished tasks muted. Columns go with the width: under 100, TASK,
   STATUS and GOAL; under 130, CRITERIA, COST (one figure) and UPDATED too; from 130, APP, PLAN,
-  IMPL, REVIEW (where someone other than the writer reviews) and CREATED. The goal takes what
-  is left and ends in an ellipsis.
+  IMPL, REVIEW (where someone other than the writer reviews) and CREATED. The goal's column
+  takes the rest of the width, to the screen's edge, and a goal longer than it ends in an
+  ellipsis.
+- The command bar: keys in the accent, what they do in the secondary tone; the decisions' words
+  in the foreground.
 
 ## Known gaps
 

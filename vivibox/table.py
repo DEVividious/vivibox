@@ -190,6 +190,12 @@ class TaskTable:
                 )
                 taken += max(widest, len(name)) + 2
         goal_width = max(self.size.width - taken - 3, 16)
+        # The goal's column reaches the right edge whatever its goals: a wide terminal is used, and
+        # the cursor's row and the header span the screen.
+        goal_column = table.columns.get("GOAL")
+        if goal_column is not None:
+            goal_column.auto_width = False
+            goal_column.width = goal_width
         ids = [key for _, key in planned]
         for cells, key in planned:
             goal = Text.from_markup(cells.get("GOAL", ""))
@@ -234,13 +240,14 @@ class TaskTable:
 
     @staticmethod
     def task_name(task_id: str, project: str, finished: bool = False) -> str:
-        """A task under its project: indented, the project's name in its id muted, so the number is
-        what the eye finds."""
+        """A task under its project, indented: a live one whole in the foreground, a finished one
+        quieter, the project's part of its id muted."""
         prefix = f"{project}-"
         rest = task_id.removeprefix(prefix) if task_id.startswith(prefix) else task_id
-        shown = look.secondary(rest) if finished else escape(rest)
-        muted = look.muted if finished else look.secondary
-        return f"  {muted(prefix) if rest != task_id else ''}{shown}"
+        if finished:
+            return f"  {look.muted(prefix) if rest != task_id else ''}{look.secondary(rest)}"
+        # A live task's name is content, whole in the foreground.
+        return f"  {escape(task_id)}"
 
     @staticmethod
     def cost_cells(spent: ui.Spend, muted: bool = False) -> tuple[str, ...]:

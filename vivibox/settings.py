@@ -14,7 +14,6 @@ from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.content import Content
 from textual.widgets import Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
@@ -38,7 +37,7 @@ from .dialogs import NOTHING_TO_PREPARE, PREPARE_HINT, PREPARE_QUESTION, ChooseE
 from .panel import edit_in_editor
 from .providers_ui import ManageProviders, provider_rows
 from .verify_ui import AskVerify
-from .widgets import Dialog, EdgeTextArea
+from .widgets import ContextHelp, Dialog, EdgeTextArea
 
 # A row: what it is called, what it is now, and the key Enter acts on; None for a heading or a
 # value that is only shown.
@@ -115,9 +114,9 @@ class Rows(Dialog):
     def open(self, key: str) -> None:
         raise NotImplementedError
 
-    def about(self, key: str) -> str | Content:
-        """What the row does, in words, for the line under the list; "" for nothing to say; a
-        Content where some of it stands out."""
+    def about(self, key: str) -> str | look.Explained:
+        """What the row does, in words, for the help under the list; "" for nothing to say; an
+        Explained where it has facts to show."""
         return ""
 
     def compose(self) -> ComposeResult:
@@ -125,20 +124,23 @@ class Rows(Dialog):
         with Vertical(classes="dialog"):
             yield OptionList(id="rows")
             # Read while choosing: a notification with the same words is gone before it is read.
-            yield Label("", id="about")
+            yield ContextHelp(id="about")
 
-    # Around the list: the dialog's frame and padding, and the most the description takes with
-    # its rule and the blank rows around it (#about); on a short terminal, the rule and three lines.
-    AROUND = 2 + 2 + 9 + 1
-    AROUND_SHORT = 2 + 2 + 3 + 1
-    SHORT = 30
+    # The help's lines of text by the terminal's height: all of a flow's from TALL lines up, three
+    # (a flow in its short form) from SHORT, two below.
+    TALL, SHORT = 40, 30
+    # Around the list: the dialog's frame and padding, the help's blank row and rule, and the
+    # row of keys with the blank row above it.
+    AROUND = 2 + 2 + 2 + 2
 
     def on_resize(self) -> None:
-        """The list as tall as the screen leaves once the description has its lines: a tall
-        terminal shows every row, a short one scrolls the list, never the description away."""
-        short = self.size.height < self.SHORT
-        self.query_one(".dialog").set_class(short, "short")
-        room = int(self.size.height * 0.9) - (self.AROUND_SHORT if short else self.AROUND)
+        """The dialog's rectangle from the terminal alone: the help a fixed number of lines, the
+        list what the screen leaves, scrolling inside it. Moving between rows changes what the
+        help says, never the dialog's size."""
+        height = self.size.height
+        help_lines = 8 if height >= self.TALL else 3 if height >= self.SHORT else 2
+        self.query_one(ContextHelp).reserve(help_lines, full=help_lines == 8)
+        room = int(self.size.height * 0.9) - self.AROUND - help_lines
         self.query_one(OptionList).styles.max_height = max(4, room)
 
     @on(OptionList.OptionHighlighted)
@@ -148,7 +150,7 @@ class Rows(Dialog):
     def explain(self, index: int | None) -> None:
         key = self.keys[index] if index is not None and index < len(self.keys) else None
         said = self.about(key) if key else ""
-        self.query_one("#about", Label).update(said if isinstance(said, Content) else escape(said))
+        self.query_one(ContextHelp).explain(said)
 
     def on_mount(self) -> None:
         self.fill()
@@ -206,6 +208,8 @@ class Rows(Dialog):
             edit_in_editor(path)
 
 
+# The roles in the order they work, wherever they are listed.
+ROLE_ORDER = {"planner": 0, "writer": 1, "reviewer": 2}
 # What a row of k does, in the words of someone who has not read the docs.
 ROLE_ABOUT = {
     "planner": "The planner reads the task and the repository and writes the plan you accept: "
@@ -294,7 +298,9 @@ class Settings(Rows):
         return [
             ("Providers & MCP", "", None),
             ("providers", f"{len(on)} on: {', '.join(on)}" if on else "none yet", "providers"),
-            ("Default roles", "", None),
+            # The flow first, then the roles in the order they work, as under n.
+            ("Default workflow", "", None),
+            ("flow", ORCHESTRATION_MODES[config.orchestration].label, "orchestration"),
             *(
                 (
                     name,
@@ -303,7 +309,7 @@ class Settings(Rows):
                     ),
                     f"role:{name}",
                 )
-                for name in sorted(config.roles)
+                for name in sorted(config.roles, key=lambda n: (ROLE_ORDER.get(n, 9), n))
             ),
             *(
                 []
@@ -316,7 +322,6 @@ class Settings(Rows):
                     )
                 ]
             ),
-            ("flow", ORCHESTRATION_MODES[config.orchestration].label, "orchestration"),
             ("Review copy", "", None),
             (
                 EDITOR_LABEL,
@@ -343,16 +348,15 @@ class Settings(Rows):
             ("config.toml", "open in your editor", "file"),
         ]
 
-    def about(self, key: str) -> str | Content:
+    def about(self, key: str) -> str | look.Explained:
         config = self.app.config
         if key == "orchestration":
-            # The same as under n's Flow, on config.toml's models; in two lines on a short terminal.
+            # The same as under n's Flow, on config.toml's models; the help draws it in two lines
+            # on a short terminal.
             models = {
-                name: actions.choice_label(actions.configured_choice(config, name)).rpartition("/")[2]
-                for name in config.roles
+                name: actions.choice_label(actions.configured_choice(config, name)) for name in config.roles
             }
-            said = look.flow(config.orchestration, models, config.max_rounds)
-            return said.lines(full=self.size.height >= self.SHORT)
+            return look.flow(config.orchestration, models, config.max_rounds)
         if key == "ntfy_events":
             return (
                 "What your phone is told: decisions, when a task needs you (a plan, the work, a "

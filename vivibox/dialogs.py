@@ -28,7 +28,7 @@ from textual.widgets import (
 from . import actions, ide, look, version
 from .browse import FOLDER, Browse, shown_path
 from .verify_ui import AskVerify
-from .widgets import Choose, Dialog, EdgeTextArea
+from .widgets import Choose, ContextHelp, Dialog, EdgeTextArea
 
 NO_PROJECTS = """No projects yet, so your agents are sitting idle.
 
@@ -211,7 +211,7 @@ class NewProject(Dialog):
                     yield Label("", id="prepare", classes="value")
                     yield Button("Change…", compact=True, id="change-prepare", classes="inline")
             yield Label("", id="notes", classes="files wrap")
-            yield Label("", id="about", classes="wrap")
+            yield ContextHelp(3, id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Set up", variant="primary", id="create")
                 yield Button("Cancel", id="cancel")
@@ -454,11 +454,12 @@ class Help(Dialog):
         self.note = note
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(classes="dialog help"):
+        # The keys scroll inside the dialog; the row of keys that closes it stays under them.
+        with Vertical(classes="dialog help"), VerticalScroll(classes="help-body"):
             # The build first, where it is seen without scrolling: a bug report starts with it.
             yield Label(f"vivibox {version.current()}", classes="note")
-            # What o opens with is a section of the help, wrapped: a long command on a line of its
-            # own was cut at the dialog's edge.
+            # What o opens with is a section of the help, wrapped: a long command on a line of
+            # its own was cut at the dialog's edge.
             yield Static(help_text(self.note), id="help")
 
     def key_escape(self) -> None:

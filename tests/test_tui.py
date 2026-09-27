@@ -2145,10 +2145,14 @@ def test_o_opens_with_the_editor_the_repository_points_at(env, monkeypatch):
     assert actions.editor_command(load_config(), project) == "idea {path}"
     assert ide.default_for(project.repo, []) == ""
 
+    from ux import screen_text
+
     async def scenario(app, pilot):
         await pilot.press("question_mark")
         await pilot.pause()
-        note = str(app.screen.query_one("#note", Label).render())
+        app.screen.query_one(".dialog").scroll_end(animate=False)
+        await pilot.pause()
+        note = " ".join(screen_text(app).replace("│", " ").split())
         assert "o opens with code {path}" in note and "k changes it" in note
 
     run(scenario)
@@ -3706,7 +3710,8 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
         await pilot.press("question_mark")
         await pilot.pause()
         assert isinstance(app.screen, dialogs.Help)
-        text = str(app.screen.query_one("#help").render())
+        # What the help shows, key by key: its keys stand in a column of their own.
+        shown = {keys: said for _, found in dialogs.help_sections() for keys, said in found}
         for key, what in (
             ("i", "set up a project"),
             ("k", "settings: providers & MCP"),
@@ -3714,7 +3719,7 @@ def test_the_footer_shows_decisions_first_and_keeps_the_rest_under_help(env):
             ("H", "deleted"),
             ("g", "verif"),
         ):
-            assert key in text and what.lower() in text.lower()
+            assert what.lower() in shown[key].lower(), key
 
     run(scenario)
 

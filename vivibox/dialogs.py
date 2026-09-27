@@ -8,7 +8,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from rich.console import Group
 from rich.markup import escape
+from rich.padding import Padding
+from rich.table import Table
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -402,15 +406,40 @@ HELP = """[b]Your decisions[/b], on the selected task
 """
 
 
-def help_text() -> str:
-    """HELP with its keys in the accent colour and its headings muted, as keys and headings are
-    everywhere else."""
-    lines = []
+def help_sections(note: str = "") -> list[tuple[str, list[tuple[str, str]]]]:
+    """HELP as its sections: a heading and its (keys, what they do), a line that goes on
+    joined to the one before it. note: what o opens with here, "o …", a section of its own."""
+    sections: list[tuple[str, list[tuple[str, str]]]] = []
     for line in HELP.splitlines():
-        if m := re.match(r"^  (\S(?:[^ ]| (?=\S))*)(\s{2,}.*)$", line):
-            line = f"  [b {look.ACCENT}]{m.group(1)}[/]{m.group(2)}"
-        lines.append(line.replace("[b]", f"[b {look.MUTED}]").replace("[/b]", "[/]"))
-    return "\n".join(lines)
+        if not line.strip():
+            continue
+        if not line.startswith(" "):
+            sections.append((line, []))
+        elif m := re.match(r"^  (\S(?:[^ ]| (?=\S))*)\s{2,}(.*)$", line):
+            sections[-1][1].append((m.group(1), m.group(2)))
+        else:
+            keys, said = sections[-1][1][-1]
+            sections[-1][1][-1] = (keys, f"{said} {line.strip()}")
+    if note:
+        key, _, said = note.partition(" ")
+        sections.append(("[b]On this machine[/b]", [(key, said)]))
+    return sections
+
+
+def help_text(note: str = "") -> Group:
+    """The keys in the accent colour in a column of their own, what they do beside them and
+    wrapped under themselves, the headings muted, as keys and headings are everywhere else."""
+    parts = []
+    for i, (heading, rows) in enumerate(help_sections(note)):
+        heading = heading.replace("[b]", f"[b {look.MUTED}]").replace("[/b]", "[/]")
+        parts.append(Text.from_markup(("\n" if i else "") + heading))
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(no_wrap=True, min_width=5)
+        grid.add_column()
+        for keys, said in rows:
+            grid.add_row(Text(keys, style=f"bold {look.ACCENT}"), Text(said))
+        parts.append(Padding(grid, (0, 0, 0, 2)))
+    return Group(*parts)
 
 
 class Help(Dialog):
@@ -427,9 +456,9 @@ class Help(Dialog):
         with VerticalScroll(classes="dialog help"):
             # The build first, where it is seen without scrolling: a bug report starts with it.
             yield Label(f"vivibox {version.current()}", classes="note")
-            yield Static(help_text(), id="help")
-            if self.note:
-                yield Label(self.note, id="note", classes="note")
+            # What o opens with is a section of the help, wrapped: a long command on a line of its
+            # own was cut at the dialog's edge.
+            yield Static(help_text(self.note), id="help")
 
     def key_escape(self) -> None:
         self.dismiss()

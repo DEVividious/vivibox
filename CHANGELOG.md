@@ -123,6 +123,11 @@ First public version.
 
 ### Fixed
 
+- `?` showed what `o` opens with on a line of its own that a long command (JetBrains Toolbox's
+  `~/.local/share/.../idea`) ran off the dialog's edge; it is the `o` line of an "On this machine"
+  section, your home as `~`, and every line of the help wraps under its own words, not under
+  the keys.
+
 - The orchestration mode under `k` reads in lines: its name, its flow on a line of its own, when
   it fits, what it costs, and the symbols last.
 - The new task form fits 80×24 with a reviewer too: Orchestration and Rounds were a scroll away.

@@ -693,15 +693,16 @@ class Vivibox(
         self.push_screen(Help(self.editor_note()))
 
     def editor_note(self) -> str:
-        """What o opens with on this machine: chosen, or the first editor found."""
+        """What o opens with on this machine: chosen, or the first editor found; your home as ~."""
+        home = os.path.expanduser("~")
         if self.config.ide:
-            return f"o opens with {self.config.ide} (config.toml; k changes it)."
+            return f"o opens with {self.config.ide.replace(home, '~')} (config.toml; k changes it)."
         found = ide.candidates()
         if not found:
             return "o has no editor to open with: none found here; k sets one."
         return (
-            f"o opens with {found[0].command}, the first editor found here, or what .idea or .vscode "
-            "point at (k changes it)."
+            f"o opens with {found[0].command.replace(home, '~')}, the first editor found here, or what "
+            ".idea or .vscode point at (k changes it)."
         )
 
     def action_remove(self) -> None:

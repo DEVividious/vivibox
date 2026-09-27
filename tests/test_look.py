@@ -301,3 +301,33 @@ def test_the_import_and_the_manage_screens_are_forms_saved_with_ctrl_s(env, tmp_
         assert not isinstance(app.screen, providers_ui.ManageItems)
 
     run(scenario)
+
+
+def test_the_help_says_whole_what_o_opens_with_on_this_machine(env, monkeypatch):
+    """A long editor command (JetBrains Toolbox's script under ~/.local/share) was cut at the
+    dialog's edge, on a line of its own under the keys. It is the o line of a section of the help,
+    wrapped, the home folder as ~."""
+    import os
+
+    from vivibox import ide
+
+    home = os.path.expanduser("~")
+    command = f"{home}/.local/share/JetBrains/Toolbox/scripts/idea"
+    monkeypatch.setattr(ide, "candidates", lambda: [ide.Editor("IntelliJ IDEA", command)])
+
+    async def scenario(app, pilot):
+        await pilot.press("question_mark")
+        await pilot.pause()
+        app.screen.query_one(".dialog").scroll_end(animate=False)  # the section is the help's last
+        await pilot.pause()
+        shown = " ".join(screen_text(app).replace("│", " ").split())
+        assert "On this machine" in shown
+        assert "o opens with ~/.local/share/JetBrains/Toolbox/scripts/idea, the first editor found" in shown
+        assert "(k changes it)" in shown, "the note ends on the screen, not at the dialog's edge"
+        lines = screen_text(app).splitlines()
+        key = next(line for line in lines if "opens with" in line)
+        wrapped = next(line for line in lines if "first editor" in line and "opens with" not in line)
+        indent = lambda line: len(line) - len(line.lstrip("│ "))  # noqa: E731
+        assert indent(wrapped) == key.index("opens with"), "a wrapped line goes on under its words"
+
+    run(scenario, size=(80, 24))

@@ -131,11 +131,14 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
     found: dict[str, Agent] = {}
     for role in orchestration.ROLES:
         agent = mode.agents[role]
-        if agent not in config.roles:  # no reviewer configured: nobody reviews
+        if agent in found:
             continue
-        if agent not in found:
+        if agent in config.roles:
             chosen = role_of(task, agent, config)
             found[agent] = Agent(mode.brief_of(agent), chosen.model or "you, in your chat")
+        elif agent == "reviewer" and mode.separate_reviewer:
+            # No [roles.reviewer]: the mode's reviewer reads on the writer's model (ADR-0029).
+            found[agent] = Agent("reviewer", f"{role_of(task, 'writer', config).model} (the writer's)")
     for event in task.events():
         if event["type"] != "turn":
             continue

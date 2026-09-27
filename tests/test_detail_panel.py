@@ -128,3 +128,15 @@ def test_the_plan_under_review_keeps_its_criteria_under_smaller_headings(env):
     shown = detail(task, task.read_state(), 3, running=True)
     assert "**Acceptance criteria**" in shown and "- [ ] it works" in shown
     assert "\n# " not in shown and "\n## " not in shown
+
+
+def test_a_reviewer_without_a_role_of_its_own_runs_on_the_writers_model(env):
+    """The default mode reviews without [roles.reviewer], on the writer's model (ADR-0029): the
+    table said "Reviewer | -" after a review, and nothing before one."""
+    task = implementing()
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "| Reviewer | m (the writer's) | 0 | $0.00 |" in shown, "listed before its first turn"
+    turns(task, ("review", "reviewer", 0.02))
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "| Reviewer | m (the writer's) | 1 | $0.02 |" in shown
+    assert "| Reviewer | - |" not in shown

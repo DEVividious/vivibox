@@ -40,6 +40,7 @@ from .sections import (  # noqa: F401 (criteria and checklist: the list reads th
     gate_failed,
     last_gate,
     plan_section,
+    plan_text,
     reviewers_notes,
     roles_section,
 )
@@ -620,10 +621,10 @@ def detail(
             "",
             "#### The plan to fill in",
             "",
-            plan_body(read(task.plan_path)),
+            plan_text(read(task.plan_path)),
         ]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
-        body = [*plans_verify(task, st), plan_body(read(task.plan_path))]
+        body = [*plans_verify(task, st), plan_text(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_COMMAND:
         body = command_to_review(task)
     elif st.state is State.CHECKPOINT_FINAL:

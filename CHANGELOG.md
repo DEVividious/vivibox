@@ -93,7 +93,9 @@ First public version.
 - The details panel (`d`) has one layout in every state: the header, a line with the project,
   the times and the cost so far, `Next:`, what the state asks of you, then the newest review,
   the acceptance criteria, a Roles table (what each agent runs on, its turns and its cost) and
-  the plan. The review stays in the panel while the writer fixes its notes.
+  the plan. The review stays in the panel while the writer fixes its notes. Headings of a
+  review or a plan no longer stand larger than the panel's own, and the accepted plan leaves its
+  criteria to their section, where they are ticked.
 
 ### Fixed
 

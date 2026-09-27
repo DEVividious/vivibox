@@ -180,7 +180,9 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
   sections in the same order, each only when it has something: the newest review
   (`#### Review n: …`), `#### Acceptance criteria n/N`, `#### Roles` (a row per agent: what it
   runs on, its turns and its cost; roles one agent plays share a row) and `#### The plan`. A
-  plan under review is the body itself, not a section below it.
+  plan under review is the body itself, not a section below it. A review's or a plan's own
+  headings are bold lines, never larger than the section they are in; the accepted plan leaves
+  its criteria to their section.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

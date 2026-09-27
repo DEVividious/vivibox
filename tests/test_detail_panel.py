@@ -96,3 +96,35 @@ def test_the_criteria_of_an_accepted_plan_are_one_section(env):
     shown = detail(task, task.read_state(), 3, running=True)
     assert "#### Acceptance criteria 1/2" in shown and "- ☑ it works" in shown
     assert "As the agent reports them." in shown
+
+
+def test_the_reviews_own_headings_stay_under_its_section(env):
+    """A review is written with a title and `## Blocking`; in the panel they would stand larger
+    than the section they are in."""
+    task = implementing()
+    reviewing.keep(task, 1, "# Review 1\n\n## Blocking\n\n- [ ] a.py:1 — wrong\n\n## Not blocking\n")
+    task.set_reviews(1)
+    shown = detail(task, task.read_state(), 3, running=True)
+    section = shown[shown.index("#### Review 1") :]
+    assert "**Blocking**" in section and "**Not blocking**" in section
+    assert "\n## " not in section.split("#### Acceptance criteria")[0]
+    assert "# Review 1" not in section.replace("#### Review 1", ""), "the heading says it already"
+
+
+def test_the_accepted_plan_leaves_its_criteria_to_their_section(env):
+    task = implementing()
+    shown = detail(task, task.read_state(), 3, running=True)
+    plan = shown[shown.index("#### The plan") :]
+    assert "**Goal**" in plan and "\n# " not in plan and "\n## " not in plan, "headings under the section's"
+    assert "it works" not in plan, "the criteria are one section, with their ticks"
+    assert shown.count("it works") == 1
+
+
+def test_the_plan_under_review_keeps_its_criteria_under_smaller_headings(env):
+    from test_tui import at_plan_checkpoint, new_task
+
+    task = new_task()
+    at_plan_checkpoint(task)
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "**Acceptance criteria**" in shown and "- [ ] it works" in shown
+    assert "\n# " not in shown and "\n## " not in shown

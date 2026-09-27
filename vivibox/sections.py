@@ -6,6 +6,7 @@ what the state itself asks of you.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from . import gate, orchestration, reviewing, ui
@@ -81,11 +82,15 @@ def reviewers_notes(task: Task) -> list[str]:
     text = path.read_text()
     review = reviewing.parse_review(text)
     n = reviewing.NUMBERED.match(path.name).group(1)
+    # Its title is the section's; its own headings go under it.
+    kept = "\n".join(
+        line for line in text.rstrip().splitlines() if not re.fullmatch(r"#+\s*Review\s+\d+\s*", line)
+    )
     return [
         "",
         f"#### Review {n}: {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",
         "",
-        text.rstrip(),
+        demoted(kept.strip()),
     ]
 
 
@@ -169,7 +174,23 @@ def roles_section(task: Task, st: TaskState) -> list[str]:
     return lines
 
 
+def demoted(text: str) -> str:
+    """Markdown whose headings would stand larger than the panel's own: bold lines instead."""
+    return "\n".join(
+        f"**{line.lstrip('#').strip()}**" if line.startswith("#") else line for line in text.splitlines()
+    )
+
+
+def plan_text(text: str, criteria: bool = True) -> str:
+    """A plan as the panel shows it: the part that concerns you, its headings under the panel's,
+    and, once the criteria have a section of their own, without them."""
+    shown = plan_body(text)
+    if not criteria:
+        shown = re.sub(r"(?ms)^#+\s*Acceptance criteria\s*$.*?(?=^#|\Z)", "", shown).strip()
+    return demoted(shown)
+
+
 def plan_section(task: Task) -> list[str]:
     """The accepted plan, last: what the task is held to, once it is no longer the decision."""
     text = read(task.meta / gate.ACCEPTED_PLAN)
-    return ["", "#### The plan", "", plan_body(text)] if text else []
+    return ["", "#### The plan", "", plan_text(text, criteria=False)] if text else []

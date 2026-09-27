@@ -214,7 +214,7 @@ class NewTask(Dialog):
                         )  # fmt: skip
                     suggestions = OptionList(id="suggestions")
                     suggestions.display = False
-                    with Horizontal(classes="row", id="task-row"):
+                    with Horizontal(classes="row text-row", id="task-row"):
                         yield Label("Goal", classes="key")
                         yield DescriptionArea(
                             suggestions, Path.cwd(), id="goal", classes="description",

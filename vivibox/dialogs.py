@@ -488,13 +488,14 @@ class CommitWork(Dialog):
                 f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:", classes="wrap"
             )
             yield Label(self.done.status.rstrip() or "(no changes)", classes="files")
-            with Horizontal(classes="row"):
+            # A row apart from the files above it: the form starts here.
+            with Horizontal(classes="row spaced"):
                 yield Label("Branch", classes="key")
                 yield Select(
                     choices, value=actions.default_branch(self.done) if choices else Select.BLANK,
                     allow_blank=not choices, compact=True, id="branch",
                 )  # fmt: skip
-            with Horizontal(classes="row files"):
+            with Horizontal(classes="row spaced text-row"):
                 yield Label("Message", classes="key")
                 yield EdgeTextArea(self.done.message, id="message")
             with Horizontal(classes="buttons"):

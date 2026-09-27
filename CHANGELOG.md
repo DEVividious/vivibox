@@ -143,6 +143,10 @@ First public version.
 
 ### Fixed
 
+- The commit dialog: Message beside the first line of its text, not above it, as Goal under `n`;
+  Branch a row apart from the files above it. The README's pictures show the view as it is now,
+  a frame of Flow's help under `n` included.
+
 - `?` showed what `o` opens with on a line of its own that a long command (JetBrains Toolbox's
   `~/.local/share/.../idea`) ran off the dialog's edge; it is the `o` line of an "On this machine"
   section, your home as `~`, and every line of the help wraps under its own words, not under

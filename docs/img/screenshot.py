@@ -353,8 +353,9 @@ async def flow(moving: dict) -> None:
         app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(row_id))
 
     app = tui.Vivibox()
-    # Wide enough for every column, the reviewer's included: the picture shows the whole list.
-    async with app.run_test(size=(150, 36)) as pilot:
+    # Wide enough for every column, the reviewer's included: the picture shows the whole list; tall
+    # enough for the new task form to show all of the flow's help.
+    async with app.run_test(size=(150, 40)) as pilot:
         await pilot.pause(0.5)
         await settle()
         health = next(st.id for _, st in app.pairs if "health" in st.goal)
@@ -376,6 +377,9 @@ async def flow(moving: dict) -> None:
         field.text = GOAL
         await pilot.pause(0.2)
         shot(1.2)
+        app.screen.query_one("#orchestration").focus()
+        await pilot.pause(0.3)
+        shot(3.0)  # Flow: how the agents share the task, the models they run on, under the fields
         await pilot.press("escape")
         await pilot.pause(0.3)
 

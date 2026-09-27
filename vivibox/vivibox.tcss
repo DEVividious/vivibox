@@ -137,8 +137,8 @@ ToggleButton.-on > .toggle--button { color: $success; }
 .form .row.-focused > .key { color: $accent; text-style: bold; }
 .form .row > Select, .form .row > Input, .form .row > Button.field { border-left: blank; }
 .form .row > Select:focus, .form .row > Input:focus, .form .row > Button.field:focus { border-left: outer $accent; }
-/* The goal's label on its first line of text, inside the frame. */
-.form #task-row > .key { padding-top: 1; }
+/* A framed text's label on its first line of text, inside the frame (Goal, a commit's Message). */
+.form .text-row > .key { padding-top: 1; }
 .form .hint { width: 1fr; color: $text-muted; padding: 0 0 0 2; }
 .form.tight .hint-row { display: none; }
 .form .row > Select, .form .row > TextArea, .form .row > Input { width: 1fr; }

@@ -908,7 +908,13 @@ def test_a_package_json_without_a_lockfile_gets_no_install(task):
 
 @pytest.mark.parametrize(
     "said",
-    ["/bin/sh: 1: tsc: not found", "bash: vitest: command not found", "sh: mvn: not found"],
+    [
+        "/bin/sh: 1: tsc: not found",
+        "bash: vitest: command not found",
+        "sh: mvn: not found",
+        # A tool the agent installed with mise in its own home: the gate's home is fresh.
+        "mise ERROR No version is set for shim: bun",
+    ],
 )
 def test_a_tool_not_found_on_the_fresh_clone_is_a_failure_of_the_environment(task, said):
     """Nothing the agent could commit brings a tool the fresh clone lacks: the command needs an

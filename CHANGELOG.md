@@ -154,6 +154,9 @@ First public version.
   line was a floor nothing enforced, and cobra's `go 1.15` got a Go its tests do not build on.
 - A build's output that git ignores (`dist/package.json`) no longer stops a task for approval
   as a risky file: the review copy is made from the commits, and they never carry it.
+- A tool the gate's fresh home has no version of (`mise ERROR No version is set for shim: bun`,
+  after the agent installed bun in its own) is a failure of the environment: the task waits
+  for you instead of spending the writer's attempt.
 
 - A Rust project's build files are risky files, their changes waiting for your approval like
   `pom.xml`'s: `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain(.toml)`.

@@ -120,6 +120,12 @@ def ignored(repo: Path) -> set[str]:
     return set(filter(None, listed.stdout.split("\0"))) if listed.returncode == 0 else set()
 
 
+def _under(path: str, left_out: set[str]) -> bool:
+    """Whether path is one of the left-out paths, or in a left-out folder."""
+    parts = path.split("/")
+    return path in left_out or any("/".join(parts[:i]) + "/" in left_out for i in range(1, len(parts)))
+
+
 def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
     """Risky files in the working tree, with a digest of each; nested git repositories too. What
     git ignores and does not track is left out: it never reaches your checkout."""
@@ -191,6 +197,10 @@ class Approvals:
 
     def changes(self) -> list[Change]:
         before, now = self.approved(), scan(self.repo, self.extra)
+        # Approved before git ignored it (a build's output, approved before those were left out):
+        # still there, and out of the scan now, so not a removal to approve.
+        left_out = ignored(self.repo)
+        before = {p: d for p, d in before.items() if p in now or not _under(p, left_out)}
         result = [Change(p, "added") for p in now if p not in before]
         result += [Change(p, "changed") for p in now if p in before and now[p] != before[p]]
         result += [Change(p, "removed") for p in before if p not in now]

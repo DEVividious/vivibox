@@ -193,7 +193,9 @@ ENVIRONMENT = re.compile(
     r"|Temporary failure in name resolution|network is unreachable"
     # A tool the fresh clone lacks: nothing the agent commits brings it; an install in front of
     # the command does, or the image.
-    r"|(?:^|\b)(?:sh|bash)(?:: \d+)?: [\w./-]+: (?:command )?not found$",
+    r"|(?:^|\b)(?:sh|bash)(?:: \d+)?: [\w./-]+: (?:command )?not found$"
+    # One the agent installed with mise in its own home, which the gate's fresh home does not have.
+    r"|No version is set for shim: [\w.-]+",
     re.IGNORECASE,
 )
 # Words no test prints on purpose, matched anywhere in the output: a build tool that runs many

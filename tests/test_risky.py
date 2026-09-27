@@ -194,3 +194,19 @@ def test_bun_files_are_risky(repo):
     for name in ("bun.lock", "web/bun.lockb", "bunfig.toml"):
         write(repo, name, "")
     assert {"bun.lock", "web/bun.lockb", "bunfig.toml"} <= set(scan(repo))
+
+
+def test_an_approved_file_git_now_ignores_is_not_a_removal(tmp_path):
+    """A task that approved a build's output before it was left out (zustand's dist/package.json)
+    would otherwise wait for an approval of its removal, which nothing can give."""
+    root = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    write(root, "package.json", "{}")
+    write(root, "dist/package.json", "{}")
+    approvals = Approvals(tmp_path / "meta", root)
+    approvals.approve()
+    write(root, ".gitignore", "dist/\n")
+    assert approvals.changes() == []
+    (root / "dist" / "package.json").unlink()
+    (root / "package.json").unlink()
+    assert [c.path for c in approvals.changes()] == ["package.json"]

@@ -225,3 +225,57 @@ def test_the_kernel_says_whether_vivibox_can_run(release, shiftfs, runs):
     assert (result.returncode == 0) is runs
     said = result.stdout if runs else result.stderr
     assert f"kernel {release}: vivibox {'can' if runs else 'cannot'} run" in said
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_setup_checks_git_like_other_packages(tmp_path, installed):
+    result, calls = run_setup_without_host_changes(tmp_path, check=True, installed=installed)
+    assert result.returncode == 1, "the fake host has other missing setup steps"
+    assert ("missing  packages: git" in result.stdout) is (not installed)
+    if installed:
+        assert "ok       packages: git tmux" in result.stdout
+    assert "apt-get" not in calls, "--check never installs packages"
+
+
+def test_setup_installs_missing_git_after_confirmation(tmp_path):
+    result, calls = run_setup_without_host_changes(tmp_path, check=False, installed=False)
+    assert result.returncode == 31, "the fake sudo stops after recording the package installation"
+    assert "apt-get install -y -q git" in calls
+
+
+def run_setup_without_host_changes(tmp_path, *, check, installed):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    calls = tmp_path / "sudo-calls"
+    scripts = {
+        "docker": "echo sysbox-runc",
+        "ip": "exit 0",
+        "modinfo": "exit 0",
+        "dpkg-query": (
+            "for arg do\n"
+            '  if [ "$arg" = git ] && [ "$TEST_GIT_INSTALLED" = no ]; then exit 1; fi\n'
+            'done\necho "install ok installed"'
+        ),
+        "sudo": 'echo "$*" >> "$TEST_SUDO_CALLS"\n[ "$1" != apt-get ] || exit 31',
+        "uv": 'echo "$TEST_TOOL_DIR"',
+    }
+    for name, body in scripts.items():
+        path = fake / name
+        path.write_text("#!/bin/sh\n" + body + "\n")
+        path.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "VIVIBOX_TASKS_DIR": str(tmp_path / "tasks"),
+        "TEST_GIT_INSTALLED": "yes" if installed else "no",
+        "TEST_SUDO_CALLS": str(calls),
+        "TEST_TOOL_DIR": str(tmp_path / "tools"),
+    }
+    result = subprocess.run(
+        ["bash", str(HOST / "setup.sh"), *(["--check"] if check else [])],
+        input="y\n",
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return result, calls.read_text() if calls.exists() else ""

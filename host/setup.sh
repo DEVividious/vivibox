@@ -9,7 +9,7 @@
 # It first checks the kernel can run Sysbox, and stops if it cannot.
 #
 # What it sets up:
-#   - packages: tmux (agent sessions), jq, libnotify-bin (desktop notifications), curl;
+#   - packages: git, tmux (agent sessions), jq, libnotify-bin (desktop notifications), curl;
 #   - Docker networks moved off the ranges Docker uses inside Sysbox containers (restarts Docker);
 #   - Sysbox CE, the runtime for the per-task Docker sidecar;
 #   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev;
@@ -22,7 +22,7 @@ TASKS_DIR=${VIVIBOX_TASKS_DIR:-/srv/vivibox}
 HELPER=/usr/local/libexec/vivibox-netns
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
-PACKAGES=(tmux jq libnotify-bin curl)
+PACKAGES=(git tmux jq libnotify-bin curl)
 # Ranges for the host daemon's own networks: the bridge first, then the pool it cuts networks
 # from. The first two that nothing on this machine routes (a VPN, a LAN, a Docker network) are
 # taken; VIVIBOX_DOCKER_RANGES="<bridge> <pool>" chooses them instead. Not 172.17.0.0/16: Docker

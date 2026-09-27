@@ -79,7 +79,9 @@ RUN groupadd -o -g "${GID}" agent \
 # until asked, and whatever reads the jar there, the next module or a packaging plugin, fails.
 # uv keeps its downloads, and the Pythons it fetches, in a shared cache too; it copies from there,
 # the cache being another volume than the clone. Python writes no __pycache__ into the clone,
-# where an untracked folder stops the gate's build.
+# where an untracked folder stops the gate's build. pip installs only into a virtual environment:
+# mise's Python is in the cache every task shares, and a package installed there by one task
+# was on every other task's import path, the gate's too.
 ENV HOME=/config \
     MAVEN_CONFIG= \
     MAVEN_ARGS="-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true -Dmaven.build.cache.lazyRestore=false" \
@@ -94,6 +96,7 @@ ENV HOME=/config \
     UV_PYTHON_INSTALL_DIR=/cache/uv/python \
     UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1 \
+    PIP_REQUIRE_VIRTUALENV=1 \
     PATH=/cache/mise/shims:$PATH
 
 USER agent

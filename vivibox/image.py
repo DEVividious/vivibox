@@ -118,6 +118,8 @@ def checks(uid: int, gid: int) -> list[Check]:
             "ok",
         ),
         Check("Gradle uses the shared cache", "echo $GRADLE_USER_HOME", "/cache/gradle"),
+        # mise installs Python on first use, so this image has none to ask yet: the setting it is.
+        Check("pip keeps out of the shared Python", "echo pip=$PIP_REQUIRE_VIRTUALENV", "pip=1"),
         Check("Node and npm", "node -v && npm -v", "v24."),
         Check("corepack", "corepack --version", "."),
         Check("git", "git --version", "git version"),

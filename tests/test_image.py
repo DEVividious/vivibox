@@ -142,3 +142,13 @@ def test_python_gets_a_shared_uv_cache_and_writes_no_bytecode_into_the_clone():
     assert pod.CACHES["uv"] == "/cache/uv"
     writable = next(c for c in image.checks(1000, 1000) if c.name == "caches are writable")
     assert " uv;" in writable.command
+
+
+def test_pip_installs_only_into_a_virtual_environment():
+    """mise's Python lives in the cache every task shares: a planner's `pip install -e .` put one
+    task's clone on every other task's import path, and the gate's."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    assert "PIP_REQUIRE_VIRTUALENV=1" in text
+    assert any("PIP_REQUIRE_VIRTUALENV" in check.command for check in image.checks(1000, 1000))

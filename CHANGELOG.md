@@ -74,6 +74,8 @@ First public version.
 
 ### Fixed
 
+- `pip install` in a pod outside a virtual environment is refused: it installed into mise's
+  Python, shared by every task and the gate, and put one task's clone on the others' import path.
 - A Python environment in the clone (`uv sync`'s `.venv`, `.tox`) no longer stops a task for risky
   files: it is skipped while git tracks nothing in it.
 - Python in a pod writes no `__pycache__` folders, which stopped the gate as uncommitted files.

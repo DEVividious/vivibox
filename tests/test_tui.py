@@ -52,14 +52,14 @@ def at_plan_checkpoint(task):
     task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works"))
 
 
-def run(scenario, size=(140, 40)):
+def run(scenario, size=(140, 40), *, notifications=False):
     """A scenario on the view, once the view's own start-up work is over: the thread that reads
     the models and the provider catalog at mount would otherwise finish during the scenario and
     overwrite what it set (app.available, app.catalog), as it did on a slow CI runner."""
 
     async def go():
         app = Vivibox()
-        async with app.run_test(size=size) as pilot:
+        async with app.run_test(size=size, notifications=notifications) as pilot:
             await app.workers.wait_for_complete()
             await pilot.pause()
             await scenario(app, pilot)
@@ -4530,3 +4530,61 @@ def test_the_header_says_first_what_would_keep_every_task_from_starting(env, mon
         assert styles and all("red" in style and "bold" in style for style in styles), shown.spans
 
     run(scenario)
+
+
+@pytest.mark.parametrize("missing", ["name", "email", "both"])
+def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeypatch, missing):
+    from ux import screen_text
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for key in ("name", "email") if missing == "both" else (missing,):
+        subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert not isinstance(app.screen, dialogs.NewTask)
+        said = screen_text(app)
+        assert "Git identity is missing" in said
+        assert "git config --global user.name" in said
+        assert "git config --global user.email" in said
+        assert "without --global" in said
+        assert not load_config().tasks_dir.exists()
+
+    run(scenario, notifications=True)
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_n_accepts_a_complete_local_or_global_git_identity(env, monkeypatch, local):
+    if local:
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    else:
+        for key in ("name", "email"):
+            subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, dialogs.NewTask)
+
+    run(scenario, notifications=True)
+
+
+def test_new_task_rechecks_identity_if_it_disappears_while_form_is_open(env, monkeypatch):
+    from ux import screen_text
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, dialogs.NewTask)
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+        subprocess.run(["git", "config", "--unset", "user.email"], cwd=env / "repo", check=True)
+        app.screen.query_one("#goal", TextArea).load_text("Do something")
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not load_config().tasks_dir.exists()
+        assert "Git identity is missing" in screen_text(app)
+
+    run(scenario, notifications=True)

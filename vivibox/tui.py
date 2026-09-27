@@ -18,13 +18,12 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.content import Content
-from textual.widgets import DataTable, Header, Markdown, Select, Static
+from textual.widgets import DataTable, Header, Markdown, Static
 
 from . import actions, code, ide, probe, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
-    NEW_PROJECT,
     NO_PROJECTS,
     ChooseSession,
     CommitWork,
@@ -36,11 +35,11 @@ from .dialogs import (
 from .keys_box import BoxKeys
 from .keys_demo import DemoKeys
 from .keys_models import ModelKeys
+from .keys_new import NewKeys
 from .keys_plan import PlanKeys
 from .keys_project import ProjectKeys
 from .keys_run import RunKeys
 from .keys_work import WorkKeys
-from .newtask import NewTask
 from .panel import (
     CODE_CHANGED,
     CODE_CHECK_SECONDS,
@@ -74,7 +73,9 @@ from .widgets import Confirm
 DOCKER_EVERY = 30.0
 
 
-class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App):
+class Vivibox(
+    TaskTable, BoxKeys, DemoKeys, ModelKeys, NewKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App
+):
     TITLE = "vivibox"
     # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
     ENABLE_COMMAND_PALETTE = False
@@ -683,59 +684,6 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             f"o opens with {found[0].command}, the first editor found here, or what .idea or .vscode "
             "point at (k changes it)."
         )
-
-    def action_new(self, preselect: str = "") -> None:
-        if not projects():
-            self.notify("A task needs a project first; press i to add one.")
-            return
-        if actions.needs_provider(load_config()):
-            self.notify("A task needs a provider first; press k to add one.")
-            return
-        preselect = preselect or self.selected_project()
-
-        def create(form: dict) -> None:
-            if form.get("project") == NEW_PROJECT:
-                self.new_project()
-                return
-            if not form:
-                return
-            if not form["goal"] or form["project"] is Select.NULL:
-                self.notify("A task needs a project and a description.", severity="error")
-                return
-            self.notify(f"Creating a task in {form['project']}…")
-            self.create(form)
-
-        self.push_screen(NewTask(preselect, self.available), create)
-
-    @work(thread=True)
-    def create(self, form: dict) -> None:
-        try:
-            options = ("roles", "orchestration", "max_rounds", "no_build", "base_ref")
-            task = actions.create(
-                form["project"],
-                form["goal"],
-                auto=form["auto"],
-                kind=form["kind"],
-                **{name: form[name] for name in options if name in form},
-            )
-            self.call_from_thread(self.reload)
-            for note in actions.context_notes(task):
-                self.call_from_thread(self.notify, f"{task.id}: {note}.", severity="warning", timeout=12)
-            if form["draft"]:
-                self.call_from_thread(
-                    self.notify, f"Created {task.id}; edit its plan with e, start it with s."
-                )
-                return
-            step = lambda doing: self.call_from_thread(self.busy_with, task.id, doing)  # noqa: E731
-            step("starting…")
-            try:
-                model = actions.start(task.id, on_step=step)
-            finally:
-                step("")
-            self.call_from_thread(self.notify, f"{task.id} started ({model}).")
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        self.call_from_thread(self.reload)
 
     def action_remove(self) -> None:
         if entry := self.finished_entry(self.selected_id()):

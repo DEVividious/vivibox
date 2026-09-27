@@ -136,6 +136,11 @@ starts the pod when needed.
 
 ## 5. Errors
 
+Before opening the new task form, `n` checks the project's Git identity. Missing `user.name`
+or `user.email` keeps the list open and shows a bottom-right error toast with the two
+`git config --global` commands, and the option to run them without `--global` in the project.
+The chosen project's identity is checked again before creating the task.
+
 Every error has three parts, in this order:
 
 1. What happened, in the person's terms ("could not start").

@@ -63,7 +63,12 @@ def identity(source: Path) -> Identity:
     name = git("config", "user.name", cwd=source, check=False).stdout.strip()
     email = git("config", "user.email", cwd=source, check=False).stdout.strip()
     if not name or not email:
-        raise RepoError(f"set git user.name and user.email for {source}")
+        raise RepoError(
+            "Git identity is missing. Set your name and email:\n"
+            'git config --global user.name "Your Name"\n'
+            'git config --global user.email "you@example.com"\n'
+            f"Or run these without --global in {source}."
+        )
     return Identity(name, email)
 
 

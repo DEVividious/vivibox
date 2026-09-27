@@ -466,6 +466,22 @@ def test_a_draft_the_gate_would_refuse_gets_one_repair_turn(task):
     assert len(harness.prompts) == 2 and "placeholder" in harness.prompts[1], "told what is wrong"
 
 
+def test_the_repair_turn_says_why_in_the_timeline(task):
+    """A second planner turn of a few seconds, with nothing to say why, was in most tasks of the
+    language polygon: the draft had something acceptance would refuse. The turn now says what."""
+    from vivibox import timeline
+
+    placeholder = DRAFT.replace("health endpoint returns 200", gate.PLACEHOLDER)
+    write_placeholder = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(placeholder)  # noqa: E731
+    sup, _ = make(task, FakeHarness(task, [write_placeholder, write_draft]))
+    sup.step()
+    turns = [e for e in task.events() if e["type"] == "turn"]
+    assert "kind" not in turns[0]["data"], "the first turn is the planning itself"
+    assert turns[1]["data"]["kind"].startswith("plan repair: ") and "placeholder" in turns[1]["data"]["kind"]
+    shown = timeline.write(task).read_text()
+    assert "planner (plan repair: the plan still carries the template's placeholder criterion" in shown
+
+
 def test_the_repair_turn_goes_on_in_the_planners_own_session(task):
     """opencode makes the session ahead of the turn, and the supervisor keeps it in the task's
     state; the repair turn read the state from before the first turn, saw no session, and made a
@@ -629,6 +645,23 @@ def test_the_writer_is_asked_for_the_command_only_when_the_project_has_none(task
     assert "10 minutes" in first_implement_prompt([], verify_timeout=600)
     assert "verify-proposal" not in first_implement_prompt(["npm test"])
     assert "verify-proposal" not in first_implement_prompt([], "verify = false")
+
+
+def test_the_writer_asked_for_a_command_is_told_what_the_build_files_name(task):
+    """The language polygon: init suggested the project's own test command, the writer, who never
+    saw it, proposed a plainer one. What the build files and the pipeline name goes with the ask."""
+    t = create_task(task.root.parent / "named", "demo", "Goal", TEMPLATE)
+    t.plan_path.write_text(DRAFT)
+    t.transition(State.CHECKPOINT_PLAN)
+    supervisor.accept_plan(t, "plan accepted")
+    t.repo.mkdir(parents=True, exist_ok=True)
+    (t.repo / "go.mod").write_text("module example.com/x\n\ngo 1.21\n")
+    harness = FakeHarness(t)
+    ports = supervisor.Ports(run_gate=lambda _: gate_result(), risky_changes=lambda: [])
+    supervisor.Supervisor(t, harness, ports, max_rounds=1, project_verify=[]).step()
+    asked = harness.prompts[0]
+    assert "`go test ./...` (go.mod)" in asked, asked
+    assert asked.index("go test") < asked.index(prompts.IMPLEMENT_PROMPT), "with the ask, before the work"
 
 
 def test_a_turn_leaves_its_running_cost_with_the_task_while_it_runs(task):

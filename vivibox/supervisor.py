@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import brief, feedback, gate, manual, orchestration, proposal, reviewing, transcript, ui
+from . import init as project_init
 from .config import DEFAULT_VERIFY_TIMEOUT, Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
@@ -26,6 +27,7 @@ from .prompts import (
     PLAN_PROMPT,
     PLAN_REPAIR_PROMPT,
     PREPARED_PREFIX,
+    PROPOSE_FOUND,
     PROPOSE_PREFIX,
     REVIEW_AGAIN_PREFIX,
     REVIEW_FIX_PROMPT,
@@ -414,8 +416,10 @@ class Supervisor:
         plan, problem = self._read_draft()
         if problem:
             # One turn to fix what acceptance would refuse anyway (the placeholder left in, no
-            # criteria, no verify command): cheaper than your reply, and once, not a loop.
-            if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem)) is None:
+            # criteria, no verify command): cheaper than your reply, and once, not a loop. What
+            # was wrong goes with the turn, so the timeline says why the planner took a second.
+            repair = f"plan repair: {problem[:120]}"
+            if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem), kind=repair) is None:
                 return
             if q := question(self.task):
                 self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
@@ -524,6 +528,12 @@ class Supervisor:
         if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
+            # What the build files and the pipeline name, as init shows it: the writer, who never
+            # saw init's notes, proposed a plainer command than the project's own.
+            named = project_init.candidates(self.task.repo) if self.task.repo.is_dir() else []
+            if named:
+                listed = "; ".join(f"`{command}` ({source})" for command, source in named)
+                prompt = PROPOSE_FOUND.format(commands=listed) + prompt
             prompt = PROPOSE_PREFIX.format(minutes=max(1, round(self.verify_timeout / 60))) + prompt
         # A self-review resumed after a stop is one on the record too.
         resumed = prompt == self._self_review_prompt(st)

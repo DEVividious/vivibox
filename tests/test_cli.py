@@ -321,6 +321,40 @@ def test_rm_asks_first(env, monkeypatch):
     assert find_task(load_config().tasks_dir, "demo-1").root.exists()
 
 
+def test_rm_without_a_terminal_says_how_instead_of_a_traceback(env, monkeypatch, capsys):
+    """Run from a script there is nobody to answer: the question ended in an EOFError's traceback.
+    It says what happened, why, and the flag that goes without asking; the task stays."""
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    capsys.readouterr()
+
+    def closed(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed)
+    assert main(["rm", "demo-1"]) == 1
+    err = capsys.readouterr().err
+    assert "not deleted" in err and "no terminal" in err and "--yes" in err
+    assert find_task(load_config().tasks_dir, "demo-1").root.exists()
+
+
+def test_new_without_the_image_says_so_before_it_creates_a_task(env, monkeypatch, capsys):
+    """A task made without the agent image stood as 'could not start', and only then was the
+    image named. Checked first, like the project's repository: nothing is created. A draft needs
+    no image until it starts."""
+    from vivibox import image
+    from vivibox.config import load_config
+    from vivibox.task import list_tasks
+
+    monkeypatch.setattr(image, "exists", lambda ref, runner=None: False)
+    assert main(["new", "demo", "Add health endpoint"]) == 1
+    assert "vivibox image build" in capsys.readouterr().err
+    assert list(list_tasks(load_config().tasks_dir)) == [], "no task stands as 'could not start'"
+    assert main(["new", "demo", "Add health endpoint", "--draft"]) == 0
+
+
 def test_review_worktree_follows_the_task_and_is_removed_with_it(env, capsys):
     import subprocess
 

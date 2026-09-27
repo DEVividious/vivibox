@@ -62,3 +62,7 @@ def no_real_start(request, monkeypatch):
     )
     # The view asks the daemon for the header's warning; the tests have no daemon to ask.
     monkeypatch.setattr(probe, "docker_running", lambda: True)
+    # vivibox new asks for the agent image before it creates a task; nor is there an image.
+    from vivibox import image
+
+    monkeypatch.setattr(image, "exists", lambda ref, runner=None: True)

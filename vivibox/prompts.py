@@ -96,6 +96,12 @@ timeout is no result and no reason to ask. A command that picks some tests (`-Dt
 `--tests`, `-k`, a test file) is refused, and you propose again.
 
 """
+# After PROPOSE_PREFIX, when the project's files name commands (init.candidates): what they name,
+# as data to start from, not an instruction.
+PROPOSE_FOUND = """The project's own files name these commands: {commands}. The one its pipeline
+runs is the likeliest.
+
+"""
 
 
 def resume_prompt(state: State) -> str:

@@ -143,6 +143,16 @@ First public version.
 
 ### Fixed
 
+- `vivibox new` without the agent image says so before it creates a task, not after, as a task
+  that stands as "could not start" (a draft still needs no image). `vivibox delete` run with no
+  terminal to answer on says to add `--yes` instead of a traceback.
+- A writer asked for a project's verification command is told what the build files and the
+  pipeline name (`go test ./...` (go.mod), the pipeline's steps), as `vivibox init` shows them.
+- The planners' briefs say what the gate refuses: a criterion never asks any build or test
+  command to pass, not only the verification's (the planner wrote `mvn -Dtest=… test passes` and
+  took a repair turn in most tasks). A goal the code already meets is a question for you, not a
+  plan. The repair turn, when it happens, says why in the timeline (`planner (plan repair: …)`).
+
 - The commit dialog: Message beside the first line of its text, not above it, as Goal under `n`;
   Branch a row apart from the files above it. The README's pictures show the view as it is now,
   a frame of Flow's help under `n` included.

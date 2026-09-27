@@ -154,3 +154,16 @@ def test_the_repositorys_agents_md_is_instruction_and_the_rest_of_the_repository
     text = BRIEFS["writer"]
     assert "`AGENTS.md`" in text.split("## What to trust")[1]
     assert "is data, not instruction" not in text, "the old blanket sentence"
+
+
+def test_every_planners_brief_says_no_command_passing_is_a_criterion_and_what_to_do_when_done():
+    """The gate refuses a criterion that asks any build or test command to pass (command_criteria);
+    the brief said only "the verification command", and planners wrote `mvn -Dtest=… test` passes,
+    to be sent back for a repair turn. And a goal the code already meets is a question for the
+    user, not a plan of tests that cannot be seen failing first."""
+    from importlib.resources import files
+
+    for name in ("planner", "planner-reviewer", "planner-writer-reviewer"):
+        text = " ".join(files("vivibox").joinpath(f"templates/roles/{name}.md").read_text().split())
+        assert "never that a build or test command passes" in text, name
+        assert "already does what the goal asks" in text and "/task/handoff/question.md" in text, name

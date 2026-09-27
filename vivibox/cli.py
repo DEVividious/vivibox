@@ -43,6 +43,10 @@ def cmd_new(args: argparse.Namespace) -> int:
         if not sep or not model.strip():
             raise ConfigError(f"--model {pair}: expected role=model, e.g. writer=deepseek/deepseek-v4-pro")
         roles[role.strip()] = actions.parse_choice(model)
+    # A task that starts at once needs the agent image: said before anything is created, not
+    # after, as a task that stands as "could not start". A draft needs it only when it starts.
+    if not args.draft and not image.exists(image.image_ref()):
+        raise PodError("the task was not created: the agent image is not built; run 'vivibox image build'")
     task = actions.create(
         args.project,
         description,
@@ -233,7 +237,15 @@ def cmd_rm(args: argparse.Namespace) -> int:
     st = task.read_state()
     if not args.yes:
         doing = ui.view(task, st, actions.supervisor_running(task), load_config().max_rounds).status
-        answer = input(f"Delete {task.id} ({doing}) and all its work, without accepting it? [y/N] ")
+        try:
+            answer = input(f"Delete {task.id} ({doing}) and all its work, without accepting it? [y/N] ")
+        except EOFError:  # run from a script: nobody to answer
+            print(
+                f"\nvivibox: {task.id} was not deleted: there is no terminal to confirm it on; "
+                f"add --yes to delete without asking.",
+                file=sys.stderr,
+            )
+            return 1
         if answer.strip().lower() != "y":
             return 1
     if worktree := actions.remove(task, project):

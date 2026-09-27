@@ -81,9 +81,39 @@ def prepare(task: Task, model: str, verify: list[str], used: list[str] | tuple =
     return before != {p.name: p.read_text() for p in d.iterdir()}
 
 
+# How much of a tool's argument the transcript keeps: enough to recognise the call.
+TOOL_ARGUMENT = 120
+# The argument that says what a call of a tool was about, by the tool's name.
+TOOL_SUBJECT = {
+    "bash": "command", "read": "filePath", "edit": "filePath", "write": "filePath", "grep": "pattern",
+    "glob": "pattern", "list": "path", "webfetch": "url", "task": "description",
+}  # fmt: skip
+
+
+def tool_line(part: dict) -> str:
+    """A tool call in a line: the tool, its argument cut short, and how it ended when not well.
+    What it printed stays out; the agent's window has it while the pod is up."""
+    state = part.get("state") or {}
+    given = state.get("input") or {}
+    tool = part.get("tool") or "?"
+    if tool == "todowrite" and isinstance(given.get("todos"), list):
+        subject = f"{len(given['todos'])} todos"
+    elif (key := TOOL_SUBJECT.get(tool)) and isinstance(given.get(key), str):
+        subject = given[key]
+    else:
+        subject = json.dumps(given, ensure_ascii=False)
+    subject = " ".join(subject.split())
+    if len(subject) > TOOL_ARGUMENT:
+        subject = subject[: TOOL_ARGUMENT - 1] + "…"
+    ended = "" if state.get("status") in ("completed", None) else f" [{state['status']}"
+    if ended and state.get("error"):
+        ended += f": {' '.join(str(state['error']).split())[:80]}"
+    return f"→ {tool}: {subject}{ended + ']' if ended else ''}"
+
+
 # The running cost, tokens and step count of a turn, reported as each step of it finishes.
 def parse_events(output: str) -> Turn:
-    session, cost, tokens, texts, errors = "", 0.0, 0, [], []
+    session, cost, tokens, texts, errors, said = "", 0.0, 0, [], [], []
     for line in output.splitlines():
         try:
             event = json.loads(line)
@@ -96,9 +126,14 @@ def parse_events(output: str) -> Turn:
             tokens += int((part.get("tokens") or {}).get("total") or 0)
         elif event.get("type") == "text" and part.get("text"):
             texts.append(part["text"])
+            said.append(part["text"].strip())
+        elif event.get("type") == "tool_use":
+            said.append(tool_line(part))
         elif event.get("type") == "error":
             errors.append(json.dumps(event.get("error") or event)[:500])
-    return Turn(session, not errors, round(cost, 6), tokens, "\n".join(texts), "\n".join(errors))
+    turn = Turn(session, not errors, round(cost, 6), tokens, "\n".join(texts), "\n".join(errors))
+    turn.transcript = said
+    return turn
 
 
 # How long one readiness probe of the server may take.

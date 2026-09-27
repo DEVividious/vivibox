@@ -66,6 +66,10 @@ First public version.
   task and every commit of the agent as a line.
 - A finished task keeps its timeline, its verification logs, its reviews and the supervisor's
   log with its plan, and `l` on its row reads them.
+- Each role's conversation is kept turn by turn in `log/planner.log`, `log/writer.log` and
+  `log/reviewer.log`: the prompt in short, what the agent said, the tools it called with their
+  arguments cut short, the cost and the time. `l` lists them after the timeline, with their
+  turns and cost, on a live task and from a finished one's archive.
 
 - `init` suggests how a Python project is tested and prepared: `uv run --frozen pytest` and
   `uv sync --frozen` with a `uv.lock`, else `pytest` in a throwaway environment from

@@ -1,6 +1,6 @@
-"""What l opens: the task's timeline, its verification logs newest first, and the supervisor's
-log last, as diagnostics. One entry opens at once; while a verification runs its log is the
-entry the cursor is on, followed as it is written."""
+"""What l opens: the task's timeline, each role's conversation, its verification logs newest
+first, and the supervisor's log last, as diagnostics. One entry opens at once; while a
+verification runs its log is the entry the cursor is on, followed as it is written."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList
 
-from . import prepare, reviewing, timeline
+from . import prepare, reviewing, timeline, transcript
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
@@ -60,11 +60,21 @@ def describe(path: Path) -> str:
     return " · ".join(said)
 
 
+def conversations(folder: Path) -> list[Entry]:
+    """Each role's transcript, in the order the roles work, opened at its newest turn."""
+    return [
+        Entry(log.name, transcript.describe(log, role), pager_command(log, at_end=True))
+        for role in transcript.ROLES
+        if (log := folder / f"{role}.log").exists()
+    ]
+
+
 def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]:
     """What l offers, and which entry the cursor starts on: the log being written during a
     verification, else the timeline."""
     found = [
-        Entry("timeline", "what happened, oldest first", pager_command(timeline.write(task), at_end=True))
+        Entry("timeline", "what happened, oldest first", pager_command(timeline.write(task), at_end=True)),
+        *conversations(task.meta / "log"),
     ]
     logs = sorted((task.meta / "log").glob("verify-*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
     verifying = st.state is State.VERIFY and running
@@ -108,7 +118,7 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
         )
     if preparing and st.state is State.IMPLEMENT and prepared.exists():
         return found, next(i for i, e in enumerate(found) if e.label == prepare.LOG)
-    return found, 1 if verifying and logs else 0
+    return found, next(i for i, e in enumerate(found) if e.label == logs[0].name) if verifying and logs else 0
 
 
 def archived_entries(kept: Path) -> list[Entry]:
@@ -118,6 +128,7 @@ def archived_entries(kept: Path) -> list[Entry]:
     found = []
     if (kept / "timeline.txt").exists():
         found.append(Entry("timeline", "what happened, oldest first", pager_command(kept / "timeline.txt")))
+    found += conversations(kept / "log")
     logs = sorted((kept / "log").glob("verify-*.log"), key=lambda p: p.name, reverse=True)
     for log in logs:
         found.append(Entry(log.name, describe(log), pager_command(log, at_end=True)))

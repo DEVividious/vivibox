@@ -192,3 +192,29 @@ def test_the_readiness_probe_gives_up_on_a_request_the_server_never_answers():
 
     assert opencode.OpenCode(P()).healthy()
     assert f"--max-time {opencode.PROBE_SECONDS}" in ran[-1] and "/session" in ran[-1]
+
+
+def test_a_turn_keeps_its_transcript_text_and_tools_with_short_arguments():
+    long = "./mvnw -q -pl core test -Dtest=" + "InvoiceTests," * 20
+    lines = [
+        {"type": "step_start", "sessionID": "s", "part": {}},
+        {"type": "text", "sessionID": "s", "part": {"text": "I will run the tests first."}},
+        {"type": "tool_use", "sessionID": "s", "part": {"tool": "bash", "state": {
+            "status": "completed", "input": {"command": long}, "output": "BUILD OK"}}},
+        {"type": "tool_use", "sessionID": "s", "part": {"tool": "edit", "state": {
+            "status": "error", "input": {"filePath": "/task/repo/src/Invoice.java", "oldString": "a" * 500},
+            "error": "oldString not found"}}},
+        {"type": "tool_use", "sessionID": "s", "part": {"tool": "todowrite", "state": {
+            "status": "completed", "input": {"todos": [{"content": "a"}, {"content": "b"}]}}}},
+        {"type": "step_finish", "sessionID": "s", "part": {"cost": 0.001, "tokens": {"total": 70}}},
+        {"type": "text", "sessionID": "s", "part": {"text": "Done: the totals match."}},
+    ]  # fmt: skip
+    turn = opencode.parse_events("\n".join(json.dumps(x) for x in lines))
+    shown = "\n".join(turn.transcript)
+    assert turn.transcript[0] == "I will run the tests first."
+    assert "→ bash: ./mvnw -q -pl core test -Dtest=InvoiceTests," in shown
+    assert all(len(line) <= 160 for line in turn.transcript), "arguments are cut"
+    assert "→ edit: /task/repo/src/Invoice.java [error: oldString not found]" in shown
+    assert "→ todowrite: 2 todos" in shown
+    assert turn.transcript[-1] == "Done: the totals match."
+    assert "BUILD OK" not in shown, "what a tool printed stays in the agent's window"

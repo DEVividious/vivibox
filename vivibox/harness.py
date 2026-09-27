@@ -8,7 +8,7 @@ reads the same attributes and calls the same methods on each, so nothing asks a 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class HarnessError(Exception):
@@ -27,6 +27,9 @@ class Turn:
     tokens: int
     text: str
     error: str = ""
+    # The turn as a person reads it afterwards: what the agent said and the tools it called, one
+    # entry each; empty from a tool that reports only its answer, whose text stands in for it.
+    transcript: list[str] = field(default_factory=list)
 
 
 class Harness:

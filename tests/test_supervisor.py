@@ -1297,3 +1297,36 @@ def test_the_reviews_count_is_the_reason_on_the_row(task, tmp_path):
     assert st.round_reason == "1 blocking note" and "round 1/2: 1 blocking note" in ui.activity(st, 2)
     task.reset_rounds()
     assert task.read_state().round_reason == "", "your reply clears it with the rounds"
+
+
+def test_every_turn_is_written_to_its_roles_transcript(task):
+    class Talking(FakeHarness):
+        def turn(self, prompt, session="", title="", on_step=None):
+            self.prompts.append(prompt)
+            if self.actions:
+                self.actions.pop(0)(self.task)
+            return Turn(
+                "ses_1", True, 0.0123, 4500, "done", transcript=["Reading the code.", "→ read: src/a.py"]
+            )
+
+    sup, _ = make(task, Talking(task, [write_draft]))
+    assert sup.step()
+    log = (task.meta / "log" / "planner.log").read_text()
+    heading, *_, footer = [line for line in log.splitlines() if line]
+    assert heading.startswith("=== ") and " planner (as writer) · plan ===" in heading, (
+        "the agent that played it"
+    )
+    assert "Prompt: Read the goal" in log and "Reading the code.\n→ read: src/a.py\n" in log
+    assert "ok · $0.0123 · 4500 tokens · " in footer
+    assert not (task.meta / "log" / "writer.log").exists()
+
+
+def test_a_failed_turn_says_why_in_its_transcript_and_a_tool_without_one_gives_its_text(task):
+    class Failing(FakeHarness):
+        def turn(self, prompt, session="", title="", on_step=None):
+            return Turn("ses_1", False, 0.0, 0, "partial answer", error="provider said no")
+
+    sup, _ = make(task, Failing(task))
+    sup.step()
+    log = (task.meta / "log" / "planner.log").read_text()
+    assert "partial answer" in log and "failed: provider said no" in log.strip().splitlines()[-1]

@@ -623,6 +623,9 @@ def test_l_on_a_finished_task_reads_what_its_archive_kept(env):
     (kept / "log" / "verify-2-130000.log").write_text("$ npm test\n[exit 1 after 2 s]\n")
     (kept / "review-1.md").write_text("## Blocking\n\n- a.py:1 — wrong\n\n## Not blocking\n")
     (kept / "log" / "supervisor.log").write_text("Supervising demo-9\n")
+    (kept / "log" / "planner.log").write_text(
+        "=== 12:00:00 planner · plan ===\n--- 12:01:00 · ok · $0.0100\n"
+    )
 
     async def scenario(app, pilot):
         app.reload()
@@ -636,6 +639,7 @@ def test_l_on_a_finished_task_reads_what_its_archive_kept(env):
         labels = [e.label for e in app.screen.found]
         assert labels == [
             "timeline",
+            "planner.log",
             "verify-2-130000.log",
             "verify-1-120000.log",
             "review-1.md",
@@ -3260,17 +3264,28 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         newest = task.meta / "log" / "verify-2-130000.log"
         newest.write_text("# started 13:00:00\n$ npm test\n[exit 0 after 2 s]\n\n# summary\n")
         (task.meta / "log" / "supervisor.log").write_text("Supervising\n")
+        (task.meta / "log" / "writer.log").write_text(
+            "=== 12:00:00 writer · implement ===\nPrompt: Go\n\nDone.\n--- 12:01:00 · ok · $0.0100\n\n"
+            "=== 12:02:00 writer · implement ===\nPrompt: Fix\n\nFixed.\n--- 12:03:00 · ok · $0.0200\n\n"
+        )
         await pilot.press("l")
         await pilot.pause()
         assert isinstance(app.screen, logs.ChooseLog)
         labels = [e.label for e in app.screen.found]
-        assert labels == ["timeline", "verify-2-130000.log", "verify-1-120000.log", "supervisor.log"]
-        assert app.screen.found[1].said == "attempt 2 · `npm test` · passed · 2 s · 5 lines"
-        assert app.screen.found[2].said == "attempt 1 · `npm test` · failed · 3 s · 6 lines"
+        assert labels == [
+            "timeline",
+            "writer.log",
+            "verify-2-130000.log",
+            "verify-1-120000.log",
+            "supervisor.log",
+        ]
+        assert app.screen.found[1].said == "the writer's conversation · 2 turns · $0.03"
+        assert app.screen.found[2].said == "attempt 2 · `npm test` · passed · 2 s · 5 lines"
+        assert app.screen.found[3].said == "attempt 1 · `npm test` · failed · 3 s · 6 lines"
         assert app.screen.query_one(OptionList).highlighted == 0, "the timeline first, nothing running"
         await pilot.press("down", "enter")
         await pilot.pause()
-        assert opened[-1] == ["less", "+G", str(newest)]
+        assert opened[-1] == ["less", "+G", str(task.meta / "log" / "writer.log")], "at its newest turn"
 
     run(scenario)
 
@@ -3283,7 +3298,7 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         app.reload()
         await pilot.press("l")
         await pilot.pause()
-        assert app.screen.query_one(OptionList).highlighted == 1, "the log being written"
+        assert app.screen.query_one(OptionList).highlighted == 2, "the log being written"
         await pilot.press("enter")
         await pilot.pause()
         assert opened[-1] == ["less", "+F", str(task.meta / "log" / "verify-2-130000.log")], "followed"

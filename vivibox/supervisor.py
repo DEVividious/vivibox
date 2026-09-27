@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, feedback, gate, manual, orchestration, proposal, reviewing, ui
+from . import brief, feedback, gate, manual, orchestration, proposal, reviewing, transcript, ui
 from .config import DEFAULT_VERIFY_TIMEOUT, Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
@@ -312,6 +312,7 @@ class Supervisor:
         role = role or self.role_for(st.state)
         agent = self.agent_of(role)
         harness = self.harness_of(agent)
+        asked, began = prompt, time.monotonic()
         # The session as it is now, not as the state given had it: a second turn of the same
         # step (the plan's repair, the review's) would not see the one the first turn made, and
         # would make another, briefed again, doing the first's work over.
@@ -331,6 +332,7 @@ class Supervisor:
                 self.task.set_session(agent, was)
                 self.ports.session_started(self.task.read_state())
         turn = self._attempts(harness, prompt, was, title, st, role)
+        transcript.write(self.task, role, agent, str(st.state), kind, asked, turn, time.monotonic() - began)
         if turn.session and turn.session != was:
             self.task.set_session(agent, turn.session)
         self.task.event(

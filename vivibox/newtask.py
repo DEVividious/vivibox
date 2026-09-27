@@ -284,7 +284,7 @@ class NewTask(Dialog):
         """The description as tall as the screen leaves after the other rows, a line at least, so
         the whole form stays in view and the description scrolls inside itself. Before the
         description would shrink below three lines, the groups' headings go, then the blank rows
-        between the lists of a group."""
+        between the lists of a group and the one between the groups."""
         fields = self.query_one(Fields)
         goal = self.query_one("#goal", TextArea)
         dialog = self.query_one(".dialog")
@@ -293,19 +293,19 @@ class NewTask(Dialog):
         room = (height - 2 if height < self.SHORT else int(height * 0.9)) - self.CHROME
         fields.styles.max_height = max(5, room)
         # Counted, not measured: a measure is the last layout's, whatever class the dialog has
-        # been given since. A row is a line; the second group stands a blank row below the first.
-        # A hint row goes with the gaps when the terminal is short.
+        # been given since. A row is a line. The blank rows (between the lists, between the two
+        # groups) and a hint row go together when the terminal is short.
         rows = [row for row in self.query(".row") if row.id != "task-row" and not row.has_class("hint-row")]
         rows = [row for row in rows if row.display]
         hints = len(self.query(".hint-row"))
-        others = len(rows) + 1
-        gaps = len([row for row in rows if row.has_class("gap")])
+        # The blank rows between the lists, and the one the second group stands below the first.
+        gaps = len([row for row in rows if row.has_class("gap")]) + 1
         titles = 2 * len(self.query(".title"))  # a heading and the blank row under it
-        spare = room - others - 3
+        spare = room - len(rows) - 3
         plain, tight = spare < gaps + titles + hints, spare < gaps + hints
         dialog.set_class(plain, "plain")
         dialog.set_class(tight, "tight")
-        taken = others + (0 if tight else gaps + hints) + (0 if plain else titles)
+        taken = len(rows) + (0 if tight else gaps + hints) + (0 if plain else titles)
         goal.styles.height = max(3, min(12, room - taken))
         goal.focus()
 

@@ -42,6 +42,7 @@ HeaderIcon { display: none; }
 /* Lists of a group a row apart, unless the terminal is short (fit() decides). */
 .form .row.gap { margin-top: 1; }
 .form.tight .row.gap { margin-top: 0; }
+.form.tight .section { margin-top: 0; }
 /* A group has a heading, and its fields are bands, every other one darker, so rows stay apart
    even where a short terminal leaves no blank row between them. On a short terminal the
    headings go too: every field on the screen comes first. */

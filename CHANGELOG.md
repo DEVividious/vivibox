@@ -99,6 +99,7 @@ First public version.
 
 ### Fixed
 
+- The new task form fits 80×24 with a reviewer too: Orchestration and Rounds were a scroll away.
 - Under `k` and a project's `e`, a line under the list says what the highlighted setting does
   (what a round is, what `cost_warning` does, the orchestration mode it is on with its legend);
   switching the orchestration no longer puts its description in a notification, and a change

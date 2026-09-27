@@ -2376,6 +2376,31 @@ def test_the_new_task_dialog_shows_every_field_at_once(env, size):
     run(scenario, size=size)
 
 
+@pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+def test_with_a_reviewer_the_whole_new_task_form_fits_a_short_terminal(env, size):
+    """With a reviewer's row as well, Orchestration and Rounds were a scroll away at 80×24: the
+    blank row between the two groups goes on a short terminal too, after the headings and the
+    blank rows between the lists."""
+    from ux import screen_text
+
+    with_reviewer(env)
+    with_code("demo")
+
+    async def scenario(app, pilot):
+        app.available = AVAILABLE
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.pause()
+        dialog = app.screen
+        assert dialog.query_one(widgets.Fields).max_scroll_y == 0, "nothing to scroll"
+        shown = screen_text(app)
+        for word in ("Kind", "Branch", "Build", "Attach…", "Reviewer", "Orchestration", "Rounds", "Create"):
+            assert word in shown, f"{word} not on the screen at {size}"
+        assert dialog.query_one("#goal").region.height >= 3
+
+    run(scenario, size=size)
+
+
 @pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), False)])
 def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_working_order(env, size, headed):
     """Task and Agents head the two groups on a tall terminal and go first on a short one (§4);

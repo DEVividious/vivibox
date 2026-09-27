@@ -104,7 +104,8 @@ starts the pod when needed.
   close the dialog. Related fields form a group under a heading, and a blank row separates
   groups; the lists of a group stand a blank row apart too, and every other field is drawn a
   shade darker, so rows stay apart where no blank row fits. On a short terminal the headings go
-  first, then the rows between the lists, before the multi-line text shrinks below three lines.
+  first, then the rows between the lists and between the groups, before the multi-line text
+  shrinks below three lines.
   Roles stand in the order they work: planner, writer, reviewer, and under them the Orchestration
   list, with Rounds at its right: the mode's name on the list, its flow in symbols on the hint
   line under it (which goes with the blank rows on a short terminal), and when it fits, the

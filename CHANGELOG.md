@@ -69,6 +69,8 @@ First public version.
 
 ### Fixed
 
+- A task's row says what sent the writer on its fix turn (`implementing (round 1/3: 2 criteria
+  not met)`), and the supervisor's window logs every change of state with its reason.
 - A commit whose message is about the task's files ("Record test red evidence", "Tick criteria")
   is refused by the gate, and the commit `a` proposes leaves such lines out of its body.
 - Task columns follow the current terminal width immediately after a resize.

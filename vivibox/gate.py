@@ -728,6 +728,27 @@ def _stream(pod: Pod, command: str, out, values: list[str], timeout: float) -> t
         return said, "timeout"
 
 
+def why_red(result: GateResult) -> str:
+    """Why the verification failed, in a few words for the task's row and the supervisor's log:
+    the first two of what went wrong, counted. "" for a result that passed."""
+    said = []
+    if failed := [c.command for c in result.commands if not c.ok]:
+        said.append(f"`{failed[0]}` failed" if len(failed) == 1 else f"{len(failed)} commands failed")
+    for items, one, many in (
+        (result.missing_criteria, "criterion not met", "criteria not met"),
+        (result.commit_problems, "commit problem", "commit problems"),
+        (result.uncommitted, "uncommitted file", "uncommitted files"),
+        (result.switched_off, "test switched off", "tests switched off"),
+        (result.no_red_evidence, "test without red evidence", "tests without red evidence"),
+        (result.hidden_characters, "invisible character", "invisible characters"),
+    ):
+        if items:
+            said.append(f"{len(items)} {one if len(items) == 1 else many}")
+    if result.narrowed:
+        said.append(f"command narrowed to {result.narrowed}")
+    return ", ".join(said[:2])
+
+
 def next_state(result: GateResult, rounds: int, max_rounds: int) -> State:
     """rounds: the fix turns the writer has had; another only while they are under the limit."""
     if result.environment:

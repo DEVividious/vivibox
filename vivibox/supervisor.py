@@ -379,15 +379,22 @@ class Supervisor:
         finally:
             self.task.clear_live_turn()  # the turn event is the record from here on
 
+    def _go(self, target: State, reason: str, **data) -> TaskState:
+        """Every change of state, with why, on the record and in the supervisor's window: the log
+        used to say only some, and a used-up round had to be worked out from the timeline."""
+        st = self.task.transition(target, reason=reason, **data)
+        print(f"[{time.strftime('%H:%M:%S')}] → {target}: {reason}", flush=True)
+        return st
+
     def _checkpoint(self, target: State, reason: str, kind: str = "") -> None:
         # Every checkpoint first checks risky files: you may open the project in IntelliJ at a checkpoint.
         if self.ports.risky_changes():
-            self.task.transition(State.APPROVAL_RISKY, reason=reason, then=str(target))
+            self._go(State.APPROVAL_RISKY, reason, then=str(target))
             self.ports.notify(
                 self.task.id, f"{reason}; risky files changed, run 'vivibox risky {self.task.id}' first"
             )
         else:
-            self.task.transition(target, reason=reason)
+            self._go(target, reason)
             self.ports.notify(self.task.id, reason, kind=kind)
 
     def _plan(self, st: TaskState) -> None:
@@ -442,7 +449,7 @@ class Supervisor:
             self.task.set_goal(plan.summary)
         if st.auto_plan and not self.ports.risky_changes():
             # Through the plan checkpoint, so the event log reads the same as when you accept.
-            self.task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
+            self._go(State.CHECKPOINT_PLAN, "plan ready")
             try:
                 accept_plan(self.task, "plan accepted automatically")
                 print(f"[{time.strftime('%H:%M:%S')}] plan accepted automatically", flush=True)
@@ -535,7 +542,7 @@ class Supervisor:
         if self._asks_for_command():
             self._command_checkpoint(st)
             return
-        self.task.transition(State.VERIFY)
+        self._go(State.VERIFY, "the writer's turn is over")
 
     def _self_review_prompt(self, st: TaskState) -> str:
         return SELF_REVIEW_PROMPT.format(base=st.base_commit)
@@ -575,7 +582,7 @@ class Supervisor:
             feedback.write_feedback(self.task, result)
         if result.environment:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
-            self.task.transition(target, reason="verification could not run")
+            self._go(target, "verification could not run")
             self.ports.notify(
                 self.task.id,
                 f"verification could not run: {result.environment[:150]}; fix it, then press g"
@@ -587,31 +594,30 @@ class Supervisor:
             # around what it asked about. No attempt is spent.
             kept.rename(kept.with_name(QUESTION))
             asked = (question(self.task) or "").splitlines()[0][:150]
-            self.task.transition(
-                State.CHECKPOINT_BLOCKED, reason="verification still failing; the agent's question stands"
-            )
+            self._go(State.CHECKPOINT_BLOCKED, "verification still failing; the agent's question stands")
             self.ports.notify(
                 self.task.id, f"verification still failing; the agent's question stands: {asked}"
             )
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)
-            self.task.transition(target, reason="verification failed")
+            why = gate.why_red(result)
+            self._go(target, f"verification failed: {why}", why=why)
         elif target is State.CHECKPOINT_BLOCKED:
-            self.task.transition(target, reason="verification still failing")
+            self._go(target, f"verification still failing: {gate.why_red(result)}")
             self.ports.notify(
                 self.task.id,
                 f"verification still failing after {st.rounds} fix turn{'s' if st.rounds != 1 else ''}",
             )
         elif self.mode.supervisor or (self.mode.separate_reviewer and self.reviewer is not None):
             self.last_gate = result
-            self.task.transition(State.REVIEW, reason="verification passed")
+            self._go(State.REVIEW, "verification passed")
         elif target is State.APPROVAL_RISKY:
-            self.task.transition(target, reason="verification passed", then=str(State.CHECKPOINT_FINAL))
+            self._go(target, "verification passed", then=str(State.CHECKPOINT_FINAL))
             self.ports.notify(
                 self.task.id, f"done pending your approval of risky files: 'vivibox risky {self.task.id}'"
             )
         else:
-            self.task.transition(target, reason="verification passed")
+            self._go(target, "verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
 
     def _head_moved(self, st: TaskState) -> bool:
@@ -623,7 +629,7 @@ class Supervisor:
             return False
         reason = f"commits changed since the verification ({st.verified_commit[:7]} → {head[:7]})"
         self.task.event("unverified_head", verified=st.verified_commit, head=head)
-        self.task.transition(State.VERIFY, reason=reason)
+        self._go(State.VERIFY, reason)
         return True
 
     def _review(self, st: TaskState) -> None:
@@ -662,7 +668,7 @@ class Supervisor:
             said = f"review {n}: no blocking notes, {others} not blocking"
         if blocking and st.rounds < self.max_rounds:
             set_next_prompt(self.task, REVIEW_FIX_PROMPT)
-            self.task.transition(State.IMPLEMENT, reason=f"review {n}: {blocking} blocking")
+            self._go(State.IMPLEMENT, f"review {n}: {blocking} blocking", why=_notes(blocking))
             print(f"[{time.strftime('%H:%M:%S')}] {said}, back to the writer", flush=True)
             return
         if self._head_moved(self.task.read_state()):

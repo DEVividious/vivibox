@@ -937,3 +937,14 @@ def test_a_criterion_that_is_the_build_command_is_refused(criterion, refused):
             gate.check_plan(plan)
     else:
         gate.check_plan(plan)
+
+
+def test_why_red_names_the_first_two_things_that_went_wrong():
+    result = gate.GateResult(Path("/dev/null"))
+    assert gate.why_red(result) == ""
+    result.commands = [gate.CommandResult("npm test", False, 1.0)]
+    result.missing_criteria = ["a", "b"]
+    result.uncommitted = ["x"]
+    assert gate.why_red(result) == "`npm test` failed, 2 criteria not met"
+    only = gate.GateResult(Path("/dev/null"), no_red_evidence=["t.py"], narrowed="-k x")
+    assert gate.why_red(only) == "1 test without red evidence, command narrowed to -k x"

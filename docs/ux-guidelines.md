@@ -43,7 +43,7 @@ Status labels, the only ones allowed:
 | plan ready | `review the plan` | Waiting for you |
 | the writer's verification command proposed, in a project with none; the first verification waits for it | `review the command` | Waiting for you |
 | manual planner, no plan yet | `plan it yourself` | Waiting for you |
-| implementing; from the first fix turn `(round n/N)` follows: fix turns used, of the task's limit | `implementing` | Working |
+| implementing; from the first fix turn `(round n/N: why)` follows: fix turns used, of the task's limit, and what sent the writer back (`2 criteria not met`, `1 blocking note`) | `implementing` | Working |
 | the project's preparation running, the writer's first turn waiting for it | `preparing` | Working |
 | verification running | `verifying` | Working |
 | the reviewer reading the work | `reviewing` | Working |

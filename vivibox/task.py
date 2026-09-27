@@ -65,6 +65,9 @@ class TaskState:
     max_rounds: int = 0
     # The commit the last green verification ran on: what the review and you are shown is it.
     verified_commit: str = ""
+    # Why the writer was sent on its last fix turn (what the gate found, or the review's count),
+    # for the row to say beside the round; "" before the first.
+    round_reason: str = ""
 
 
 class Task:
@@ -87,7 +90,7 @@ class Task:
     def reset_rounds(self) -> None:
         """After your decision the writer gets its fix turns back."""
         st = self.read_state()
-        st.rounds = 0
+        st.rounds, st.round_reason = 0, ""
         self._write_state(st)
 
     def set_session(self, role: str, session: str) -> None:
@@ -246,6 +249,7 @@ class Task:
             st.iteration += 1
         if target is State.IMPLEMENT and previous in (State.VERIFY, State.REVIEW):
             st.rounds += 1
+            st.round_reason = str(data.get("why", ""))
         self._write_state(st)
         self.event("state", previous=str(previous), current=str(target), **data)
         return st

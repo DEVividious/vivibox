@@ -241,7 +241,8 @@ def activity(st: TaskState, max_rounds: int) -> str:
         return "done"
     text = WORKING[st.state]
     if st.state in (State.IMPLEMENT, State.VERIFY) and st.rounds:
-        text += f" (round {st.rounds}/{max_rounds})"
+        why = f": {st.round_reason}" if st.round_reason else ""
+        text += f" (round {st.rounds}/{max_rounds}{why})"
     return text
 
 

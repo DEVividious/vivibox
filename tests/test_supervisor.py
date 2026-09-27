@@ -205,7 +205,9 @@ def test_failed_gate_sends_feedback_then_blocks_after_limit(task):
     sup, notes = make(task, harness, results=[gate_result(False), gate_result(False)])
     sup.step()  # implement
     sup.step()  # verify: fails; the one fix turn
-    assert task.read_state().state is State.IMPLEMENT and task.read_state().rounds == 1
+    st = task.read_state()
+    assert (st.state, st.rounds, st.round_reason) == (State.IMPLEMENT, 1, "1 criterion not met")
+    assert ui.activity(st, 1) == "implementing (round 1/1: 1 criterion not met)"
     assert (task.meta / "handoff" / "verify-feedback.md").exists()
     sup.step()  # implement with feedback
     assert harness.prompts[-1] == prompts.FEEDBACK_PROMPT
@@ -1269,3 +1271,29 @@ def test_each_mode_names_its_agents_and_their_briefs():
     assert modes["supervisor_worker"].brief_of("planner") == "planner-reviewer"
     assert [m.reviews() for m in modes.values()] == [False, False, True, True]
     assert [m.self_review for m in modes.values()] == [True, True, False, False]
+
+
+def test_every_change_of_state_is_on_the_supervisors_log_with_its_reason(task, capsys):
+    """The log said "plan accepted" and little else; a round spent on a red gate had to be worked
+    out from the timeline. Now each arrow names the state and why."""
+    accepted(task)
+    sup, notes = make(task, FakeHarness(task), results=[gate_result(False), gate_result(True)])
+    for _ in range(4):  # implement, verify red, the fix, verify green
+        sup.step()
+    lines = [line.split("] ", 1)[1] for line in capsys.readouterr().out.splitlines() if "] → " in line]
+    assert lines == [
+        "→ verify: the writer's turn is over",
+        "→ implement: verification failed: 1 criterion not met",
+        "→ verify: the writer's turn is over",
+        "→ checkpoint:final: verification passed",
+    ]
+
+
+def test_the_reviews_count_is_the_reason_on_the_row(task, tmp_path):
+    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING])
+    for _ in range(3):  # implement, verify, review: one blocking note
+        sup.step()
+    st = task.read_state()
+    assert st.round_reason == "1 blocking note" and "round 1/2: 1 blocking note" in ui.activity(st, 2)
+    task.reset_rounds()
+    assert task.read_state().round_reason == "", "your reply clears it with the rounds"

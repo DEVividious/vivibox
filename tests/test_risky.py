@@ -134,6 +134,21 @@ def test_lockfiles_are_risky(repo):
     assert {"web/package-lock.json", "web/yarn.lock", "web/pnpm-lock.yaml", "npm-shrinkwrap.json"} <= found
 
 
+def test_a_rust_projects_build_files_are_risky(repo):
+    """rust-analyzer runs build.rs and the proc macros Cargo.toml pulls in as it opens the project,
+    .cargo/config.toml can set the compiler a build runs, rust-toolchain picks the toolchain
+    rustup fetches, and Cargo.lock decides the dependencies' own build scripts: as pom.xml and
+    package-lock.json, a change to one waits for you. target/ is the build's own, not scanned."""
+    names = ("Cargo.toml", "crates/core/Cargo.toml", "Cargo.lock", "build.rs", "crates/core/build.rs",
+             ".cargo/config.toml", ".cargo/config", "rust-toolchain.toml", "rust-toolchain")  # fmt: skip
+    for name in names:
+        write(repo, name, "")
+    write(repo, "target/debug/build/x/build.rs", "")
+    found = set(scan(repo))
+    assert set(names) <= found, set(names) - found
+    assert "target/debug/build/x/build.rs" not in found
+
+
 def test_the_agents_instruction_files_are_risky(repo):
     """AGENTS.md is read by the agent as its instructions: an agent that edits it instructs the
     next turn, and the next task, so the change waits for you like a build file's."""

@@ -31,6 +31,10 @@ DEFAULT_PATTERNS = (
     # Lockfiles decide what an install puts on your host, and one added where the project had
     # none changes how it is verified.
     "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    # Rust: rust-analyzer runs build scripts and proc macros as it opens the project;
+    # .cargo/config can set the compiler a build runs; the toolchain file picks what rustup
+    # fetches; Cargo.lock decides the dependencies, and their build scripts, like a lockfile above.
+    "Cargo.toml", "Cargo.lock", "build.rs", ".cargo/**", "rust-toolchain", "rust-toolchain.toml",
     # The agent's own instructions, read by opencode and Claude Code from the repository: an
     # agent that edits them instructs the next turn, and the next task.
     "AGENTS.md", "CLAUDE.md",

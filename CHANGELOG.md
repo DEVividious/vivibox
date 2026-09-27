@@ -143,6 +143,10 @@ First public version.
 
 ### Fixed
 
+- A Rust project's build files are risky files, their changes waiting for your approval like
+  `pom.xml`'s: `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain(.toml)`.
+  rust-analyzer runs build scripts and proc macros as your IDE opens the project.
+
 - `vivibox new` without the agent image says so before it creates a task, not after, as a task
   that stands as "could not start" (a draft still needs no image). `vivibox delete` run with no
   terminal to answer on says to add `--yes` instead of a traceback.

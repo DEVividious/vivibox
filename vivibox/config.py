@@ -13,6 +13,8 @@ from pathlib import Path
 HARNESSES = ("opencode", "claude-code", "manual")
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
+# Where the Docker Hub mirror listens on the host (mirror.py), unless config.toml says otherwise.
+DEFAULT_HUB_MIRROR_PORT = 5055
 # What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
 NTFY_LEVELS = ("decisions", "all")
 DEFAULT_NTFY_SERVER = "https://ntfy.sh"
@@ -162,6 +164,9 @@ class Config:
     # Addresses the task networks are cut from, one /28 per task. The default is TEST-NET-2, which
     # RFC 5737 reserves for documentation: nothing may use it in a real network, so nothing collides.
     network_pool: str = DEFAULT_NETWORK_POOL
+    # Docker Hub kept once on this machine for every pod's daemon, and the port it listens on.
+    hub_mirror: bool = False
+    hub_mirror_port: int = DEFAULT_HUB_MIRROR_PORT
     # Seconds one verification command may take before it is stopped and counted as a failure of
     # the environment, not of the code.
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
@@ -326,6 +331,13 @@ def load_config(base: Path | None = None) -> Config:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
         )
+    hub_mirror = data.get("network", {}).get("hub_mirror", False)
+    if not isinstance(hub_mirror, bool):
+        raise ConfigError(f"{path}: network.hub_mirror is true or false")
+    hub_mirror_port = data.get("network", {}).get("hub_mirror_port", DEFAULT_HUB_MIRROR_PORT)
+    port_ok = isinstance(hub_mirror_port, int) and not isinstance(hub_mirror_port, bool)
+    if not port_ok or not 0 < hub_mirror_port < 65536:
+        raise ConfigError(f"{path}: network.hub_mirror_port is a port, e.g. {DEFAULT_HUB_MIRROR_PORT}")
     return Config(
         tasks_dir,
         max_rounds,
@@ -340,6 +352,8 @@ def load_config(base: Path | None = None) -> Config:
         **costs,
         ntfy_server=ntfy_server.rstrip("/"),
         ntfy_events=ntfy_events,
+        hub_mirror=hub_mirror,
+        hub_mirror_port=hub_mirror_port,
     )
 
 

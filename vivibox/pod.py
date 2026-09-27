@@ -186,6 +186,8 @@ class Pod:
     review_dir: Path | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
     network_pool: str = DEFAULT_NETWORK_POOL
+    # Where the daemon pulls Docker Hub's images through, "" for Docker Hub itself (mirror.py).
+    hub_mirror: str = ""
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
@@ -416,9 +418,10 @@ class Pod:
         # The trap passes docker stop on to the daemon, which then shuts down cleanly.
         # Docker 29 refuses API versions below 1.40, and Testcontainers before 1.21 speaks 1.32: it
         # would find no Docker at all while `docker version` works. 1.24 is the oldest it still knows.
+        mirror = f"--registry-mirror={self.hub_mirror} " if self.hub_mirror else ""
         daemon = (
             f"rm -f {SOCKET}; DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} "
-            ">/var/log/dockerd.log 2>&1 & "
+            f"{mirror}>/var/log/dockerd.log 2>&1 & "
             'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
             f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
         )

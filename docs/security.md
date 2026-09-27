@@ -44,6 +44,14 @@ it does on your host. The sidecar remembers the bundle it started with: when the
 as it does when a VPN client installs a new corporate authority, the next start of the task makes
 the sidecar again, because its Docker daemon reads the authorities once, at its start.
 
+With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
+pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not
+daemons: each pod keeps its own images, containers and volumes. The cache listens only on the address
+the pods know your host by, and each pod's firewall lets through that one port, as for a host service.
+A task can pull from it and nothing else: a registry that proxies refuses pushes, and deletes are off.
+It has no credentials of its own, so what it keeps is what anyone may pull from Docker Hub.
+Deleting a task never touches it.
+
 The task's clone is a real `git clone`, so your repository's `.git` never enters the pod. In the
 clone, `.git/config` and `.git/hooks/` are read-only for the agent, and the project's own hooks reach
 git through `core.hooksPath` in the agent's global config, not through files the agent can edit.

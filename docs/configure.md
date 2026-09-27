@@ -181,6 +181,17 @@ log shows `***` in their place. A token that expires needs a fresh start: log in
 vivibox from that shell, and stop and start the task with `s`; a task that got blocked on it is
 verified again with `g`.
 
+Every pod has a Docker of its own, so two tasks that run the same database in their tests download
+its image twice. With `hub_mirror = true` under `[network]` in `config.toml`, vivibox starts one
+pull-through cache of Docker Hub on your Docker, `vivibox-mirror`, and every pod's daemon pulls through
+it: the first task downloads the image, the next ones take it from your machine. A pod started before
+you turned it on uses it from its next start. It saves the download, not the unpacking, so it pays
+off on a slow or metered connection (a VPN) more than on a fast one. It serves Docker Hub only;
+quay.io, ghcr.io and other registries are pulled as before. `vivibox mirror` says whether it runs
+and how much it holds; it forgets a layer nobody pulled for two weeks, and `vivibox mirror remove`
+removes it with everything it holds. If it is down, a pod pulls from Docker Hub itself. It listens on
+port 5055 of the address the pods reach your machine by; `hub_mirror_port` changes it.
+
 A repository you move or delete leaves its project file behind. vivibox does not offer a project it
 cannot work in: it names those on start and offers to forget them, which removes the project file
 and nothing else.

@@ -97,6 +97,13 @@ First public version.
   review or a plan no longer stand larger than the panel's own, and the accepted plan leaves its
   criteria to their section, where they are ticked.
 - `vivibox new --flow <mode>` picks the task's orchestration mode, as the Flow row in `n`.
+- A Docker Hub mirror, off until `hub_mirror = true` under `[network]` in `config.toml`: a
+  pull-through cache in one container on your Docker, `vivibox-mirror`, that every pod's daemon
+  pulls through, so an image one task pulled is not downloaded again for the next. Each pod
+  keeps its own daemon and images; the mirror listens only where pods reach the host, takes no
+  pushes, holds no credentials, and forgets a layer nobody pulled for two weeks. When it is
+  down, a pod pulls from Docker Hub itself. `vivibox mirror` says what it holds, `vivibox
+  mirror remove` removes it.
 
 ### Changed
 
@@ -227,5 +234,6 @@ First public version.
 - The gate's feedback text moves to `vivibox/feedback.py`.
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
 - `vivibox auth` and `vivibox models` live in `cli_providers.py`, under the size limit.
+- `vivibox image` and `vivibox mirror` live in `cli_host.py`, under the size limit.
 - `CHANGELOG.md` is written as the work is done: a change under `vivibox/` changes it in the
   same commit, and `tests/test_structure.py` fails on a branch that does not.

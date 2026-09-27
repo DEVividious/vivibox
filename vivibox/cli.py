@@ -26,6 +26,7 @@ from . import (
     version,
 )
 from . import init as project_init
+from .cli_host import cmd_image_build, cmd_image_check, cmd_mirror
 from .cli_providers import cmd_auth, cmd_models
 from .config import ORCHESTRATION_MODES, ConfigError, config_dir, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
@@ -174,12 +175,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_image_build(args: argparse.Namespace) -> int:
-    ref, built = image.build(pull=args.pull, force=args.force)
-    print(f"{'Built' if built else 'Up to date'}: {ref}")
-    return 0
-
-
 def ensure_image() -> None:
     """The view starts with the agent image ready: built the first time, and again whenever its
     definition changed, which an update of vivibox can do."""
@@ -193,21 +188,6 @@ def ensure_image() -> None:
     failed = [check.name for check, ok, _ in image.run_checks(ref) if not ok]
     if failed:
         raise PodError(f"the agent image fails its checks ({', '.join(failed)}); see: vivibox image check")
-
-
-def cmd_image_check(args: argparse.Namespace) -> int:
-    ref = image.image_ref()
-    if not image.exists(ref):
-        print(f"vivibox: image {ref} is not built; run 'vivibox image build'", file=sys.stderr)
-        return 1
-    failed = 0
-    for check, ok, out in image.run_checks(ref):
-        print(f"{'PASS' if ok else 'FAIL'}  {check.name}")
-        if not ok:
-            failed += 1
-            print("      " + out.replace("\n", "\n      "))
-    print(f"\n{ref}: {failed} failed" if failed else f"\n{ref}: all checks passed")
-    return 1 if failed else 0
 
 
 def carry_on(task: Task) -> None:
@@ -642,6 +622,13 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--force", action="store_true", help="rebuild even if up to date")
     build.set_defaults(func=cmd_image_build)
     img.add_parser("check", help="verify the agent image").set_defaults(func=cmd_image_check)
+
+    mirror_cmd = sub.add_parser("mirror", help="the Docker Hub mirror the pods pull through: what it holds")
+    mirror_cmd.add_argument(
+        "action", nargs="?", choices=["status", "remove"], default="status",
+        help="remove: the mirror's container and what it holds",
+    )  # fmt: skip
+    mirror_cmd.set_defaults(func=cmd_mirror)
 
     verify = sub.add_parser("verify", help="run the verification gate now")
     verify.add_argument("task", help="task id")

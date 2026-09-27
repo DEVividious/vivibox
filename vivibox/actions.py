@@ -26,6 +26,7 @@ from . import (
     ide,
     image,
     manual,
+    mirror,
     opencode,
     prepare,
     prompts,
@@ -53,6 +54,7 @@ from .config import (
     ORCHESTRATION_MODES,
     Config,
     ConfigError,
+    HostService,
     Project,
     Role,
     config_dir,
@@ -81,7 +83,7 @@ from .demo import (  # noqa: F401
 from .orchestration import mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
-from .pod import Mount, Pod, PodError
+from .pod import HOST_GATEWAY, Mount, Pod, PodError
 from .projects import (  # noqa: F401
     GROUNDWORK,
     broken_projects,
@@ -209,10 +211,13 @@ def task_pod(task_id: str) -> Pod:
         "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR,
         **toolchain.agent_env(project.java, image.env(ref)),
     }
+    config = load_config()
+    # The mirror is reached as a service of the host's, through the pod's firewall.
+    through = [HostService(HOST_GATEWAY, config.hub_mirror_port)] if config.hub_mirror else []
     return Pod(
-        task.id, task.repo, ref, project.host_services, mounts, env, project.pass_env,
+        task.id, task.repo, ref, [*project.host_services, *through], mounts, env, project.pass_env,
         gate_dir=task.root / "gate", review_dir=task.root / ".review",
-        network_pool=load_config().network_pool,
+        network_pool=config.network_pool, hub_mirror=mirror.url(config.hub_mirror_port) if through else "",
     )  # fmt: skip
 
 
@@ -425,6 +430,12 @@ def _start(
     used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)
+    if config.hub_mirror:
+        on_step("starting the Docker Hub mirror…")
+        try:
+            mirror.ensure(config.hub_mirror_port)
+        except PodError as e:
+            task.event("mirror", problem=str(e))
     on_step("starting the pod…")
     pod.up()
     if project.java or project.tools:

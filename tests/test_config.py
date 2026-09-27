@@ -246,3 +246,19 @@ def test_the_orchestration_modes_are_the_four_of_the_decision(tmp_path):
     text += ROLES
     config = load_config(write(tmp_path / "config.toml", text))
     assert (config.orchestration, config.max_rounds) == ("supervisor_worker", 4)
+
+
+def test_the_docker_hub_mirror_is_off_until_you_turn_it_on(tmp_path):
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES)
+    assert load_config(base).hub_mirror is False
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[network]\nhub_mirror = true\n' + ROLES)
+    assert load_config(base).hub_mirror is True and load_config(base).hub_mirror_port == 5055
+    text = 'tasks_dir = "/t"\n[network]\nhub_mirror = true\nhub_mirror_port = 6000\n' + ROLES
+    assert load_config(write(tmp_path / "config.toml", text)).hub_mirror_port == 6000
+
+
+@pytest.mark.parametrize("line", ['hub_mirror = "yes"', "hub_mirror_port = 0", "hub_mirror_port = 70000"])
+def test_rejects_a_mirror_setting_that_is_not_one(tmp_path, line):
+    base = write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[network]\n{line}\n' + ROLES)
+    with pytest.raises(ConfigError, match="network.hub_mirror"):
+        load_config(base)

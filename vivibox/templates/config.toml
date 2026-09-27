@@ -77,3 +77,10 @@ desktop = true
 # no real network and no product may use it, so nothing on your machine collides with it. Change it
 # only if something here already routes this range; host/setup.sh --check says so if it does.
 # pool = "198.51.100.0/24"
+# Docker Hub's images kept once on this machine: a pull-through cache in a container of its own,
+# vivibox-mirror, that every pod's Docker pulls through, so the second task that needs mysql does not
+# download it again. Each pod keeps its own daemon and images; the cache listens only where the pods
+# reach this machine, and forgets a layer nobody pulled for two weeks. Other registries (quay.io,
+# ghcr.io) are pulled as before. vivibox mirror says what it holds.
+# hub_mirror = true
+# hub_mirror_port = 5055

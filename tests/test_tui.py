@@ -4544,7 +4544,7 @@ def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeyp
     async def scenario(app, pilot):
         await pilot.press("n")
         await pilot.pause()
-        assert not isinstance(app.screen, dialogs.NewTask)
+        assert not isinstance(app.screen, newtask.NewTask)
         said = screen_text(app)
         assert "Git identity is missing" in said
         assert "git config --global user.name" in said
@@ -4566,7 +4566,7 @@ def test_n_accepts_a_complete_local_or_global_git_identity(env, monkeypatch, loc
     async def scenario(app, pilot):
         await pilot.press("n")
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.NewTask)
+        assert isinstance(app.screen, newtask.NewTask)
 
     run(scenario, notifications=True)
 
@@ -4577,7 +4577,7 @@ def test_new_task_rechecks_identity_if_it_disappears_while_form_is_open(env, mon
     async def scenario(app, pilot):
         await pilot.press("n")
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.NewTask)
+        assert isinstance(app.screen, newtask.NewTask)
         monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
         subprocess.run(["git", "config", "--unset", "user.email"], cwd=env / "repo", check=True)
         app.screen.query_one("#goal", TextArea).load_text("Do something")

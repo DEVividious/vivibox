@@ -231,7 +231,8 @@ def task_number(task_id: str) -> int:
     return int(number) if number.isdigit() else 0
 
 
-def activity(st: TaskState, max_iterations: int) -> str:
+def activity(st: TaskState, max_rounds: int) -> str:
+    """max_rounds: the task's own limit, or config.toml's (orchestration.max_rounds_of)."""
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return AWAITING_PLAN[0]
     if st.state in WAITING:
@@ -239,8 +240,8 @@ def activity(st: TaskState, max_iterations: int) -> str:
     if st.state is State.DONE:
         return "done"
     text = WORKING[st.state]
-    if st.state in (State.IMPLEMENT, State.VERIFY) and st.iteration > 1:
-        text += f" (attempt {st.iteration}/{max_iterations})"
+    if st.state in (State.IMPLEMENT, State.VERIFY) and st.rounds:
+        text += f" (round {st.rounds}/{max_rounds})"
     return text
 
 
@@ -282,7 +283,7 @@ WAITS, WORKS, STOPPED, DONE = ORDER
 DECISION, FAILED, IDLE, AT_WORK, PARKED, FINISHED = range(6)
 
 
-def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskView:
+def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
     """running: whether the task's supervisor is alive. Whatever will not move without you waits
     for you; "Stopped" is only what you stopped yourself."""
     if st.state is State.DONE:
@@ -303,9 +304,9 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     if st.box and st.state in WAITING:
         # Nobody in a box to reply to; its work is yours to accept or to delete.
         commands = tuple(c for c in next_commands(st) if "reply" not in c)
-        return TaskView(activity(st, max_iterations), WAITS, DECISION, commands=commands)
+        return TaskView(activity(st, max_rounds), WAITS, DECISION, commands=commands)
     if st.state in WAITING:
-        status = activity(st, max_iterations)
+        status = activity(st, max_rounds)
         if st.state is State.CHECKPOINT_BLOCKED:
             if (task.meta / "handoff" / "question.md").exists():
                 status = "agent asks"
@@ -324,13 +325,13 @@ def view(task: Task, st: TaskState, running: bool, max_iterations: int) -> TaskV
     if st.state is State.IMPLEMENT and prepare.underway(task):
         # The writer's turn waits for the project's preparation; nobody implements yet.
         return TaskView("preparing", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
-    return TaskView(activity(st, max_iterations), WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
+    return TaskView(activity(st, max_rounds), WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))
 
 
 def task_list(
     tasks: list[Task],
     criteria,
-    max_iterations: int,
+    max_rounds: int,
     style: Style,
     now=None,
     running=lambda task: True,
@@ -339,7 +340,7 @@ def task_list(
     """One row per task, like kubectl get: the tasks waiting for you first, the goal fills the rest.
     finished: the history's entries, listed under the live tasks as the view lists them."""
     states = [(task, task.read_state()) for task in tasks]
-    seen = [(task, st, view(task, st, running(task), max_iterations)) for task, st in states]
+    seen = [(task, st, view(task, st, running(task), max_rounds)) for task, st in states]
     seen.sort(key=lambda found: found[2].rank)
     header = ("TASK", "STATUS", "CRITERIA", "PLAN", "IMPL", "REVIEW", "CREATED", "UPDATED", "GOAL")
     rows = []
@@ -383,10 +384,10 @@ def task_list(
 
 
 def task_detail(
-    task: Task, criteria, max_iterations: int, events: int, style: Style, running: bool = True
+    task: Task, criteria, max_rounds: int, events: int, style: Style, running: bool = True
 ) -> str:
     st = task.read_state()
-    shown = view(task, st, running, max_iterations)
+    shown = view(task, st, running, max_rounds)
     meta = [ago(st.updated)] if st.box else [f"{criteria(task)} criteria", ago(st.updated)]
     if spent := cost(task):
         meta.append(str(spent))

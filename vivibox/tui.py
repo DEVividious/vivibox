@@ -30,7 +30,6 @@ from .dialogs import (
     CommitWork,
     DeleteTask,
     Help,
-    NewTask,
     Reply,
     ReplyWithCriteria,
 )
@@ -41,6 +40,7 @@ from .keys_plan import PlanKeys
 from .keys_project import ProjectKeys
 from .keys_run import RunKeys
 from .keys_work import WorkKeys
+from .newtask import NewTask
 from .panel import (
     CODE_CHANGED,
     CODE_CHECK_SECONDS,
@@ -303,7 +303,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
         # Worked out once per refresh; the list, the panel and the keys all read it from here.
         self.views = {
-            st.id: ui.view(task, st, st.id in self.running, self.config.max_iterations) for task, st in pairs
+            st.id: ui.view(task, st, st.id in self.running, self.config.max_rounds) for task, st in pairs
         }
         # A row keeps its place whatever its task does: newest first, by number, not by state.
         self.pairs = pairs = sorted(pairs, key=lambda p: ui.task_number(p[1].id), reverse=True)
@@ -334,7 +334,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
         found = self.views.get(st.id)
         if found is None:
             task = next(t for t, s in self.pairs if s.id == st.id)
-            found = ui.view(task, st, self.agent_running(st.id), self.config.max_iterations)
+            found = ui.view(task, st, self.agent_running(st.id), self.config.max_rounds)
         return found
 
     def selected_id(self) -> str | None:
@@ -369,7 +369,7 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
             return
         pick = self.selected()
         if pick:
-            text = detail(*pick, self.config.max_iterations, self.agent_running(pick[1].id), self.pod)
+            text = detail(*pick, self.config.max_rounds, self.agent_running(pick[1].id), self.pod)
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
         elif self.on_project_row():
@@ -710,15 +710,13 @@ class Vivibox(TaskTable, BoxKeys, DemoKeys, ModelKeys, ProjectKeys, PlanKeys, Ru
     @work(thread=True)
     def create(self, form: dict) -> None:
         try:
+            options = ("roles", "orchestration", "max_rounds", "no_build", "base_ref")
             task = actions.create(
                 form["project"],
                 form["goal"],
                 auto=form["auto"],
                 kind=form["kind"],
-                roles=form.get("roles"),
-                review_mode=form.get("review", ""),
-                no_build=form.get("no_build", False),
-                base_ref=form.get("base_ref", ""),
+                **{name: form[name] for name in options if name in form},
             )
             self.call_from_thread(self.reload)
             for note in actions.context_notes(task):

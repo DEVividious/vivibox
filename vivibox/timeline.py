@@ -74,7 +74,9 @@ def _settings(data: dict) -> tuple[str, str]:
     """What the task started with, as two lines that fit: the agents (roles and the review), and
     the project's side (verification, preparation, the rest that is set, the build of vivibox)."""
     agents = [", ".join(f"{role} {ran}" for role, ran in (data.get("roles") or {}).items())]
-    if review := data.get("review"):
+    if mode := data.get("orchestration"):
+        agents.append(f"{mode}, {data.get('max_rounds', '?')} rounds")
+    elif review := data.get("review"):  # a task from before orchestration modes
         agents.append(f"review {review}, {data.get('max_reviews', '?')} rounds")
     parts = []
     verify = data.get("verify")
@@ -135,7 +137,9 @@ def entries(task: Task) -> list[tuple[str, str]]:
             elif reason:
                 text += f" ({reason})"
         elif kind == "turn":
-            role = data.get("role", data.get("kind", "agent"))
+            role = data.get("role", "agent")
+            if data.get("kind"):
+                role += f" ({data['kind']})"
             took = _took(began.pop(data.get("role", ""), None), ts)
             text = f"{role} turn: ${data.get('cost') or 0:.2f}, {data.get('tokens') or 0} tokens"
             if took:
@@ -144,6 +148,13 @@ def entries(task: Task) -> list[tuple[str, str]]:
                 text += f"; failed: {data.get('error', '')}"
         elif kind == "gate":
             text = _gate(data)
+        elif kind == "orchestration":
+            text = f"orchestration {data.get('mode', '?')}, {data.get('max_rounds', '?')} rounds"
+            if data.get("notice"):
+                text += f"; {data['notice']}"
+        elif kind == "unverified_head":
+            was, now = data.get("verified", "")[:7], data.get("head", "")[:7]
+            text = f"commits changed since the verification: {was} → {now}"
         elif kind == "turn_retry":
             text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":

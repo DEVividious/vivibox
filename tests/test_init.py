@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from conftest import make_repo
 
-from vivibox import init
+from vivibox import init, prompts
 from vivibox.cli import main
 from vivibox.config import load_project
 
@@ -391,7 +391,7 @@ def test_accepting_the_command_keeps_it_for_the_project_and_starts_the_verificat
     path.write_text(path.read_text().replace('verify = ["./mvnw -B test"]', "verify = []"))
     task = at_checkpoint("Add Owner tests", "./mvnw -Dtest=Owner test")
     assert actions.reply(task, "The whole build, please") is State.IMPLEMENT
-    assert supervisor.next_prompt(task, supervisor.IMPLEMENT_PROMPT) == supervisor.COMMENT_PROMPT
+    assert supervisor.next_prompt(task, prompts.IMPLEMENT_PROMPT) == prompts.COMMENT_PROMPT
 
 
 def test_a_command_that_starts_in_a_folder_gets_its_install_there(tmp_path):

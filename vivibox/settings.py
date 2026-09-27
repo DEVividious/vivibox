@@ -25,8 +25,9 @@ from .config import (
     JAVA,
     NTFY_LEVELS,
     NTFY_TOPIC,
+    ORCHESTRATION_MODES,
     RESERVED_ENV,
-    REVIEW_MODES,
+    ROUNDS_HELP,
     ConfigError,
     config_dir,
     load_config,
@@ -176,15 +177,20 @@ class Settings(Rows):
                 for name in sorted(config.roles)
             ),
             *(
-                [("review mode", config.review_mode, "review_mode")]
+                []
                 if "reviewer" in config.roles
                 else [
                     (
                         "reviewer",
-                        "none: Enter picks a model, on another family than the writer",
+                        "the writer's model: Enter picks one, on another family than the writer",
                         "add-reviewer",
                     )
                 ]
+            ),
+            (
+                "orchestration",
+                f"{config.orchestration}: {ORCHESTRATION_MODES[config.orchestration].flow}",
+                "orchestration",
             ),
             ("Review", "", None),
             (
@@ -197,13 +203,8 @@ class Settings(Rows):
             ("ntfy server", config.ntfy_server, "ntfy_server"),
             ("ntfy events", config.ntfy_events, "ntfy_events"),
             ("Limits", "", None),
-            ("max_iterations", str(config.max_iterations), "max_iterations"),
+            ("rounds", str(config.max_rounds), "max_rounds"),
             ("verify_timeout", f"{config.verify_timeout} s", "verify_timeout"),
-            *(
-                [("max_reviews", str(config.max_reviews), "max_reviews")]
-                if "reviewer" in config.roles
-                else []
-            ),
             (
                 "cost_warning",
                 f"${config.cost_warning:.2f}" if config.cost_warning else "none",
@@ -321,26 +322,27 @@ class Settings(Rows):
                 if choice is None or not choice[1]:
                     return
                 configfile.set_value(config_path(), "harness", choice[0], "roles.reviewer")
-                configfile.set_value(config_path(), "mode", REVIEW_MODES[0], "roles.reviewer")
-                self.write(
-                    "model", choice[1], "roles.reviewer", f"reviewer on {choice[1]}, mode {REVIEW_MODES[0]}."
-                )
+                self.write("model", choice[1], "roles.reviewer", f"reviewer on {choice[1]}.")
 
             self.app.push_screen(
                 ChooseModel("reviewer", offered, None, offered[0], self.app.available), picked
             )
-        elif key == "review_mode":
-            mode = REVIEW_MODES[(REVIEW_MODES.index(config.review_mode) + 1) % len(REVIEW_MODES)]
-            said = "blocking notes go back to the writer" if mode == "loop" else "every note comes to you"
-            self.write("mode", mode, "roles.reviewer", f"review mode {mode}: {said}.")
-        elif key in ("max_iterations", "verify_timeout", "max_reviews"):
+        elif key == "orchestration":
+            names = list(ORCHESTRATION_MODES)
+            name = names[(names.index(config.orchestration) + 1) % len(names)]
+            mode = ORCHESTRATION_MODES[name]
+            self.write(
+                "agent_orchestration_mode",
+                name,
+                "",
+                f"{mode.label}: {mode.flow}. {mode.when} {mode.tradeoff}",
+            )
+        elif key in ("max_rounds", "verify_timeout"):
             prompts = {
-                "max_iterations": "Verification failures the writer may fix on its own before it stops:",
+                "max_rounds": ROUNDS_HELP,
                 "verify_timeout": "Seconds one verification command may take:",
-                "max_reviews": "Rounds of blocking notes sent back to the writer before the work is yours:",
             }
-            now = {"max_iterations": config.max_iterations, "verify_timeout": config.verify_timeout,
-                   "max_reviews": config.max_reviews}[key]  # fmt: skip
+            now = {"max_rounds": config.max_rounds, "verify_timeout": config.verify_timeout}[key]
 
             def typed(value: str | None) -> None:
                 if value is None:

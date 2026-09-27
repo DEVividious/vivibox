@@ -48,7 +48,7 @@ def make(task, writer, source):
         risky_changes=lambda: [],
         notify=lambda _id, msg, kind="": notes.append(msg),
     )
-    sup = supervisor.Supervisor(task, writer, ports, max_iterations=2, planner=manual.Manual(), source=source)
+    sup = supervisor.Supervisor(task, writer, ports, max_rounds=2, planner=manual.Manual(), source=source)
     return sup, notes
 
 

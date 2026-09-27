@@ -28,6 +28,7 @@ class TaskState:
     project: str
     goal: str
     state: State
+    # How many verifications have run.
     iteration: int
     paused: bool
     created: str
@@ -53,9 +54,17 @@ class TaskState:
     # A box: the project's pod with no plan and no agent, for you to work in by hand. Its work
     # comes back the way a task's does.
     box: bool = False
-    # Rounds of review so far, and how the reviewer works on this task ("" for config.toml's mode).
+    # Reviews written so far, which number their files (handoff/review-N.md).
     reviews: int = 0
-    review_mode: str = ""
+    # Fix turns the writer was sent on since the plan was accepted or you last replied: after a
+    # red gate or a review with blocking notes. The first implementation is none.
+    rounds: int = 0
+    # How this task is shared between the roles, and how many fix turns it gets: "" and 0 for
+    # config.toml's.
+    orchestration: str = ""
+    max_rounds: int = 0
+    # The commit the last green verification ran on: what the review and you are shown is it.
+    verified_commit: str = ""
 
 
 class Task:
@@ -75,11 +84,10 @@ class Task:
     def repo(self) -> Path:
         return self.root / "repo"
 
-    def reset_iterations(self) -> None:
-        """After your decision the agent gets a fresh iteration budget, and the reviewer its rounds."""
+    def reset_rounds(self) -> None:
+        """After your decision the writer gets its fix turns back."""
         st = self.read_state()
-        st.iteration = 1
-        st.reviews = 0
+        st.rounds = 0
         self._write_state(st)
 
     def set_session(self, role: str, session: str) -> None:
@@ -149,9 +157,15 @@ class Task:
         st.updated = now()
         self._write_state(st)
 
-    def set_review_mode(self, mode: str) -> None:
+    def set_orchestration(self, mode: str, max_rounds: int = 0) -> None:
+        """This task's own way of sharing the work and its own round limit; "" and 0 follow config.toml."""
         st = self.read_state()
-        st.review_mode = mode
+        st.orchestration, st.max_rounds = mode, max_rounds
+        self._write_state(st)
+
+    def set_verified_commit(self, commit: str) -> None:
+        st = self.read_state()
+        st.verified_commit = commit
         self._write_state(st)
 
     def set_reviews(self, reviews: int) -> None:
@@ -225,10 +239,13 @@ class Task:
         check_transition(st.state, target)
         previous = st.state
         st.state, st.updated = target, now()
-        # A failed gate uses up an attempt. Coming back from you does not: your reply has just
-        # given the agent a fresh budget (reset_iterations), and counting here made it start at 2.
-        if target is State.IMPLEMENT and previous is State.VERIFY:
+        # iteration counts the verifications run; rounds the fix turns the writer was sent on by
+        # the gate or the review. Coming back from you is neither: your reply gave the writer its
+        # rounds back (reset_rounds).
+        if target is State.VERIFY:
             st.iteration += 1
+        if target is State.IMPLEMENT and previous in (State.VERIFY, State.REVIEW):
+            st.rounds += 1
         self._write_state(st)
         self.event("state", previous=str(previous), current=str(target), **data)
         return st
@@ -262,7 +279,7 @@ def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, af
         (task.meta / sub).mkdir(parents=True)
     task.plan_path.write_text(plan_template.replace("{{goal}}", goal))
     ts = now()
-    task._write_state(TaskState(task.id, project, goal, State.PLAN, 1, False, ts, ts))
+    task._write_state(TaskState(task.id, project, goal, State.PLAN, 0, False, ts, ts))
     task.event("created", project=project, goal=goal)
     return task
 

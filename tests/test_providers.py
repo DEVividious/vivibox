@@ -313,7 +313,7 @@ def test_a_start_on_a_retired_model_says_so_and_what_to_pick(env, monkeypatch):
     from vivibox.config import Role
 
     retired = type(config)(
-        config.tasks_dir, config.max_iterations,
+        config.tasks_dir, config.max_rounds,
         {"planner": Role("manual", ""), "writer": Role("opencode", "deepseek/deepseek-v4-flash")},
     )  # fmt: skip
     why = actions.model_missing(retired, None, available)

@@ -3,6 +3,11 @@
 Coding agents in a box: they work on a clone, in a pod of their own, and nothing they write runs
 on your machine until you have looked at it.
 
+vivibox is built for a situation many teams are in: access to a strong model is rationed, and
+cheap models are plentiful. It gets the most out of that combination by putting the strong model
+where a decision has the most leverage, the plan and the supervision, and the cheap ones in the
+loop of implementing and reviewing, behind a gate none of them can bypass.
+
 You describe a task. The agent plans; you accept the plan. The agent implements in its clone; a
 gate builds and tests the commits on a fresh clone and checks the plan's criteria; a reviewer on
 another model reads the work. Then it comes to you as a review copy, and only your `a` puts it in
@@ -48,6 +53,7 @@ vivibox            # builds the agent image, asks for a key and a model, opens t
 3. The agent implements and commits in its clone, ticking the criteria as it goes. The first
    task of a project also proposes the command that verifies it; you keep it with `a`, once.
 4. The gate runs. Green, and the reviewer reads the work; red, and the agent gets the log back.
+   Which agents there are, and in what order, is the task's orchestration mode (below).
 5. The work waits for you as a review copy: `o` opens it in your IDE, `f` shows the diff, `v`
    runs the app in the pod, `r` asks for changes, `a` accepts it into your checkout and offers a
    commit message written from the plan and the agent's commits.
@@ -55,6 +61,40 @@ vivibox            # builds the agent image, asks for a key and a model, opens t
 Desktop notifications, or [ntfy](docs/configure.md) on your phone, say when a task waits for you.
 Several tasks run at once, each in its own pod. Everything the view does is also a command
 (`vivibox new`, `accept`, `reply`, `status`…). All of it: [docs/tasks.md](docs/tasks.md).
+
+## Orchestration modes
+
+How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where the
+gate runs, is one setting, `agent_orchestration_mode`: in `config.toml`, under `k`, and per task
+under `n`.
+
+| Mode | Flow | When |
+|---|---|---|
+| `single_agent` | P+W+R → Gate | small, routine, cheap tasks |
+| `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
+| `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
+| `supervisor_worker` | (P+R) ⇄ W → Gate | hard, multi-step changes under a strong model's constant supervision |
+
+Legend: `+` roles in one agent and one conversation, on the first role's model; `→` then; `⇄`
+rounds of fixes, up to `max_rounds`; Gate the verification (build, tests, criteria, commits).
+
+- A writer that reviews its own work (W+R) gets a turn after each of its turns to read the diff
+  as a reviewer would, before the gate; nothing else reviews it.
+- The reviewer of `planner_maker_checker` reads in a container of its own, after a green gate;
+  its blocking notes go back to the writer, through the gate again, until it has none. Without
+  `[roles.reviewer]` it runs on the writer's model.
+- The supervisor of `supervisor_worker` plans, then reads every turn of the worker's in the pod,
+  before any build, and sends back what to change; when it accepts, the gate runs. A red gate
+  goes back to the worker and straight to the gate again.
+- One limit, `max_rounds` (3), counts the fix turns the writer gets, from the gate or from a
+  review, before the work comes to you; your reply gives them back.
+
+Models: a strong planner and a cheaper writer; the reviewer cheaper than or a little stronger
+than the writer, best of another family; in `supervisor_worker`, a strong supervisor. With little
+of a strong model and plenty of a cheap one: `planner_maker_checker`, the strong one planning,
+the cheap one writing and reviewing. The trade-offs: `single_agent` is the cheapest and has no
+independent review; `planner_maker_checker` costs the most turns; `supervisor_worker` spends the
+strong model on every round and finds a build error late.
 
 ## Models
 
@@ -67,7 +107,8 @@ your own chat. [docs/configure.md](docs/configure.md).
 ## More
 
 - [What it protects against, and how](docs/security.md)
-- [Working with tasks](docs/tasks.md): every key, every command, the reviewer, running the app
+- [Working with tasks](docs/tasks.md): every key, every command, the orchestration modes and the
+  reviewer, running the app
 - [Providers, MCP servers and projects](docs/configure.md)
 - A box without an agent: `b` on a project opens its pod for you, with your keys, opencode and a
   shell; closing it brings your work back through the same review as a task's
@@ -76,8 +117,8 @@ your own chat. [docs/configure.md](docs/configure.md).
 - [Contributing](CONTRIBUTING.md): reporting a problem (`vivibox --version` first), working on the
   code, releases; [changelog](CHANGELOG.md)
 
-Status: one writer per task, a planner and a reviewer on models of your choice, several tasks at
-once. GitHub pull requests are next.
+Status: one writer per task, a planner and a reviewer on models of your choice, four ways of
+sharing a task between them, several tasks at once. GitHub pull requests are next.
 
 ## Development
 

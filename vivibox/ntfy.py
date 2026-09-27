@@ -109,8 +109,8 @@ class Stages:
             return
         first, self.last = not self.last, str(st.state)
         doing = ui.WORKING.get(st.state, "")
-        if st.state is State.IMPLEMENT and st.iteration > 1:
-            doing += f", attempt {st.iteration}"
+        if st.state is State.IMPLEMENT and st.rounds:
+            doing += f", round {st.rounds}"
         if first:
             began = "started again" if self.again else "started"
             channel.send(st.id, f"{began}: {doing}" if doing else began, "default", "")

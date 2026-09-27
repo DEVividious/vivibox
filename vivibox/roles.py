@@ -232,9 +232,8 @@ def task_settings(task: Task, project, config: Config) -> dict:
     verify = "no build" if project.no_build else project.verify or "writer proposes"
     return {
         "roles": roles,
-        "review": (st.review_mode or config.review_mode) if "reviewer" in config.roles else "",
-        "max_reviews": config.max_reviews,
-        "max_iterations": config.max_iterations,
+        "orchestration": st.orchestration or config.orchestration,
+        "max_rounds": st.max_rounds or config.max_rounds,
         "verify": verify,
         "verify_timeout": project.verify_timeout or config.verify_timeout,
         "prepare": project.prepare,

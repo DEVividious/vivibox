@@ -3,7 +3,7 @@ import asyncio
 from textual.widgets import Button, Input, OptionList, TextArea
 from ux import screen_text
 
-from vivibox import dialogs, repo
+from vivibox import newtask, repo
 from vivibox.tui import Vivibox
 
 
@@ -18,7 +18,7 @@ def test_new_task_searches_thousands_of_branches_and_keeps_current_first(env, mo
         app = Vivibox()
         async with app.run_test(size=(80, 24)) as pilot:
             result = []
-            app.push_screen(dialogs.NewTask("demo"), result.append)
+            app.push_screen(newtask.NewTask("demo"), result.append)
             await pilot.pause()
             assert app.screen.query("#base-ref"), "new tasks need a branch field"
             button = app.screen.query_one("#base-ref", Button)
@@ -34,7 +34,7 @@ def test_new_task_searches_thousands_of_branches_and_keeps_current_first(env, mo
             assert "feature/ticket-2917-checkout" in screen_text(app)
             await pilot.press("enter")
             await pilot.pause()
-            assert isinstance(app.screen, dialogs.NewTask)
+            assert isinstance(app.screen, newtask.NewTask)
             app.screen.query_one("#goal", TextArea).text = "Fix checkout"
             await pilot.press("ctrl+s")
             await pilot.pause()

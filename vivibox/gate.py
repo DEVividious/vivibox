@@ -378,6 +378,8 @@ class CommandResult:
 @dataclass
 class GateResult:
     log: Path
+    # The commit the clone stood on: what was verified, and what the review and you are shown.
+    commit: str = ""
     commands: list[CommandResult] = field(default_factory=list)
     missing_criteria: list[str] = field(default_factory=list)
     commit_problems: list[str] = field(default_factory=list)
@@ -575,8 +577,8 @@ def run_gate(
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
-    result = GateResult(log)
     head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    result = GateResult(log, commit=head)
     commands = init.with_dependencies(task.repo, commands)
     # Before the build, the two things that would make it meaningless: it would build a tree that
     # is not what was committed, or run a suite with a test switched off.
@@ -716,12 +718,13 @@ def _stream(pod: Pod, command: str, out, values: list[str], timeout: float) -> t
         return said, "timeout"
 
 
-def next_state(result: GateResult, iteration: int, max_iterations: int) -> State:
+def next_state(result: GateResult, rounds: int, max_rounds: int) -> State:
+    """rounds: the fix turns the writer has had; another only while they are under the limit."""
     if result.environment:
-        # Nothing the agent could commit would change it: for you, and no attempt is spent.
+        # Nothing the agent could commit would change it: for you, and no round is spent.
         return State.CHECKPOINT_BLOCKED
     if not result.passed:
-        return State.IMPLEMENT if iteration < max_iterations else State.CHECKPOINT_BLOCKED
+        return State.IMPLEMENT if rounds < max_rounds else State.CHECKPOINT_BLOCKED
     return State.APPROVAL_RISKY if result.risky else State.CHECKPOINT_FINAL
 
 

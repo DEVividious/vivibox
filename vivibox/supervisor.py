@@ -16,113 +16,30 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, manual, proposal, reviewing, ui
+from . import brief, gate, manual, orchestration, proposal, reviewing, ui
 from .config import DEFAULT_VERIFY_TIMEOUT, Project
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
+from .prompts import (
+    FEEDBACK_PROMPT,
+    IMPLEMENT_PROMPT,
+    PLAN_PROMPT,
+    PLAN_REPAIR_PROMPT,
+    PREPARED_PREFIX,
+    PROPOSE_PREFIX,
+    REVIEW_AGAIN_PREFIX,
+    REVIEW_FIX_PROMPT,
+    REVIEW_PROMPT,
+    REVIEW_REPAIR_PROMPT,
+    SELF_REVIEW_PROMPT,
+    SUPERVISE_PROMPT,
+)
 from .risky import Change
 from .states import State, waits_for_user
 from .task import Task, TaskState
 
 NEXT_PROMPT = "next-prompt.md"
 QUESTION = "question.md"
-
-# Every prompt that starts a turn ends by naming what ends it: the two endings the brief
-# (templates/instructions.md) allows, and nothing else. docs/prompt-guidelines.md says why.
-PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
-/task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
-- keep the header between the +++ lines, except: set summary to one line of at most 100
-  characters naming what the task does;
-- under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
-  check" with concrete "- [ ]" items, each checkable by reading or running code; keep the
-  first item;
-- fill in the other sections as their <!-- notes --> say. The writer may not remember this
-  conversation: the plan says everything.
-Do not change code. End the turn when the draft is written, or when a question is in
-/task/handoff/question.md."""
-
-PLAN_REPAIR_PROMPT = """The plan draft in /task/handoff/plan-draft.md is not ready: {problem}. Fix
-that in the draft. End the turn when it is fixed."""
-
-IMPLEMENT_PROMPT = """The plan in /task/plan.md is accepted. Carry it out: write the code and the
-tests, commit, and tick each item in /task/handoff/criteria.md the moment you have verified it.
-End the turn when every item is ticked and committed, or when a question is in
-/task/handoff/question.md."""
-
-FEEDBACK_PROMPT = """Verification failed. Read /task/handoff/verify-feedback.md: it names what
-failed and quotes the lines that say why (the whole output is in /task/handoff/verify.log). Fix
-what it names and commit. End the turn when that is done, or, if the cause is outside the code,
-when you have written it to /task/handoff/question.md."""
-
-REVIEW_PROMPT = """The verification passed: the build and the tests are green, do not run them.
-Read /task/plan.md, /task/handoff/criteria.md, /task/handoff/red.md and /task/handoff/comments.md,
-then the work itself: `git diff {base}..HEAD` in the repository you are in. Write
-/task/review/review.md with two sections. Under "## Blocking": what keeps the work from being
-what the plan says, or from proving it: a test that cannot fail, a criterion ticked but not met,
-behaviour the plan rules out. Under "## Not blocking": the rest. Each note is one line,
-"path:line — what is wrong and what would make it right"; a section may be empty. Do not report
-what the verification already checks: commits, ticks, switched-off tests, red evidence named.
-End the turn when the review is written."""
-
-# Before a round after the first: the writer may have answered the last round instead of acting
-# on it; a round that does not read the answer repeats its note, and the dispute goes to you.
-REVIEW_AGAIN_PREFIX = """Where the writer disagreed with your last round it said why in
-/task/handoff/review-N-reply.md (N is the round before this one): read it first. A note it
-answered stays under Blocking only with one sentence on why the answer does not hold.
-
-"""
-
-REVIEW_REPAIR_PROMPT = """The review in /task/review/review.md is not one the orchestrator can
-read: {problem}. Rewrite it with the two sections, "## Blocking" and "## Not blocking", and a
-place (path:line) on every note. End the turn when it is rewritten."""
-
-REVIEW_FIX_PROMPT = """The reviewer read your work. Read the newest /task/handoff/review-N.md (N is
-the round): fix every note under Blocking, commit, and keep the ticks in /task/handoff/criteria.md
-true. Where you disagree, say why in one paragraph in /task/handoff/review-N-reply.md instead.
-End the turn when that is done and committed, or when a question is in
-/task/handoff/question.md."""
-
-COMMENT_PROMPT = """The user replied. Read the newest entry in /task/handoff/comments.md and do
-what it asks. End the turn when that is done and committed, or when you have written a new
-question to /task/handoff/question.md."""
-
-PLAN_COMMENT_PROMPT = """The user commented on your plan. Read the newest entry in
-/task/handoff/comments.md and update /task/handoff/plan-draft.md. End the turn when the draft is
-updated."""
-
-RESUME_PREFIX = """You were interrupted. Check `git status` and the files in /task/handoff/ for what
-is already done, then go on with this:
-
-"""
-
-# Before the first implementing turn of a project that is prepared (Project.prepare): what ran, so
-# the writer builds on it instead of building everything again, and where to look when it failed.
-PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in the repository, so what it
-built and installed is there; its output is in /task/handoff/prepare.log. Build only the modules you
-change, and all of them in one command (Maven: `-pl core,app`): a module built on its own takes its
-neighbours as they were installed, before your change.
-
-"""
-
-# Before the first implementing turn of a task whose project has no verification command: the
-# writer, who runs the build anyway, says what builds and tests it; the gate verifies the task with
-# that, and you decide on its own whether the project keeps it.
-PROPOSE_PREFIX = """No command verifies this project yet. When the work is done, write the one command
-that builds the whole project and runs all its tests, as its pipeline would, on one line in
-/task/handoff/verify-proposal.md: the orchestrator verifies your work with it, and the user
-decides whether the project keeps it. The whole build may take long: run it with a timeout of
-{minutes} minutes on your shell tool, the same the verification has; a build cut short by a
-timeout is no result and no reason to ask. A command that picks some tests (`-Dtest=`,
-`--tests`, `-k`, a test file) is refused, and you propose again.
-
-"""
-
-
-def resume_prompt(state: State) -> str:
-    """After a stop or a crash: the state's own prompt again, behind a word about the interruption.
-    A session that survived would go on from a bare "continue"; one that was lost would not know
-    what the state asks for."""
-    return RESUME_PREFIX + {State.PLAN: PLAN_PROMPT, State.IMPLEMENT: IMPLEMENT_PROMPT}[state]
 
 
 @dataclass(frozen=True)
@@ -189,7 +106,7 @@ def accept_plan(task: Task, reason: str) -> None:
     # first turn of implementation would end on it as a new question.
     put_question_away(task)
     set_next_prompt(task, IMPLEMENT_PROMPT)
-    task.reset_iterations()
+    task.reset_rounds()
     task.transition(State.IMPLEMENT, reason=reason)
 
 
@@ -203,6 +120,10 @@ def _read(path: Path) -> str:
         return path.read_text()
     except OSError:
         return ""
+
+
+def _notes(n: int) -> str:
+    return f"{n} blocking note{'s' if n != 1 else ''}"
 
 
 def question(task: Task) -> str | None:
@@ -274,6 +195,9 @@ class Ports:
     preparing: Callable[[], bool] = lambda: False
     # How a retry waits; a test passes something that does not.
     sleep: Callable[[float], None] = time.sleep
+    # The commit the task's clone stands on, for the check that what is reviewed and what comes to
+    # you is what the verification ran on; "" when nobody can say (a test), and nothing is checked.
+    head: Callable[[], str] = lambda: ""
 
 
 @dataclass
@@ -281,7 +205,10 @@ class Supervisor:
     task: Task
     harness: Harness
     ports: Ports
-    max_iterations: int
+    # Fix turns the writer gets, from the gate or from the review, before the work comes to you.
+    max_rounds: int
+    # How the task is shared between the roles; the agents below play what it says.
+    mode: orchestration.Mode = orchestration.DEFAULT
     # The project's verify commands, and whether it has nothing to build.
     project_verify: list[str] = field(default_factory=list)
     project_no_build: bool = False
@@ -299,11 +226,8 @@ class Supervisor:
     # Dollars the task may cost before you are told, and before it stops for you; 0 is no limit.
     cost_warning: float = 0.0
     cost_limit: float = 0.0
-    # The reviewer, when there is one: reads the work after a green gate. loop sends its blocking
-    # notes back to the writer, up to max_reviews rounds; supervised reviews once, for you.
+    # The reviewer of its own, in the review container, where the mode has one.
     reviewer: Harness | None = None
-    review_mode: str = "loop"
-    max_reviews: int = 2
     # The gate's result the review followed, for the message that ends the task's work.
     last_gate: gate.GateResult | None = None
     # The seconds the verification may take (limits.verify_timeout, or the project's own): what
@@ -311,16 +235,20 @@ class Supervisor:
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
 
     def role_for(self, state: State) -> str:
-        """Planning is where a wrong decision costs the most and the fewest tokens are spent, so it
-        is worth a different model, and sometimes a different tool, from the one that types."""
-        if state is State.REVIEW:
-            return "reviewer"
-        return "planner" if state is State.PLAN and self.planner else "writer"
+        return {State.PLAN: "planner", State.REVIEW: "reviewer"}.get(state, "writer")
 
-    def harness_of(self, role: str) -> Harness:
-        if role == "reviewer" and self.reviewer:
+    def agent_of(self, role: str) -> str:
+        """The agent that plays a role in this mode: its conversation and its model. Planning is
+        where a wrong decision costs the most and the fewest tokens are spent, so it is worth a
+        different model, and sometimes a different tool, from the one that types; a caller with
+        one harness and no planner has the writer plan."""
+        agent = self.mode.agents[role]
+        return "writer" if agent == "planner" and self.planner is None else agent
+
+    def harness_of(self, agent: str) -> Harness:
+        if agent == "reviewer" and self.reviewer:
             return self.reviewer
-        return self.planner if role == "planner" and self.planner else self.harness
+        return self.planner if agent == "planner" and self.planner else self.harness
 
     def step(self) -> bool:
         """Does one unit of work. False when there is nothing to do until you act."""
@@ -380,16 +308,20 @@ class Supervisor:
 
     # --- states -----------------------------------------------------------------------------
 
-    def _turn(self, st: TaskState, prompt: str, role: str = "") -> Turn | None:
+    def _turn(self, st: TaskState, prompt: str, role: str = "", kind: str = "") -> Turn | None:
+        """kind: what the turn is besides the state's own work ("self-review"), for the record."""
         role = role or self.role_for(st.state)
-        harness = self.harness_of(role)
+        agent = self.agent_of(role)
+        harness = self.harness_of(agent)
         # The session as it is now, not as the state given had it: a second turn of the same
         # step (the plan's repair, the review's) would not see the one the first turn made, and
         # would make another, briefed again, doing the first's work over.
-        was = self.task.read_state().sessions.get(role, "")
+        was = self.task.read_state().sessions.get(agent, "")
         if not was:
-            # The first message of a role's conversation says what the role is and owns.
-            prompt = f"{brief.role_text(role)}\n{prompt}"
+            # The first message of an agent's conversation says what it is and owns: its role, or
+            # the roles it plays in one conversation.
+            roles = self.mode.brief_of(agent) if agent == self.mode.agents[role] else agent
+            prompt = f"{brief.role_text(roles)}\n{prompt}"
         title = f"{self.task.id}: {st.goal}"[:80]
         if not was:
             try:
@@ -397,21 +329,23 @@ class Supervisor:
             except HarnessError as e:  # the turn makes its own, as before; only watching waits
                 self.task.event("session_not_started", error=str(e)[:500])
             if was:  # a tool that keeps no session ahead of the turn gives ""
-                self.task.set_session(role, was)
+                self.task.set_session(agent, was)
                 self.ports.session_started(self.task.read_state())
         turn = self._attempts(harness, prompt, was, title, st, role)
         if turn.session and turn.session != was:
-            self.task.set_session(role, turn.session)
+            self.task.set_session(agent, turn.session)
         self.task.event(
             "turn",
             state=str(st.state),
             role=role,
+            agent=agent,
             harness=harness.name,
             metered=harness.metered,
             ok=turn.ok,
             cost=turn.cost,
             tokens=turn.tokens,
             error=turn.error[:500],
+            **({"kind": kind} if kind else {}),
         )
         if not turn.ok:
             self.task.set_paused(True, problem=f"agent turn failed: {turn.error or turn.text}")
@@ -588,10 +522,32 @@ class Supervisor:
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
             return
+        if self.mode.self_review and prompt != self._self_review_prompt(st):
+            # The writer reads its own work before the gate does, in the same conversation. The
+            # prompt is kept first, so a stop in between resumes here, not with the work over.
+            set_next_prompt(self.task, self._self_review_prompt(st))
+            if self._turn(st, self._self_review_prompt(st), kind="self-review") is None:
+                return
+            if q := question(self.task):
+                self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
+                return
         if self._asks_for_command():
             self._command_checkpoint(st)
             return
+        if self.mode.supervisor and not self._after_red_gate():
+            # The supervisor reads every turn before any verification; only a turn that fixes a
+            # red gate goes straight back to the gate, and the supervisor sees it once it is green.
+            self.task.transition(State.REVIEW, reason="the worker's turn is over")
+            return
         self.task.transition(State.VERIFY)
+
+    def _self_review_prompt(self, st: TaskState) -> str:
+        return SELF_REVIEW_PROMPT.format(base=st.base_commit)
+
+    def _after_red_gate(self) -> bool:
+        """Whether the writer's turn just over was sent by a red verification."""
+        entered = next((e for e in reversed(self.task.events()) if e["type"] == "state"), None)
+        return bool(entered) and entered["data"].get("previous") == str(State.VERIFY)
 
     def _command_checkpoint(self, st: TaskState) -> None:
         """The command the writer proposed is what the task is about to be verified with: yours to
@@ -621,7 +577,9 @@ class Supervisor:
 
     def _verify(self, st: TaskState) -> None:
         result = self.ports.run_gate(self.task)
-        target = gate.next_state(result, st.iteration, self.max_iterations)
+        target = gate.next_state(result, st.rounds, self.max_rounds)
+        if result.passed:
+            self.task.set_verified_commit(result.commit)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
             gate.write_feedback(self.task, result)
         if result.environment:
@@ -649,8 +607,12 @@ class Supervisor:
             self.task.transition(target, reason="verification failed")
         elif target is State.CHECKPOINT_BLOCKED:
             self.task.transition(target, reason="verification still failing")
-            self.ports.notify(self.task.id, f"verification still failing after {st.iteration} attempts")
-        elif self._review_due(st):
+            self.ports.notify(
+                self.task.id,
+                f"verification still failing after {st.rounds} fix turn{'s' if st.rounds != 1 else ''}"
+                + self._unresolved(),
+            )
+        elif self.mode.separate_reviewer and self.reviewer is not None:
             self.last_gate = result
             self.task.transition(State.REVIEW, reason="verification passed")
         elif target is State.APPROVAL_RISKY:
@@ -660,62 +622,101 @@ class Supervisor:
             )
         else:
             self.task.transition(target, reason="verification passed")
-            self.ports.notify(self.task.id, self._review_message(result), kind="review")
+            self.ports.notify(self.task.id, self._review_message(result) + self._unresolved(), kind="review")
 
-    def _review_due(self, st: TaskState) -> bool:
-        """Whether the reviewer reads the work now: once in supervised mode, and in loop mode
-        after every green gate until its rounds are used up. Your reply gives it them back."""
-        if self.reviewer is None or self.review_mode == "none":
+    def _unresolved(self) -> str:
+        """The supervisor's last word on the work, when it had one the worker did not get to act
+        on: the work comes to you with it, verified or not."""
+        if not self.mode.supervisor or not (last := reviewing.latest(self.task)):
+            return ""
+        text = last.read_text()
+        n = int(reviewing.NUMBERED.match(last.name).group(1))
+        if problem := reviewing.problem(text):
+            return f"; supervisor round {n} unreadable ({problem})"
+        if not (blocking := reviewing.parse_review(text).blocking):
+            return f"; supervisor round {n}: no blocking notes"
+        return f"; supervisor round {n}: {_notes(len(blocking))} unresolved"
+
+    def _head_moved(self, st: TaskState) -> bool:
+        """The commits are not the ones the verification ran on (you talked to the agent under w,
+        an agent committed after its turn, a stop fell between states): back to the verification,
+        for no round of the writer's; what is reviewed and what comes to you is what was verified."""
+        head = self.ports.head()
+        if not head or not st.verified_commit or head == st.verified_commit:
             return False
-        rounds = self.max_reviews if self.review_mode == "loop" else 1
-        return st.reviews < rounds
+        reason = f"commits changed since the verification ({st.verified_commit[:7]} → {head[:7]})"
+        self.task.event("unverified_head", verified=st.verified_commit, head=head)
+        self.task.transition(State.VERIFY, reason=reason)
+        return True
 
     def _review(self, st: TaskState) -> None:
-        """The reviewer's round: a fresh container and a fresh conversation, its review kept as
-        handoff/review-N.md. Blocking notes go back to the writer while rounds are left; the last
-        round, or none, and the work goes on to you with the notes."""
+        """A round of the reviewer's, kept as handoff/review-N.md. In the review container it is a
+        fresh clone and a fresh conversation after a green gate; the supervisor reads in the pod,
+        in its own conversation, before any gate. Blocking notes go back to the writer while it
+        has rounds; then the work goes on, to you or to the gate, with the notes."""
+        if self.mode.separate_reviewer and self._head_moved(st):
+            return
         n = st.reviews + 1
-        out = self.ports.review_up()
-        try:
-            self.task.set_session("reviewer", "")  # the last round's server is gone with its container
-            st = self.task.read_state()
-            prompt = REVIEW_PROMPT.format(base=st.base_commit)
-            if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
-                prompt = REVIEW_AGAIN_PREFIX + prompt
-            if self._turn(st, prompt, role="reviewer") is None:
-                return
-            text = _read(out / "review.md")
-            if problem := reviewing.problem(text):
-                if self._turn(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
-                    return
-                text = _read(out / "review.md")
-        finally:
-            self.ports.review_down()
+        if self.mode.supervisor:
+            out = self.task.meta / "review"
+            out.mkdir(exist_ok=True)
+            (out / "review.md").unlink(missing_ok=True)  # the last round's, or the supervisor reads it
+            text = self._review_turns(st, n, out, SUPERVISE_PROMPT)
+        else:
+            out = self.ports.review_up()
+            try:
+                self.task.set_session("reviewer", "")  # the last round's server is gone with its container
+                text = self._review_turns(st, n, out, REVIEW_PROMPT)
+            finally:
+                self.ports.review_down()
+        if text is None:
+            return
         reviewing.keep(self.task, n, text)
         self.task.set_reviews(n)
         problem = reviewing.problem(text)
         review = reviewing.parse_review(text) if not problem else reviewing.Review()
         blocking, others = len(review.blocking), len(review.not_blocking)
         self.task.event("review", round=n, blocking=blocking, not_blocking=others, problem=problem)
-        if blocking and self.review_mode == "loop" and n < self.max_reviews:
-            set_next_prompt(self.task, REVIEW_FIX_PROMPT)
-            self.task.transition(State.IMPLEMENT, reason=f"review {n}: {blocking} blocking")
-            print(
-                f"[{time.strftime('%H:%M:%S')}] review {n}: {blocking} blocking, back to the writer",
-                flush=True,
-            )
-            return
         if problem:
             said = f"review {n} unreadable ({problem})"
         elif blocking:
-            said = (
-                f"review {n}: {blocking} blocking note{'s' if blocking != 1 else ''}, {others} not blocking"
-            )
+            said = f"review {n}: {_notes(blocking)}, {others} not blocking"
         else:
             said = f"review {n}: no blocking notes, {others} not blocking"
+        if blocking and st.rounds < self.max_rounds:
+            set_next_prompt(self.task, REVIEW_FIX_PROMPT)
+            self.task.transition(State.IMPLEMENT, reason=f"review {n}: {blocking} blocking")
+            print(f"[{time.strftime('%H:%M:%S')}] {said}, back to the writer", flush=True)
+            return
+        if self.mode.supervisor:
+            # Accepted, or out of rounds: the verification, and then the work comes to you with the
+            # notes. Nothing reaches you unverified.
+            accepted = not blocking and not problem
+            reason = "supervisor accepted the work" if accepted else f"{said}, no rounds left"
+            self.task.transition(State.VERIFY, reason=reason)
+            print(f"[{time.strftime('%H:%M:%S')}] {reason}", flush=True)
+            return
+        if self._head_moved(self.task.read_state()):
+            return
         self._checkpoint(
             State.CHECKPOINT_FINAL, f"{self._review_message(self.last_gate)}; {said}", kind="review"
         )
+
+    def _review_turns(self, st: TaskState, n: int, out: Path, prompt: str) -> str | None:
+        """The reviewer's turn, and one more when what it wrote is not a review; None when a turn
+        failed and the task stopped."""
+        st = self.task.read_state()
+        prompt = prompt.format(base=st.base_commit)
+        if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
+            prompt = REVIEW_AGAIN_PREFIX + prompt
+        if self._turn(st, prompt, role="reviewer") is None:
+            return None
+        text = _read(out / "review.md")
+        if problem := reviewing.problem(text):
+            if self._turn(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
+                return None
+            text = _read(out / "review.md")
+        return text
 
     def _review_message(self, result: gate.GateResult | None = None) -> str:
         # Tests that went missing are said here, not to the agent, which would put them back.

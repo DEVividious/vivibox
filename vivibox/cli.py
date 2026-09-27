@@ -140,7 +140,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.task:
         task = find_task(config.tasks_dir, args.task)
         running = actions.supervisor_running(task)
-        print(ui.task_detail(task, _criteria, config.max_iterations, args.events, style, running), end="")
+        print(ui.task_detail(task, _criteria, config.max_rounds, args.events, style, running), end="")
         return 0
     tasks = list_tasks(config.tasks_dir)
     live = {task.id for task in tasks}
@@ -149,7 +149,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("No tasks. Create one with 'vivibox new <project> \"<goal>\"'.")
         return 0
     shown = ui.task_list(
-        tasks, _criteria, config.max_iterations, style, running=actions.supervisor_running, finished=finished
+        tasks, _criteria, config.max_rounds, style, running=actions.supervisor_running, finished=finished
     )
     print(shown, end="")
     return 0
@@ -218,7 +218,7 @@ def cmd_rm(args: argparse.Namespace) -> int:
     task, project = actions.load(args.task)
     st = task.read_state()
     if not args.yes:
-        doing = ui.view(task, st, actions.supervisor_running(task), load_config().max_iterations).status
+        doing = ui.view(task, st, actions.supervisor_running(task), load_config().max_rounds).status
         answer = input(f"Delete {task.id} ({doing}) and all its work, without accepting it? [y/N] ")
         if answer.strip().lower() != "y":
             return 1

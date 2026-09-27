@@ -20,10 +20,22 @@ First public version.
 - The gate builds and tests the commits on a fresh clone with a build cache of its own, and checks
   the acceptance criteria, the commit messages, switched-off tests and the agent's `red.md`. A
   criterion that is only the build passing is refused.
+- Orchestration modes (`agent_orchestration_mode`, in `config.toml`, under `k` and per task under
+  `n`): `single_agent` (P+W+R → Gate), `planner_executor` (P → W+R → Gate),
+  `planner_maker_checker` (P → W → Gate → R ⇄ W, the default) and `supervisor_worker`
+  ((P+R) ⇄ W → Gate). Roles joined in one agent share one conversation and the first role's
+  model, and a writer that reviews its own work gets a self-review turn before every
+  verification; a supervisor reads every turn of the worker's in the pod, before the
+  verification, and a red verification goes back to the worker and to the verification again.
+  One limit, `limits.max_rounds` (3), counts the fix turns the writer gets, from the
+  verification or from a review, before the work comes to you; your reply gives them back.
+  `max_iterations`, `max_reviews` and the reviewer's `mode` are read no more, and a file that
+  still has them is told once. Without `[roles.reviewer]` the default mode reviews on the
+  writer's model.
 - A reviewer on a model of its own reads the work after a green gate; blocking notes go back to
-  the writer by themselves (`loop`) or every note comes to you (`supervised`); a task can go
-  without a reviewer. The reviewer reads the writer's reply in a later round. Its cost stands in a
-  column of its own.
+  the writer by themselves. The reviewer reads the writer's reply in a later round. Its cost
+  stands in a column of its own. What is reviewed, and what comes to you, is the commit the
+  verification ran on: commits that changed since go through it again first.
 - A project without a verification command asks the writer for one, and the proposal waits for
   your review before the first verification (`review the command`); a proposal narrowed to some
   tests is refused. The writer is told to allow its own whole build the verification's time

@@ -27,7 +27,7 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 |---|---|---|
 | unit of work | task | job, run |
 | checks after implementation | verification | verify; "gate" only in code and docs/security.md |
-| one round of implementing and verifying | attempt | iteration |
+| a fix turn the writer is sent on, by the verification or the review | round | attempt, iteration, retry |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
 | removing a task | delete | rm, remove |
 | the copy you review | review copy | worktree |
@@ -43,14 +43,14 @@ Status labels, the only ones allowed:
 | plan ready | `review the plan` | Waiting for you |
 | the writer's verification command proposed, in a project with none; the first verification waits for it | `review the command` | Waiting for you |
 | manual planner, no plan yet | `plan it yourself` | Waiting for you |
-| implementing; from the second attempt `(attempt n/N)` follows | `implementing` | Working |
+| implementing; from the first fix turn `(round n/N)` follows: fix turns used, of the task's limit | `implementing` | Working |
 | the project's preparation running, the writer's first turn waiting for it | `preparing` | Working |
 | verification running | `verifying` | Working |
 | the reviewer reading the work | `reviewing` | Working |
 | risky files changed | `approve risky files` | Waiting for you |
 | blocked on the agent's question | `agent asks` | Waiting for you |
-| blocked with every attempt used | `verification failed N×` | Waiting for you |
-| blocked by something outside the code (Docker, network, a credential, the time limit); no attempt spent | `verification could not run` | Waiting for you |
+| blocked with every round used | `verification failed N×` | Waiting for you |
+| blocked by something outside the code (Docker, network, a credential, the time limit); no round spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |
 | stopped by the person | `stopped` | Stopped |
 | stopped by force (`S`), the turn under way lost | `stopped by force` | Waiting for you |
@@ -105,7 +105,11 @@ starts the pod when needed.
   groups; the lists of a group stand a blank row apart too, and every other field is drawn a
   shade darker, so rows stay apart where no blank row fits. On a short terminal the headings go
   first, then the rows between the lists, before the multi-line text shrinks below three lines.
-  Roles stand in the order they work: planner, writer, reviewer.
+  Roles stand in the order they work: planner, writer, reviewer, and under them the Orchestration
+  list, with Rounds at its right: the mode's name on the list, its flow in symbols on the hint
+  line under it (which goes with the blank rows on a short terminal), and when it fits, the
+  models, the trade-off and the legend on hover. The reviewer's model row shows only where the
+  mode has a reviewer of its own.
 - A button that helps fill a field stands in that field's row, compact, or is the last entry of
   that field's list ("+ set up another project…"). The closing row holds one
   primary button, then Cancel, then the key that presses the primary button.

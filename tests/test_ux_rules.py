@@ -26,15 +26,15 @@ from vivibox import (
 from vivibox.states import State
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
-# attempt n/N and N× vary; everything else is a fixed word from the table.
-VARIABLE = re.compile(r" \(attempt \d+/\d+\)$|\d+×$")
+# round n/N and N× vary; everything else is a fixed word from the table.
+VARIABLE = re.compile(r" \(round \d+/\d+\)$|\d+×$")
 
 
 def allowed_labels() -> set[str]:
     """The Label column of the status table in the guidelines."""
     rows = re.findall(r"^\| [^|]+ \| `([^`]+)` \| [^|]+ \|$", GUIDELINES.read_text(), re.MULTILINE)
     assert len(rows) >= 12, "the status table moved or changed its shape"
-    return {VARIABLE.sub("", label.replace(" (attempt n/N)", "").replace("N×", "")) for label in rows}
+    return {VARIABLE.sub("", label.replace(" (round n/N)", "").replace("N×", "")) for label in rows}
 
 
 def situations(env):

@@ -87,8 +87,9 @@ def test_a_task_records_what_it_runs_with_when_it_starts_and_a_role_you_change(e
     config = load_config()
     found = roles.task_settings(task, load_project("demo"), config)
     assert found["roles"] == {"planner": "opencode m", "writer": "opencode m"}
-    assert found["verify"] == ["true"] and found["verify_timeout"] == 1800 and found["max_iterations"] == 3
-    assert found["review"] == "" and found["version"] == version.current() and found["auto"] is False
+    assert found["verify"] == ["true"] and found["verify_timeout"] == 1800 and found["max_rounds"] == 3
+    assert found["orchestration"] == "planner_maker_checker" and found["version"] == version.current()
+    assert found["auto"] is False
     actions.record_settings(task, load_project("demo"), config)
     assert [e["data"] for e in task.events() if e["type"] == "settings"] == [found]
     actions.choose_role(task, "writer", ("opencode", "other/strong"), config)

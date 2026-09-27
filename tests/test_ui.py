@@ -82,7 +82,7 @@ def test_list_is_a_table_with_waiting_tasks_first(tmp_path):
     assert lines[1].startswith("demo-1") and "review the plan" in lines[1]
     assert (
         lines[2].startswith("demo-2")
-        and "implementing (attempt 2/3)" in lines[2]
+        and "implementing (round 1/3)" in lines[2]
         and "$0.00   $0.25   -" in lines[2]
     )
     assert lines[3].startswith("demo-3") and "stopped" in lines[3]

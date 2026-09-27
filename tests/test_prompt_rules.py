@@ -16,7 +16,7 @@ BRIEFS = {
     role: brief.common("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
     + "\n"
     + brief.role_text(role)
-    for role in brief.ROLES
+    for role in brief.BRIEFS
 }
 TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
 # What starts a turn of an agent, wherever vivibox keeps it.
@@ -26,6 +26,9 @@ TURN_PROMPTS = {
     "DEMO_ASK": actions.DEMO_ASK,
 }
 MAX_BRIEF_WORDS = 800
+# A brief of roles joined in one agent (writer-reviewer, planner-writer-reviewer, planner-reviewer)
+# carries two roles' rules, and gets a hundred words more rather than a shortened rule.
+MAX_JOINED_BRIEF_WORDS = 900
 MAX_PROMPT_WORDS = 160
 # The files of /task the pod mounts for the agent (actions.task_pod), by the names the brief gives.
 MOUNTED = {"/task/plan.md", "/task/context", "/task/harness", "/task/review/review.md"} | {
@@ -88,6 +91,7 @@ def test_every_failure_the_gate_records_has_a_line_in_its_feedback():
     for field in dataclasses.fields(gate.GateResult):
         if field.name in (
             "log",
+            "commit",
             "risky",
             "removed_tests",
             "build_files",
@@ -119,7 +123,8 @@ def test_the_stuck_path_names_the_file_by_its_full_path():
 
 def test_word_budgets():
     for role, text in BRIEFS.items():
-        assert len(text.split()) <= MAX_BRIEF_WORDS, f"{role}: {len(text.split())} words"
+        limit = MAX_JOINED_BRIEF_WORDS if "-" in role else MAX_BRIEF_WORDS
+        assert len(text.split()) <= limit, f"{role}: {len(text.split())} words"
     for name, text in TURN_PROMPTS.items():
         if name == "DEMO_ASK":  # a conversation of its own, with no brief behind it: it is its own
             continue

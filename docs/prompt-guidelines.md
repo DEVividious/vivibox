@@ -2,7 +2,8 @@
 
 Read this before changing anything an agent reads: the prompts in `vivibox/supervisor.py`,
 `vivibox/manual.py` and `vivibox/demo.py`, the templates in `vivibox/templates/`, and the
-feedback the gate writes in `vivibox/gate.py`. The rules can be checked, and
+feedback the gate writes in `vivibox/gate.py`. The supervisor's turn prompts live in
+`vivibox/prompts.py`. The rules can be checked, and
 `tests/test_prompt_rules.py` checks the mechanical ones. A change to a rule updates the table
 here in the same commit.
 
@@ -14,8 +15,11 @@ here in the same commit.
   role's part (`templates/roles/<role>.md`) says what the role does and which files are its own,
   and goes as the first message of that role's conversation (`brief.role_text`), because a
   system prompt per agent would replace the harness's own, which teaches a model its tools.
-- **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, …): what to do now, which files to
-  read and write, and the sentence that ends the turn.
+- **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
+  `SUPERVISE_PROMPT`, …): what to do now, which files to read and write, and the sentence that ends
+  the turn. A role's part of the brief is one file per agent: a role's own, or the roles one agent
+  plays in one conversation (`roles/writer-reviewer.md`, `roles/planner-writer-reviewer.md`,
+  `roles/planner-reviewer.md`, chosen by the orchestration mode).
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
   make it right.
 
@@ -76,8 +80,10 @@ name in every prompt, in the feedback and in the view.
 
 ## 7. Length
 
-The brief, common part and role part together, stays under 800 words and a turn prompt under
-160; the numbers are in `tests/test_prompt_rules.py`. The prompt that works out how to run the app (`DEMO_ASK`) is a
+The brief, common part and role part together, stays under 800 words (900 for the brief of roles
+joined in one agent, `writer-reviewer`, `planner-writer-reviewer`, `planner-reviewer`: two roles'
+rules, none of them shortened) and a turn prompt under 160; the numbers are in
+`tests/test_prompt_rules.py`. The prompt that works out how to run the app (`DEMO_ASK`) is a
 conversation of its own with no brief behind it, so it carries its own and is not budgeted. Room is made by moving a sentence to the layer it belongs to
 (§1), not by shortening what a weaker model needs spelled out.
 
@@ -108,6 +114,13 @@ the commit that changed the prompt:
 - review: the writer commits a test that proves nothing (it asserts a constant) with the
   criterion ticked; the reviewer's blocking note names it, and the next turn makes the test
   real.
+- single agent: one conversation on the planner's model plans, writes, reviews itself and passes
+  the gate; no review state.
+- planner and executor: the same fake test, planted before the writer's own review turn; that
+  turn makes it real before the gate.
+- supervisor and worker: the same fake test, read by the supervisor in the pod before any build;
+  its blocking note goes to the worker, the fix comes back to it, and the gate runs once it
+  accepts; the supervisor's turns change no commit.
 - prepared: a Maven project of three modules, installed once by `prepare`; the task changes two
   of them, one depending on the other. The writer works on the modules it changes, together, and
   builds the whole reactor once at most, as its last check; the evidence stays out of the

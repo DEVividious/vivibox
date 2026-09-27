@@ -18,7 +18,7 @@ def test_create_numbers_tasks_per_project(tmp_path):
 def test_new_task_starts_in_plan_with_event(tmp_path):
     task = create_task(tmp_path, "shop", "goal", "")
     st = task.read_state()
-    assert st.state is State.PLAN and st.iteration == 1 and not st.paused
+    assert st.state is State.PLAN and (st.iteration, st.rounds) == (0, 0) and not st.paused
     assert [e["type"] for e in task.events()] == ["created"]
     assert (task.meta / "handoff").is_dir() and (task.meta / "log").is_dir()
 
@@ -28,7 +28,8 @@ def test_transitions_are_logged_and_count_iterations(tmp_path):
     for target in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.IMPLEMENT, State.VERIFY):
         task.transition(target)
     task.transition(State.CHECKPOINT_FINAL, reason="green")
-    assert task.read_state().iteration == 2
+    st = task.read_state()
+    assert (st.iteration, st.rounds) == (2, 1), "two verifications, one fix turn"
     last = task.events()[-1]
     assert last["type"] == "state"
     assert last["data"] == {"previous": "verify", "current": "checkpoint:final", "reason": "green"}

@@ -12,6 +12,9 @@ from importlib.resources import files
 from pathlib import Path
 
 ROLES = ("planner", "writer", "reviewer")
+# The briefs there are: a role's own, and the ones for roles joined in one agent (orchestration
+# modes), named by the roles they join.
+BRIEFS = (*ROLES, "planner-writer-reviewer", "writer-reviewer", "planner-reviewer")
 
 
 def _template(name: str) -> str:
@@ -29,7 +32,7 @@ def common(task_id: str, repo: str | Path, branch: str, verify: list[str] | tupl
 
 
 def role_text(role: str) -> str:
-    """What one role owns and is held to, on top of the common brief."""
-    if role not in ROLES:
+    """What one role, or the roles one agent plays, owns and is held to, on top of the common brief."""
+    if role not in BRIEFS:
         raise ValueError(f"no such role: {role}")
     return _template(f"roles/{role}.md")

@@ -16,9 +16,66 @@ DEFAULT_NETWORK_POOL = "198.51.100.0/24"
 # What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
 NTFY_LEVELS = ("decisions", "all")
 DEFAULT_NTFY_SERVER = "https://ntfy.sh"
-# How the reviewer works: blocking notes go back to the writer by themselves (loop), or every
-# note comes to you (supervised).
-REVIEW_MODES = ("loop", "supervised")
+
+
+@dataclass(frozen=True)
+class Orchestration:
+    """One way of sharing a task between the roles: what the view and the docs say about it."""
+
+    label: str
+    flow: str
+    when: str
+    models: str
+    tradeoff: str
+
+
+# How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where
+# the verification (Gate) runs. Roles joined with + are one agent in one conversation, on the
+# model of the first of them; ⇄ is rounds of fixes, up to limits.max_rounds.
+ORCHESTRATION_MODES = {
+    "single_agent": Orchestration(
+        "Single agent",
+        "P+W+R → Gate",
+        "Small, routine, cheap tasks.",
+        "One model for everything: the planner's, which has to be an opencode model.",
+        "Cheapest and fastest; no independent review.",
+    ),
+    "planner_executor": Orchestration(
+        "Planner and executor",
+        "P → W+R → Gate",
+        "A good plan matters and the implementation is routine.",
+        "A strong planner; a cheaper writer, which reviews its own work before the gate.",
+        "The plan gets the strong model; the review is the writer's own.",
+    ),
+    "planner_maker_checker": Orchestration(
+        "Planner, maker, checker",
+        "P → W → Gate → R ⇄ W",
+        "An independent review at every round; the default.",
+        "A strong planner; a cheaper writer; a reviewer cheaper than or a little stronger than the "
+        "writer, best of another family; without [roles.reviewer] it runs on the writer's model.",
+        "The most turns and cost per task; the most checks.",
+    ),
+    "supervisor_worker": Orchestration(
+        "Supervisor and worker",
+        "(P+R) ⇄ W → Gate",
+        "Hard, multi-step changes under a strong model's constant supervision.",
+        "A strong supervisor, which plans and then reads every turn of a cheaper worker in the "
+        "same pod, without editing.",
+        "The strong model reads every round, so it costs more of it; the build runs only once the "
+        "supervisor accepts, so a build error surfaces late.",
+    ),
+}
+DEFAULT_ORCHESTRATION = "planner_maker_checker"
+ORCHESTRATION_LEGEND = (
+    "P planner · W writer · R reviewer · Gate the verification (build, tests, criteria, commits) · "
+    "+ roles in one agent and one conversation · → then · ⇄ rounds of fixes, up to max_rounds"
+)
+DEFAULT_MAX_ROUNDS = 3
+# What the view says of limits.max_rounds.
+ROUNDS_HELP = (
+    "Fix turns the writer gets on its own, from the gate or from the review, before the work "
+    "comes to you; your reply gives it as many again."
+)
 # A topic is a name: letters, digits, - and _, as ntfy has it.
 NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
@@ -56,7 +113,9 @@ class Role:
 @dataclass(frozen=True)
 class Config:
     tasks_dir: Path
-    max_iterations: int
+    # Fix turns the writer gets on its own, from the gate or from the review, before the work
+    # comes to you (limits.max_rounds).
+    max_rounds: int
     roles: dict[str, Role]
     desktop_notifications: bool = True
     # Command that opens a directory in your IDE ("idea", "code"); offered when work is ready for review.
@@ -70,10 +129,10 @@ class Config:
     # Dollars a task may cost before you are told, and before it stops for you; 0 is no limit.
     cost_warning: float = 0.0
     cost_limit: float = 0.0
-    # The reviewer, when roles has one: how it works, and how many rounds of blocking notes go
-    # back to the writer before the work comes to you as it is.
-    review_mode: str = "loop"
-    max_reviews: int = 2
+    # How a task is shared between the roles (agent_orchestration_mode, one of ORCHESTRATION_MODES).
+    orchestration: str = DEFAULT_ORCHESTRATION
+    # Keys the file still has from before, in one line to say once; "" when there are none.
+    notice: str = ""
     # The ntfy topic the supervisor's messages go to as well ("" for none), on which server, and
     # which of them.
     ntfy: str = ""
@@ -142,9 +201,15 @@ def load_config(base: Path | None = None) -> Config:
     tasks_dir = Path(_expect(data, "tasks_dir", str, path))
     if not tasks_dir.is_absolute():
         raise ConfigError(f"{path}: tasks_dir must be an absolute path")
-    max_iterations = data.get("limits", {}).get("max_iterations", 3)
-    if not isinstance(max_iterations, int) or max_iterations < 1:
-        raise ConfigError(f"{path}: limits.max_iterations must be an integer >= 1")
+    limits = data.get("limits", {})
+    old = [f"limits.{k}" for k in ("max_iterations", "max_reviews") if k in limits]
+    # A limit from before there was one: its figure carries over, so a task fixes as often as it did.
+    max_rounds = limits.get("max_rounds", limits.get("max_iterations", DEFAULT_MAX_ROUNDS))
+    if isinstance(max_rounds, bool) or not isinstance(max_rounds, int) or max_rounds < 1:
+        raise ConfigError(f"{path}: limits.max_rounds must be an integer >= 1")
+    orchestration = data.get("agent_orchestration_mode", DEFAULT_ORCHESTRATION)
+    if orchestration not in ORCHESTRATION_MODES:
+        raise ConfigError(f"{path}: agent_orchestration_mode must be one of {', '.join(ORCHESTRATION_MODES)}")
     verify_timeout = data.get("limits", {}).get("verify_timeout", DEFAULT_VERIFY_TIMEOUT)
     if not isinstance(verify_timeout, int) or verify_timeout < 1:
         raise ConfigError(f"{path}: limits.verify_timeout must be a number of seconds >= 1")
@@ -154,10 +219,6 @@ def load_config(base: Path | None = None) -> Config:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise ConfigError(f"{path}: limits.{name} is dollars per task, e.g. 2.5; 0 for none")
         costs[name] = float(value)
-    max_reviews = data.get("limits", {}).get("max_reviews", 2)
-    if not isinstance(max_reviews, int) or max_reviews < 1:
-        raise ConfigError(f"{path}: limits.max_reviews must be an integer >= 1")
-    review_mode = REVIEW_MODES[0]
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -181,10 +242,15 @@ def load_config(base: Path | None = None) -> Config:
                 raise ConfigError(
                     f"{path}: roles.reviewer.harness must be opencode: the reviewer reads in a pod"
                 )
-            review_mode = role.get("mode", REVIEW_MODES[0])
-            if review_mode not in REVIEW_MODES:
-                raise ConfigError(f"{path}: roles.reviewer.mode must be one of {', '.join(REVIEW_MODES)}")
+            if "mode" in role:
+                old.append("roles.reviewer.mode")
         roles[name] = Role(harness, role["model"])
+    notice = (
+        f"{path}: {', '.join(old)} is from before orchestration modes and is not read; the limit is"
+        f" limits.max_rounds ({max_rounds}) and the flow is agent_orchestration_mode ({orchestration})"
+        if old
+        else ""
+    )
     for needed in ("planner", "writer"):
         if needed not in roles:
             raise ConfigError(
@@ -220,15 +286,15 @@ def load_config(base: Path | None = None) -> Config:
         )
     return Config(
         tasks_dir,
-        max_iterations,
+        max_rounds,
         roles,
         desktop,
         ide,
         str(parsed),
         verify_timeout=verify_timeout,
         ntfy=ntfy,
-        review_mode=review_mode,
-        max_reviews=max_reviews,
+        orchestration=orchestration,
+        notice=notice,
         **costs,
         ntfy_server=ntfy_server.rstrip("/"),
         ntfy_events=ntfy_events,

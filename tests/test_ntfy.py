@@ -62,10 +62,10 @@ def test_a_failure_to_send_is_said_and_stops_nothing():
     assert said == ["ntfy: not sent (connection refused)"]
 
 
-def state(st: State, iteration: int = 1) -> TaskState:
+def state(st: State, rounds: int = 0) -> TaskState:
     return TaskState(
-        id="demo-1", project="demo", goal="g", state=st, iteration=iteration,
-        paused=False, created="", updated="",
+        id="demo-1", project="demo", goal="g", state=st, iteration=1,
+        paused=False, created="", updated="", rounds=rounds,
     )  # fmt: skip
 
 
@@ -76,19 +76,19 @@ def test_the_start_is_said_at_every_level_and_the_stages_at_level_all_when_they_
     stages = ntfy.Stages(lambda: channel(sent, level=ntfy.ALL))
     for st in (State.PLAN, State.PLAN, State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         stages.seen(state(st))
-    stages.seen(state(State.IMPLEMENT, iteration=2))
+    stages.seen(state(State.IMPLEMENT, rounds=1))
     assert [s[2] for s in sent] == [
         "started: planning",
         "implementing",
         "verifying",
-        "implementing, attempt 2",
+        "implementing, round 1",
     ]
     assert all(s[1]["Priority"] == "default" for s in sent), "a stage is news, not a decision"
     decisions = []
     stages = ntfy.Stages(lambda: channel(decisions), again=True)
     for st in (State.IMPLEMENT, State.VERIFY, State.IMPLEMENT):
-        stages.seen(state(st, iteration=2))
-    assert decisions[0][2] == "started again: implementing, attempt 2"
+        stages.seen(state(st, rounds=1))
+    assert decisions[0][2] == "started again: implementing, round 1"
     assert len(decisions) == 1, "at the default level the stages after the start do not go"
     waiting = []
     ntfy.Stages(lambda: channel(waiting), again=True).seen(state(State.CHECKPOINT_PLAN))

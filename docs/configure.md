@@ -52,22 +52,32 @@ view). `ntfy_server` is ntfy.sh unless you run your own; a token, when the topic
 stage after that (implementing, verifying) to the decisions. The three rows are under `k` as well, and a change there
 reaches a running task from its next message.
 
-A third role, `[roles.reviewer]`, reads the work after a green gate (docs/tasks.md, *A second
-agent reviews first*). It runs through opencode on a model of your choice; another family than
-the writer's is what makes the review worth its cost. `mode` is `loop` (blocking notes go back to
-the writer by themselves) or `supervised` (every note comes to you), and `limits.max_reviews` (2)
-is how many rounds go back before the work comes to you as it is. Under `k` the reviewer's row
-adds one when there is none, and *review mode* and `max_reviews` sit with the roles and the
-limits.
+`agent_orchestration_mode`, at the top of the file, says how a task is shared between the
+planner, the writer and the reviewer, and where the gate runs (docs/tasks.md, *Orchestration
+modes*): `single_agent`, `planner_executor`, `planner_maker_checker` (the default) or
+`supervisor_worker`. Roles joined in one agent share one conversation and the first role's model,
+so `single_agent` needs a planner on an opencode model and `supervisor_worker` a planner on a
+model, not `manual`; a task that cannot run in its mode says so before it starts. The same
+setting is a row under `k` and a row under `n`, for one task.
 
-`config.toml` also holds the limits: `max_iterations`, how many verification failures the
-writer may fix on its own before the task stops for you (3), and `verify_timeout`, the seconds one
+A third role, `[roles.reviewer]`, is the reviewer of `planner_maker_checker`: it reads the work
+after a green gate in a container of its own, through opencode, on a model of your choice;
+another family than the writer's is what makes the review worth its cost. Without it, the mode
+reviews on the writer's model, and the reviewer's row under `k` says so. The other modes have
+the writer or the planner review, and read no `[roles.reviewer]`.
+
+`config.toml` also holds the limits: `max_rounds`, the fix turns the writer gets on its own, from
+the gate or from the review, before the work comes to you (3; the first implementation is none
+of them, and your reply gives them back), and `verify_timeout`, the seconds one
 verification command may take (1800) before it is stopped and the task waits for you as on any
 failure outside the code. A project file may set its own `verify_timeout`. `cost_warning` and
 `cost_limit` are dollars a task may cost, planning and implementation together, before you are
 told and before it stops for you: it waits with the figures on its row (*cost limit reached*),
 and goes on once you raise the limit under `k` and press `s`. Both are checked before a turn, so
-a turn may run past the limit by its own cost; neither is set unless you set it.
+a turn may run past the limit by its own cost; neither is set unless you set it. A file from
+before orchestration modes may still have `limits.max_iterations`, `limits.max_reviews` or the
+reviewer's `mode`: they are not read, `max_iterations` carries over as `max_rounds` when that is
+not set, and the supervisor says so once, in its window and in the task's timeline.
 
 Once per repository you want agents to work on: press `i` in the view, and browse to its folder
 (or make a new one there, for a project from scratch), or from a shell inside it:

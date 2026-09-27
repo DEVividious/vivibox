@@ -162,31 +162,58 @@ ignored. Changes of yours are never overwritten: vivibox stops and names the fil
 `/srv/vivibox/<id>/repo` in an IDE. It is the agent's working copy, and IDEs rewrite their project
 files when they open it.
 
-### A second agent reviews first
+### Orchestration modes
 
-With a reviewer in `config.toml` (`[roles.reviewer]`, best on another family of models than the
-writer), the work the gate passed is read by it before it comes to you. It works in a container
-of its own on a fresh clone of the commits, with the writer's tree read-only and only its own key,
-and writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
-(`path:line`), what is wrong and what would make it right: what keeps the work from being what
-the plan says, and, besides the plan, what a senior reviewer sends back (code the repository
-already has, an abstraction with one caller, behaviour nobody asked for, a comment that restates
-the code, a test of how the code is written, a name that says the type). It runs no build, asks
-nothing and adds no criteria; the supervisor, not the agents, ends the loop.
+How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where the
+gate runs, is its orchestration mode: config.toml's `agent_orchestration_mode`, the row under `k`,
+or the row under `n` for one task. Roles joined with `+` are one agent in one conversation, on
+the first role's model; `→` is then; `⇄` is rounds of fixes.
 
-- In **loop** mode blocking notes go back to the writer by themselves, then the gate runs again
-  and the reviewer reads again, up to `max_reviews` rounds (2), with what the writer answered
-  where it disagreed (`review-N-reply.md`) read first, so a note the answer settles is not
-  repeated at you. No blocking notes, or the last
-  round, and the work comes to you as usual, the notes with it.
-- In **supervised** mode the reviewer reads once and every note comes to you.
-- `n` asks which for the task when there is a reviewer, and *no reviewer* is a choice too: its
-  model row goes with it, and no container is started for it. `k` sets the default,
-  the reviewer's model and the rounds.
+| Mode | Flow | When |
+|---|---|---|
+| `single_agent` | P+W+R → Gate | small, routine, cheap tasks; no independent review |
+| `planner_executor` | P → W+R → Gate | a good plan matters and the implementation is routine |
+| `planner_maker_checker` (default) | P → W → Gate → R ⇄ W | an independent review at every round |
+| `supervisor_worker` | (P+R) ⇄ W → Gate | hard, multi-step changes under a strong model's constant supervision |
 
-The list says `reviewing` while it reads, and its cost stands in a column of its own. At the
-final checkpoint the panel shows the newest review with its counts; `l` opens every round. Your
-reply at the end gives the reviewer its rounds back for the next attempt.
+Every mode plans first and stops for your acceptance of the plan (`--auto` does not). Then:
+
+- **W+R**, the writer reviewing its own work (`single_agent`, `planner_executor`): after each of
+  the writer's turns, the first implementation, a fix after a red gate, or what it did with your
+  reply, it gets one more turn in the same conversation to read the diff against the plan and
+  the criteria, for what the gate cannot see (a test that cannot fail, a criterion ticked on
+  faith, behaviour the plan did not ask for), and to fix it. Then the gate runs. The timeline
+  says `writer turn (self-review)`.
+- **The reviewer** of `planner_maker_checker` works in a container of its own on a fresh clone of
+  the commits, with the writer's tree read-only and only its own key, after a green gate, and
+  writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
+  (`path:line`), what is wrong and what would make it right: what keeps the work from being what
+  the plan says, and, besides the plan, what a senior reviewer sends back (code the repository
+  already has, an abstraction with one caller, behaviour nobody asked for, a comment that
+  restates the code, a test of how the code is written, a name that says the type). It runs no
+  build, asks nothing and adds no criteria. Blocking notes go back to the writer, then the gate
+  runs again and the reviewer reads again, with what the writer answered where it disagreed
+  (`review-N-reply.md`) read first. No blocking notes, and the work comes to you, the notes with
+  it. Without `[roles.reviewer]` the reviewer runs on the writer's model.
+- **The supervisor** of `supervisor_worker` is the planner, and reads every turn of the worker's
+  in the same pod, on the same clone, before any build: it changes nothing and commits nothing,
+  and writes the same `review-N.md`. Blocking notes go back to the worker; when it accepts, the
+  gate runs, and green, the work comes to you. A red gate goes back to the worker and straight
+  to the gate again: the supervisor does not read a fix until it is green. Out of rounds, the
+  gate runs anyway, and the work comes to you with the supervisor's unresolved notes, verified
+  or, red, with both.
+
+One limit, `max_rounds` (3 in config.toml, or the task's own from `n`), counts the fix turns the
+writer gets before the work comes to you: a red gate is one, a review with blocking notes is
+one, the first implementation and a verification alone are none. Your reply gives them back.
+The list says `implementing (round n/N)` from the first fix turn on, `reviewing` while a
+reviewer or the supervisor reads, and the reviewing's cost stands in a column of its own where
+the mode has one. At the final checkpoint the panel shows the newest review with its counts;
+`l` opens every round.
+
+What the reviewer reads, and what comes to you, is the commit the gate verified: commits that
+changed since (you talked to the agent under `w`, an agent committed after its turn) go through
+the gate again first, for no round.
 
 ### Running the app
 

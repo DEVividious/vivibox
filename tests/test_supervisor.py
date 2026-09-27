@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import brief, gate, supervisor, ui
+from vivibox import brief, gate, orchestration, prompts, supervisor, ui
 from vivibox.harness import Harness, Turn
 from vivibox.risky import Change
 from vivibox.states import State
@@ -52,7 +52,7 @@ def make(task, harness, results=(), risky=()):
         notify=lambda _id, msg, kind="": notes.append(msg),
         sleep=lambda seconds: None,  # a retry's wait, not waited in tests
     )
-    sup = supervisor.Supervisor(task, harness, ports, max_iterations=2, project_verify=["true"])
+    sup = supervisor.Supervisor(task, harness, ports, max_rounds=1, project_verify=["true"])
     return sup, notes
 
 
@@ -67,7 +67,7 @@ def test_plan_turn_copies_draft_and_stops_at_checkpoint(task):
     st = task.read_state()
     assert st.state is State.CHECKPOINT_PLAN and st.sessions == {"writer": "ses_1"}
     assert "health endpoint returns 200" in task.plan_path.read_text()
-    assert harness.prompts[0].endswith(supervisor.PLAN_PROMPT) and notes == ["plan ready for review"]
+    assert harness.prompts[0].endswith(prompts.PLAN_PROMPT) and notes == ["plan ready for review"]
     assert not sup.step(), "waits for you at a checkpoint"
 
 
@@ -112,11 +112,11 @@ def test_a_plan_with_the_placeholder_left_in_goes_to_the_planner(task):
 
 def test_after_your_reply_the_planner_revises_even_a_finished_plan(task):
     task.plan_path.write_text(YOUR_PLAN)
-    supervisor.set_next_prompt(task, supervisor.PLAN_COMMENT_PROMPT)
+    supervisor.set_next_prompt(task, prompts.PLAN_COMMENT_PROMPT)
     harness = FakeHarness(task, [write_draft])
     sup, _ = make(task, harness)
     assert sup.step()
-    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(supervisor.PLAN_COMMENT_PROMPT)
+    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(prompts.PLAN_COMMENT_PROMPT)
 
 
 def test_a_plan_you_review_has_no_notes_left_for_the_agent(task):
@@ -139,7 +139,7 @@ def test_auto_plan_goes_straight_to_implementation(task):
     assert st.state is State.IMPLEMENT and notes == []
     assert (task.meta / gate.ACCEPTED_PLAN).exists()
     sup.step()
-    assert harness.prompts[-1] == supervisor.IMPLEMENT_PROMPT
+    assert harness.prompts[-1] == prompts.IMPLEMENT_PROMPT
 
 
 def test_auto_plan_still_stops_without_real_criteria(task):
@@ -176,17 +176,17 @@ def test_the_writer_waits_for_the_projects_preparation(task):
         preparing=lambda: waits.pop(0) if waits else False,
     )
     sup = supervisor.Supervisor(
-        task, harness, ports, max_iterations=2, project_verify=["true"], prepared=["mvn -B install"]
+        task, harness, ports, max_rounds=1, project_verify=["true"], prepared=["mvn -B install"]
     )
     assert sup.step()
     assert harness.prompts == [] and slept == [supervisor.PREPARE_POLL]
     assert task.read_state().state is State.IMPLEMENT
     sup.step()
-    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(supervisor.IMPLEMENT_PROMPT)
+    assert len(harness.prompts) == 1 and harness.prompts[0].endswith(prompts.IMPLEMENT_PROMPT)
     assert "`mvn -B install`" in harness.prompts[0] and "/task/handoff/prepare.log" in harness.prompts[0]
     sup.step()  # the verification fails: the feedback turn is not told again
     sup.step()
-    assert "prepare.log" not in harness.prompts[-1] and harness.prompts[-1] == supervisor.FEEDBACK_PROMPT
+    assert "prepare.log" not in harness.prompts[-1] and harness.prompts[-1] == prompts.FEEDBACK_PROMPT
 
 
 def test_question_during_implementation_blocks(task):
@@ -204,14 +204,14 @@ def test_failed_gate_sends_feedback_then_blocks_after_limit(task):
     harness = FakeHarness(task)
     sup, notes = make(task, harness, results=[gate_result(False), gate_result(False)])
     sup.step()  # implement
-    sup.step()  # verify: fails, iteration 1 of 2
-    assert task.read_state().state is State.IMPLEMENT
+    sup.step()  # verify: fails; the one fix turn
+    assert task.read_state().state is State.IMPLEMENT and task.read_state().rounds == 1
     assert (task.meta / "handoff" / "verify-feedback.md").exists()
     sup.step()  # implement with feedback
-    assert harness.prompts[-1] == supervisor.FEEDBACK_PROMPT
+    assert harness.prompts[-1] == prompts.FEEDBACK_PROMPT
     sup.step()  # verify: fails again at the limit
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
-    assert notes[-1] == "verification still failing after 2 attempts", "attempts, as the list calls them"
+    assert notes[-1] == "verification still failing after 1 fix turn"
 
 
 def test_your_reply_to_a_blocked_task_gives_the_agent_a_whole_new_budget(task):
@@ -225,11 +225,12 @@ def test_your_reply_to_a_blocked_task_gives_the_agent_a_whole_new_budget(task):
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
     actions.reply(task, "Docker works again; switch the integration tests back on")
     st = task.read_state()
-    assert (st.state, st.iteration) == (State.IMPLEMENT, 1), "attempt 1, not 2, after your reply"
-    assert "attempt" not in ui.activity(st, 2)
+    assert (st.state, st.rounds, st.iteration) == (State.IMPLEMENT, 0, 2), "no round spent on your reply"
+    assert "round" not in ui.activity(st, 1)
     sup.step()  # implement
-    sup.step()  # verify fails: the first of the new two
-    assert task.read_state().state is State.IMPLEMENT and task.read_state().iteration == 2
+    sup.step()  # verify fails: the first fix turn of the new pool
+    st = task.read_state()
+    assert (st.state, st.rounds, st.iteration) == (State.IMPLEMENT, 1, 3)
 
 
 def test_passing_gate_reaches_final_checkpoint(task):
@@ -425,7 +426,7 @@ def test_verifying_again_runs_the_gate_without_a_turn_of_the_agent(task):
     blocked(task, harness)
     actions.verify_again(task)
     st = task.read_state()
-    assert st.state is State.VERIFY and st.iteration == 2, "no new attempt: nothing was written"
+    assert st.state is State.VERIFY and (st.iteration, st.rounds) == (3, 1), "a verification, no round"
     assert task.events()[-1]["data"]["reason"] == "verify again"
     sup, notes = make(task, harness, results=[gate_result(True)])
     sup.step()
@@ -515,9 +516,9 @@ def test_accepting_the_plan_puts_an_old_question_away(task):
 
 
 def test_resuming_repeats_the_states_own_prompt():
-    own = {State.PLAN: supervisor.PLAN_PROMPT, State.IMPLEMENT: supervisor.IMPLEMENT_PROMPT}
+    own = {State.PLAN: prompts.PLAN_PROMPT, State.IMPLEMENT: prompts.IMPLEMENT_PROMPT}
     for state, prompt in own.items():
-        resumed = supervisor.resume_prompt(state)
+        resumed = prompts.resume_prompt(state)
         assert resumed.startswith("You were interrupted") and resumed.endswith(prompt)
 
 
@@ -532,7 +533,7 @@ def test_a_broken_environment_stops_the_task_without_using_an_attempt(task):
     sup.step()  # implement
     sup.step()  # verify
     st = task.read_state()
-    assert (st.state, st.iteration) == (State.CHECKPOINT_BLOCKED, 1), "the first attempt, still"
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0), "no round spent"
     assert "could not run" in notes[-1] and "Docker" in notes[-1] and "g" in notes[-1]
     assert not (task.meta / supervisor.NEXT_PROMPT).exists(), (
         "no feedback turn for something the agent cannot fix"
@@ -570,8 +571,8 @@ def test_the_first_turn_of_a_role_opens_with_its_brief(task):
     task.transition(State.IMPLEMENT)
     sup.step()  # implement, in the same conversation
     first, second = harness.prompts
-    assert first.startswith(brief.role_text("writer")) and first.endswith(supervisor.PLAN_PROMPT)
-    assert second == supervisor.IMPLEMENT_PROMPT, "said once per conversation, not once per turn"
+    assert first.startswith(brief.role_text("writer")) and first.endswith(prompts.PLAN_PROMPT)
+    assert second == prompts.IMPLEMENT_PROMPT, "said once per conversation, not once per turn"
 
 
 def test_the_review_message_counts_removed_tests(task):
@@ -614,13 +615,11 @@ def test_the_writer_is_asked_for_the_command_only_when_the_project_has_none(task
         supervisor.accept_plan(t, "plan accepted")
         harness = FakeHarness(t)
         ports = supervisor.Ports(run_gate=lambda _: gate_result(), risky_changes=lambda: [])
-        supervisor.Supervisor(
-            t, harness, ports, max_iterations=2, project_verify=project_verify, **limits
-        ).step()
+        supervisor.Supervisor(t, harness, ports, max_rounds=1, project_verify=project_verify, **limits).step()
         return harness.prompts[0]
 
     asked = first_implement_prompt([])
-    assert supervisor.PROPOSE_PREFIX.format(minutes=30) + supervisor.IMPLEMENT_PROMPT in asked
+    assert prompts.PROPOSE_PREFIX.format(minutes=30) + prompts.IMPLEMENT_PROMPT in asked
     assert "/task/handoff/verify-proposal.md" in asked
     # The whole build it runs itself gets the verification's own time limit, so its tool's default
     # of two minutes does not cut a Maven suite short and read as a failure, or a question.
@@ -787,7 +786,7 @@ class FakeReviewer(FakeHarness):
         return Turn("rev_1", True, 0.05, 100, "done")
 
 
-def reviewed(task, tmp_path, texts, results=(), mode="loop", max_reviews=2):
+def reviewed(task, tmp_path, texts, results=(), max_rounds=2):
     """A task at verify with the plan accepted, a gate that passes, and a reviewer that answers
     with the texts, one per round. Returns the supervisor, the notes and the reviewer."""
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
@@ -797,7 +796,7 @@ def reviewed(task, tmp_path, texts, results=(), mode="loop", max_reviews=2):
     out.mkdir()
     reviewer = FakeReviewer(task, out, texts)
     sup, notes = make(task, FakeHarness(task), results=results or [gate_result(True)] * 3)
-    sup.reviewer, sup.review_mode, sup.max_reviews = reviewer, mode, max_reviews
+    sup.reviewer, sup.max_rounds = reviewer, max_rounds
     lifecycle = []
     sup.ports.review_up = lambda: lifecycle.append("up") or out
     sup.ports.review_down = lambda: lifecycle.append("down")
@@ -819,14 +818,14 @@ def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_t
     assert sup.lifecycle == ["up", "down"], "the review container lives for the turn"
     assert "git diff" in reviewer.prompts[0] and "/task/review/review.md" in reviewer.prompts[0]
     sup.step()  # the writer, told to fix the notes
-    assert sup.harness.prompts[-1] == supervisor.REVIEW_FIX_PROMPT
+    assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT
     (task.meta / "handoff" / "review-1-reply.md").write_text("The lockfile is needed because…\n")
     sup.step()  # verify
     sup.step()  # the review: clean
     st = task.read_state()
     assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
-    assert supervisor.REVIEW_AGAIN_PREFIX not in reviewer.prompts[0], "nothing to answer in round 1"
-    assert supervisor.REVIEW_AGAIN_PREFIX in reviewer.prompts[1], "round 2 reads the writer's reply"
+    assert prompts.REVIEW_AGAIN_PREFIX not in reviewer.prompts[0], "nothing to answer in round 1"
+    assert prompts.REVIEW_AGAIN_PREFIX in reviewer.prompts[1], "round 2 reads the writer's reply"
     assert "/task/handoff/review-N-reply.md" in reviewer.prompts[1]
     assert notes[-1].startswith("work ready for your review") and "review 2: no blocking notes" in notes[-1]
     assert [e["data"] for e in task.events() if e["type"] == "review"] == [
@@ -849,7 +848,7 @@ def test_blocking_notes_written_as_the_prompt_asks_go_back_to_the_writer(task, t
 
 
 def test_the_last_round_sends_the_work_to_you_with_its_notes_open(task, tmp_path):
-    sup, notes, _ = reviewed(task, tmp_path, [BLOCKING, BLOCKING], max_reviews=2)
+    sup, notes, _ = reviewed(task, tmp_path, [BLOCKING, BLOCKING], max_rounds=1)
     for _ in range(3):  # implement, verify, review 1
         sup.step()
     for _ in range(3):  # implement with the notes, verify, review 2
@@ -858,26 +857,6 @@ def test_the_last_round_sends_the_work_to_you_with_its_notes_open(task, tmp_path
     assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
     assert "review 2: 1 blocking note" in notes[-1]
     assert not sup.step(), "no third round: the rest is yours"
-
-
-def test_supervised_mode_reviews_once_and_leaves_every_note_to_you(task, tmp_path):
-    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING], mode="supervised")
-    for _ in range(3):
-        sup.step()
-    st = task.read_state()
-    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 1
-    assert "review 1: 1 blocking note" in notes[-1] and len(reviewer.prompts) == 1
-
-
-def test_no_review_for_this_task_starts_no_reviewer(task, tmp_path):
-    """The task's own choice of no review: the work goes from the green gate straight to you,
-    and the reviewer's container is never brought up."""
-    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING], mode="none")
-    for _ in range(2):
-        sup.step()
-    assert task.read_state().state is State.CHECKPOINT_FINAL
-    assert sup.lifecycle == [] and reviewer.prompts == []
-    assert "review 1" not in notes[-1]
 
 
 def test_the_reviews_repair_turn_goes_on_in_the_reviewers_own_session(task, tmp_path):
@@ -934,10 +913,14 @@ def test_without_a_reviewer_a_green_gate_goes_to_you_as_before(task):
     assert task.read_state().state is State.CHECKPOINT_FINAL and task.read_state().reviews == 0
 
 
-def test_your_reply_at_the_end_gives_the_reviewer_its_rounds_back(task, tmp_path):
+def test_your_reply_at_the_end_gives_the_writer_its_rounds_back_and_keeps_the_reviews_counted(task):
+    """The reviews number their files: a round after your reply is review-3.md, not review-1.md again."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.REVIEW, State.IMPLEMENT):
+        task.transition(s)
     task.set_reviews(2)
-    task.reset_iterations()
-    assert task.read_state().reviews == 0
+    assert task.read_state().rounds == 1
+    task.reset_rounds()
+    assert (task.read_state().rounds, task.read_state().reviews) == (0, 2)
 
 
 def test_the_agents_question_stands_when_the_verification_fails_again_after_g(task):
@@ -950,12 +933,12 @@ def test_the_agents_question_stands_when_the_verification_fails_again_after_g(ta
     blocked(task, harness)
     asked = "The gate installs with `npm ci`, but this repository has no lockfile. Which way?\n"
     (task.meta / "handoff" / "question.md").write_text(asked)
-    before = task.read_state().iteration
+    before = task.read_state().rounds
     actions.verify_again(task)
     sup, notes = make(task, harness, results=[gate_result(False)])
     sup.step()  # verify: fails again
     st = task.read_state()
-    assert st.state is State.CHECKPOINT_BLOCKED and st.iteration == before
+    assert st.state is State.CHECKPOINT_BLOCKED and st.rounds == before
     assert supervisor.question(task) == asked.strip(), "back where the view and the next turn read it"
     assert harness.prompts == [], "no turn of the agent"
     assert "question stands" in notes[-1] and "npm ci" in notes[-1]
@@ -988,7 +971,7 @@ def command_supervisor(task, harness, results=(), auto=False):
         notify=lambda _id, msg, kind="": notes.append(msg),
         keep_command=kept.append,
     )
-    return supervisor.Supervisor(task, harness, ports, max_iterations=2, project_verify=[]), notes, kept
+    return supervisor.Supervisor(task, harness, ports, max_rounds=1, project_verify=[]), notes, kept
 
 
 def test_the_writers_command_is_a_checkpoint_before_the_first_verification(task):
@@ -1047,3 +1030,264 @@ def test_a_plan_whose_criterion_is_the_build_command_goes_back_to_the_planner_on
     assert len(harness.prompts) == 2 and "not a criterion" in harness.prompts[1]
     assert "./mvnw -B verify" in harness.prompts[1]
     assert task.read_state().state is State.CHECKPOINT_PLAN and notes == ["plan ready for review"]
+
+
+# --- orchestration modes ---------------------------------------------------------------------
+
+
+def accepted(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    (task.meta / gate.ACCEPTED_PLAN).write_text("+++\n+++\n")
+
+
+def test_single_agent_plans_writes_and_reviews_itself_in_one_conversation(task):
+    """P+W+R: one agent, one session, keyed by the planner, briefed as all three; after the
+    implementing turn a self-review turn in the same session, then the gate; no review state."""
+    harness = FakeHarness(task, [write_draft])
+    sup, notes = make(task, harness, results=[gate_result(True)])
+    sup.mode, sup.planner = orchestration.MODES["single_agent"], harness
+    sup.step()  # plan
+    assert task.read_state().sessions == {"planner": "ses_1"}
+    assert harness.prompts[0].startswith(brief.role_text("planner-writer-reviewer"))
+    supervisor.accept_plan(task, "plan accepted")
+    sup.step()  # implement, and the self-review in the same conversation
+    st = task.read_state()
+    assert st.state is State.VERIFY and st.sessions == {"planner": "ses_1"}
+    assert harness.prompts[1].endswith(prompts.IMPLEMENT_PROMPT) and "role" not in harness.prompts[1][:20]
+    assert harness.prompts[2] == prompts.SELF_REVIEW_PROMPT.format(base=st.base_commit)
+    assert [e["data"].get("kind") for e in task.events() if e["type"] == "turn"] == [
+        None,
+        None,
+        "self-review",
+    ]
+    assert [e["data"]["agent"] for e in task.events() if e["type"] == "turn"] == ["planner"] * 3
+    sup.step()  # verify: green, straight to you
+    assert task.read_state().state is State.CHECKPOINT_FINAL and len(harness.prompts) == 3
+
+
+def test_a_self_review_follows_every_turn_of_the_writers_and_a_stop_between_resumes_with_it(task):
+    """After a red gate the fix turn ends in a self-review too, then the gate again; the self-review
+    prompt is kept as the next prompt first, so a stop after the fix resumes with the review, not
+    with the fix over again."""
+    accepted(task)
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness, results=[gate_result(False), gate_result(True)])
+    sup.mode = orchestration.MODES["planner_executor"]
+    sup.step()  # implement + self-review
+    sup.step()  # verify: red, one round
+    assert task.read_state().state is State.IMPLEMENT and task.read_state().rounds == 1
+    sup.step()  # the fix + self-review
+    assert harness.prompts[-2] == prompts.FEEDBACK_PROMPT
+    assert harness.prompts[-1] == prompts.SELF_REVIEW_PROMPT.format(base=task.read_state().base_commit)
+    assert task.read_state().state is State.VERIFY
+    # A stop between the fix and its review: the next prompt is the review.
+    task.transition(State.IMPLEMENT, reason="your reply")
+    supervisor.set_next_prompt(task, prompts.SELF_REVIEW_PROMPT.format(base=task.read_state().base_commit))
+    before = len(harness.prompts)
+    sup.step()
+    assert len(harness.prompts) == before + 1, "the review once, not the review and then another"
+    assert task.read_state().state is State.VERIFY
+
+
+def test_a_question_in_the_self_review_stops_for_you_before_the_gate(task):
+    accepted(task)
+    ask = lambda t: (t.meta / "handoff" / "question.md").write_text("Keep the old endpoint?")  # noqa: E731
+    harness = FakeHarness(task, [lambda t: None, ask])
+    sup, notes = make(task, harness)
+    sup.mode = orchestration.MODES["planner_executor"]
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED and "Keep the old endpoint?" in notes[-1]
+
+
+def test_planner_executor_keeps_the_planner_apart_and_the_writer_reviews_itself(task):
+    planner, writer = FakeHarness(task, [write_draft]), FakeHarness(task)
+    sup, _ = make(task, writer, results=[gate_result(True)])
+    sup.mode, sup.planner = orchestration.MODES["planner_executor"], planner
+    sup.step()
+    assert planner.prompts[0].startswith(brief.role_text("planner"))
+    supervisor.accept_plan(task, "plan accepted")
+    sup.step()
+    assert writer.prompts[0].startswith(brief.role_text("writer-reviewer"))
+    assert len(writer.prompts) == 2 and task.read_state().sessions == {"planner": "ses_1", "writer": "ses_1"}
+
+
+def test_the_default_mode_has_no_self_review_and_one_pool_for_the_gate_and_the_review(task, tmp_path):
+    """planner_maker_checker: a red gate and a blocking review draw on the same rounds."""
+    sup, notes, reviewer = reviewed(
+        task,
+        tmp_path,
+        [BLOCKING, BLOCKING],
+        results=[gate_result(False), gate_result(True), gate_result(True)],
+        max_rounds=2,
+    )
+    sup.step()  # implement: one turn, no self-review
+    assert len(sup.harness.prompts) == 1
+    sup.step()  # verify: red, round 1
+    sup.step()  # the fix
+    sup.step()  # verify: green
+    sup.step()  # review 1: blocking, round 2
+    st = task.read_state()
+    assert (st.state, st.rounds, st.reviews) == (State.IMPLEMENT, 2, 1)
+    sup.step()  # the fix
+    sup.step()  # verify: green
+    sup.step()  # review 2: blocking, and no rounds left: yours, with the notes
+    st = task.read_state()
+    assert (st.state, st.reviews) == (State.CHECKPOINT_FINAL, 2) and "review 2: 1 blocking note" in notes[-1]
+
+
+def test_the_review_and_the_final_checkpoint_get_the_commit_the_gate_verified(task, tmp_path):
+    """The commits moved after the gate (you talked to the agent under w, a stop fell between
+    states): back through the gate, for no round, before the reviewer reads or the work is yours."""
+    sup, notes, reviewer = reviewed(task, tmp_path, [CLEAN, CLEAN], results=[gate_result(True)] * 3)
+    heads = ["c1"]
+    sup.ports.head = lambda: heads[0]
+    results = [gate.GateResult(Path("/dev/null"), commit=c) for c in ("c1", "c2", "c2")]
+    sup.ports.run_gate = lambda t: results.pop(0)
+    sup.step()  # implement
+    sup.step()  # verify on c1
+    assert task.read_state().verified_commit == "c1"
+    sup.step()  # review: HEAD is still c1, and so is the work that comes to you
+    assert reviewer.prompts and task.read_state().state is State.CHECKPOINT_FINAL
+    task.transition(State.IMPLEMENT, reason="your reply")
+    sup.step()  # implement
+    sup.step()  # verify on c2
+    heads[0] = "c3"
+    sup.step()  # review: HEAD c3 is not what was verified
+    st = task.read_state()
+    assert st.state is State.VERIFY and st.rounds == 0
+    assert [e["data"] for e in task.events() if e["type"] == "unverified_head"] == [
+        {"verified": "c2", "head": "c3"}
+    ]
+    assert "commits changed since the verification (c2 → c3)" in task.events()[-1]["data"]["reason"]
+
+
+def supervised(task, tmp_path, texts, results=(), max_rounds=2):
+    """supervisor_worker: the planner's harness reviews in the pod, writing where the review
+    mount is; no review container."""
+    accepted(task)
+    out = task.meta / "review"
+    out.mkdir(exist_ok=True)
+    reviewer = FakeReviewer(task, out, texts)
+    sup, notes = make(task, FakeHarness(task), results=results or [gate_result(True)] * 3)
+    sup.mode, sup.planner, sup.max_rounds = orchestration.MODES["supervisor_worker"], reviewer, max_rounds
+    lifecycle = []
+    sup.ports.review_up = lambda: lifecycle.append("up") or out
+    sup.ports.review_down = lambda: lifecycle.append("down")
+    sup.lifecycle = lifecycle
+    return sup, notes, reviewer
+
+
+def test_the_supervisor_reads_every_turn_before_the_gate_and_the_gate_runs_once_it_accepts(task, tmp_path):
+    sup, notes, reviewer = supervised(task, tmp_path, [BLOCKING, CLEAN])
+    sup.step()  # implement: to the supervisor, not the gate
+    assert task.read_state().state is State.REVIEW
+    sup.step()  # supervisor: one blocking note
+    st = task.read_state()
+    assert (st.state, st.rounds, st.reviews) == (State.IMPLEMENT, 1, 1)
+    assert reviewer.prompts[0].startswith(brief.role_text("planner-reviewer"))
+    assert (
+        "verification has not run yet" in reviewer.prompts[0]
+        and "/task/review/review.md" in reviewer.prompts[0]
+    )
+    assert st.sessions.get("planner") == "rev_1", "the supervisor's conversation is the planner's"
+    sup.step()  # the worker, with the notes
+    assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT and task.read_state().state is State.REVIEW
+    sup.step()  # supervisor: accepts
+    assert task.read_state().state is State.VERIFY and sup.lifecycle == [], "no review container"
+    assert (task.meta / "handoff" / "review-2.md").read_text() == CLEAN
+    sup.step()  # verify: green, yours
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
+    assert (
+        notes[-1].startswith("work ready for your review")
+        and "supervisor round 2: no blocking notes" in notes[-1]
+    )
+
+
+def test_after_a_red_gate_the_worker_goes_back_to_the_gate_and_the_supervisor_sees_it_green(task, tmp_path):
+    sup, notes, reviewer = supervised(
+        task, tmp_path, [CLEAN, CLEAN], results=[gate_result(False), gate_result(True)]
+    )
+    sup.step()  # implement
+    sup.step()  # supervisor accepts
+    sup.step()  # verify: red, round 1
+    assert task.read_state().state is State.IMPLEMENT
+    sup.step()  # the fix: straight back to the gate
+    assert sup.harness.prompts[-1] == prompts.FEEDBACK_PROMPT
+    assert task.read_state().state is State.VERIFY and len(reviewer.prompts) == 1
+    sup.step()  # verify: green, yours
+    assert task.read_state().state is State.CHECKPOINT_FINAL and len(reviewer.prompts) == 1
+
+
+def test_out_of_rounds_the_supervisors_notes_go_through_the_gate_to_you(task, tmp_path):
+    """The last blocking review does not send the worker back; the gate runs, and the work comes to
+    you verified, with the supervisor's unresolved notes; or unverified, with both."""
+    sup, notes, reviewer = supervised(
+        task, tmp_path, [BLOCKING, BLOCKING], results=[gate_result(True)], max_rounds=1
+    )
+    for _ in range(4):  # implement, supervisor (round 1), the fix, supervisor: no rounds left
+        sup.step()
+    st = task.read_state()
+    assert (
+        st.state is State.VERIFY
+        and st.rounds == 1
+        and "no rounds left" in task.events()[-1]["data"]["reason"]
+    )
+    sup.step()  # verify: green
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+    assert "supervisor round 2: 1 blocking note unresolved" in notes[-1]
+    # The other ending: the gate red, and no rounds left.
+    task2 = create_task(tmp_path / "t2", "demo", "Add health endpoint", TEMPLATE)
+    sup, notes, reviewer = supervised(
+        task2, tmp_path, [BLOCKING, BLOCKING], results=[gate_result(False)], max_rounds=1
+    )
+    for _ in range(5):
+        sup.step()
+    assert task2.read_state().state is State.CHECKPOINT_BLOCKED
+    assert (
+        notes[-1]
+        == "verification still failing after 1 fix turn; supervisor round 2: 1 blocking note unresolved"
+    )
+    assert not sup.step(), "no turn of the worker's: yours"
+
+
+def test_the_supervisors_review_file_is_cleared_before_each_round(task, tmp_path):
+    sup, notes, reviewer = supervised(task, tmp_path, [CLEAN])
+    (task.meta / "review" / "review.md").write_text(BLOCKING)
+    reviewer.texts = []  # the supervisor writes nothing this round
+    sup.step()  # implement
+    sup.step()  # supervisor: nothing written is not a review; asked once more, then on to the gate
+    assert len(reviewer.prompts) == 2 and task.read_state().state is State.VERIFY
+    assert "review 1 unreadable" in task.events()[-1]["data"]["reason"]
+    assert BLOCKING not in (task.meta / "handoff" / "review-1.md").read_text(), (
+        "the old round is not the new one"
+    )
+    sup.step()  # verify: green, and the work comes to you saying what the supervisor's round was
+    assert "supervisor round 1 unreadable" in notes[-1]
+
+
+def test_a_mode_refuses_a_planner_it_cannot_run_on():
+    from vivibox.config import Role
+
+    assert orchestration.problem("single_agent", Role("manual", "")).startswith(
+        "single_agent needs a planner that can write"
+    )
+    assert "planner_executor" in orchestration.problem("single_agent", Role("claude-code", "claude-opus-5"))
+    assert orchestration.problem("single_agent", Role("opencode", "deepseek/v4")) == ""
+    assert orchestration.problem("supervisor_worker", Role("manual", "")).startswith(
+        "supervisor_worker needs a planner that runs on a model"
+    )
+    assert orchestration.problem("supervisor_worker", Role("claude-code", "claude-opus-5")) == ""
+    for mode in ("planner_executor", "planner_maker_checker"):
+        assert orchestration.problem(mode, Role("manual", "")) == ""
+
+
+def test_each_mode_names_its_agents_and_their_briefs():
+    modes = orchestration.MODES
+    assert modes["single_agent"].brief_of("planner") == "planner-writer-reviewer"
+    assert modes["planner_executor"].brief_of("writer") == "writer-reviewer"
+    assert modes["planner_maker_checker"].brief_of("reviewer") == "reviewer"
+    assert modes["supervisor_worker"].brief_of("planner") == "planner-reviewer"
+    assert [m.reviews() for m in modes.values()] == [False, False, True, True]
+    assert [m.self_review for m in modes.values()] == [True, True, False, False]

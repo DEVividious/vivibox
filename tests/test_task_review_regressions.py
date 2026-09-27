@@ -7,7 +7,7 @@ from test_writer_progress import event, writer_task
 from textual.widgets import Button, Input
 from ux import screen_text
 
-from vivibox import actions, dialogs, gate, panel, progress, repo, review, ui
+from vivibox import actions, gate, newtask, panel, progress, repo, review, ui
 from vivibox.branches import BranchPicker
 from vivibox.config import load_project
 from vivibox.states import State
@@ -154,7 +154,7 @@ def test_branch_field_names_current_checkout_before_opening_picker(env):
     async def scenario():
         app = Vivibox()
         async with app.run_test() as pilot:
-            app.push_screen(dialogs.NewTask("demo"))
+            app.push_screen(newtask.NewTask("demo"))
             await pilot.pause()
             await app.workers.wait_for_complete()
             assert "Current (main)" in str(app.screen.query_one("#base-ref", Button).label)

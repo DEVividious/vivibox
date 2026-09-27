@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 from conftest import make_repo
 
-from vivibox import actions, gate, image, keys, plan, supervisor, ui
+from vivibox import actions, gate, image, keys, plan, prompts, supervisor, ui
 from vivibox.config import load_config
 from vivibox.pod import FIREWALL
 from vivibox.states import State
@@ -101,7 +101,7 @@ def bench(tmp_path_factory):
     cfg = tmp / "config"
     (cfg / "projects").mkdir(parents=True)
     (cfg / "config.toml").write_text(
-        f'tasks_dir = "{tasks_dir}"\n[limits]\nmax_iterations = 3\n'
+        f'tasks_dir = "{tasks_dir}"\n[limits]\nmax_rounds = 3\n'
         f'[roles.planner]\nharness = "opencode"\nmodel = "{PLANNER}"\n'
         f'[roles.writer]\nharness = "opencode"\nmodel = "{WRITER}"\n'
         "[notifications]\ndesktop = false\n"
@@ -144,9 +144,9 @@ def project(
     return repo
 
 
-def begin(name: str, goal: str):
+def begin(name: str, goal: str, orchestration: str = ""):
     """A task, its pod up and its supervisor built here, not in a process of its own."""
-    task = actions.create(name, goal, auto=True)
+    task = actions.create(name, goal, auto=True, orchestration=orchestration)
     actions.start(task.id, supervise=False)
     task, proj = actions.load(task.id)
     return task, make_supervisor(task, proj, actions.task_pod(task.id), load_config())
@@ -546,9 +546,7 @@ def test_review_a_test_that_proves_nothing_is_a_blocking_note_and_the_next_turn_
     names the test, the writer's next turn makes it real, and the second review lets the work
     through. Needs a reviewer in the bench's config: set with VIVIBOX_BEHAVIOURAL_REVIEWER."""
     cfg = bench["cfg"] / "config.toml"
-    cfg.write_text(
-        cfg.read_text() + f'[roles.reviewer]\nharness = "opencode"\nmodel = "{REVIEWER}"\nmode = "loop"\n'
-    )
+    cfg.write_text(cfg.read_text() + f'[roles.reviewer]\nharness = "opencode"\nmodel = "{REVIEWER}"\n')
     try:
         project(bench, "review", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
         task, sup = begin("review", "Add subtract(a, b) to calc.py, with a unit test in test_calc.py")
@@ -581,3 +579,90 @@ def test_review_a_test_that_proves_nothing_is_a_blocking_note_and_the_next_turn_
             finish(task)
     finally:
         cfg.write_text(cfg.read_text().split("[roles.reviewer]")[0])
+
+
+# --- orchestration modes: the three flows that are not the default ---------------------------
+
+GOAL = "Add subtract(a, b) to calc.py, with a unit test in test_calc.py"
+
+
+def test_single_agent_one_conversation_plans_writes_reviews_itself_and_passes_the_gate(bench):
+    """P+W+R: the planner's model in one conversation from the plan to the green gate, with a
+    self-review turn after the implementing one and no review state."""
+    project(bench, "single", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
+    task, sup = begin("single", GOAL, "single_agent")
+    try:
+        ends = {State.CHECKPOINT_FINAL, State.APPROVAL_RISKY, State.CHECKPOINT_BLOCKED}
+        st = drive(task, sup, ends, steps=8)
+        assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY), (
+            f"ended in {st.state}: {st.problem}"
+        )
+        turns = [e["data"] for e in task.events() if e["type"] == "turn"]
+        assert {t["agent"] for t in turns} == {"planner"}, "one agent plays every role"
+        assert [t.get("kind") for t in turns if t["state"] == "implement"][-1] == "self-review"
+        assert list(st.sessions) == ["planner"] and st.reviews == 0
+        states = [e["data"].get("current") for e in task.events() if e["type"] == "state"]
+        assert "review" not in states
+    finally:
+        finish(task)
+
+
+def test_planner_executor_the_self_review_makes_a_fake_test_real_before_the_gate(bench):
+    """W+R: a test that asserts a constant, planted as a weaker writer would leave it, is caught by
+    the writer's own review turn, before any gate or reviewer sees it."""
+    project(bench, "executor", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
+    task, sup = begin("executor", GOAL, "planner_executor")
+    try:
+        st = drive(task, sup, {State.IMPLEMENT})
+        assert st.state is State.IMPLEMENT
+        plant_a_fake_test(task)
+        supervisor.set_next_prompt(task, prompts.SELF_REVIEW_PROMPT.format(base=st.base_commit))
+        sup.step()  # the writer's own review, in the writer's conversation
+        spend(task)
+        st = task.read_state()
+        assert st.state is State.VERIFY, f"the self-review did not end in a commit: {st}"
+        assert "assertTrue(True)" not in (task.repo / "test_calc.py").read_text(), "made real"
+        turns = [e["data"] for e in task.events() if e["type"] == "turn"]
+        assert turns[-1]["agent"] == "writer" and turns[-1].get("kind") == "self-review"
+        sup.step()  # the gate
+        spend(task)
+        assert task.read_state().state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY)
+    finally:
+        finish(task)
+
+
+def test_supervisor_worker_the_planner_reviews_in_the_pod_before_the_gate_and_commits_nothing(bench):
+    """(P+R) ⇄ W: the supervisor's blocking note on the fake test goes to the worker before any
+    build; the worker's fix goes to the supervisor again; accepted, the gate runs. The supervisor
+    changes no commit of the clone's."""
+    project(bench, "supervised", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
+    task, sup = begin("supervised", GOAL, "supervisor_worker")
+    try:
+        st = drive(task, sup, {State.IMPLEMENT})
+        assert st.state is State.IMPLEMENT
+        plant_a_fake_test(task)
+        before = head(task.repo)
+        task.transition(State.REVIEW, reason="the worker's turn is over")
+        sup.step()  # the supervisor, in the pod
+        spend(task)
+        review = (task.meta / "handoff" / "review-1.md").read_text()
+        st = task.read_state()
+        assert head(task.repo) == before, "the supervisor committed"
+        assert st.state is State.IMPLEMENT and "test_calc.py" in review.split("## Not blocking")[0], (
+            f"the supervisor did not block the fake test:\n{review}"
+        )
+        assert [e["data"]["agent"] for e in task.events() if e["type"] == "turn"][-1] == "planner"
+        sup.step()  # the worker fixes it
+        spend(task)
+        assert task.read_state().state is State.REVIEW, "back to the supervisor, not to the gate"
+        assert "assertTrue(True)" not in (task.repo / "test_calc.py").read_text(), "made real"
+        sup.step()  # the supervisor accepts
+        spend(task)
+        assert task.read_state().state is State.VERIFY and task.read_state().reviews == 2
+        sup.step()  # the gate
+        spend(task)
+        st = task.read_state()
+        assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY), f"ended in {st.state}"
+        assert not any(e["type"] == "turn" and e["data"]["state"] == "verify" for e in task.events())
+    finally:
+        finish(task)

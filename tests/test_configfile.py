@@ -55,4 +55,4 @@ def test_a_project_files_lists_are_written_on_one_line(env):
     project = load_project("demo")
     assert project.demo == ["npm install", "npm start"] and project.java == "17"
     configfile.set_value(env / "config" / "config.toml", "max_iterations", 7, "limits")
-    assert load_config().max_iterations == 7
+    assert load_config().max_rounds == 7, "the old key carries over as the round limit"

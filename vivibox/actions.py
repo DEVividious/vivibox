@@ -28,6 +28,7 @@ from . import (
     manual,
     opencode,
     prepare,
+    prompts,
     providers,
     repo,
     reviewing,
@@ -49,10 +50,11 @@ from .box import (  # noqa: F401
     start_box,
 )
 from .config import (
-    REVIEW_MODES,
+    ORCHESTRATION_MODES,
     Config,
     ConfigError,
     Project,
+    Role,
     config_dir,
     load_config,
     load_project,
@@ -76,6 +78,8 @@ from .demo import (  # noqa: F401
     use_instruction,
     write_instruction,
 )
+from .orchestration import mode_of
+from .orchestration import problem as orchestration_problem
 from .plan import KINDS
 from .pod import Mount, Pod, PodError
 from .projects import (  # noqa: F401
@@ -187,11 +191,14 @@ def task_pod(task_id: str) -> Pod:
     runtime = secrets.runtime_dir(task.id)
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
     (task.meta / "harness").mkdir(exist_ok=True)
+    (task.meta / "review").mkdir(exist_ok=True)
     mounts = [
         *repo.agent_mounts(task.repo, task.meta),
         # The plan, harness files and gate results: readable, not writable, for the agent.
         Mount(str(task.meta), "/task", read_only=True),
         Mount(str(task.meta / "handoff"), "/task/handoff"),
+        # Where a supervisor reading in the pod writes its review, as the reviewer's container does.
+        Mount(str(task.meta / "review"), reviewing.MOUNT),
         Mount(str(runtime), secrets.MOUNT, read_only=True),
     ]
     ref = image.image_ref()
@@ -237,7 +244,8 @@ def create(
     kind: str = "feature",
     cwd: Path | None = None,
     roles: dict[str, Choice] | None = None,
-    review_mode: str = "",
+    orchestration: str = "",
+    max_rounds: int = 0,
     no_build: bool = False,
     base_ref: str = "",
 ) -> Task:
@@ -246,10 +254,13 @@ def create(
     description: one line, or a whole ticket; it all goes into the plan the agent starts from.
     @path mentions in it are copied into the task (relative ones from cwd). roles: what a role runs
     on for this task only, as m would set it; config.toml's own choice is no choice at all.
-    review_mode: how the reviewer works on this task, loop, supervised or none; "" is config.toml's."""
+    orchestration: how this task is shared between the roles (config.ORCHESTRATION_MODES); "" is
+    config.toml's. max_rounds: this task's fix turns before the work comes to you; 0 is config.toml's."""
     config = load_config()
-    if review_mode not in ("", *REVIEW_MODES, "none"):
-        raise ConfigError(f"review_mode must be one of {', '.join(REVIEW_MODES)}, none")
+    if orchestration not in ("", *ORCHESTRATION_MODES):
+        raise ConfigError(f"orchestration must be one of {', '.join(ORCHESTRATION_MODES)}")
+    if not isinstance(max_rounds, int) or max_rounds < 0:
+        raise ConfigError("max_rounds is a whole number of fix turns; 0 for config.toml's")
     chosen: dict[str, Choice] = {}
     for role, (harness, model) in (roles or {}).items():
         if role not in config.roles:
@@ -264,6 +275,9 @@ def create(
         harness, model = chosen.get(role) or configured_choice(config, role)
         if harness != manual.NAME and not model:
             raise ConfigError(f"the {role} has no model yet; pick one, or add a provider")
+    planner = Role(*(chosen.get("planner") or configured_choice(config, "planner")))
+    if why := orchestration_problem(orchestration or config.orchestration, planner):
+        raise ConfigError(why)
     project = load_project(project_name)
     if not project.repo.is_dir():
         raise ConfigError(f"{project.repo} is gone; project {project_name} has nothing to work on")
@@ -280,8 +294,13 @@ def create(
     if no_build:
         plan = plan.replace("\nverify = []\n", "\nverify = false\n", 1)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
-    if review_mode and review_mode != config.review_mode:
-        task.set_review_mode(review_mode)
+    if (orchestration and orchestration != config.orchestration) or (
+        max_rounds and max_rounds != config.max_rounds
+    ):
+        task.set_orchestration(
+            orchestration if orchestration != config.orchestration else "",
+            max_rounds if max_rounds != config.max_rounds else 0,
+        )
     try:
         described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))
@@ -389,6 +408,8 @@ def _start(
             "(pass_env). Set them, e.g. with your login command, then start vivibox from that shell."
         )
     _, model = writer(config, task)
+    if why := orchestration_problem(mode_of(task, config).name, role_of(task, "planner", config)):
+        raise PodError(why)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")
     # A model the catalog retired fails the first turn with an opaque server error; said here,
@@ -420,7 +441,7 @@ def _start(
         task.event("session_lost", role="writer", harness=harness.name, session=was)
     interrupted = st.state in (State.PLAN, State.IMPLEMENT) and (st.paused or resume)
     if interrupted and not (task.meta / supervisor.NEXT_PROMPT).exists():
-        supervisor.set_next_prompt(task, supervisor.resume_prompt(st.state))
+        supervisor.set_next_prompt(task, prompts.resume_prompt(st.state))
     if st.paused:
         task.set_paused(False)
     task.set_problem("")  # whatever kept it from starting before did not this time
@@ -619,9 +640,9 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
     with (handoff / "comments.md").open("a") as f:
         f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
     supervisor.put_question_away(task)
-    prompt = supervisor.PLAN_COMMENT_PROMPT if target is State.PLAN else supervisor.COMMENT_PROMPT
+    prompt = prompts.PLAN_COMMENT_PROMPT if target is State.PLAN else prompts.COMMENT_PROMPT
     supervisor.set_next_prompt(task, prompt)
-    task.reset_iterations()
+    task.reset_rounds()
     task.transition(target, reason="your reply")
     return target
 

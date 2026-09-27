@@ -7,7 +7,19 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from . import actions, gate, keys, ntfy, prepare, reviewing, supervisor, version
+from . import (
+    actions,
+    gate,
+    keys,
+    ntfy,
+    opencode,
+    orchestration,
+    prepare,
+    repo,
+    reviewing,
+    supervisor,
+    version,
+)
 from .config import Config, ConfigError, Project, load_config, load_project
 from .risky import Approvals
 from .states import waits_for_user
@@ -32,6 +44,12 @@ def cmd_supervise(args: argparse.Namespace) -> int:
         f"vivibox {version.current()} supervising {task.id}. Your decisions: vivibox accept|reply {task.id}",
         flush=True,
     )
+    if not any(e["type"] == "orchestration" for e in task.events()):
+        # Once per task, at its first start: how it is shared out, and what its config.toml still
+        # says from before there were modes.
+        task.event("orchestration", mode=sup.mode.name, max_rounds=sup.max_rounds, notice=config.notice)
+    if config.notice:
+        print(config.notice, flush=True)
     stepped(task.read_state())  # a resumed task already has its session
     sup.run(on_step=stepped)
     return 0
@@ -90,11 +108,21 @@ def make_supervisor(
     """The supervisor as the command line runs it: the gate on the project's commands, your
     notifications, the review copy. The behavioural tests build the same one and step it.
     current: the settings as they are at each message; the ones given, unless told otherwise."""
+    mode = orchestration.mode_of(task, config)
     harness = actions.harness_for("writer", pod, task)
-    planner = actions.harness_for("planner", pod, task)
-    reviewer = (
-        actions.harness_for("reviewer", pod.review_side(), task) if "reviewer" in config.roles else None
-    )
+    if mode.agents["writer"] == "planner":
+        # One agent plans, writes and reviews: the planner's model, on the tool that writes, with
+        # the writer's progress recorded from its stream.
+        planner = opencode.OpenCode(pod, actions.role_of(task, "planner", config).model, task=task)
+    else:
+        planner = actions.harness_for("planner", pod, task)
+    reviewer = None
+    if mode.separate_reviewer:
+        if "reviewer" in config.roles:
+            reviewer = actions.harness_for("reviewer", pod.review_side(), task)
+        else:  # the writer's model reads, in the review container, as the mode asks for a reviewer
+            model = actions.role_of(task, "writer", config).model
+            reviewer = opencode.OpenCode(pod.review_side(), model, port=opencode.REVIEW_PORT)
 
     seen = project
 
@@ -137,17 +165,17 @@ def make_supervisor(
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
+        head=lambda: repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip(),
     )
     return supervisor.Supervisor(
         task,
         harness,
         ports,
-        max_iterations=config.max_iterations,
+        max_rounds=orchestration.max_rounds_of(task, config),
+        mode=mode,
         cost_warning=config.cost_warning,
         cost_limit=config.cost_limit,
         reviewer=reviewer,
-        review_mode=task.read_state().review_mode or config.review_mode,
-        max_reviews=config.max_reviews,
         verify_timeout=project.verify_timeout or config.verify_timeout,
         project_verify=project.verify,
         project_no_build=project.no_build,

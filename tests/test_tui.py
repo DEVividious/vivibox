@@ -17,6 +17,7 @@ from vivibox import (
     browse,
     dialogs,
     gate,
+    newtask,
     panel,
     providers_ui,
     settings,
@@ -912,7 +913,7 @@ def test_the_first_run_says_how_to_add_a_project_and_opens_nothing(env, tmp_path
         assert not app.check_action("details", ()) and not app.check_action("toggle_done", ()), "nor d and h"
         await pilot.press("n")
         await pilot.pause()
-        assert not isinstance(app.screen, dialogs.NewTask)
+        assert not isinstance(app.screen, newtask.NewTask)
         (env / "config" / "projects" / "demo.toml").write_text(
             f'repo = "{env / "repo"}"\nverify = ["true"]\n'
         )
@@ -1185,9 +1186,9 @@ def test_the_list_says_when_you_asked_for_a_task_not_only_when_it_last_moved(env
         app.reload()
         row = app.table.get_row(task.id)
         # Not ui.ago() recomputed here: that races the minute boundary and says nothing extra.
-        assert row[6] == "just now", "CREATED, and the task was made a moment ago"
-        assert row[7] == "just now", "UPDATED"
-        assert [str(c.label) for c in app.table.columns.values()][6] == "CREATED"
+        assert row[7] == "just now", "CREATED, and the task was made a moment ago"
+        assert row[8] == "just now", "UPDATED"
+        assert [str(c.label) for c in app.table.columns.values()][7] == "CREATED"
 
     run(scenario)
 
@@ -1208,8 +1209,8 @@ def test_a_finished_task_keeps_when_you_asked_for_it(env):
     async def scenario(app, pilot):
         app.show_done = True
         app.reload()
-        assert app.table.get_row("demo-9")[6] == "just now"
-        assert app.table.get_row("demo-8")[6] == "-"
+        assert app.table.get_row("demo-9")[7] == "just now"
+        assert app.table.get_row("demo-8")[7] == "-"
 
     run(scenario)
 
@@ -1701,7 +1702,7 @@ def test_n_without_a_provider_says_to_press_k(env):
         app.available = {}
         await pilot.press("n")
         await pilot.pause()
-        assert not isinstance(app.screen, dialogs.NewTask)
+        assert not isinstance(app.screen, newtask.NewTask)
         assert any("press k" in str(n.message) for n in app._notifications)
 
     run(scenario)
@@ -1880,7 +1881,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
 
     config = env / "config" / "config.toml"
     config.write_text(
-        '# The manual.\ntasks_dir = "' + str(env / "tasks") + '"\n\n[limits]\n# Kept.\nmax_iterations = 3\n\n'
+        '# The manual.\ntasks_dir = "' + str(env / "tasks") + '"\n\n[limits]\n# Kept.\nmax_rounds = 3\n\n'
         '[roles.planner]\nharness = "manual"\nmodel = ""\n\n'
         '[roles.writer]\nharness = "opencode"\nmodel = "m"\n\n'
         '[review]\n# ide = "idea {path}"\n'
@@ -1935,7 +1936,7 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         await pilot.pause()
         assert "desktop = false" in config.read_text() and "off" in labels(app)[notify]
         # A limit: one line, checked.
-        limit = next(i for i, row in enumerate(labels(app)) if "max_iterations" in row)
+        limit = next(i for i, row in enumerate(labels(app)) if row.strip().startswith("rounds"))
         app.screen.query_one("#rows", OptionList).highlighted = limit
         await pilot.press("enter")
         await pilot.pause()
@@ -1943,14 +1944,14 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         app.screen.query_one(Input).value = "0"
         await pilot.press("enter")
         await pilot.pause()
-        assert "max_iterations = 3" in config.read_text(), "0 is refused"
+        assert "max_rounds = 3" in config.read_text(), "0 is refused"
         await pilot.press("enter")
         await pilot.pause()
         app.screen.query_one(Input).value = "5"
         await pilot.press("enter")
         await pilot.pause()
         text = config.read_text()
-        assert "[limits]\n# Kept.\nmax_iterations = 5\n" in text and app.config.max_iterations == 5
+        assert "[limits]\n# Kept.\nmax_rounds = 5\n" in text and app.config.max_rounds == 5
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, settings.Settings)
@@ -2270,7 +2271,7 @@ def test_the_new_task_dialog_shows_every_field_at_once(env, size):
 @pytest.mark.parametrize(("size", "headed"), [((120, 40), True), ((100, 30), False)])
 def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_working_order(env, size, headed):
     """Task and Agents head the two groups on a tall terminal and go first on a short one (§4);
-    the roles stand as they work, planner, writer, reviewer, with the review mode under them."""
+    the roles stand as they work, planner, writer, reviewer, with the orchestration under them."""
     from ux import screen_text
 
     with_reviewer(env)
@@ -2284,7 +2285,7 @@ def test_the_groups_have_headings_where_there_is_room_and_the_roles_stand_in_wor
         assert ("Agents" in shown) is headed, shown
         rows = [app.screen.query_one(f"#role-{r}").region.y for r in ("planner", "writer", "reviewer")]
         assert rows == sorted(rows), rows
-        assert app.screen.query_one("#review").region.y > rows[-1]
+        assert app.screen.query_one("#orchestration").region.y > rows[-1]
         assert app.screen.query_one(widgets.Fields).max_scroll_y == 0, "every field in view"
 
     run(scenario, size=size)
@@ -2376,8 +2377,8 @@ def test_an_open_list_in_the_new_task_form_is_framed_apart_from_the_rows_under_i
 def test_tab_walks_the_new_task_form_from_the_description_down(env):
     """The description first, as the project comes from the selected row; then down the form, and
     round to the project and the kind."""
-    expected = ["goal", "attach", "plan", "role-planner", "role-writer", "create", "cancel",
-                "project", "kind", "base-ref", "no-build", "goal"]  # fmt: skip
+    expected = ["goal", "attach", "plan", "role-planner", "role-writer", "orchestration", "max-rounds",
+                "create", "cancel", "project", "kind", "base-ref", "no-build", "goal"]  # fmt: skip
     with_code("demo")
 
     async def scenario(app, pilot):
@@ -3440,7 +3441,7 @@ def test_n_on_a_project_row_starts_a_task_in_that_project(env):
         assert app.selected_project() == "shop"
         await pilot.press("n")
         await pilot.pause()
-        assert isinstance(app.screen, dialogs.NewTask)
+        assert isinstance(app.screen, newtask.NewTask)
         assert app.screen.query_one("#project", Select).value == "shop"
 
     run(scenario)
@@ -3576,7 +3577,7 @@ def test_a_wide_terminal_has_every_column(env):
     async def scenario(app, pilot):
         app.reload()
         await pilot.pause()
-        assert len(app.table.columns) == 9, "PLAN and IMPL apart; REVIEW only with a reviewer"
+        assert len(app.table.columns) == 10, "PLAN and IMPL apart; REVIEW, as the default mode reviews"
 
     run(scenario, size=(140, 40))
 
@@ -4105,17 +4106,22 @@ def test_the_settings_list_grows_with_the_terminal_and_fits_a_short_one(env):
 # --- the reviewer in the view ------------------------------------------------------------------
 
 
-def with_reviewer(env, mode="loop"):
+def with_reviewer(env):
     config = env / "config" / "config.toml"
-    config.write_text(
-        config.read_text()
-        + f'[roles.reviewer]\nharness = "opencode"\nmodel = "other/strong"\nmode = "{mode}"\n'
-    )
+    config.write_text(config.read_text() + '[roles.reviewer]\nharness = "opencode"\nmodel = "other/strong"\n')
 
 
-def test_the_cost_is_three_columns_and_review_shows_only_with_a_reviewer(env, monkeypatch):
+def with_mode(env, mode: str):
+    from vivibox import configfile
+
+    configfile.set_value(env / "config" / "config.toml", "agent_orchestration_mode", mode)
+
+
+def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(env, monkeypatch):
     """PLAN, IMPL and REVIEW, one figure each, instead of a sum to read in one cell; the third
-    column only when a reviewer is configured, so a list without one looks as it did."""
+    column only where the mode has someone other than the writer review, so a list of a mode
+    without one looks as it did."""
+    with_mode(env, "planner_executor")
     task = implementing()
     task.event("turn", state="plan", role="planner", cost=0.10, tokens=1)
     task.event("turn", state="implement", role="writer", cost=0.04, tokens=1)
@@ -4139,7 +4145,7 @@ def test_the_cost_is_three_columns_and_review_shows_only_with_a_reviewer(env, mo
         assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04"
 
     run(without)
-    with_reviewer(env)
+    with_mode(env, "planner_maker_checker")
     task.event("turn", state="review", role="reviewer", cost=0.02, tokens=1)
 
     async def with_(app, pilot):
@@ -4208,14 +4214,15 @@ def test_the_final_checkpoint_shows_the_reviewers_notes_and_l_opens_them(env, mo
     run(scenario)
 
 
-def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monkeypatch):
-    with_reviewer(env, mode="loop")
+def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env, monkeypatch):
+    """The Orchestration list stands where Review stood, on config.toml's mode with its flow in
+    symbols and a line on when under it; the reviewer's model row only where the mode has a
+    reviewer of its own; Rounds beside it. What the form sends names the mode and the rounds."""
+    with_reviewer(env)
     calls = []
 
-    def create(
-        project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False, base_ref=""
-    ):
-        calls.append((roles, review_mode))
+    def create(project, goal, **kw):
+        calls.append(kw)
         return new_task(goal)  # goes through the same create again, so the first call is the view's
 
     monkeypatch.setattr(actions, "create", create)
@@ -4226,71 +4233,53 @@ def test_n_asks_how_the_reviewer_works_for_this_task_when_there_is_one(env, monk
         await pilot.press("n")
         await pilot.pause()
         await pilot.press(*"Add divide")
-        review = app.screen.query_one("#review", Select)
-        assert review.value == "loop", "config.toml's mode, ready to keep or change"
-        assert app.screen.query_one("#role-reviewer", Select).value == (OC, "other/strong")
-        review.value = "supervised"
-        await pilot.pause()
-        await pilot.press("ctrl+s")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert calls[0][1] == "supervised" and "reviewer" in calls[0][0]
-
-    run(scenario)
-
-
-def test_no_review_for_this_task_takes_the_reviewers_model_off_the_form(env, monkeypatch):
-    """A task without a review has no reviewer to pick a model for: the row goes, and comes back
-    with a mode that reviews. What the form sends names no reviewer either."""
-    with_reviewer(env, mode="loop")
-    calls = []
-
-    def create(
-        project, goal, auto=False, kind="feature", roles=None, review_mode="", no_build=False, base_ref=""
-    ):
-        calls.append((roles, review_mode))
-        return new_task(goal)
-
-    monkeypatch.setattr(actions, "create", create)
-    monkeypatch.setattr(actions, "start", lambda task_id, resume=False, on_step=None: "m")
-
-    async def scenario(app, pilot):
-        app.available = AVAILABLE
-        await pilot.press("n")
-        await pilot.pause()
-        await pilot.press(*"Add divide")
-        review = app.screen.query_one("#review", Select)
+        mode = app.screen.query_one("#orchestration", Select)
         reviewer = app.screen.query_one("#role-reviewer", Select)
-        assert reviewer.parent.display
-        assert ("No reviewer for this task", "none") in [(str(t), v) for t, v in review._options], (
-            "the choice names the role it leaves out, as the row it hides does"
-        )
-        review.value = "none"
+        assert mode.value == "planner_maker_checker", "config.toml's mode, ready to keep or change"
+        labels = [str(t) for t, _ in mode._options]
+        assert labels == [
+            "Single agent",
+            "Planner and executor",
+            "Planner, maker, checker",
+            "Supervisor and worker",
+        ]
+        hint = str(app.screen.query_one("#orchestration-hint", Label).render())
+        assert hint == "P → W → Gate → R ⇄ W"
+        assert "⇄ rounds of fixes" in str(mode.tooltip) and "the default" in str(mode.tooltip), "on hover"
+        assert reviewer.parent.display and reviewer.value == (OC, "other/strong")
+        mode.value = "single_agent"
         await pilot.pause()
-        assert not reviewer.parent.display
-        review.value = "supervised"
+        assert not reviewer.parent.display, "no reviewer of its own to pick a model for"
+        hint = str(app.screen.query_one("#orchestration-hint", Label).render())
+        assert hint == "P+W+R → Gate"
+        mode.value = "supervisor_worker"
+        await pilot.pause()
+        assert not reviewer.parent.display, "the planner reviews"
+        mode.value = "planner_maker_checker"
         await pilot.pause()
         assert reviewer.parent.display
-        review.value = "none"
+        mode.value = "planner_executor"
+        app.screen.query_one("#max-rounds", Input).value = "5"
         await pilot.pause()
         await pilot.press("ctrl+s")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert calls[0][1] == "none" and "reviewer" not in calls[0][0]
+        assert calls[0]["orchestration"] == "planner_executor" and calls[0]["max_rounds"] == 5
+        assert "reviewer" not in calls[0]["roles"]
 
     run(scenario)
 
 
-def test_without_a_reviewer_n_does_not_ask(env, monkeypatch):
+def test_without_a_reviewer_n_still_asks_how_the_task_is_orchestrated(env, monkeypatch):
     async def scenario(app, pilot):
         await pilot.press("n")
         await pilot.pause()
-        assert not app.screen.query("#review"), "nothing to choose"
+        assert app.screen.query("#orchestration") and not app.screen.query("#role-reviewer")
 
     run(scenario)
 
 
-def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
+def test_k_adds_a_reviewer_and_sets_the_orchestration_and_the_rounds(env):
     config = env / "config" / "config.toml"
 
     def labels(app) -> list[str]:
@@ -4298,15 +4287,21 @@ def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
         return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
 
     def row(app, name: str) -> str:
-        return next(text for text in labels(app) if name in text)
+        return next(text for text in labels(app) if text.strip().startswith(name))
+
+    def pick(app, name: str) -> None:
+        index = next(i for i, text in enumerate(labels(app)) if text.strip().startswith(name))
+        app.screen.query_one("#rows", OptionList).highlighted = index
 
     async def scenario(app, pilot):
         app.available = AVAILABLE
         await pilot.press("k")
         await pilot.pause()
-        assert "none" in row(app, "reviewer") and not any("review mode" in r for r in labels(app))
-        reviewer = next(i for i, text in enumerate(labels(app)) if text.strip().startswith("reviewer"))
-        app.screen.query_one("#rows", OptionList).highlighted = reviewer
+        assert "the writer's model" in row(app, "reviewer") and not any(
+            "review mode" in r for r in labels(app)
+        )
+        assert "planner_maker_checker: P → W → Gate → R ⇄ W" in row(app, "orchestration")
+        pick(app, "reviewer")
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, dialogs.ChooseModel)
@@ -4314,21 +4309,23 @@ def test_k_adds_a_reviewer_and_sets_its_mode_and_rounds(env):
         await pilot.pause()
         text = config.read_text()
         assert "[roles.reviewer]" in text and 'model = "deepseek/deepseek-v4-flash"' in text
-        assert "deepseek-v4-flash" in row(app, "reviewer") and "loop" in row(app, "review mode")
-        mode = next(i for i, text in enumerate(labels(app)) if "review mode" in text)
-        app.screen.query_one("#rows", OptionList).highlighted = mode
+        assert "\nmode = " not in text.split("[roles.reviewer]")[1], "no review mode any more"
+        assert "deepseek-v4-flash" in row(app, "reviewer")
+        pick(app, "orchestration")
         await pilot.press("enter")
         await pilot.pause()
-        assert 'mode = "supervised"' in config.read_text() and "supervised" in row(app, "review mode")
-        rounds = next(i for i, text in enumerate(labels(app)) if "max_reviews" in text)
-        app.screen.query_one("#rows", OptionList).highlighted = rounds
+        text = config.read_text()
+        assert 'agent_orchestration_mode = "supervisor_worker"' in text, "the next mode, at the top level"
+        assert text.index("agent_orchestration_mode") < text.index("["), "before any table"
+        assert "supervisor_worker: (P+R) ⇄ W → Gate" in row(app, "orchestration")
+        pick(app, "rounds")
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, settings.Ask)
-        app.screen.query_one(Input).value = "3"
+        app.screen.query_one(Input).value = "4"
         await pilot.press("enter")
         await pilot.pause()
-        assert "max_reviews = 3" in config.read_text() and "3" in row(app, "max_reviews")
+        assert "max_rounds = 4" in config.read_text() and "4" in row(app, "rounds")
 
     run(scenario)
 

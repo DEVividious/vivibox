@@ -3,6 +3,7 @@ import shlex
 
 import pytest
 
+from vivibox import prompts
 from vivibox.cli import main
 
 
@@ -115,7 +116,7 @@ def test_accept_and_reply_follow_the_checkpoints(env, capsys):
     assert task.read_state().state is State.PLAN
     assert "Use Postgres, not H2" in (task.meta / "handoff" / "comments.md").read_text()
     assert not (task.meta / "handoff" / supervisor.QUESTION).exists(), "answered questions are archived"
-    assert supervisor.next_prompt(task, "") == supervisor.PLAN_COMMENT_PROMPT
+    assert supervisor.next_prompt(task, "") == prompts.PLAN_COMMENT_PROMPT
 
     task.transition(State.CHECKPOINT_PLAN)
     assert main(["accept", "demo-1"]) == 0

@@ -22,7 +22,7 @@ def test_loads_config_with_defaults(tmp_path):
     )
     config = load_config(base)
     assert config.tasks_dir == Path("/srv/vivibox")
-    assert config.max_iterations == 3
+    assert config.max_rounds == 3 and config.orchestration == "planner_maker_checker" and config.notice == ""
     assert config.roles["writer"].harness == "opencode"
     assert config.desktop_notifications is True
 
@@ -39,7 +39,8 @@ def test_desktop_notifications_can_be_turned_off(tmp_path):
         'tasks_dir = "/t"\n[roles.planner]\nharness = "opencode"\nmodel = "m"\n'
         '[roles.writer]\nharness = "other"\nmodel = "m"\n',
         'tasks_dir = "/t"\n[roles.reviewer]\nharness = "opencode"\nmodel = "m"\n',
-        'tasks_dir = "/t"\n[limits]\nmax_iterations = 0\n' + ROLES,
+        'tasks_dir = "/t"\n[limits]\nmax_rounds = 0\n' + ROLES,
+        'tasks_dir = "/t"\nagent_orchestration_mode = "pair"\n' + ROLES,
         "tasks_dir = ",
         'tasks_dir = "/t"\n[notifications]\ndesktop = "no"\n' + ROLES,
     ],
@@ -205,21 +206,39 @@ def test_cost_limits_are_dollars_per_task_and_none_by_default(tmp_path):
             load_config(write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[limits]\n{bad}\n' + ROLES))
 
 
-def test_a_reviewer_is_a_role_like_the_others_with_a_mode_and_a_round_limit(tmp_path):
-    config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
-    assert "reviewer" not in config.roles and config.review_mode == "loop" and config.max_reviews == 2
+def test_a_reviewer_is_a_role_like_the_others_and_the_old_review_keys_are_one_notice(tmp_path):
+    """The reviewer is optional: the mode decides whether someone reviews. `mode` under the
+    reviewer and the two old limits are read no more; a file that still has them is told once,
+    and the old attempt limit carries over as the round limit, so a task fixes as often as it did."""
+    reviewer = '[roles.reviewer]\nharness = "opencode"\nmodel = "anthropic/claude-sonnet-5"\n'
+    text = 'tasks_dir = "/t"\n' + ROLES + reviewer
+    config = load_config(write(tmp_path / "config.toml", text))
+    assert config.roles["reviewer"].model == "anthropic/claude-sonnet-5" and config.notice == ""
     text = (
-        'tasks_dir = "/t"\n[limits]\nmax_reviews = 1\n'
+        'tasks_dir = "/t"\n[limits]\nmax_iterations = 5\nmax_reviews = 1\n'
         + ROLES
-        + '[roles.reviewer]\nharness = "opencode"\nmodel = "anthropic/claude-sonnet-5"\nmode = "supervised"\n'
+        + reviewer.replace('"\n', '"\nmode = "supervised"\n', 1)
     )
     config = load_config(write(tmp_path / "config.toml", text))
-    assert config.roles["reviewer"].model == "anthropic/claude-sonnet-5"
-    assert config.review_mode == "supervised" and config.max_reviews == 1
-    for bad, said in (
-        ('[roles.reviewer]\nharness = "opencode"\nmodel = "m"\nmode = "chatty"\n', "loop, supervised"),
-        ('[roles.reviewer]\nharness = "manual"\nmodel = ""\n', "opencode"),
-        ("[limits]\nmax_reviews = 0\n", "max_reviews"),
-    ):
-        with pytest.raises(ConfigError, match=said):
-            load_config(write(tmp_path / "config.toml", f'tasks_dir = "/t"\n{bad}' + ROLES))
+    assert config.max_rounds == 5, "the old limit carries over"
+    assert "limits.max_iterations, limits.max_reviews, roles.reviewer.mode" in config.notice
+    assert "limits.max_rounds (5)" in config.notice and "planner_maker_checker" in config.notice
+    text = 'tasks_dir = "/t"\n[limits]\nmax_iterations = 5\nmax_rounds = 2\n' + ROLES
+    assert load_config(write(tmp_path / "config.toml", text)).max_rounds == 2, "the new key wins"
+    text = 'tasks_dir = "/t"\n[roles.reviewer]\nharness = "manual"\nmodel = ""\n' + ROLES
+    with pytest.raises(ConfigError, match="opencode"):
+        load_config(write(tmp_path / "config.toml", text))
+
+
+def test_the_orchestration_modes_are_the_four_of_the_decision(tmp_path):
+    from vivibox.config import ORCHESTRATION_LEGEND, ORCHESTRATION_MODES
+
+    modes = ["single_agent", "planner_executor", "planner_maker_checker", "supervisor_worker"]
+    assert list(ORCHESTRATION_MODES) == modes
+    for name, mode in ORCHESTRATION_MODES.items():
+        assert mode.label and "→" in mode.flow and mode.when and mode.models and mode.tradeoff, name
+    assert "⇄" in ORCHESTRATION_LEGEND and "max_rounds" in ORCHESTRATION_LEGEND
+    text = 'tasks_dir = "/t"\nagent_orchestration_mode = "supervisor_worker"\n[limits]\nmax_rounds = 4\n'
+    text += ROLES
+    config = load_config(write(tmp_path / "config.toml", text))
+    assert (config.orchestration, config.max_rounds) == ("supervisor_worker", 4)

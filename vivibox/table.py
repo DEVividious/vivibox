@@ -10,7 +10,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.widgets import Static
 
-from . import actions, ui
+from . import actions, orchestration, ui
 from .dialogs import NO_PROJECTS
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
@@ -34,10 +34,11 @@ class TaskTable:
             return self.NARROW
         if width < 130:
             return self.MEDIUM
-        # The reviewer's figure only where there is a reviewer: a list without one looks as it did.
+        # The reviewer's figure only where someone other than the writer reviews: a list without
+        # one looks as it did.
         return (
             self.COLUMNS
-            if "reviewer" in self.config.roles
+            if orchestration.MODES[self.config.orchestration].reviews()
             else tuple(c for c in self.COLUMNS if c != "REVIEW")
         )
 

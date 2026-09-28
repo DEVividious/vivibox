@@ -165,6 +165,8 @@ First public version.
 
 ### Fixed
 
+- A writer's proposed command written as Markdown (a heading, a fenced block with its language, a
+  sentence around the command) gives the command, not "# Verification proposal" or "bash".
 - A planner that asks instead of planning (the goal is met already) leaves the task at "agent
   asks" with its question in the panel, not at "review the plan" with the template as the plan,
   whose accept could only fail.

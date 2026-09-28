@@ -17,15 +17,26 @@ from .task import Task
 PROPOSAL = "verify-proposal.md"
 
 
+# A fence's opening line with its language (```bash), and a command in backticks within a line.
+FENCE = re.compile(r"^(`{3,}|~{3,})\s*[\w+-]*$")
+INLINE = re.compile(r"`([^`]+)`")
+
+
 def proposed(task: Task) -> str:
-    """The command the writer wrote, its first line, without the backticks or the prompt sign a
-    model tends to put around it; "" for none."""
+    """The command the writer wrote, its first line, without what a model puts around it in a
+    Markdown file: a heading, a fenced block and its language, a comment in it, a list marker, a
+    sentence around a command in backticks, the prompt sign; "" for none."""
     try:
         text = (task.meta / "handoff" / PROPOSAL).read_text()
     except OSError:
         return ""
     for line in text.splitlines():
-        command = line.strip().strip("`").strip()
+        command = line.strip()
+        if not command or command.startswith("#") or FENCE.match(command):
+            continue
+        if found := INLINE.search(command):
+            command = found.group(1).strip()
+        command = command.removeprefix("- ").removeprefix("* ").strip("`").strip()
         if command.startswith("$ "):
             command = command[2:].strip()
         if command:

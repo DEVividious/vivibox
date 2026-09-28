@@ -164,6 +164,26 @@ def test_a_project_with_no_command_is_verified_with_what_its_writer_proposed(env
     assert (task.meta / gate.ACCEPTED_PLAN).exists()
 
 
+@pytest.mark.parametrize(
+    "written",
+    [
+        "# Verification proposal\n\nbash mvnw -B verify\n",
+        "# Verification proposal\n\n```bash\n# from the root\n$ bash mvnw -B verify\n```\n",
+        "## Command\n\nRun `bash mvnw -B verify` from the root.\n",
+        "- `bash mvnw -B verify`\n",
+    ],
+)
+def test_a_proposal_written_as_markdown_gives_its_command_not_its_heading(env, written):
+    """The file is Markdown and a writer writes it so: a heading, a fenced block with its
+    language, a sentence around the command. The command is what comes out."""
+    from vivibox import actions, proposal
+
+    task = actions.create("demo", "Refactor the parser")
+    (task.meta / "handoff").mkdir(parents=True, exist_ok=True)
+    (task.meta / "handoff" / proposal.PROPOSAL).write_text(written)
+    assert proposal.proposed(task) == "bash mvnw -B verify"
+
+
 def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
     """What a new project is told: one command per build file that names it, as a note."""
     (tmp_path / "mvnw").write_text("")

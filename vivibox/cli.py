@@ -199,8 +199,15 @@ def cmd_rm(args: argparse.Namespace) -> int:
     return 0
 
 
+def on_a_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def cmd_attach(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
+    if not on_a_terminal():  # tmux could not attach, and the agent's window would stay open
+        print(f"vivibox: attach needs a terminal; run it in one: vivibox attach {task.id}", file=sys.stderr)
+        return 1
     command = actions.attach_command(args.task)
     subprocess.run(command, env=actions.outside_tmux())
     if not task.read_state().box:  # a box's shell keeps its state between visits

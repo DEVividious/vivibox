@@ -982,9 +982,26 @@ def test_attach_opens_the_agents_window_and_closes_it_when_you_leave(env, monkey
     ran = {}
     monkeypatch.setattr(cli.subprocess, "run", lambda command, **kw: ran.update(command=command, **kw))
     calls = fake_tmux(monkeypatch, shows="")
+    monkeypatch.setattr(cli, "on_a_terminal", lambda: True)
     assert main(["attach", task.id]) == 0
     assert ran["command"][0] == "tmux" and "TMUX" not in ran["env"]
     assert ["kill-session", "-t", f"vivibox-{task.id}"] in calls
+
+
+def test_attach_without_a_terminal_refuses_before_it_opens_the_agents_window(env, monkeypatch, capsys):
+    """Run from a script, tmux could not attach and left opencode's window running in the pod."""
+    from vivibox import actions, cli
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    opened = []
+    monkeypatch.setattr(actions, "attach_command", lambda task_id, role="": opened.append(task_id))
+    monkeypatch.setattr(cli, "on_a_terminal", lambda: False)
+    assert main(["attach", task.id]) == 1
+    assert opened == []
+    assert "needs a terminal" in capsys.readouterr().err
 
 
 @pytest.mark.real_start

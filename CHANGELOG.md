@@ -157,6 +157,8 @@ First public version.
 
 ### Fixed
 
+- `vivibox attach` run without a terminal says it needs one, instead of leaving the agent's
+  window running in the pod.
 - A command the writer proposes with Maven's or Gradle's debug output on (`mvn -X`, `--debug`,
   copied from jsoup's pipeline) is refused like one that picks some tests: every verification
   log would have been megabytes of it. The proposal prompt says so, and the checkpoint names it.

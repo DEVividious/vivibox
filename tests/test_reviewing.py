@@ -12,6 +12,10 @@ REVIEW = """# Review 1
 ## Not blocking
 
 - src/calc.py:3 — the docstring still says "adds"
+
+## Checked
+
+- divide and its test against the plan's criteria
 """
 
 
@@ -24,6 +28,7 @@ def test_a_review_has_blocking_and_not_blocking_notes_each_with_a_place():
     assert review.not_blocking == ['src/calc.py:3 — the docstring still says "adds"']
     assert reviewing.problem(REVIEW) == ""
     clean = reviewing.parse_review("# Review 2\n\n## Blocking\n\n## Not blocking\n\n- a.py:1 — nit\n")
+    assert reviewing.parse_review(REVIEW).checked == ["divide and its test against the plan's criteria"]
     assert clean.blocking == [] and len(clean.not_blocking) == 1, "an empty section is no notes"
 
 
@@ -32,9 +37,14 @@ def test_a_review_without_the_sections_or_without_places_is_refused():
     without a place is one the writer cannot act on."""
     assert "## Blocking" in reviewing.problem("Looks fine to me.")
     assert "place" in reviewing.problem(
-        "## Blocking\n\n- [ ] the error handling is wrong\n\n## Not blocking\n"
+        "## Blocking\n\n- [ ] the error handling is wrong\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
     )
-    assert reviewing.problem("## Blocking\n\n- [ ] src/x.py:4 — off by one\n\n## Not blocking\n") == ""
+    assert (
+        reviewing.problem(
+            "## Blocking\n\n- [ ] src/x.py:4 — off by one\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
+        )
+        == ""
+    )
 
 
 # What a reviewer on deepseek-flash wrote in the behavioural run of 2026-09-25: one line a note,
@@ -48,6 +58,9 @@ red.md — the red evidence records only "AssertionError" with no expected vs ac
 
 ## Not blocking
 
+## Checked
+
+- test_calc.py and calc.py against the plan
 """
 
 
@@ -59,7 +72,9 @@ def test_a_note_is_a_line_of_its_section_as_the_prompt_asks_with_or_without_a_li
     marked = "## Blocking\n\n* a.py:1 — x\n1. b.py:2 — y\n- [x] c.py:3 — z\n\n## Not blocking\n\nNone.\n"
     assert reviewing.parse_review(marked).blocking == ["a.py:1 — x", "b.py:2 — y", "c.py:3 — z"]
     assert reviewing.parse_review(marked).not_blocking == [], "None. is an empty section"
-    wrapped = "## Blocking\n\n- a.py:1 — a long note\n  that goes on\n\n## Not blocking\n"
+    wrapped = (
+        "## Blocking\n\n- a.py:1 — a long note\n  that goes on\n\n## Not blocking\n\n## Checked\n\n- a.py\n"
+    )
     assert reviewing.parse_review(wrapped).blocking == ["a.py:1 — a long note that goes on"]
     assert reviewing.problem(wrapped) == ""
 
@@ -139,3 +154,19 @@ def test_the_reviewers_key_goes_with_the_tasks(tmp_path, monkeypatch):
     assert secrets.runtime_dir("demo-1-review").is_dir()
     reviewing.forget("demo-1")
     assert not secrets.runtime_dir("demo-1-review").exists()
+
+
+def test_a_review_says_what_it_checked():
+    """A review of two empty sections (go-humanize-4) could not tell reading the work from not
+    reading it; the notes are what was wrong, Checked is what the review stands on."""
+    empty = "## Blocking\n\n## Not blocking\n"
+    assert reviewing.problem(empty) == "the section ## Checked is missing"
+    assert "says what was checked" in reviewing.problem(empty + "\n## Checked\n\nNone.\n")
+    assert reviewing.problem(empty + "\n## Checked\n\n- the parser against the 15 invalid inputs\n") == ""
+
+
+def test_both_review_prompts_carry_the_same_rules():
+    from vivibox import prompts
+
+    assert prompts.REVIEW_RULES in prompts.REVIEW_PROMPT
+    assert "## Checked" in prompts.REVIEW_RULES and "## Checked" in prompts.REVIEW_REPAIR_PROMPT

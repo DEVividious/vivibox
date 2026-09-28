@@ -34,15 +34,24 @@ failed and quotes the lines that say why (the whole output is in /task/handoff/v
 what it names and commit. End the turn when that is done, or, if the cause is outside the code,
 when you have written it to /task/handoff/question.md."""
 
-REVIEW_PROMPT = """The verification passed: the build and the tests are green, do not run them.
+# What a good review is, for every reviewer: the one in the pod and one in an agent's CLI on your
+# machine (ADR-0035) read the same rules, and only where the files are differs.
+REVIEW_RULES = """with three sections. Under "## Blocking": what keeps the work from being what the
+plan says, or from proving it: a test that cannot fail, a criterion ticked but not met,
+behaviour the plan rules out. Under "## Not blocking": the rest. Each note is one line,
+"path:line — what is wrong and what would make it right"; either section may be empty. Under
+"## Checked": what you read and checked, one line each, at least one. Do not report what the
+verification already checks: commits, ticks, switched-off tests, red evidence named."""
+
+REVIEW_PROMPT = (
+    """The verification passed: the build and the tests are green, do not run them.
 Read /task/plan.md, /task/handoff/criteria.md, /task/handoff/red.md and /task/handoff/comments.md,
 then the work itself: `git diff {base}..HEAD` in the repository you are in. Write
-/task/review/review.md with two sections. Under "## Blocking": what keeps the work from being
-what the plan says, or from proving it: a test that cannot fail, a criterion ticked but not met,
-behaviour the plan rules out. Under "## Not blocking": the rest. Each note is one line,
-"path:line — what is wrong and what would make it right"; a section may be empty. Do not report
-what the verification already checks: commits, ticks, switched-off tests, red evidence named.
+/task/review/review.md """
+    + REVIEW_RULES
+    + """
 End the turn when the review is written."""
+)
 
 # Before a round after the first: the writer may have answered the last round instead of acting
 # on it; a round that does not read the answer repeats its note, and the dispute goes to you.
@@ -53,8 +62,9 @@ answered stays under Blocking only with one sentence on why the answer does not 
 """
 
 REVIEW_REPAIR_PROMPT = """The review in /task/review/review.md is not one the orchestrator can
-read: {problem}. Rewrite it with the two sections, "## Blocking" and "## Not blocking", and a
-place (path:line) on every note. End the turn when it is rewritten."""
+read: {problem}. Rewrite it with the three sections, "## Blocking", "## Not blocking" and
+"## Checked", a place (path:line) on every note and a line on what you checked. End the turn when
+it is rewritten."""
 
 REVIEW_FIX_PROMPT = """The reviewer read your work. Read the newest /task/handoff/review-N.md (N is
 the round): fix every note under Blocking, commit, and keep the ticks in /task/handoff/criteria.md

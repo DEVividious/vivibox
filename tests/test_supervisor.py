@@ -799,9 +799,13 @@ def turns(task) -> int:
 
 # --- the reviewer -----------------------------------------------------------------------------
 
-CLEAN = "# Review\n\n## Blocking\n\n## Not blocking\n\n- calc.py:3 — the docstring still says adds\n"
+CHECKED = "\n## Checked\n\n- calc.py and test_calc.py against the plan\n"
+CLEAN = (
+    "# Review\n\n## Blocking\n\n## Not blocking\n\n- calc.py:3 — the docstring still says adds\n" + CHECKED
+)
 BLOCKING = (
     "# Review\n\n## Blocking\n\n- [ ] test_calc.py:20 — asserts True, proves nothing\n\n## Not blocking\n"
+    "\n## Checked\n\n- calc.py and test_calc.py against the plan\n"
 )
 
 
@@ -873,7 +877,10 @@ def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_t
 def test_blocking_notes_written_as_the_prompt_asks_go_back_to_the_writer(task, tmp_path):
     """One line a note, "path:line — …", no list mark: what a reviewer on deepseek-flash wrote in
     the behavioural run of 2026-09-25. Read as no notes, the work went to you with them open."""
-    plain = "## Blocking\n\ntest_calc.py:10 — test_subtract asserts assertTrue(True)\n\n## Not blocking\n"
+    plain = (
+        "## Blocking\n\ntest_calc.py:10 — test_subtract asserts assertTrue(True)\n\n## Not blocking\n"
+        + CHECKED
+    )
     sup, notes, _ = reviewed(task, tmp_path, [plain])
     for _ in range(3):  # implement, verify, review
         sup.step()

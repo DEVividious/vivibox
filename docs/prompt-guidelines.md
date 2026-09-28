@@ -42,7 +42,7 @@ broken, next to the line that broke it.
 | the command a writer proposes builds the whole project, not a selection of tests, and without the build tool's debug output | `gate.narrowed_proposal` |
 | a criterion never asks a build or test command to pass, the verification's or any other | `gate.command_criteria` |
 | a plan in a project verified by its modules names them (`modules`) | `proposal.modules_missing` |
-| a review has its two sections and a place on every note | `reviewing.problem` |
+| a review has its three sections, a place on every note and a line on what was checked | `reviewing.problem` |
 
 A sentence no row covers is one of two things: a fact about the pod ("Docker works here") or a
 description of a file. The evidence in `red.md` is the one rule the gate checks only in part

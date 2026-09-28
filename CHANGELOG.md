@@ -129,6 +129,9 @@ First public version.
 
 ### Changed
 
+- A review has a third section, `## Checked`: what the reviewer read and checked, at least one
+  line, so a review with no notes says what it stands on; a review without it goes back to the
+  reviewer once, like one without places on its notes.
 - `host/setup.sh` says `update` for what is there but older than the checkout (the firewall
   helper, the vivibox skill) or installed from another checkout (the vivibox command), and
   `missing` only for what is not there.

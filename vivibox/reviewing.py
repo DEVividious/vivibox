@@ -1,7 +1,8 @@
 """The reviewer's file: what it says, whether it is one, and where the task keeps each round.
 
-A review is `handoff/review-N.md` with two sections, `## Blocking` and `## Not blocking`, each a
-list of notes that name a place (`path:line`). The supervisor reads the blocking list and nothing
+A review is `handoff/review-N.md` with three sections: `## Blocking` and `## Not blocking`, each a
+list of notes that name a place (`path:line`), and `## Checked`, what the review read and checked,
+which a review without notes stands on. The supervisor reads the blocking list and nothing
 else decides: a review with no blocking notes lets the work go on to you, a review that is not
 one comes back to the reviewer once, like a plan draft that is not a plan.
 """
@@ -21,7 +22,7 @@ from .task import Task
 # Where the reviewer writes, in its container: outside the handoff, which it only reads.
 MOUNT = "/task/review"
 
-BLOCKING, NOT_BLOCKING = "## Blocking", "## Not blocking"
+BLOCKING, NOT_BLOCKING, CHECKED = "## Blocking", "## Not blocking", "## Checked"
 # A note names where: a path, a colon, a line number, then what is wrong.
 PLACE = re.compile(r"^\S+:\d+\b")
 # A note is a line of its section, as REVIEW_PROMPT asks: "path:line — …". A list mark in front
@@ -38,6 +39,7 @@ NUMBERED = re.compile(r"^review-(\d+)\.md$")
 class Review:
     blocking: list[str] = field(default_factory=list)
     not_blocking: list[str] = field(default_factory=list)
+    checked: list[str] = field(default_factory=list)
 
 
 def parse_review(text: str) -> Review:
@@ -50,6 +52,8 @@ def parse_review(text: str) -> Review:
                 if stripped.lower() == BLOCKING.lower()
                 else review.not_blocking
                 if stripped.lower() == NOT_BLOCKING.lower()
+                else review.checked
+                if stripped.lower() == CHECKED.lower()
                 else None
             )
         elif section is None or not stripped or EMPTY.match(stripped):
@@ -64,10 +68,12 @@ def parse_review(text: str) -> Review:
 def problem(text: str) -> str:
     """Why the text is not a review the supervisor can read, or "" when it is."""
     lines = {line.strip().lower() for line in text.splitlines()}
-    for heading in (BLOCKING, NOT_BLOCKING):
+    for heading in (BLOCKING, NOT_BLOCKING, CHECKED):
         if heading.lower() not in lines:
             return f"the section {heading} is missing"
     review = parse_review(text)
+    if not review.checked:
+        return f"{CHECKED} says what was checked, one line each, and it is empty"
     for note in review.blocking + review.not_blocking:
         if not PLACE.match(note):
             return f"a note has no place (path:line) to act on: {note[:80]}"

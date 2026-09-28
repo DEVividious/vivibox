@@ -116,6 +116,10 @@ First public version.
 
 ### Changed
 
+- A proposed command that builds one part of the project (`-pl`, `:module:test`, a Go package,
+  `cargo -p`, a workspace) is told as narrowed, like one that picks some tests: the first task's
+  writer proposes the part that task was about, and every task is verified with it. Keeping the
+  command says it is kept for every task of the project.
 - The brief says a global install (`mise use --global`, `npm install -g`) is invisible to the
   verification, and that a tool the plan does not call for is a question for you.
 - `vivibox usage --json` now returns an object with `tasks` and `shared_caches`, instead of a

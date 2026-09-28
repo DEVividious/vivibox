@@ -1017,7 +1017,7 @@ def test_the_writers_command_is_a_checkpoint_before_the_first_verification(task)
     sup.step()  # implement: the turn ends with a proposal
     assert task.read_state().state is State.CHECKPOINT_COMMAND
     assert notes[-1] == (
-        "command proposed: `npm ci && npm test`; keep it for the project, change it, or send it back"
+        "command proposed: `npm ci && npm test`; keep it for every task of demo, change it, or send it back"
     )
     assert sup.step() is False and kept == [], "waits for you"
     supervisor.accept_command(task, "npm ci && npm test", "command accepted")

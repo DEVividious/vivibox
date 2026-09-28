@@ -1,5 +1,6 @@
-"""Whether the command a writer proposes is a whole build: not a selection of tests, and without
-the build tool's debug output. The gate refuses one that is not, and names what is wrong."""
+"""Whether the command a writer proposes is a whole build: not a selection of tests nor of one
+part of the project, and without the build tool's debug output. The gate refuses one that is not,
+and names what is wrong."""
 
 from __future__ import annotations
 
@@ -21,12 +22,43 @@ BUILD_TOOL = re.compile(r"(?<![\w-])(?:mvnw?|gradlew?)(?![\w-])")
 DEBUG_OUTPUT = re.compile(r"(?<![\w-])(?:-X|--debug)(?![\w=-])")
 
 
+# What picks one part of the project, per build tool: a Maven module or its pom, a Gradle
+# project's task, a Go package, a Cargo package, a workspace. The writer of the first task
+# proposes the command every task is verified with, and its part is the one that task was about.
+# {modules} is not a part: the plan of each task names its own (ADR-0033). A directory the command
+# changes into is not one either: in a repository of separate apps it is the app's whole build.
+SELECTS_PART = [
+    (
+        re.compile(r"(?<![\w-])mvnw?(?![\w-])"),
+        re.compile(
+            r"(?<![\w-])(?:(?:-pl|--projects)(?:=|\s+)(?!\S*\{modules\})\S+|(?:-f|--file)(?:=|\s+)\S+/pom\.xml)"
+        ),
+    ),
+    (
+        re.compile(r"(?<![\w-])gradlew?(?![\w-])"),
+        re.compile(r"(?<!\S)(?::[\w.-]+)+:\w+(?!\S)|(?<![\w-])-p\s+\S+"),
+    ),
+    (
+        re.compile(r"(?<![\w-])go\s+test(?![\w-])"),
+        re.compile(r"(?<!\S)\./(?!\.\.\.)[\w.-]+(?:/[\w.-]+)*(?:/\.\.\.)?"),
+    ),
+    (re.compile(r"(?<![\w-])cargo(?![\w-])"), re.compile(r"(?<![\w-])(?:-p|--package)(?:=|\s+)\S+")),
+    (
+        re.compile(r"(?<![\w-])(?:npm|pnpm|yarn)(?![\w-])"),
+        re.compile(r"(?<![\w-])(?:--workspace(?:=|\s+)\S+|--filter(?:=|\s+)\S+|workspace\s+\S+)"),
+    ),
+]
+
+
 def narrowed_proposal(command: str) -> str:
     """What is wrong with a proposed command, as its part that says so: the selection of tests
-    (a writer verified by the tests it wrote alone would pass whatever it broke elsewhere), or
-    the build tool's debug output; "" for a whole build that reads."""
+    or of one part of the project (a writer verified by a part alone would pass whatever it broke
+    elsewhere), or the build tool's debug output; "" for a whole build that reads."""
     if found := SELECTS_TESTS.search(command):
         return found.group(0)
+    for tool, part in SELECTS_PART:
+        if tool.search(command) and (found := part.search(command)):
+            return found.group(0)
     found = DEBUG_OUTPUT.search(command) if BUILD_TOOL.search(command) else None
     return found.group(0) if found else ""
 

@@ -97,11 +97,13 @@ the command it ran to `/task/handoff/verify-proposal.md` (told to allow that bui
 verification's own time limit, `verify_timeout`, so its tool's default of two minutes does not
 cut a suite short), and before the first verification the
 task waits for you as `review the command`: `a` opens the same field as under `e` with the
-command in it, Enter keeps it for the project and the gate runs with it; `e` changes it first,
+command in it, Enter keeps it for every task of the project and the gate runs with it; `e` changes it first,
 `r` sends the writer back for another. A writer that proposed none leaves the field empty, for
 you to type the command or to ask for one; a command that picks some tests (`-Dtest=`, `--tests`,
-`-k`, a test file named) is shown with its selection, because a writer verified by its own tests
-alone would pass whatever it broke elsewhere. With `--auto` a whole command is kept without
+`-k`, a test file named) or one part of the project (`-pl`, `:module:test`, a Go package,
+`cargo -p`, a workspace) is shown with its selection, because every task verified by a part alone
+would pass whatever it broke elsewhere; the first task's writer tends to propose the part that
+task was about. With `--auto` a whole command is kept without
 stopping, and a narrowed or missing one still waits for you. The project's next task has the
 command and skips this. A command that runs a file the repository's commits do not have (`./mvnw`
 after a move to Gradle, a wrapper never committed) leaves the task waiting for you with

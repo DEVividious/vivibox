@@ -513,12 +513,13 @@ def test_the_writers_command_is_a_decision_of_its_own_before_the_first_verificat
     async def scenario(app, pilot):
         app.reload()
         assert app.views[task.id].status == "review the command"
-        assert "`a` keep it" in detail(task, task.read_state(), 3, True, None)
+        assert "`a` keep it for every task" in detail(task, task.read_state(), 3, True, None)
         await pilot.press("a")
         await pilot.pause()
         assert isinstance(app.screen, AskVerify)
         assert app.screen.query_one(Input).value == "npm ci && npm test"
         assert "proposes" in app.screen.heading and not app.screen.query(Checkbox)
+        assert "keeps it for every task of demo" in app.screen.heading
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause()

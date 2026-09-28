@@ -915,6 +915,20 @@ def test_a_file_the_command_runs_is_looked_for_where_the_command_runs_it(task):
         ("./mvnw -B verify -Dmaven.test.failure.ignore=false", ""),
         ("mvn -B verify -Xmx2g", ""),
         ("node --debug-port=1 x.js && npm test", ""),
+        # One part of the project: the module the first task was about, kept for every task.
+        ("bash mvnw -B -pl common -am test", "-pl common"),
+        ("./mvnw -B verify --projects=services", "--projects=services"),
+        ("mvn -B -f core/pom.xml verify", "-f core/pom.xml"),
+        ("bash mvnw -B -pl {modules} -am verify", ""),
+        ("bash gradlew :core:test --no-daemon", ":core:test"),
+        ("go test ./internal/parser/...", "./internal/parser/..."),
+        ("go test ./...", ""),
+        ("cargo test -p parser", "-p parser"),
+        ("cargo test --workspace", ""),
+        ("npm test --workspace=api", "--workspace=api"),
+        ("pnpm --filter web test", "--filter web"),
+        ("yarn workspace web test", "workspace web"),
+        ("uv run pytest -p no:cacheprovider", ""),
     ],
 )
 def test_a_command_narrowed_to_some_tests_is_told_from_a_whole_build(command, selection):
@@ -937,6 +951,17 @@ def test_a_proposal_with_debug_output_is_refused_and_told_as_such(task):
     text = feedback.feedback(result)
     assert "debug output (-X)" in text and "picks some tests" not in text and "verify-proposal.md" in text
     assert "with debug output on (-X)" in gate.why_red(result)
+
+
+def test_a_proposal_of_one_part_of_the_project_is_told_as_such_to_the_writer(task):
+    """The writer of a task about one module proposes that module's build: told it picked some
+    tests, it would look for a test it did not pick."""
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    result = gate.run_gate(task, FakePod(), ["bash mvnw -B -pl common test"], [], narrowed="-pl common")
+    text = feedback.feedback(result)
+    assert "builds one part of the project (-pl common)" in text and "picks some tests" not in text
 
 
 def test_a_proposal_narrowed_to_the_writers_tests_is_refused_before_the_build(task):

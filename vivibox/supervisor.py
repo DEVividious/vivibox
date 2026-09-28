@@ -610,7 +610,10 @@ class Supervisor:
                 f"command proposed: `{command}`, {gate.proposal_fault(selection)}; change it, or send it back"
             )
         else:
-            reason = f"command proposed: `{command}`; keep it for the project, change it, or send it back"
+            reason = (
+                f"command proposed: `{command}`; keep it for every task of {st.project}, change it,"
+                " or send it back"
+            )
         self._checkpoint(State.CHECKPOINT_COMMAND, reason, kind="command")
 
     def _asks_for_command(self) -> bool:

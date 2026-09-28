@@ -193,8 +193,9 @@ def command_to_review(task: Task) -> list[str]:
         ]
     elif selection:
         lines += [
-            f"*This command is narrowed to {selection}: a writer verified by its own tests alone passes"
-            " whatever it broke elsewhere. Change it to the whole build, or ask the writer for it.*",
+            f"*This command is narrowed to {selection}: verified by a part of the project alone, this task"
+            " and every one after it pass whatever they break elsewhere. Change it to the whole build,"
+            " or ask the writer for it.*",
             "",
         ]
     lines += [
@@ -313,7 +314,7 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if st.state is State.CHECKPOINT_PLAN:
         return "`a` accept the plan · `r` send it back with a comment · `e` edit it"
     if st.state is State.CHECKPOINT_COMMAND:
-        return "`a` keep it for the project · `e` change it · `r` ask the writer for another"
+        return "`a` keep it for every task · `e` change it · `r` ask the writer for another"
     if st.state is State.CHECKPOINT_FINAL:
         return "`f` the diff · `o` open the review copy · `v` run the app · `a` accept · `r` ask for changes"
     if st.state is State.APPROVAL_RISKY:

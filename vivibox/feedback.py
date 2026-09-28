@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import shutil
 
-from .gate import DEBUG_OUTPUT, MAX_LISTED, GateResult
+from .gate import DEBUG_OUTPUT, MAX_LISTED, SELECTS_TESTS, GateResult
 from .task import Task
 
 
@@ -34,6 +34,8 @@ def feedback(result: GateResult) -> str:
             f"turns on the build tool's debug output ({result.narrowed})"
             if DEBUG_OUTPUT.fullmatch(result.narrowed)
             else f"picks some tests ({result.narrowed})"
+            if SELECTS_TESTS.fullmatch(result.narrowed)
+            else f"builds one part of the project ({result.narrowed})"
         )
         parts.append(
             f"- The command you proposed {fault}, so it was not run: write to"

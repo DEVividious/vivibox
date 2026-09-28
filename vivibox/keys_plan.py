@@ -89,7 +89,7 @@ class PlanKeys:
         self.review_command(self.selected()[0])
 
     def review_command(self, task: Task) -> None:
-        """The command the writer proposed, in the field e shows: Enter keeps it for the project
+        """The command the writer proposed, in the field e shows: Enter keeps it for every task
         and the verification runs with it; typed over, yours is kept instead; empty, nothing is
         decided. The box that leaves it to the writer is not offered: the writer just had its say."""
         project = actions.load(task.id)[1]
@@ -97,24 +97,26 @@ class PlanKeys:
         if not command:
             heading = (
                 f"No command came from the writer of {task.id}. Type the one that builds {project.name}"
-                " and runs its tests; Enter keeps it for the project and verifies the task with it."
+                f" and runs its tests; Enter keeps it for every task of {project.name} and verifies this one"
+                " with it."
             )
         elif (selection := gate.narrowed_proposal(command)) and gate.DEBUG_OUTPUT.fullmatch(selection):
             heading = (
                 f"The writer of {task.id} proposes this command, with debug output on ({selection}):"
-                " every verification log would be megabytes of it. Take it out; Enter keeps it for the"
-                " project."
+                " every verification log would be megabytes of it. Take it out; Enter keeps it for every"
+                f" task of {project.name}."
             )
         elif selection:
             heading = (
-                f"The writer of {task.id} proposes this command, narrowed to {selection}: verified by its"
-                " own tests alone it would pass whatever it broke elsewhere. Change it to the whole build;"
-                " Enter keeps it for the project."
+                f"The writer of {task.id} proposes this command, narrowed to {selection}: verified by a part"
+                " of the project alone, every task would pass whatever it broke elsewhere. Change it to the"
+                f" whole build; Enter keeps it for every task of {project.name}."
             )
         else:
             heading = (
                 f"The writer of {task.id} proposes how {project.name} is verified, the command it ran."
-                " Enter keeps it for the project and verifies the task with it; Escape decides nothing."
+                f" Enter keeps it for every task of {project.name} and verifies this one with it; Escape"
+                " decides nothing."
             )
 
         def chosen(choice: dict) -> None:

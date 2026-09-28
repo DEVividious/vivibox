@@ -575,7 +575,9 @@ class Supervisor:
                 " type one, or send it back"
             )
         elif selection:
-            reason = f"command proposed: `{command}`, narrowed to {selection}; change it, or send it back"
+            reason = (
+                f"command proposed: `{command}`, {gate.proposal_fault(selection)}; change it, or send it back"
+            )
         else:
             reason = f"command proposed: `{command}`; keep it for the project, change it, or send it back"
         self._checkpoint(State.CHECKPOINT_COMMAND, reason, kind="command")

@@ -908,12 +908,35 @@ def test_a_file_the_command_runs_is_looked_for_where_the_command_runs_it(task):
         ("bash gradlew test --no-daemon --console=plain", ""),
         ("cd apps/react-vite && yarn install --frozen-lockfile && yarn vitest run", ""),
         ("uv run pytest -q", ""),
+        # The build tool's debug output: the log the writer and you read, megabytes of it.
+        ("mvn -X verify -B --file pom.xml", "-X"),
+        ("./mvnw --debug -B verify", "--debug"),
+        ("bash gradlew test --debug", "--debug"),
+        ("./mvnw -B verify -Dmaven.test.failure.ignore=false", ""),
+        ("mvn -B verify -Xmx2g", ""),
+        ("node --debug-port=1 x.js && npm test", ""),
     ],
 )
 def test_a_command_narrowed_to_some_tests_is_told_from_a_whole_build(command, selection):
     """The writer proposes the command it is verified with; one that picks its own tests would
     pass whatever it broke elsewhere. The gate names the selection, or "" for a whole build."""
     assert gate.narrowed_proposal(command) == selection
+
+
+def test_a_proposal_with_debug_output_is_refused_and_told_as_such(task):
+    """jsoup's pipeline runs mvn -X, and its writer proposed it: every verification log of the
+    project would be megabytes of Maven's debug output, where the failure has to be found."""
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add the endpoint")
+    pod = FakePod()
+    result = gate.run_gate(task, pod, ["mvn -X verify"], [], narrowed="-X")
+    assert ran(pod) == [] and not result.passed
+    assert gate.proposal_fault("-X") == "with debug output on (-X)"
+    assert gate.proposal_fault("-Dtest=PetTests") == "narrowed to -Dtest=PetTests"
+    text = feedback.feedback(result)
+    assert "debug output (-X)" in text and "picks some tests" not in text and "verify-proposal.md" in text
+    assert "with debug output on (-X)" in gate.why_red(result)
 
 
 def test_a_proposal_narrowed_to_the_writers_tests_is_refused_before_the_build(task):

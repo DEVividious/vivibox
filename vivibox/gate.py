@@ -465,11 +465,25 @@ SELECTS_TESTS = re.compile(
 )
 
 
+# Maven's and Gradle's debug output: megabytes of log, where the writer and you look for the
+# failure. A pipeline turns it on to debug the pipeline (jsoup's runs mvn -X); a proposal copies it.
+BUILD_TOOL = re.compile(r"(?<![\w-])(?:mvnw?|gradlew?)(?![\w-])")
+DEBUG_OUTPUT = re.compile(r"(?<![\w-])(?:-X|--debug)(?![\w=-])")
+
+
 def narrowed_proposal(command: str) -> str:
-    """The selection of tests in a proposed command, or "" when it builds the whole project. A
-    writer verified by the tests it wrote alone would pass whatever it broke elsewhere."""
-    found = SELECTS_TESTS.search(command)
+    """What is wrong with a proposed command, as its part that says so: the selection of tests
+    (a writer verified by the tests it wrote alone would pass whatever it broke elsewhere), or
+    the build tool's debug output; "" for a whole build that reads."""
+    if found := SELECTS_TESTS.search(command):
+        return found.group(0)
+    found = DEBUG_OUTPUT.search(command) if BUILD_TOOL.search(command) else None
     return found.group(0) if found else ""
+
+
+def proposal_fault(part: str) -> str:
+    """How the part narrowed_proposal found is named to you: a selection, or debug output."""
+    return f"with debug output on ({part})" if DEBUG_OUTPUT.fullmatch(part) else f"narrowed to {part}"
 
 
 def uncommitted(repo_dir: Path) -> list[str]:
@@ -611,7 +625,7 @@ def run_gate(
     elif narrowed:
         result.narrowed = narrowed
         log.write_text(
-            f"# commit {head}: the build was not run: the proposed command is narrowed to {narrowed}\n"
+            f"# commit {head}: the build was not run: the proposed command is {proposal_fault(narrowed)}\n"
         )
     elif not commands and no_command:
         log.write_text(f"# commit {head}: the build was not run: {no_command}\n")
@@ -770,7 +784,7 @@ def why_red(result: GateResult) -> str:
         if items:
             said.append(f"{len(items)} {one if len(items) == 1 else many}")
     if result.narrowed:
-        said.append(f"command narrowed to {result.narrowed}")
+        said.append(f"command {proposal_fault(result.narrowed)}")
     return ", ".join(said[:2])
 
 

@@ -99,7 +99,13 @@ class PlanKeys:
                 f"No command came from the writer of {task.id}. Type the one that builds {project.name}"
                 " and runs its tests; Enter keeps it for the project and verifies the task with it."
             )
-        elif selection := gate.narrowed_proposal(command):
+        elif (selection := gate.narrowed_proposal(command)) and gate.DEBUG_OUTPUT.fullmatch(selection):
+            heading = (
+                f"The writer of {task.id} proposes this command, with debug output on ({selection}):"
+                " every verification log would be megabytes of it. Take it out; Enter keeps it for the"
+                " project."
+            )
+        elif selection:
             heading = (
                 f"The writer of {task.id} proposes this command, narrowed to {selection}: verified by its"
                 " own tests alone it would pass whatever it broke elsewhere. Change it to the whole build;"

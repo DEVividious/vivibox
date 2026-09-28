@@ -93,7 +93,9 @@ that builds the whole project and runs all its tests, as its pipeline would, on 
 decides whether the project keeps it. The whole build may take long: run it with a timeout of
 {minutes} minutes on your shell tool, the same the verification has; a build cut short by a
 timeout is no result and no reason to ask. A command that picks some tests (`-Dtest=`,
-`--tests`, `-k`, a test file) is refused, and you propose again.
+`--tests`, `-k`, a test file) is refused, and so is one with the build tool's debug output
+(`mvn -X`, `--debug`), which a pipeline may copy and a verification log does not need; you
+then propose again.
 
 """
 # After PROPOSE_PREFIX, when the project's files name commands (init.candidates): what they name,

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import ui
+from .gate import proposal_fault
 from .states import State
 from .task import Task
 
@@ -45,7 +46,7 @@ def _gate(data: dict) -> str:
     if skipped := data.get("build_skipped"):
         text += f"; build not run: {skipped}"
     if narrowed := data.get("narrowed"):
-        text += f"; proposed command narrowed to {narrowed}"
+        text += f"; proposed command {proposal_fault(narrowed)}"
     for key, said in (
         ("missing_criteria", "criteria not met"),
         ("commit_problems", "commit problems"),

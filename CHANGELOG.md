@@ -151,6 +151,9 @@ First public version.
 
 ### Fixed
 
+- A command the writer proposes with Maven's or Gradle's debug output on (`mvn -X`, `--debug`,
+  copied from jsoup's pipeline) is refused like one that picks some tests: every verification
+  log would have been megabytes of it. The proposal prompt says so, and the checkpoint names it.
 - `vivibox --version`, the timeline and the history name the commit that runs when vivibox runs
   from a checkout, as an editable install does: they named the version of the day it was
   installed, and every pull since went unnamed in a bug report.

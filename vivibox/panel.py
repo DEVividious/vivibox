@@ -185,7 +185,13 @@ def command_to_review(task: Task) -> list[str]:
             "",
         ]
     lines = [f"**Proposed command:** `{command}`", ""]
-    if selection := gate.narrowed_proposal(command):
+    if (selection := gate.narrowed_proposal(command)) and gate.DEBUG_OUTPUT.fullmatch(selection):
+        lines += [
+            f"*This command has debug output on ({selection}): every verification log would be"
+            " megabytes of it. Take it out, or ask the writer for the command without it.*",
+            "",
+        ]
+    elif selection:
         lines += [
             f"*This command is narrowed to {selection}: a writer verified by its own tests alone passes"
             " whatever it broke elsewhere. Change it to the whole build, or ask the writer for it.*",

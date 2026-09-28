@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import shutil
 
-from .gate import MAX_LISTED, GateResult
+from .gate import DEBUG_OUTPUT, MAX_LISTED, GateResult
 from .task import Task
 
 
@@ -30,10 +30,15 @@ def feedback(result: GateResult) -> str:
     if result.build_skipped:
         parts.append(f"- The build was not run: {result.build_skipped}. Fix that first.")
     if result.narrowed:
+        fault = (
+            f"turns on the build tool's debug output ({result.narrowed})"
+            if DEBUG_OUTPUT.fullmatch(result.narrowed)
+            else f"picks some tests ({result.narrowed})"
+        )
         parts.append(
-            f"- The command you proposed picks some tests ({result.narrowed}), so it was not run:"
-            " write to /task/handoff/verify-proposal.md the one command that builds the whole project"
-            " and runs all its tests, as its pipeline would."
+            f"- The command you proposed {fault}, so it was not run: write to"
+            " /task/handoff/verify-proposal.md the one command that builds the whole project and runs"
+            " all its tests, as its pipeline would, without debug output."
         )
     if result.unchanged:
         parts.append(

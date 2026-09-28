@@ -1042,6 +1042,13 @@ def test_a_command_narrowed_to_some_tests_reaches_the_checkpoint_with_a_warning(
     assert "narrowed to -Dtest=PetTests" in notes[-1]
 
 
+def test_a_command_with_debug_output_reaches_the_checkpoint_named_as_such(task):
+    sup, notes, kept = command_supervisor(task, FakeHarness(task, [with_proposal("mvn -X verify")]))
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_COMMAND
+    assert "with debug output on (-X)" in notes[-1] and "narrowed" not in notes[-1]
+
+
 def test_auto_keeps_a_whole_command_without_stopping_but_stops_on_a_narrowed_one(task):
     harness = FakeHarness(task, [with_proposal("npm ci && npm test")])
     sup, notes, kept = command_supervisor(task, harness, results=[gate_result()], auto=True)

@@ -39,7 +39,7 @@ broken, next to the line that broke it.
 | everything is committed | `gate.uncommitted` |
 | build files, test configuration, IDE settings and hooks change only with the user's approval | `risky.Approvals.changes` |
 | every test file added or changed is named in `red.md` | `gate.red_evidence_missing` |
-| the command a writer proposes builds the whole project, not a selection of tests | `gate.narrowed_proposal` |
+| the command a writer proposes builds the whole project, not a selection of tests, and without the build tool's debug output | `gate.narrowed_proposal` |
 | a criterion never asks a build or test command to pass, the verification's or any other | `gate.command_criteria` |
 | a review has its two sections and a place on every note | `reviewing.problem` |
 

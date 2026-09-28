@@ -414,6 +414,42 @@ MAVEN_GOAL = (
 )
 
 
+# jsoup's pipeline, as the language polygon of 2026-09-28 found it: Maven with its debug output on.
+DEBUG_PIPELINE = """name: Build
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: mvn -X compile -B --file pom.xml
+      - run: mvn -X verify -B --file pom.xml
+"""
+
+
+def test_propose_a_pipeline_with_debug_output_is_proposed_without_it(bench):
+    """The project's pipeline runs mvn -X, which the project's files hand the writer as the
+    likeliest command; the command it proposes builds everything without the debug output."""
+    from vivibox import proposal
+    from vivibox.config import load_project
+
+    files = {**MAVEN_FILES, ".github/workflows/build.yml": DEBUG_PIPELINE}
+    project(bench, "debugci", files, [])
+    task, sup = begin("debugci", "Add Calc.subtract(a, b) to the core module, with a unit test in CalcTest.")
+    try:
+        st = drive(task, sup, {State.CHECKPOINT_BLOCKED, State.CHECKPOINT_FINAL}, steps=16)
+        command = proposal.proposed(task)
+        assert command, f"no command in {proposal.PROPOSAL} (state {st.state})"
+        assert "mvn" in command, f"the project's build: {command!r}"
+        assert not gate.narrowed_proposal(command), f"whole, and without debug output: {command!r}"
+        refused = [e for e in task.events() if e["type"] == "gate" and e["data"].get("narrowed")]
+        print(f"\nproposed: {command!r}; refused before: {[e['data']['narrowed'] for e in refused]}")
+        assert st.state is State.CHECKPOINT_FINAL, f"verified with it: {st.state}, {st.problem}"
+        assert load_project("debugci").verify == [command]
+    finally:
+        finish(task)
+
+
 def writer_commands(task) -> list[str]:
     """The shell commands the writer ran, read from its conversation on the pod's opencode server."""
     from vivibox.opencode import MOUNT, PORT

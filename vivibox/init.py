@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,14 @@ class Detected:
 def project_name(repo: Path) -> str:
     name = re.sub(r"[^a-z0-9-]+", "-", repo.name.lower()).strip("-")[:31] or "project"
     return name if PROJECT_NAME.match(name) else f"p-{name}"[:31]
+
+
+def wrapper(repo: Path, name: str) -> str:
+    """How to run a build tool's wrapper: as itself when git has it executable, as the gate's fresh
+    clone gets it; through bash when it was committed without its executable bit. Always by its
+    path: a wrapper finds the project by ${0%/*}, which of a bare "mvnw" is the file itself."""
+    listed = subprocess.run(["git", "ls-files", "-s", "--", name], cwd=repo, capture_output=True, text=True)
+    return f"./{name}" if listed.stdout.startswith("100755") else f"bash ./{name}"
 
 
 def _read(path: Path) -> str:
@@ -290,11 +299,11 @@ def prepare_suggestion(repo: Path) -> list[str]:
     files say nothing, or name a tool the image does not have. The first build tool found, as
     the verification's candidates are ordered."""
     if (repo / "gradlew").exists():
-        return ["bash gradlew assemble --no-daemon --console=plain"]
+        return [f"{wrapper(repo, 'gradlew')} assemble --no-daemon --console=plain"]
     if (repo / "build.gradle.kts").exists() or (repo / "build.gradle").exists():
         return ["gradle assemble --no-daemon --console=plain"]
     if (repo / "mvnw").exists():
-        return ["bash mvnw -B install -DskipTests"]
+        return [f"{wrapper(repo, 'mvnw')} -B install -DskipTests"]
     if (repo / "pom.xml").exists():
         return ["mvn -B install -DskipTests"]
     if (repo / "package.json").exists() and has_lockfile(repo):
@@ -313,14 +322,13 @@ def candidates(repo: Path) -> list[tuple[str, str]]:
     comes from: notes for a new project, never its verification."""
     found = []
     if (repo / "gradlew").exists():
-        # bash: the wrapper is often committed without its executable bit.
-        found.append(("bash gradlew test --no-daemon --console=plain", "gradlew"))
+        found.append((f"{wrapper(repo, 'gradlew')} test --no-daemon --console=plain", "gradlew"))
     elif (repo / "build.gradle.kts").exists():
         found.append(("gradle test --no-daemon --console=plain", "build.gradle.kts"))
     elif (repo / "build.gradle").exists():
         found.append(("gradle test --no-daemon --console=plain", "build.gradle"))
     if (repo / "mvnw").exists():
-        found.append(("bash mvnw -B verify", "mvnw"))
+        found.append((f"{wrapper(repo, 'mvnw')} -B verify", "mvnw"))
     elif (repo / "pom.xml").exists():
         found.append(("mvn -B verify", "pom.xml"))
     if (repo / "package.json").exists():
@@ -401,7 +409,7 @@ def _yaml_steps(text: str) -> list[list[str]]:
     return steps
 
 
-def _build_command(step: list[str]) -> str:
+def _build_command(repo: Path, step: list[str]) -> str:
     """The build lines of a step joined as the gate runs them, or "" when the step is no build."""
     kept = []
     for line in step:
@@ -410,7 +418,7 @@ def _build_command(step: list[str]) -> str:
         if not words or words[0] not in TOOLS or "${{" in line or NOT_A_CHECK.search(line):
             continue
         if line.startswith("./") and words[0] in ("mvnw", "gradlew"):
-            line = "bash " + line[2:]
+            line = wrapper(repo, words[0]) + line[2 + len(words[0]) :]
         kept.append(line)
     return " && ".join(kept)
 
@@ -431,7 +439,7 @@ def ci_commands(repo: Path) -> list[tuple[str, str]]:
             env = _yaml_env(text)
             steps = [[_expand(line, env) for line in step] for step in _yaml_steps(text)]
         for step in steps:
-            command = _build_command(step)
+            command = _build_command(repo, step)
             if command and command not in {c for c, _ in found}:
                 found.append((command, str(path.relative_to(repo))))
     return found[:MAX_CI]
@@ -448,7 +456,7 @@ def by_module(repo: Path) -> list[str]:
     any other project, whose writer proposes the command it ran."""
     if len(MODULE_TAG.findall(_read(repo / "pom.xml"))) < MANY_MODULES:
         return []
-    maven = "bash mvnw" if (repo / "mvnw").exists() else "mvn"
+    maven = wrapper(repo, "mvnw") if (repo / "mvnw").exists() else "mvn"
     return [f"{maven} -B -pl {{modules}} -am verify"]
 
 

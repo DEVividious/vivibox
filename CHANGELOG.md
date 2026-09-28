@@ -169,6 +169,9 @@ First public version.
 
 ### Fixed
 
+- A Maven or Gradle wrapper is proposed by its path: `./mvnw` when committed executable,
+  `bash ./mvnw` when not, in the verification, the preparation and the notes. `bash mvnw` made a
+  wrapper that finds the project by `${0%/*}` look for it under `mvnw/`.
 - A writer's proposed command written as Markdown (a heading, a fenced block with its language, a
   sentence around the command) gives the command, not "# Verification proposal" or "bash".
 - A planner that asks instead of planning (the goal is met already) leaves the task at "agent

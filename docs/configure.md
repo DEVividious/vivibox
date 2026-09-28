@@ -90,7 +90,7 @@ vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the re
 
 Either way vivibox reads the build files and proposes a project: how it is verified, and what a
 new task's clone runs first (`prepare`, a build without tests, so the writer starts on a built
-project: `bash mvnw -B install -DskipTests`, `bash gradlew assemble`, or the Node install by its
+project: `./mvnw -B install -DskipTests`, `./gradlew assemble`, or the Node install by its
 lockfile; empty where the files say nothing, `--prepare` and Change… set it). The verification
 is a command you type, or left empty: the next task's writer, who builds the project while it works, then writes
 the command it ran to `/task/handoff/verify-proposal.md` (told to allow that build the
@@ -124,8 +124,8 @@ installed for in that folder, by its lockfile; a `package.json` without a lockfi
 monorepo's root, gets no install, and the notes name each package with a test script instead
 (`cd apps/web && yarn install --frozen-lockfile && yarn test`). A tool the fresh clone lacks
 (`tsc: not found`) is a failure of the environment, not of the code: the task waits for you to
-put the install in front of the command. Otherwise: the command the gate runs (`bash gradlew
-test`, `bash mvnw -B verify`, `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
+put the install in front of the command. Otherwise: the command the gate runs (`./gradlew
+test`, `./mvnw -B verify` (`bash ./mvnw` for a wrapper committed without its executable bit), `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
 when `packageManager` in `package.json` or the lockfile names them; for Python, `pytest` through
 uv: `uv run --frozen pytest` with a `uv.lock`, else in a throwaway environment from
 `pyproject.toml` or the requirements files) and, when the build needs it,
@@ -153,20 +153,20 @@ host the agent may reach and for extra risky patterns:
 
 ```toml
 repo = "~/projects/myproject"
-verify = ["bash gradlew test --no-daemon --console=plain"]
+verify = ["./gradlew test --no-daemon --console=plain"]
 java = "17"                                     # empty for Java 21
 host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
-prepare = ["bash mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
+prepare = ["./mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
 tools = ["go@1.25.3"]                           # optional, toolchains the image does not have
 ```
 
 `{modules}` in `verify` is for a project whose whole build outlasts a verification, hundreds of
-modules and a frontend: `verify = ["bash mvnw -B -pl {modules} -am verify"]`. A task's plan then
+modules and a frontend: `verify = ["./mvnw -B -pl {modules} -am verify"]`. A task's plan then
 names the directories it changes (`modules = ["core"]` in its header, which the planner fills in
 and you see when you accept the plan), and the verification runs the command with them,
 comma-joined. When a commit changes a file outside them, the root's build file included, that
-verification runs the same command without them (`bash mvnw -B verify`), the whole build, and the
+verification runs the same command without them (`./mvnw -B verify`), the whole build, and the
 task's timeline says which files took it there. `vivibox init` writes this command for a Maven
 reactor of ten modules or more. The whole build then runs only on such a change, or once before
 the work comes to you when `whole_build_before_review` is on (under `k`, "whole build before

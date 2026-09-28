@@ -156,10 +156,10 @@ def test_prepare_is_one_line_saved_with_enter_and_its_words_are_all_on_the_scree
         assert app.screen.query_one(Input).value == "npm ci && npm run build"
         shown = " ".join(screen_text(app).replace("█", " ").replace("│", " ").split())
         assert "the writer's first turn waits for it" in shown and "Empty: nothing." in shown
-        app.screen.query_one(Input).value = "bash mvnw -B install -DskipTests"
+        app.screen.query_one(Input).value = "bash ./mvnw -B install -DskipTests"
         await pilot.press("enter")
         await pilot.pause()
-        assert load_project("demo").prepare == ["bash mvnw -B install -DskipTests"]
+        assert load_project("demo").prepare == ["bash ./mvnw -B install -DskipTests"]
         await pilot.press("enter")
         await pilot.pause()
         app.screen.query_one(Input).value = ""
@@ -328,11 +328,11 @@ def test_a_new_project_leaves_its_verification_to_you_or_to_the_first_writer(env
         await pilot.pause()
         assert str(app.screen.query_one("#verify", Label).render()) == actions.WRITER_PROPOSES
         notes = str(app.screen.query_one("#notes", Label).render())
-        assert "mvnw runs: bash mvnw -B verify" in notes and "ci.yml runs" in notes
+        assert "mvnw runs: bash ./mvnw -B verify" in notes and "ci.yml runs" in notes
         app.screen.query_one("#change").press()
         await pilot.pause()
         assert isinstance(app.screen, AskVerify)
-        app.screen.query_one(Input).value = "bash mvnw -B verify -Pit -f pom.xml"
+        app.screen.query_one(Input).value = "bash ./mvnw -B verify -Pit -f pom.xml"
         await pilot.press("enter")
         await pilot.pause()
         assert "-Pit -f pom.xml" in str(app.screen.query_one("#verify", Label).render())
@@ -340,7 +340,7 @@ def test_a_new_project_leaves_its_verification_to_you_or_to_the_first_writer(env
         await pilot.pause()
 
     run(scenario)
-    assert load_project("shop").verify == ["bash mvnw -B verify -Pit -f pom.xml"]
+    assert load_project("shop").verify == ["bash ./mvnw -B verify -Pit -f pom.xml"]
 
 
 def test_reply_sends_your_comment(env):
@@ -948,22 +948,22 @@ def test_i_asks_what_to_prepare_a_new_tasks_clone_with_and_suggests_it(env, tmp_
     async def scenario(app, pilot):
         await pilot.press("i")
         await pilot.pause()
-        assert "Preparation" in screen_text(app) and "bash mvnw -B install -DskipTests" in screen_text(app)
+        assert "Preparation" in screen_text(app) and "bash ./mvnw -B install -DskipTests" in screen_text(app)
         app.screen.query_one("#change-prepare").press()
         await pilot.pause()
         field = app.screen.query_one("#value", Input)
-        assert field.value == "bash mvnw -B install -DskipTests"
-        field.value = "bash mvnw -B -q install -DskipTests"
+        assert field.value == "bash ./mvnw -B install -DskipTests"
+        field.value = "bash ./mvnw -B -q install -DskipTests"
         await pilot.press("enter")
         await pilot.pause()
-        assert "bash mvnw -B -q install -DskipTests" in screen_text(app)
+        assert "bash ./mvnw -B -q install -DskipTests" in screen_text(app)
         app.screen.query_one("#create").press()
         await pilot.pause()
         assert app.screen.query_one("#goal"), "its first task follows right away"
 
     run(scenario)
     project = load_project("api")
-    assert project.prepare == ["bash mvnw -B -q install -DskipTests"]
+    assert project.prepare == ["bash ./mvnw -B -q install -DskipTests"]
 
 
 def test_a_folder_that_is_already_a_project_leads_to_a_task(env, tmp_path, monkeypatch):

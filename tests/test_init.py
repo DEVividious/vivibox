@@ -27,7 +27,7 @@ def gradle_project(path: Path, gradle: str, source: str) -> Path:
 def test_gradle_projects_get_a_jdk_their_gradle_runs_on(tmp_path, gradle, source, java):
     found = init.detect(gradle_project(tmp_path / "shop", gradle, source))
     assert found.verify == [], "a note, never the verification"
-    assert "gradlew runs: bash gradlew test --no-daemon --console=plain" in found.notes
+    assert "gradlew runs: bash ./gradlew test --no-daemon --console=plain" in found.notes
     assert found.java == java
 
 
@@ -37,7 +37,7 @@ def test_maven_and_npm(tmp_path):
     (maven / "pom.xml").write_text(
         "<properties><maven.compiler.release>17</maven.compiler.release></properties>"
     )
-    assert init.detect(maven).verify == [] and "mvnw runs: bash mvnw -B verify" in init.detect(maven).notes
+    assert init.detect(maven).verify == [] and "mvnw runs: bash ./mvnw -B verify" in init.detect(maven).notes
     assert init.detect(maven).java == "", "Java 21 builds code written for 17"
     web = make_repo(tmp_path / "Web_App")
     (web / "package.json").write_text("{}")
@@ -53,15 +53,15 @@ def test_the_build_files_suggest_what_to_prepare_a_new_tasks_clone_with(tmp_path
     maven = make_repo(tmp_path / "api")
     (maven / "mvnw").write_text("")
     (maven / "pom.xml").write_text("<project/>")
-    assert init.prepare_suggestion(maven) == ["bash mvnw -B install -DskipTests"]
-    assert init.detect(maven).prepare == ["bash mvnw -B install -DskipTests"]
+    assert init.prepare_suggestion(maven) == ["bash ./mvnw -B install -DskipTests"]
+    assert init.detect(maven).prepare == ["bash ./mvnw -B install -DskipTests"]
     (maven / "mvnw").unlink()
     assert init.prepare_suggestion(maven) == ["mvn -B install -DskipTests"]
     gradle = make_repo(tmp_path / "app")
     (gradle / "gradlew").write_text("")
-    assert init.prepare_suggestion(gradle) == ["bash gradlew assemble --no-daemon --console=plain"]
+    assert init.prepare_suggestion(gradle) == ["bash ./gradlew assemble --no-daemon --console=plain"]
     (gradle / "mvnw").write_text("")
-    assert init.prepare_suggestion(gradle)[0].startswith("bash gradlew"), "one build tool: the first found"
+    assert init.prepare_suggestion(gradle)[0].startswith("bash ./gradlew"), "one build tool: the first found"
     web = make_repo(tmp_path / "web")
     (web / "package.json").write_text("{}")
     assert init.prepare_suggestion(web) == [], "npm ci without a lockfile fails every time"
@@ -167,10 +167,10 @@ def test_a_project_with_no_command_is_verified_with_what_its_writer_proposed(env
 @pytest.mark.parametrize(
     "written",
     [
-        "# Verification proposal\n\nbash mvnw -B verify\n",
-        "# Verification proposal\n\n```bash\n# from the root\n$ bash mvnw -B verify\n```\n",
-        "## Command\n\nRun `bash mvnw -B verify` from the root.\n",
-        "- `bash mvnw -B verify`\n",
+        "# Verification proposal\n\nbash ./mvnw -B verify\n",
+        "# Verification proposal\n\n```bash\n# from the root\n$ bash ./mvnw -B verify\n```\n",
+        "## Command\n\nRun `bash ./mvnw -B verify` from the root.\n",
+        "- `bash ./mvnw -B verify`\n",
     ],
 )
 def test_a_proposal_written_as_markdown_gives_its_command_not_its_heading(env, written):
@@ -181,7 +181,7 @@ def test_a_proposal_written_as_markdown_gives_its_command_not_its_heading(env, w
     task = actions.create("demo", "Refactor the parser")
     (task.meta / "handoff").mkdir(parents=True, exist_ok=True)
     (task.meta / "handoff" / proposal.PROPOSAL).write_text(written)
-    assert proposal.proposed(task) == "bash mvnw -B verify"
+    assert proposal.proposed(task) == "bash ./mvnw -B verify"
 
 
 def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
@@ -189,7 +189,7 @@ def test_every_build_file_is_a_candidate_with_its_source(tmp_path):
     (tmp_path / "mvnw").write_text("")
     (tmp_path / "package.json").write_text("{}")
     assert init.candidates(tmp_path) == [
-        ("bash mvnw -B verify", "mvnw"),
+        ("bash ./mvnw -B verify", "mvnw"),
         ("npm ci && npm test", "package.json"),
     ]
     found = init.detect(tmp_path)
@@ -245,14 +245,14 @@ def test_the_ci_definition_says_how_the_project_is_built(tmp_path):
         "      - run: echo ${{ matrix.os }}\n"
     )
     assert init.ci_commands(tmp_path) == [
-        ("bash mvnw --batch-mode verify -Pintegration", ".github/workflows/ci.yml"),
+        ("bash ./mvnw --batch-mode verify -Pintegration", ".github/workflows/ci.yml"),
         ("npm ci && npm run lint", ".github/workflows/ci.yml"),
     ]
     found = init.candidates(tmp_path)
-    assert found[0] == ("bash mvnw -B verify", "mvnw") and found[1:] == init.ci_commands(tmp_path)
+    assert found[0] == ("bash ./mvnw -B verify", "mvnw") and found[1:] == init.ci_commands(tmp_path)
     detected = init.detect(tmp_path)
     assert detected.verify == []
-    assert any("ci.yml runs: bash mvnw --batch-mode verify -Pintegration" in n for n in detected.notes)
+    assert any("ci.yml runs: bash ./mvnw --batch-mode verify -Pintegration" in n for n in detected.notes)
 
 
 def test_gitlab_jenkins_and_bitbucket_definitions_are_read_too(tmp_path):
@@ -268,7 +268,7 @@ def test_gitlab_jenkins_and_bitbucket_definitions_are_read_too(tmp_path):
         "          - pnpm install --frozen-lockfile\n          - pnpm test\n"
     )
     assert init.ci_commands(tmp_path) == [
-        ("bash gradlew test --no-daemon", ".gitlab-ci.yml"),
+        ("bash ./gradlew test --no-daemon", ".gitlab-ci.yml"),
         ("npm ci && npm test", "Jenkinsfile"),
         ("pnpm install --frozen-lockfile && pnpm test", "bitbucket-pipelines.yml"),
     ]
@@ -305,13 +305,13 @@ def test_a_pipelines_variables_are_filled_in_so_the_note_says_what_ci_runs(tmp_p
         "      - run: ./mvnw verify -Dos=${{ matrix.os }}\n"
     )
     assert [c for c, _ in init.ci_commands(tmp_path)] == [
-        "bash mvnw --batch-mode verify -Pintegration -DskipITs",
-        "bash mvnw -Pfast test -Pintegration -DskipITs",
+        "bash ./mvnw --batch-mode verify -Pintegration -DskipITs",
+        "bash ./mvnw -Pfast test -Pintegration -DskipITs",
     ], "a matrix value is not known, so that step stays out"
     (tmp_path / ".gitlab-ci.yml").write_text(
         "variables:\n  GRADLE_OPTS: --offline\ntest:\n  script:\n    - ./gradlew test $GRADLE_OPTS $UNKNOWN\n"
     )
-    assert ("bash gradlew test --offline $UNKNOWN", ".gitlab-ci.yml") in init.ci_commands(tmp_path)
+    assert ("bash ./gradlew test --offline $UNKNOWN", ".gitlab-ci.yml") in init.ci_commands(tmp_path)
 
 
 def test_a_narrowed_proposal_is_not_run_but_named_for_the_gate(env, tmp_path):
@@ -561,10 +561,35 @@ def test_a_large_maven_reactor_is_verified_by_the_modules_a_plan_names(tmp_path)
     modules = "".join(f"<module>m{i}</module>" for i in range(init.MANY_MODULES))
     (big / "pom.xml").write_text(f"<project><modules>{modules}</modules></project>")
     found = init.detect(big)
-    assert found.verify == ["bash mvnw -B -pl {modules} -am verify"]
+    assert found.verify == ["bash ./mvnw -B -pl {modules} -am verify"]
     assert any("{modules}" in note for note in found.notes), "and says why"
     small = make_repo(tmp_path / "small")
     (small / "pom.xml").write_text(
         "<project><modules><module>core</module><module>app</module></modules></project>"
     )
     assert init.detect(small).verify == []
+
+
+def test_an_executable_wrapper_is_run_as_itself(tmp_path):
+    """bash is only for a wrapper committed without its executable bit: run through bash, an
+    executable one does not always work as the project expects. The bit is read from git, as the
+    gate's fresh clone gets it."""
+    repo = make_repo(tmp_path / "shop")
+    (repo / "mvnw").write_text("#!/bin/sh\n")
+    (repo / "gradlew").write_text("#!/bin/sh\n")
+    subprocess.run(["git", "add", "mvnw", "gradlew"], cwd=repo, check=True)
+    subprocess.run(["git", "update-index", "--chmod=+x", "mvnw", "gradlew"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "Add the wrappers"], cwd=repo, check=True)
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("jobs:\n  build:\n    steps:\n      - run: ./mvnw verify\n")
+    assert init.candidates(repo)[:2] == [
+        ("./gradlew test --no-daemon --console=plain", "gradlew"),
+        ("./mvnw -B verify", "mvnw"),
+    ]
+    assert ("./mvnw verify", ".github/workflows/ci.yml") in init.ci_commands(repo)
+    assert init.prepare_suggestion(repo) == ["./gradlew assemble --no-daemon --console=plain"]
+    (repo / "pom.xml").write_text(
+        "<project><modules>" + "<module>m</module>" * init.MANY_MODULES + "</modules></project>"
+    )
+    assert init.by_module(repo) == ["./mvnw -B -pl {modules} -am verify"]

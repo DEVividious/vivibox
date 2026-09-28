@@ -59,12 +59,13 @@ on standard input. The first line of the output names the task: `Created <id> fr
 1. Run `vivibox wait <id> --json` until the task's `state` is `checkpoint:plan`. vivibox first
    starts the task's container, which can take a minute.
 2. Run `vivibox plan prompt <id>` and follow the prompt it prints: read the repository and
-   discuss the plan with the user. Show them the whole plan here and ask whether it is final;
-   write it to the file the prompt names only after they say it is.
-3. Run `vivibox plan import <id>`. If it fails, it says what is wrong; fix the file and import
-   again.
-4. Show the user the plan's summary and its acceptance criteria. When they accept it, run
-   `vivibox accept <id>`.
+   discuss the plan with the user. Show them the whole plan here and ask whether this is the
+   plan vivibox should carry out. Their yes is the plan's acceptance: ask once, not again
+   after the import.
+3. After their yes, write the plan to the file the prompt names and run
+   `vivibox plan import <id>`, then `vivibox accept <id>`.
+4. If the import or the accept fails, it says what is wrong. Fix the plan, show the user what
+   changed, and ask again before importing it.
 
 ## 7. Waiting
 

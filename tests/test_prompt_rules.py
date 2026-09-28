@@ -196,5 +196,5 @@ def test_the_skill_keeps_its_rules():
     assert "Run `vivibox accept` and `vivibox approve-risky` only after the user says so" in plain
     assert "Never run, build or install anything from a task's clone" in plain
     # The first run on a real project wrote and imported the plan before the user had said it
-    # was final.
-    assert "write it to the file the prompt names only after they say it is" in plain
+    # was final; the second asked twice, "is it final?" and then "do you accept it?".
+    assert "Their yes is the plan's acceptance: ask once" in plain

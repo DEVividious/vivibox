@@ -90,12 +90,10 @@ The **vivibox skill** lets Claude Code or Codex drive a task from your conversat
 existing subscription to plan with a strong model; assign cheaper API-backed models to
 implementation and review. Complete provider setup above first: those agents still need API access.
 
-`host/setup.sh` installs the skill for each supported CLI already installed. To install it
-later or refresh it after updating vivibox:
-
-```bash
-vivibox skill install
-```
+The `host/setup.sh` step above also installs or updates the skill for Claude Code and Codex
+where they are already installed. No separate skill installation is needed. If you install
+either CLI later, run `host/setup.sh` again. For a manual refresh of just the skill, use
+`vivibox skill install`.
 
 Open Claude Code or Codex in your project's repository and ask:
 

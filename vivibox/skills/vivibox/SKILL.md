@@ -40,7 +40,9 @@ When `project` is `null`:
 
 Offer only the flows whose `plan_in_cli` is true; the others need an agent planner, and vivibox
 refuses them here. Recommend one by comparing the task with each flow's `best_for`, name the
-`default_flow`, and let the user choose.
+`default_flow`, and let the user choose. With `supervisor_worker` you also review each round of
+the work yourself, and blocking notes go back to the writer without the user: say so when you
+offer it. With `planner_maker_checker` a reviewer of vivibox's does that instead.
 
 ## 4. Uncommitted changes
 
@@ -79,6 +81,13 @@ The user can also watch the task in `vivibox`, the interactive view.
 `reason` says why, and `next` lists the commands that move the task on. Summarise what happened
 and ask the user what to do; after their decision, wait again.
 
+- `reason` `review`: a round of `supervisor_worker` waits for your review. Review each round
+  yourself, without asking the user: run `vivibox review <id> --prompt` and follow it. It points
+  at the plan, the criteria, the red evidence and the work staged in the review copy; read them,
+  and run nothing from the review copy. Write the review where it says, run
+  `vivibox review <id> --import`, fix it if it is refused, and wait again. Tell the user in one
+  line what the round's review found.
+
 - `state` `checkpoint:command`: the writer proposes how the project is verified. Show the
   command from `vivibox status <id>`. The user keeps it (`vivibox accept <id>`), gives another
   (`vivibox accept <id> --verify "<command>"`) or answers the writer
@@ -93,7 +102,7 @@ and ask the user what to do; after their decision, wait again.
 - `state` `checkpoint:final`: the work passed the gate. `vivibox review <id>` prints
   `Review copy: <path>` on its first line. The work there is staged: read
   `git -C <path> status --short` and `git -C <path> diff --cached`, and summarise the change
-  against the plan's criteria. The user accepts (`vivibox accept <id>`: the work lands in
+  against the plan's criteria, and every round's review with what the writer changed after it. The user accepts (`vivibox accept <id>`: the work lands in
   their checkout uncommitted, with a suggested commit message; commit only when they ask),
   accepts it onto a branch (`vivibox accept <id> --branch`) or sends it back
   (`vivibox reply <id> "<comment>"`).

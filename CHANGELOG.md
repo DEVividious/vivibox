@@ -18,6 +18,8 @@ First public version.
 - A round waiting for the CLI's review says so in the list (*review in your CLI*), the details
   and a notification, with the way on when that conversation is closed: a new one, or `m` to put
   the supervisor on a model, which then reviews the round itself.
+- The vivibox skill offers Supervisor ⇄ Worker to a task planned in the CLI and reviews each of its
+  rounds itself, reading only, then sums the rounds up at the end.
 - `host/setup.sh` installs the vivibox skill where Claude Code or Codex is installed, and
   `--check` says when a copy is older than the checkout; `host/uninstall.sh` removes vivibox's
   copies.

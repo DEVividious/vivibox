@@ -244,7 +244,9 @@ def test_setup_installs_missing_git_after_confirmation(tmp_path):
     assert "apt-get install -y -q git" in calls
 
 
-def run_setup_without_host_changes(tmp_path, *, check, installed, routes="", networks="", config=""):
+def run_setup_without_host_changes(
+    tmp_path, *, check, installed, routes="", networks="", config="", home=None
+):
     fake = tmp_path / "bin"
     fake.mkdir()
     calls = tmp_path / "sudo-calls"
@@ -271,6 +273,8 @@ def run_setup_without_host_changes(tmp_path, *, check, installed, routes="", net
     env = {
         **os.environ,
         "PATH": f"{fake}:{os.environ['PATH']}",
+        # Yours only when a test gives none: the skill's step reads the agent CLIs' folders.
+        "HOME": str(home or os.environ["HOME"]),
         "VIVIBOX_TASKS_DIR": str(tmp_path / "tasks"),
         "TEST_GIT_INSTALLED": "yes" if installed else "no",
         "TEST_SUDO_CALLS": str(calls),
@@ -302,7 +306,7 @@ def test_setup_installs_the_skill_where_an_agent_cli_is_and_leaves_one_not_its_o
     (home / ".claude").mkdir()
     (home / ".codex").mkdir()
     claude, codex = home / ".claude" / "skills" / "vivibox", home / ".agents" / "skills" / "vivibox"
-    assert stale() == [str(claude), str(codex)]
+    assert stale() == ["missing", str(claude), "missing", str(codex)]
     source = (REPO / "vivibox" / "skills" / "vivibox" / "SKILL.md").read_text()
     for copy in (claude, codex):
         copy.mkdir(parents=True)
@@ -310,7 +314,7 @@ def test_setup_installs_the_skill_where_an_agent_cli_is_and_leaves_one_not_its_o
         (copy / ".vivibox-version").write_text("0.1.0\n")
     assert stale() == []
     (codex / "SKILL.md").write_text("an older skill")
-    assert stale() == [str(codex)]
+    assert stale() == ["older", str(codex)], "there, but not this checkout's: an update"
     (codex / ".vivibox-version").unlink()
     assert stale() == [], "not vivibox's copy: left alone"
 
@@ -377,3 +381,33 @@ def test_setup_checks_the_task_pool_config_toml_sets(tmp_path):
 def test_the_task_pool_is_read_as_vivibox_reads_it(tmp_path, config, pool):
     (tmp_path / "config.toml").write_text(config)
     assert setup_fn("task_pool", {"VIVIBOX_CONFIG_DIR": str(tmp_path)}).stdout.strip() == pool
+
+
+@pytest.mark.parametrize(("there", "state"), [(None, "missing"), ("old", "older"), ("new", "same")])
+def test_a_copy_is_missing_older_or_the_same(tmp_path, there, state):
+    source, copy = tmp_path / "source", tmp_path / "copy"
+    source.write_text("new")
+    if there:
+        copy.write_text(there)
+    assert setup_fn(f'copy_state "{source}" "{copy}"').stdout.strip() == state
+
+
+def test_what_is_there_but_older_is_an_update_not_missing(tmp_path):
+    home = tmp_path / "home"
+    copy = home / ".claude" / "skills" / "vivibox"
+    copy.mkdir(parents=True)
+    (copy / "SKILL.md").write_text("an older skill")
+    (copy / ".vivibox-version").write_text("0.1.0\n")
+    result, _ = run_setup_without_host_changes(tmp_path, check=False, installed=True, home=home)
+    assert f"  update   the vivibox skill in {copy}" in result.stdout
+    assert f"  - update the vivibox skill in {copy}" in result.stdout, "the list of changes says so too"
+
+
+def test_a_vivibox_command_from_another_checkout_is_an_update(tmp_path):
+    receipt = tmp_path / "tools" / "vivibox" / "uv-receipt.toml"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text('requirements = [{ name = "vivibox", editable = "/elsewhere/vivibox" }]\n')
+    result, _ = run_setup_without_host_changes(tmp_path, check=True, installed=True, home=tmp_path / "home")
+    assert (
+        "  update   vivibox command, installed from /elsewhere/vivibox, from this checkout" in result.stdout
+    )

@@ -167,17 +167,30 @@ kernel_verdict() {
   fi
 }
 
-# The copies of the skill missing or older than this checkout's, a path a line, for each agent CLI
-# installed here. A copy, not a link: a checkout that moved on leaves it behind. A folder of that
+# Whether a copy of a file is missing, older than its source (different: the source is this
+# checkout's), or the same.
+copy_state() {
+  if [[ ! -e "$2" ]]; then
+    echo missing
+  elif cmp -s "$1" "$2"; then
+    echo same
+  else
+    echo older
+  fi
+}
+
+# The copies of the skill missing or older than this checkout's, "<missing|older> <path>" a line,
+# for each agent CLI installed here. A copy, not a link: a checkout that moved on leaves it behind. A folder of that
 # name vivibox did not install (no .vivibox-version) is someone else's, and left alone.
 skill_to_install() {
-  local place cli skills copy
+  local place cli skills copy state
   for place in "${SKILL_PLACES[@]}"; do
     read -r cli skills <<<"$place"
     [[ -d "$HOME/$cli" || -d "$HOME/$skills" ]] || continue
     copy=$HOME/$skills/vivibox
     [[ -d "$copy" && ! -f "$copy/.vivibox-version" ]] && continue
-    cmp -s "$REPO/vivibox/skills/vivibox/SKILL.md" "$copy/SKILL.md" || echo "$copy"
+    state=$(copy_state "$REPO/vivibox/skills/vivibox/SKILL.md" "$copy/SKILL.md")
+    [[ $state == same ]] || echo "$state $copy"
   done
   return 0
 }
@@ -196,10 +209,17 @@ problem() {
 }
 
 todo=() actions=()
+# What is not there, and what is there but older than this checkout's. An action already listed
+# (one step for two things) is given as "".
 need() {
   printf '  missing  %s\n' "$1"
   todo+=("$1")
-  actions+=("$2")
+  [[ -z "$2" ]] || actions+=("$2")
+}
+update() {
+  printf '  update   %s\n' "$1"
+  todo+=("update $1")
+  [[ -z "$2" ]] || actions+=("$2")
 }
 
 # --- checks -----------------------------------------------------------------------------------
@@ -277,8 +297,11 @@ else
   need "$TASKS_DIR as a nosuid,nodev bind mount in /etc/fstab" do_mount
 fi
 
-if cmp -s "$HERE/vivibox-netns" "$HELPER" && [[ "$(stat -c '%U %a' "$HELPER")" == "root 755" ]]; then
+helper_state=$(copy_state "$HERE/vivibox-netns" "$HELPER")
+if [[ $helper_state == same && "$(stat -c '%U %a' "$HELPER")" == "root 755" ]]; then
   ok "firewall helper $HELPER"
+elif [[ $helper_state == older ]]; then
+  update "firewall helper $HELPER to this checkout's host/vivibox-netns" do_helper
 else
   need "firewall helper $HELPER (root-owned copy of host/vivibox-netns)" do_helper
 fi
@@ -297,21 +320,35 @@ else
   need "uv $UV_VERSION in $BIN" do_uv
 fi
 
-# The tool's receipt names the checkout it was installed from.
-vivibox_installed() {
-  [[ -x "$UV" ]] || return 1
-  grep -qF "\"$REPO\"" "$("$UV" tool dir --color never)/vivibox/uv-receipt.toml" 2>/dev/null
+# The tool's receipt names what it was installed from: this checkout, another one, or nothing
+# when there is no vivibox command.
+vivibox_source() {
+  [[ -x "$UV" ]] || return 0
+  sed -n 's/.*name = "vivibox", *[a-z]* = "\([^"]*\)".*/\1/p' \
+    "$("$UV" tool dir --color never)/vivibox/uv-receipt.toml" 2>/dev/null | head -1 || true
 }
-if vivibox_installed; then
+vivibox_from=$(vivibox_source)
+if [[ "$vivibox_from" == "$REPO" ]]; then
   ok "vivibox command from $REPO"
+elif [[ -n "$vivibox_from" ]]; then
+  update "vivibox command, installed from $vivibox_from, from this checkout (editable: follows it)" do_vivibox
 else
   need "vivibox command in $BIN, installed from $REPO (editable: follows this checkout)" do_vivibox
 fi
 
-mapfile -t stale_skills < <(skill_to_install)
-if ((${#stale_skills[@]})); then
-  need "the vivibox skill for Claude Code or Codex in ${stale_skills[*]}" do_skill
-else
+missing_skills=() older_skills=()
+while read -r state copy; do
+  if [[ $state == missing ]]; then missing_skills+=("$copy"); else older_skills+=("$copy"); fi
+done < <(skill_to_install)
+skill_action=do_skill
+if ((${#missing_skills[@]})); then
+  need "the vivibox skill for Claude Code or Codex in ${missing_skills[*]}" "$skill_action"
+  skill_action=""
+fi
+if ((${#older_skills[@]})); then
+  update "the vivibox skill in ${older_skills[*]}" "$skill_action"
+fi
+if ((${#missing_skills[@]} + ${#older_skills[@]} == 0)); then
   ok "the vivibox skill, for each agent CLI installed here"
 fi
 

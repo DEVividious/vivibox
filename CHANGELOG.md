@@ -129,6 +129,9 @@ First public version.
 
 ### Changed
 
+- `host/setup.sh` says `update` for what is there but older than the checkout (the firewall
+  helper, the vivibox skill) or installed from another checkout (the vivibox command), and
+  `missing` only for what is not there.
 - What a flow is best for says the same in the view as in the README.
 - A proposed command that builds one part of the project (`-pl`, `:module:test`, a Go package,
   `cargo -p`, a workspace) is told as narrowed, like one that picks some tests: the first task's

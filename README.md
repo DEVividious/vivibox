@@ -95,6 +95,10 @@ and MCP servers from your `opencode.json`; API keys stay in vivibox's key store.
 You can also plan in your own chat and bring the plan back to vivibox.
 [Providers, models and projects →](docs/configure.md)
 
+Plan with Claude Code or Codex on your own subscription: `vivibox skill install` teaches them to
+make a vivibox task, plan it with you in the conversation, wait for it and bring each checkpoint
+back to you. [Driving vivibox from an agent's CLI →](docs/tasks.md#driving-vivibox-from-an-agents-cli)
+
 Want to work directly in the isolated environment? Press `b` on a project to open a **box** with
 opencode and a shell. Its changes return through the same review-copy and approval steps.
 [Working in a box →](docs/tasks.md#a-box-the-pod-without-an-agent)

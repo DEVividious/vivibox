@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- `vivibox skill install` and `uninstall`: a skill for Claude Code and Codex that makes a vivibox
+  task, plans it with you in the conversation, waits for it and brings every checkpoint back to
+  you; `vivibox info` and the view say when a copy is older than vivibox.
 - `vivibox info [path] [--json]`: the project of a folder, the flows and which of them a planner
   in your CLI can run, and the roles' models, for an agent's CLI that drives vivibox.
 - `vivibox wait <id>...`: returns when a task needs you, is done, has a problem or stopped, with

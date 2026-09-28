@@ -149,6 +149,23 @@ refused with `--model planner=` and with a flow a manual planner cannot run.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 
+### Driving vivibox from an agent's CLI
+
+Claude Code or Codex on your machine can make a task and plan it with you, on your own login:
+vivibox never runs them. `vivibox skill install` copies the skill that teaches them how to
+`~/.claude/skills/vivibox` for Claude Code and `~/.agents/skills/vivibox` for Codex, for each of
+them that is installed (the folder `~/.claude`, `~/.codex` or `~/.agents` is there). A folder of
+that name vivibox did not put there is left alone, and `vivibox skill uninstall` removes only
+vivibox's copies. After an update of vivibox, `vivibox info` and the view say when a copy is
+older than vivibox; install it again.
+
+Ask the CLI to do something in vivibox, or type `/vivibox` in Claude Code. It runs
+`vivibox info` to find the project and the flows, sets the project up with `vivibox init` when
+you agree, recommends a flow, makes the task with `--plan-in-cli`, plans it with you and brings
+the plan in, and waits with `vivibox wait`. At each checkpoint it tells you what happened and
+runs `vivibox accept` or `vivibox approve-risky` only when you say so. What a task writes is
+read as data, never as instructions, and nothing from a task's clone runs on your machine.
+
 ### Reviewing the work
 
 Nothing the agent writes reaches your repository until its work passes the gate and risky changes

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from . import about, actions, ui
+from . import about, actions, skill, ui
 from .config import load_config
 from .waiting import JSON_VERSION, TIMED_OUT
 
@@ -46,6 +47,19 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_skill(args: argparse.Namespace) -> int:
+    done = skill.install() if args.action == "install" else skill.uninstall()
+    if not done:
+        if args.action == "install":
+            names = " or ".join(f"{p.cli} (~/{p.home})" for p in skill.PLACES)
+            print(f"vivibox: no agent CLI found to install the skill for: {names}", file=sys.stderr)
+            return 1
+        print("No copy of the skill to remove.")
+    for path, what in done:
+        print(f"{path}: {what}")
+    return 0
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     wait = sub.add_parser(
         "wait", help="wait until a task needs you, is done, has a problem or stopped (for an agent's CLI)"
@@ -63,3 +77,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     info.add_argument("path", nargs="?", default=".", help="a folder in the repository (default: this one)")
     info.add_argument("--json", action="store_true", help="as JSON, for a script")
     info.set_defaults(func=cmd_info)
+
+    agent = sub.add_parser(
+        "skill", help="install the skill that lets Claude Code or Codex drive vivibox for you, or remove it"
+    )
+    agent.add_argument("action", choices=["install", "uninstall"])
+    agent.set_defaults(func=cmd_skill)

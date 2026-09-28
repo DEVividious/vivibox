@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, gate, ide, look, probe, ui
+from . import actions, code, gate, ide, look, probe, skill, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -196,6 +196,11 @@ class Vivibox(
         self.text = self.query_one("#detail-text", Markdown)
         self.set_columns()
         self.reload()
+        if stale := [copy.cli for copy in skill.copies() if not copy.current]:
+            # The CLI would drive this vivibox by an older skill's commands.
+            said = f"The vivibox skill of {' and '.join(stale)} is older than vivibox"
+            said += ": run vivibox skill install."
+            self.notify(said, severity="warning", timeout=15)
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)

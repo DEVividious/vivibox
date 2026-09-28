@@ -7,7 +7,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from . import manual, version
+from . import manual, skill, version
 from .config import ORCHESTRATION_MODES, Role, load_config, load_project
 from .orchestration import problem
 from .projects import project_at
@@ -57,8 +57,11 @@ def gather(path: Path) -> dict:
         "default_flow": config.orchestration,
         "flows": flows,
         "roles": {name: {"harness": r.harness, "model": r.model} for name, r in config.roles.items()},
-        # Filled in when vivibox installs its skill for an agent's CLI.
-        "skill": None,
+        # The copies of the skill an agent's CLI reads, and whether each is this vivibox's.
+        "skill": [
+            {"cli": c.cli, "path": str(c.path), "version": c.version, "current": c.current}
+            for c in skill.copies()
+        ],
     }
 
 
@@ -79,5 +82,8 @@ def describe(found: dict) -> str:
     lines += ["", "Roles:"]
     for name, role in found["roles"].items():
         lines.append(f"  {name}: {role['model'] or 'you'} ({role['harness']})")
+    for copy in found["skill"]:
+        state = "current" if copy["current"] else "left behind: vivibox skill install updates it"
+        lines.append(f"The skill for {copy['cli']}: {copy['path']}, {state}")
     lines += ["", f"vivibox {found['vivibox']}"]
     return "\n".join(lines) + "\n"

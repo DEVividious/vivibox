@@ -7,7 +7,8 @@
   notification texts, the README), read `docs/ux-guidelines.md`.
   `tests/test_ux_rules.py` enforces its mechanical rules.
 - Before changing anything an agent reads (the prompts in `vivibox/prompts.py`, `vivibox/manual.py`
-  and `vivibox/demo.py`, `vivibox/templates/`, the gate's feedback in `vivibox/feedback.py`), read
+  and `vivibox/demo.py`, `vivibox/templates/`, the gate's feedback in `vivibox/feedback.py`, the skill in
+  `vivibox/skills/`), read
   `docs/prompt-guidelines.md`. `tests/test_prompt_rules.py` enforces its mechanical rules.
 - Every change in behaviour gets a test that fails first for its own assertion.
 - `vivibox/actions.py` is the facade the view and the command line call; what it does lives in

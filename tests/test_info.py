@@ -50,11 +50,12 @@ def test_the_flows_say_which_a_planner_in_your_cli_can_run(env, capsys):
     assert flows["planner_executor"]["summary"] == mode.summary
 
 
-def test_the_roles_and_the_skill_are_there(env, capsys):
+def test_the_roles_and_the_skill_are_there(env, capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     shown = info(capsys, env / "repo")
     assert shown["roles"]["planner"] == {"harness": "opencode", "model": "m"}
     assert shown["default_flow"] in ORCHESTRATION_MODES
-    assert shown["skill"] is None
+    assert shown["skill"] == [], "no copy installed under the test's home"
 
 
 def test_the_readmes_flows_are_best_for_what_the_code_says():

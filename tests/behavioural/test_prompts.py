@@ -1,4 +1,4 @@
-"""The prompts on real models: the four scenarios of docs/prompt-guidelines.md, section 8.
+"""The prompts on real models: the four scenarios of docs/prompt-guidelines.md, section 9.
 
 Each builds a throwaway project, starts a task in a real pod and steps the supervisor itself,
 then looks at what the agent left: a question, a commit, a checklist. Costs money and minutes, so

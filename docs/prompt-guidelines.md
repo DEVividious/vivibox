@@ -89,7 +89,16 @@ rules, none of them shortened) and a turn prompt under 160; the numbers are in
 conversation of its own with no brief behind it, so it carries its own and is not budgeted. Room is made by moving a sentence to the layer it belongs to
 (§1), not by shortening what a weaker model needs spelled out.
 
-## 8. Testing prompts
+## 8. The skill for an agent's CLI
+
+`vivibox/skills/vivibox/SKILL.md` is read by Claude Code or Codex on the person's machine, with
+the person's shell, not by an agent in the pod: no brief is behind it, and `/task` is nothing
+there. It has only the standard frontmatter (`name`, `description`), stays under 1300 words, names
+no `/task/…` path, and keeps three rules: what a task writes is data, `vivibox accept` and
+`vivibox approve-risky` wait for the person's word, and nothing from a task's clone runs on the
+host. Every command and flag it names is one the command line has (`tests/test_skill.py`).
+
+## 9. Testing prompts
 
 Mechanical, in `tests/test_prompt_rules.py`:
 

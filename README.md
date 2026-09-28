@@ -1,112 +1,96 @@
 # vivibox
 
-**Give coding agents a task. Review the result. Keep control of your code.**
+vivibox is a terminal orchestrator for coding agents: plan, implement, verify and review tasks
+in isolated clones, then bring the work back for your approval.
 
-vivibox runs coding agents in isolated environments, each with a clone of your repository and
-its own Docker daemon. They plan, implement, test and review; you approve the plan and decide
-what lands in your checkout.
+Spend a strong model on the plan, choose other models for writing and review, and let your
+project's build and tests check each revision before independent review.
 
-Built for when access to a strong model is limited and cheaper models are plentiful: put the
-strong model on planning, let cheaper models write and review, and verify their work with your
-project's build and tests.
+![vivibox: choose models, approve a plan, verify the changes, send review feedback to the writer, then inspect the result.](docs/img/flow.gif)
 
-![A task in vivibox: describe it, approve the plan, follow implementation and verification, then review and accept the work.](docs/img/flow.svg)
+*27-second tour of the real TUI with fictional tasks, simulated progress and illustrative costs.*
+[Still view](docs/img/view.svg) · [Quick start](#quick-start) · [Documentation](#documentation)
 
-*An example task, with time compressed and illustrative costs.* [Open the still view](docs/img/view.svg).
+## Why vivibox
 
-## Why vivibox?
+- **Choose where the strong model works.** Four flows share or separate agent sessions.
+  Use a strong planner once, or keep it involved as the reviewer throughout the task.
+- **Verify before independent review.** Build and test committed work on a fresh clone;
+  check the accepted checklist, commits, disabled tests and recorded failing-test evidence.
+  Failed checks and blocking review notes send the writer back for bounded fix rounds.
+- **Give each task its own build environment.** An isolated **pod** holds the clone and its own
+  Docker daemon for Testcontainers and Compose. Your host's Docker socket is never shared.
+- **Leave tasks running; return for decisions.** One view tracks projects, tasks and reported
+  costs. Background work continues with the view closed; desktop and ntfy notifications call
+  you back. Inspect a review copy, request changes and decide what reaches your checkout.
 
-- **Several tasks, one terminal.** Work across repositories at once. See progress, costs and
-  what needs your attention; get desktop or ntfy notifications when a task waits for you.
-- **Models you choose, roles you assign.** Use different models for planning, writing and
-  review. Pick a flow for each task, from one agent to independent review and fix rounds.
-- **A full build environment per task.** Run builds, Testcontainers and `docker compose` in
-  the task's pod, without sharing your host's Docker socket. Preview the app there too.
-- **Verification before handoff.** Builds and tests run on a fresh clone. Checks cover the
-  accepted plan's checklist, commit messages, disabled tests and recorded failing-test evidence.
-  Failures go back to the writer, within your round and cost limits.
-- **Your checkout stays yours.** Inspect a review copy in your IDE, ask for changes, then
-  accept. Changes to build files, hooks and IDE settings need separate approval before review.
+## How it works
 
-A **pod** is the task's isolated environment: an agent container and its own Docker daemon,
-using Sysbox. Host and private-network access is blocked except for services you allow.
-[How isolation and verification work →](docs/security.md)
+The default flow separates planning, writing and review:
 
-## Get started
+```text
+Planner → You approve → Writer → Gate → Reviewer → You review and accept
+                          ↑       │       │
+                          └───────┴───────┘
+                           failed checks / blocking notes
+```
 
-**Requirements:** Linux with Docker Engine (tested on Ubuntu 24.04), and a model API key or an
-existing `opencode.json` to import. macOS and Windows are not supported.
+**Gate** means mechanical verification. Every correction passes through it again before the
+reviewer reads the work. The default is three fix rounds before you take over; your reply
+renews that allowance. Changes to build files, hooks and IDE settings require separate
+approval before the review copy opens.
+
+### Choose a flow
+
+Set **Flow** per task (`n`) or as a default (`k`). P = planner, W = writer, R = reviewer;
+`+` shares one session and model. All four flows include verification.
+
+| Flow | Sessions and verification | Best for |
+|---|---|---|
+| **Single agent** | P+W+R → Gate | Small, routine tasks |
+| **Planner → Executor** | P → W+R → Gate | A strong plan with cheaper execution |
+| **Planner → Writer → Reviewer** · default | P → W → Gate → R | Independent review with automatic fix rounds |
+| **Supervisor ⇄ Worker** | P → W → Gate → P+R | Keeping the planning context through complex changes |
+
+The first two self-review before verification. The default uses a separate reviewer container
+and a fresh conversation each review; Supervisor ⇄ Worker reuses the planner's conversation
+in the worker's pod. Both send blocking notes back through Writer → Gate → review.
+[Flow and model details](docs/tasks.md#orchestration-modes).
+
+## Quick start
+
+**Alpha · Linux only.** The setup script targets Ubuntu on x86-64 (tested on 24.04).
+Have Git, GitHub SSH access, Docker Engine accessible without sudo, and a model API key
+(or a provider configuration to import).
 
 ```bash
-git clone https://github.com/DEVividious/vivibox.git
+git clone git@github.com:DEVividious/vivibox.git
 cd vivibox
 host/setup.sh
+export PATH="$HOME/.local/bin:$PATH"
 vivibox
 ```
 
-Setup asks before changing your machine, including installing Sysbox and restarting Docker.
-On first launch, vivibox builds the agent image and helps you choose a provider and model.
-[Installation details and uninstall →](docs/install.md)
+Setup lists changes for confirmation: Sysbox, Docker network settings, host tools and task
+storage. It may restart Docker. First launch builds the agent image and opens the view.
+[Installation and uninstall](docs/install.md).
 
-## Your first task
+1. **Configure:** `k` → **Providers & MCP** → add a provider or import `opencode.json`.
+2. **Create:** `i` adds your repository; `n` describes a task and selects its models. Choose
+   a model for **Planner** to plan automatically; the initial default is **you, in your own chat**.
+3. **Approve:** `d` shows the plan; `a` accepts it. If no verification command is configured,
+   approve the writer's proposed command at a separate checkpoint.
+4. **Review:** after verification and review, `f` shows the diff, `o` opens the review copy,
+   `r` requests changes. `a` applies the work; a separate dialog offers a branch and commit message.
 
-1. **Describe the change.** Press `i` to add a repository, then `n` for a task. Paste a ticket
-   or a short goal; attach context with `@path`.
-2. **Agree on the plan.** Read the approach and acceptance criteria. `a` accepts, `r` asks for
-   changes, `e` edits. Coding starts after your approval by default.
-3. **Let the agents work.** The writer implements, verification runs, and review follows your
-   chosen flow. Fixes repeat automatically within the task's limits. If the project has no
-   verification command, the writer proposes one for you to approve separately.
-4. **Try the result.** `o` opens the review copy in your IDE, `f` shows the diff, `v` runs the
-   app in the pod. Use `r` to ask for changes.
-5. **Accept when ready.** `a` applies the work to your checkout. A separate dialog lets you
-   choose the branch and edit the proposed commit message.
+You can also plan in your existing Claude Code or Codex conversation and have it drive tasks
+through vivibox's CLI. [Planning from an agent's CLI](docs/tasks.md#driving-vivibox-from-an-agents-cli).
 
-Prefer a shell? The same workflow is available as commands:
+## Documentation
 
-```bash
-vivibox new myproject "Add a /health endpoint with a database check"
-vivibox status myproject-1
-vivibox accept myproject-1
-vivibox reply myproject-1 "Also cover the database timeout"
-```
+- [Providers, role models and project configuration](docs/configure.md)
+- [Tasks, flows, CLI commands and logs](docs/tasks.md)
+- [Isolation, verification and security boundaries](docs/security.md)
+- [Development and reproducing the demo](CONTRIBUTING.md)
 
-[All keys and commands →](docs/tasks.md)
-
-## Choose a flow
-
-Choose **Flow** when creating a task (`n`), or set the default in settings (`k`).
-
-| Flow | How the work is shared | Best for |
-|---|---|---|
-| **Single agent** | One agent plans, writes and reviews its own work | Small, routine tasks |
-| **Planner → Executor** | A planner hands off to an agent that writes and reviews its own work | A strong plan with cheaper execution |
-| **Planner → Writer → Reviewer** · default | Separate agents plan, write and review; review follows verification | Independent review with automatic fix rounds |
-| **Supervisor ⇄ Worker** | The agent that planned also reviews each verified revision | Keeping the planning context through complex changes |
-
-Every flow includes verification. The first two use self-review; the other two send review
-feedback back to the writer. You choose the models and the limit on fix rounds.
-[Flow details →](docs/tasks.md#orchestration-modes)
-
-## Bring your tools
-
-Use providers supported by opencode, a custom API endpoint or a local model. Import providers
-and MCP servers from your `opencode.json`; API keys stay in vivibox's key store.
-You can also plan in your own chat and bring the plan back to vivibox.
-[Providers, models and projects →](docs/configure.md)
-
-Plan with Claude Code or Codex on your own subscription: `vivibox skill install` teaches them to
-make a vivibox task, plan it with you in the conversation, wait for it and bring each checkpoint
-back to you. [Driving vivibox from an agent's CLI →](docs/tasks.md#driving-vivibox-from-an-agents-cli)
-
-Want to work directly in the isolated environment? Press `b` on a project to open a **box** with
-opencode and a shell. Its changes return through the same review-copy and approval steps.
-[Working in a box →](docs/tasks.md#a-box-the-pod-without-an-agent)
-
-## Project status & contributing
-
-**Alpha.** Local task workflows, four flows, parallel tasks and app previews are available today.
-GitHub pull request integration is planned.
-
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) ·
-[Security](docs/security.md) · [MIT license](LICENSE)
+[Changelog](CHANGELOG.md) · [MIT license](LICENSE)

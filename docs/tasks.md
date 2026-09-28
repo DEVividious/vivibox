@@ -20,7 +20,7 @@ them all:
 | `d` or Enter | show or hide the details of the selected task: its plan, its acceptance criteria as the agent ticks them off, the files it changed, the risky-file diff or the agent's question |
 | `h` / `H` | show or hide the tasks you have accepted, or the ones you deleted, listed below the live ones; the deleted ones start hidden, the header counts what is out of sight, and both choices are kept for the next time |
 | `i` | set up a project: browse to a repository vivibox does not know yet, or to a folder, new or empty, where one should start; its verification is a command you type, or left to the first task's writer, with what its build files and pipeline (GitHub Actions, GitLab, Jenkins, Bitbucket, Azure) run in its notes |
-| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the verification then checks the criteria and the commits only), what the agent should do, from one line to a whole ticket, optionally `--auto` or `--draft`, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
+| `n` | new task: its kind (feature, bug, other; not asked for a project with no code in it yet), whether it has nothing to build (research, a ticket analysis: the other mechanical checks still run), what the agent should do, from one line to a whole ticket, with plan review, Flow, Fix rounds, and what each role runs on, config.toml's unless you pick another: a model of any provider you have a key for, or, for the planner, you in your own chat |
 | `u` | usage: one task a row, how long its planner, writer and reviewer took (their turns added up), its verifications, and the whole task from its creation to done or to now; for a live task, what its pod uses now: CPU and memory of its containers, the disk of its volumes and its folder, measured every ten seconds while `u` is open and never otherwise; the finished tasks too while the list shows them (`h`). `vivibox usage [--json]` prints the same |
 | `k` | settings: providers & MCP (add a provider from opencode's list with a key, import an opencode.json, manage what is on), what each role runs on by default, the reviewer and how it works, the editor `o` opens with, desktop notifications, the limits; the machine's own settings (`tasks_dir`, the address pool) are shown, and the last row opens `config.toml` in your editor |
 | `a` | accept the plan; the writer's verification command, kept for the project (the field `e` shows, prefilled, Enter keeps it); or the finished work, which lands in your checkout; then commit it with the suggested message, on the branch the task started on or a new one named after it, or leave it uncommitted |
@@ -99,7 +99,7 @@ none), the flows with what each is best for and whether a planner in your CLI ca
 each role runs on, and the vivibox version. `--json` also carries `version`, the shape of the
 output.
 
-### Your decisions
+## Your decisions
 
 | Command | When |
 |---|---|
@@ -125,7 +125,7 @@ turn would have the agent work around what it asked about instead of waiting for
   replaced) goes straight to your review when the task starts, whoever the planner is; one with
   the placeholder still in it goes to the planner as its starting point.
 
-### Planning in your own chat
+## Planning in your own chat
 
 With `harness = "manual"` for the planner, you plan in a chat of your own: claude.ai, Gemini, or a
 CLI such as `claude` or `gemini` in your checkout, on whatever plan you have there. vivibox never
@@ -149,7 +149,7 @@ refused with `--model planner=` and with a flow a manual planner cannot run.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 
-### Driving vivibox from an agent's CLI
+## Driving vivibox from an agent's CLI
 
 Claude Code or Codex on your machine can make a task and plan it with you, on your own login:
 vivibox never runs them. `vivibox skill install` copies the skill that teaches them how to
@@ -166,10 +166,10 @@ the plan in, and waits with `vivibox wait`. At each checkpoint it tells you what
 runs `vivibox accept` or `vivibox approve-risky` only when you say so. What a task writes is
 read as data, never as instructions, and nothing from a task's clone runs on your machine.
 
-### Reviewing the work
+## Reviewing the work
 
-Nothing the agent writes reaches your repository until its work passes the gate and risky changes
-are approved. Then vivibox prepares a review copy in `/srv/vivibox/<id>/<your repository's name>`:
+Your checkout stays unchanged until you accept the work. Once task work is ready and risky
+changes are approved, vivibox prepares a review copy in `/srv/vivibox/<id>/<your repository's name>`:
 a worktree of your repository at the commit the task started from, with the agent's work as
 uncommitted changes. Your IDE lists them like your own work (IntelliJ: the Commit tool window,
 Alt+0), with a diff for each file. Your checkout and your branches stay as they are.
@@ -177,12 +177,6 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
 - **Run the tests or the application** in the review copy if you like. It lives in the task's
   directory, which the agent cannot see.
 - **Ask for changes** with `vivibox reply <id> "…"`. The next round updates the copy.
-An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it
-cost, and the commit it left; and its record in `~/.local/share/vivibox/archive/<id>/`: the plan it
-was held to, its events and its criteria, a few dozen kilobytes, without the clone or the logs. A
-deleted task leaves the same. The view lists those under their projects with the plan in the
-details; `x` forgets one, archive included.
-
 - **Accept** with `vivibox accept <id>`: only now does the work reach your checkout, as
   uncommitted changes on your current branch. vivibox asks whether to commit them and suggests a
   message: a subject from the plan's summary (else the goal's first line, when it fits), then every
@@ -196,12 +190,18 @@ details; `x` forgets one, archive included.
   and only creates that branch.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.
 
+An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it
+cost, and the commit it left; and its record in `~/.local/share/vivibox/archive/<id>/`: the plan it
+was held to, events, criteria, review notes, conversations and verification logs, without the clone. A
+deleted task leaves the same. The view lists those under their projects with the plan in the
+details; `x` forgets one, archive included.
+
 Changes your IDE makes to its own project files (`.idea/`, `*.iml`, `.vscode/`) in the copy are
 ignored. Changes of yours are never overwritten: vivibox stops and names the files. Do not open
 `/srv/vivibox/<id>/repo` in an IDE. It is the agent's working copy, and IDEs rewrite their project
 files when they open it.
 
-### Orchestration modes
+## Orchestration modes
 
 How a task is shared between the planner (P), the writer (W) and the reviewer (R), and where the
 verification runs, is its orchestration mode: config.toml's `agent_orchestration_mode`, the Flow
@@ -254,13 +254,13 @@ What the reviewer reads, and what comes to you, is the commit the gate verified:
 changed since (you talked to the agent under `w`, an agent committed after its turn) go through
 the gate again first, for no round.
 
-### Running the app
+## Running the app
 
 `vivibox demo <id>`, or `v` in the view, starts the project inside its pod and opens it. A server
 the agent left running in the background during its turn would hold the port, so it is stopped
 first, and the view says what went:
 
-```
+```console
 $ vivibox demo myshop-1
 From your project file:
   docker compose up -d db
@@ -273,7 +273,7 @@ commands ran, so whatever the project is — Vite, uvicorn, Spring Boot, three s
 compose file — the address it prints is the one that is actually open. That also makes the usual
 mistake legible instead of silent:
 
-```
+```text
 Port 8080 is bound to localhost inside the pod, so nothing outside can reach it.
 Start it on 0.0.0.0 instead.
 ```
@@ -308,7 +308,7 @@ the browser on your machine, which knows nothing about it. Let the frontend call
 origin and forward it server-side (`server.proxy` in Vite, rewrites in Next, or a backend that
 serves the built frontend). That also settles CORS.
 
-### A box: the pod without an agent
+## A box: the pod without an agent
 
 `b` on a project's row, or `vivibox box <project>`, opens a box: the project's clone in a pod of
 its own, with the keys of every provider you have on, opencode's configuration with your MCP
@@ -329,7 +329,7 @@ box without bringing anything back.
 A login you make inside the box, such as `claude`'s, lives in the box's own volume, which vivibox
 never reads or copies, and goes with the box.
 
-### What the tasks cost, and what the gate refused
+## What the tasks cost, and what the gate refused
 
 The list shows what a task cost in three columns, one figure each: `PLAN`, `IMPL` and, when a
 reviewer is configured, `REVIEW`; a box shows one figure under `IMPL`. The history keeps the same
@@ -355,20 +355,22 @@ with `--project` or no live tasks, and are never added to a task's DISK figure. 
 is an object with `tasks` (the task rows) and `shared_caches` (tool names mapped to bytes,
 `null` when Docker could not be measured).
 
-### When a task costs too much
+## When a task costs too much
 
 `cost_warning` and `cost_limit` in `config.toml` (under `k`, limits) are dollars per task. Past
-the warning you are told once and the task goes on; at the limit it stops before its next turn
-and waits with the figures on its row. Raise the limit and press `s` to take it on.
+the warning you are told once and the task goes on. Before each planning or implementation
+step, vivibox checks the total reported cost (including review) and stops if the limit has been
+reached. It is not a hard spending cap: a turn, self-review or separate review can overshoot it.
+Raise the limit and press `s` to take it on.
 
-### When a turn fails
+## When a turn fails
 
 An error that passes with time (the provider busy or rate limiting, the network gone for a
 moment) is waited out: the turn runs again after half a minute, a minute, then two minutes, and
 the timeline says so. The fourth failure in a row, and any other error, stops the task with the
 reason on its row; `s` starts it again from where it was.
 
-### Stopping and removing
+## Stopping and removing
 
 `vivibox stop <id>` stops a task and keeps its work, and `vivibox start <id>` continues it from
 where it was (`resume` is the same command). `vivibox stop <id> --force` (`S` in the view) kills the

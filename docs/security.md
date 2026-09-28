@@ -15,13 +15,14 @@ on your machine until you have approved it.
   configuration (`vitest.config.*`, `jest.config.*`, `pytest.ini`, `pyproject.toml`, `conftest.py`…),
   which can leave tests out without any of the words the gate looks for.
 - **The gate checks what the agent claims:** your verify commands, the acceptance criteria of the
-  plan you accepted, one-line commit messages without co-author or AI signatures, tests switched
+  plan you accepted, commit subjects of at most 72 characters, without co-author or AI signatures, tests switched
   off in added lines (`@Disabled`, `skipITs`, `it.skip` and the like), invisible Unicode
   characters in added lines, and that every test file added or changed is named in the agent's
   `red.md`. Tests the work removed are counted for you at review. When a verification fails, the task's details show the lines of the
   build log that say why, and where the whole log is.
-- **Keys stay out of images, volumes and `docker inspect`.** A task gets only the key its model
-  needs, as a read-only file on tmpfs.
+- **Keys stay out of images, volumes and `docker inspect`.** The agent pod gets the provider keys needed by its configured roles and enabled MCP secrets,
+  mounted as read-only files on tmpfs. The separate review container gets the reviewer's provider
+  key and enabled MCP secrets. These files are readable by the agents that use them.
 
 ## How the pod is built
 
@@ -56,19 +57,16 @@ The task's clone is a real `git clone`, so your repository's `.git` never enters
 clone, `.git/config` and `.git/hooks/` are read-only for the agent, and the project's own hooks reach
 git through `core.hooksPath` in the agent's global config, not through files the agent can edit.
 
-## Compared with Docker Sandboxes
+## Limits of the boundary
 
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) run an agent in a microVM with its own
-Docker daemon, which is a stronger boundary than Sysbox: a microVM has its own kernel, a Sysbox
-container shares yours. If you have KVM and want the strongest wall around the agent, it is a good
-choice.
+Sysbox containers share the host kernel; they are not virtual machines. The firewall blocks
+host and private-network access except explicitly allowed services, but DNS and public internet
+access remain open. The agent can read credentials passed to its build in `pass_env`.
 
-vivibox draws the second line, from the agent back to you. Docker Sandboxes mount your working tree
-read-write, so the agent edits the files you see, git hooks and build files included, and the
-documentation asks you to review changes before running any modified code. vivibox never lets the
-agent into your checkout: it works on a clone, its work comes back as a review copy, files that run
-code on import need your approval whenever they change, and a gate the agent cannot bypass checks the
-work first. vivibox also runs without KVM, in a VM or on a machine without hardware virtualization.
+The gate checks the accepted checklist and whether changed test files are named in `red.md`;
+it does not independently prove that each criterion is satisfied or that the recorded test
+actually failed before the fix. Code review and your final acceptance still matter. Once you
+approve risky files and run the review copy in your IDE, that code runs with your permissions.
 
 ---
 Back to the [README](../README.md).

@@ -1,21 +1,28 @@
 # Installing vivibox
 
-Linux with Docker Engine and your user in the `docker` group; tested on Ubuntu 24.04, and other
-recent distributions with a kernel Sysbox supports should work. A model: an API key for a provider
-from opencode's list, or an `opencode.json` with your own providers, which vivibox imports.
+The setup script targets **Ubuntu on x86-64**, tested on 24.04. It uses apt/dpkg and downloads
+amd64 Sysbox and uv packages; it is not a distribution-independent installer. macOS and Windows
+are not supported.
+
+Before starting, install Git and Docker Engine and make sure `docker info` works as your user
+without sudo. The clone command below uses your GitHub SSH access. You also need a model API key,
+or an `opencode.json` defining a provider you can use.
 
 ```bash
-git clone https://github.com/DEVividious/vivibox.git && cd vivibox
-host/setup.sh            # once, asks before each change: Sysbox, tmux, /srv/vivibox, uv, vivibox
-host/setup.sh --check    # confirms nothing is missing
-vivibox                  # the first time: builds the agent image, then asks for a key and a model
+git clone git@github.com:DEVividious/vivibox.git
+cd vivibox
+host/setup.sh            # lists changes, then asks before applying them
+host/setup.sh --check    # read-only; exits 1 if setup is incomplete
+export PATH="$HOME/.local/bin:$PATH"
+vivibox
 ```
 
-```bash
-host/setup.sh            # once, asks before each change: Sysbox, tmux, /srv/vivibox, uv, vivibox
-host/setup.sh --check    # confirms nothing is missing
-vivibox                  # the first time: builds the agent image, then asks for a key and a model
-```
+First launch builds the agent image, writes `~/.config/vivibox/config.toml` and opens the view.
+Press `k` → **Providers & MCP** to add a provider with its key or import `opencode.json`.
+Press `i` to add a repository, then `n` to choose models and describe a task. Planning initially
+uses **you, in your own chat**; pick a model for Planner if you want it to generate the plan.
+The writer needs a model too; the separate reviewer uses the writer's model unless you choose
+another. See [configuration](configure.md) for manual planning and role defaults.
 
 `host/setup.sh` moves Docker's default networks off `172.17.0.0/16` (Docker restarts) to the first
 ranges nothing on your machine routes, a VPN included (`VIVIBOX_DOCKER_RANGES="<bridge> <pool>"`
@@ -42,7 +49,7 @@ a task whose supervisor is older say so too; stop and start that task (`s`) when
 
 ## Removing vivibox
 
-```
+```bash
 host/uninstall.sh            # lists what is there, removes it after confirmation
 host/uninstall.sh --check    # only lists
 ```

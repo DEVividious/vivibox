@@ -1,22 +1,22 @@
 """Draws the README tour and still view: uv run python docs/img/screenshot.py
 
-Made-up projects and tasks in a throwaway directory, one in every state worth showing. Nothing of
-yours is read, and no pod is started.
+Fictional projects in a throwaway directory; no provider calls or pods. Add --gif to render
+the GitHub hero (requires Pillow, Playwright and Chromium; see CONTRIBUTING.md).
 """
 
 from __future__ import annotations
 
 import asyncio
 import html
-import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
-from animation import animated
 
 HERE = Path(__file__).parent
 # Short: a throwaway path longer than the one shown in its place would cut lines that fit on a real
@@ -24,7 +24,7 @@ HERE = Path(__file__).parent
 ROOT = Path(tempfile.mkdtemp(prefix="v-"))
 # The panel shows the review copy's path, and a temp path would be a lie about where it lives.
 SHOWN_ROOT = "/srv/vivibox"
-PROJECTS = ("payments-api", "storefront", "fixtures-feed")
+PROJECTS = ("payments-api", "storefront")
 
 
 def git(*args: str, cwd: Path) -> None:
@@ -52,6 +52,11 @@ config = ROOT / "config"
 for name in PROJECTS:
     make_repo(ROOT / name)
     (config / "projects" / f"{name}.toml").write_text(f'repo = "{ROOT / name}"\nverify = ["true"]\n')
+# Browser binaries belong to the recording tool, not the isolated app fixture's cache.
+os.environ.setdefault(
+    "PLAYWRIGHT_BROWSERS_PATH",
+    str(Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "ms-playwright"),
+)
 os.environ.update(
     VIVIBOX_CONFIG_DIR=str(config),
     XDG_DATA_HOME=str(ROOT / "data"),
@@ -61,10 +66,12 @@ os.environ.update(
 
 # Render the product palette even when the invoking shell disables terminal colour.
 os.environ.pop("NO_COLOR", None)
+os.environ["TZ"] = "UTC"
+time.tzset()
 
-from vivibox import actions, gate, keys, reviewing, tui  # noqa: E402
+from vivibox import actions, gate, keys, probe, reviewing, table, tui, ui  # noqa: E402
+from vivibox import task as task_module  # noqa: E402
 from vivibox.config import load_project  # noqa: E402
-from vivibox.pod import Listener  # noqa: E402
 from vivibox.states import State  # noqa: E402
 
 PLAN = """## Approach
@@ -83,6 +90,18 @@ actions.supervisor_running = lambda task: task.id in RUNNING
 actions.available_models = lambda refresh=False: {}
 actions.provider_catalog = lambda refresh=False: []
 tui.pod_views = lambda ids: {i: SERVING.get(i, tui.PodView()) for i in ids}
+probe.docker_running = lambda: True
+
+
+class DemoClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2026, 1, 15, 12, 0, tzinfo=UTC)
+        return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+
+# Stable visible times, without changing asyncio's monotonic clock.
+task_module.datetime = ui.datetime = table.datetime = DemoClock
 
 
 def task(project: str, goal: str, criteria: list[str], minutes_ago: int, approach: str = "…"):
@@ -114,19 +133,10 @@ def accepted(made, ticked: int = 0):
 def aged(made, updated_minutes_ago: int) -> None:
     """The times a task that has been around for a while would show."""
     st = made.read_state()
-    now = datetime.now(UTC)
+    now = DemoClock.now(UTC)
     st.created = (now - timedelta(minutes=made.minutes_ago)).isoformat(timespec="milliseconds")
     st.updated = (now - timedelta(minutes=updated_minutes_ago)).isoformat(timespec="milliseconds")
     made._write_state(st)
-
-
-REVIEW_NOTE = """## Blocking
-
-## Not blocking
-
-- src/main/java/payments/HealthController.java:27 — the version is read from the manifest on
-  every request; reading it once at start-up would do.
-"""
 
 
 def committed(made, *commits: tuple[str, str]) -> None:
@@ -141,134 +151,22 @@ def committed(made, *commits: tuple[str, str]) -> None:
         )
 
 
-def reviewed(made, note: str = REVIEW_NOTE, others: int = 1) -> None:
-    """The gate passed and the reviewer read the work: the task waits for you with a review copy,
-    from wherever it was (implementing, verifying, or already with the reviewer)."""
-    state = made.read_state().state
-    if state is State.IMPLEMENT:
-        made.transition(State.VERIFY)
-        state = State.VERIFY
-    if state is State.VERIFY:
-        made.event("gate", passed=True, iteration=1, log="verify-1-120000.log")
-        made.transition(State.REVIEW, reason="verification passed")
-    spent(made, 0.0, review=0.02)
-    reviewing.keep(made, 1, note)
-    made.set_reviews(1)
-    made.event("review", round=1, blocking=0, not_blocking=others, problem="")
-    made.transition(State.CHECKPOINT_FINAL, reason="verification passed; review 1: no blocking notes")
-    actions.prepare_review(made, load_project(made.read_state().project))
-
-
-def world() -> dict:
-    """Three projects with tasks in every state worth showing; the ones the frames move later
-    are returned by name."""
-    moving = {}
-    plan = task(
-        "payments-api", "Reject expired cards at checkout", ["Expired card gives 402", "Covered by a test"], 9
-    )
-    spent(plan, 0.03)
-    plan.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
-    aged(plan, 2)
-
-    health = task(
+def world() -> None:
+    """A quiet dashboard: one other task working and one awaiting a decision."""
+    waiting = task(
         "payments-api",
-        "Add a /health endpoint with the database state",
-        [
-            "GET /health returns 200 with the version",
-            "A failing database gives 503",
-            "Both covered by a test",
-        ],
-        58,
+        "Reject expired cards",
+        ["Expired card gives 402"],
+        9,
+        approach="Validate the expiry date before submitting the charge.",
     )
-    spent(health, 0.04, 0.11)
-    accepted(health, ticked=3)
-    committed(
-        health,
-        ("Add the /health endpoint", "src/main/java/payments/HealthController.java"),
-        ("Report the database state", "src/test/java/payments/HealthControllerTests.java"),
-    )
-    reviewed(health)
-    SERVING[health.id] = tui.PodView("198.51.100.3", [Listener(8080, True)], demo=True)
-    aged(health, 4)
-
-    vat = task(
-        "payments-api",
-        "Round VAT per line, not per invoice",
-        ["Totals match the ledger", "Old invoices unchanged"],
-        35,
-    )
-    spent(vat, 0.03, 0.09)
-    accepted(vat, ticked=1)
-    vat.transition(State.VERIFY)
-    vat.event("gate", passed=False, iteration=1, failed_commands=["./mvnw -B verify"])
-    vat.transition(State.IMPLEMENT, reason="verification failed")
-    aged(vat, 3)
-    moving["vat"] = vat
-
-    cart = task(
-        "storefront",
-        "Show the order total with VAT on the cart page",
-        ["Total includes VAT", "Matches the checkout total"],
-        27,
-    )
-    spent(cart, 0.02, 0.06)
-    accepted(cart, ticked=2)
-    committed(cart, ("Show the total with VAT", "src/features/cart/CartTotal.tsx"))
-    cart.transition(State.VERIFY)
-    aged(cart, 1)
-    moving["cart"] = cart
-
-    asks = task(
-        "storefront",
-        "Cache the product feed for an hour",
-        ["Feed is cached for an hour", "Works offline"],
-        41,
-    )
-    spent(asks, 0.02, 0.04)
-    accepted(asks, ticked=1)
-    (asks.meta / "handoff" / "question.md").write_text(
-        "Redis is in compose.yml but unused. Use it, or a file?\n"
-    )
-    asks.transition(State.CHECKPOINT_BLOCKED, reason="question from the agent")
-    aged(asks, 6)
-
-    images = task("storefront", "Lazy-load product images below the fold", ["…"], 1)
-    spent(images, 0.01)
-    aged(images, 1)
-
-    retry = task(
-        "fixtures-feed",
-        "Retry the upstream feed with backoff",
-        ["Three retries, then an error", "Covered by a test"],
-        22,
-    )
-    spent(retry, 0.02, 0.05)
-    accepted(retry, ticked=2)
-    committed(retry, ("Retry the feed with backoff", "fixtures_feed/upstream.py"))
-    retry.transition(State.VERIFY)
-    retry.event("gate", passed=True, iteration=1)
-    retry.transition(State.REVIEW, reason="verification passed")
-    aged(retry, 1)
-    moving["retry"] = retry
-
-    history = actions.history_path()
-    history.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
-    for n, (project, title, cost, hours) in enumerate(
-        (
-            ("payments-api", "Throttle failed logins", 0.12, 3),
-            ("fixtures-feed", "Parse kick-off times in the venue's zone", 0.07, 26),
-            ("storefront", "Keep the cart across a sign-in", 0.09, 30),
-        ),
-        1,
-    ):
-        finished = (datetime.now(UTC) - timedelta(hours=hours)).isoformat(timespec="milliseconds")
-        entry = {"id": f"{project}-{n * 10}", "project": project, "title": title, "cost": cost,
-                 "planning": 0.03, "review": 0.02, "commit": "5a1bcba9d2", "branch": "", "conflicts": [],
-                 "criteria": [title], "created": finished, "finished": finished}  # fmt: skip
-        lines.append(json.dumps(entry))
-    history.write_text("\n".join(lines) + "\n")
-    return moving
+    spent(waiting, 0.03)
+    waiting.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
+    aged(waiting, 2)
+    working = task("storefront", "Show the cart total with VAT", ["Total includes VAT"], 12)
+    spent(working, 0.02, 0.06)
+    accepted(working)
+    aged(working, 1)
 
 
 TEXT = re.compile(r'(<text[^>]*textLength=")([\d.]+)("[^>]*>)(.*?)(</text>)', re.S)
@@ -294,7 +192,9 @@ def shown(svg: str) -> str:
         ratio = len(html.unescape(new)) / len(html.unescape(content))
         return f"{before}{float(width) * ratio:.1f}{mid}{new}{end}"
 
-    return TEXT.sub(fix, svg)
+    svg = re.sub(r"@font-face\s*\{[^}]*\}", "", svg)
+    svg = svg.replace("Fira Code", "DejaVu Sans Mono")
+    return "\n".join(line.rstrip() for line in TEXT.sub(fix, svg).splitlines()) + "\n"
 
 
 GOAL = "Add PDF downloads for invoices"
@@ -315,13 +215,9 @@ COMMITS = (
 )
 
 
-async def flow(moving: dict) -> None:
-    """One task from the description to the commit, among the others: the frames of flow.svg, and
-    the still of view.svg from the same view."""
+async def flow() -> None:
+    """Seven scenes, 27 seconds; synthetic progress, real Textual screens and key presses."""
     from textual.widgets import TextArea
-
-    from vivibox.dialogs import CommitWork
-    from vivibox.widgets import Confirm
 
     frames: list[tuple[str, float, str, str]] = []
 
@@ -336,26 +232,22 @@ async def flow(moving: dict) -> None:
         app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(row_id))
 
     app = tui.Vivibox()
-    # A compact terminal keeps text readable when GitHub fits the image to the README.
-    async with app.run_test(size=(112, 38)) as pilot:
+    async with app.run_test(size=(100, 32)) as pilot:
         await pilot.pause(0.5)
         await settle()
-        health = next(st.id for _, st in app.pairs if "health" in st.goal)
-        select(health)
+        select("payments-api-1")
         await pilot.press("d")
-        await pilot.pause(0.4)
-        (HERE / "view.svg").write_text(shown(app.export_screenshot()))
-        shot(4, "Several tasks, one view", "Follow progress across projects. See what needs your attention.")
+        await pilot.pause(0.3)
+        shot(3, "Tasks keep working", "Two projects. Progress, costs and decisions in one terminal.")
 
-        await pilot.press("d")  # close the panel before opening the form over the list
+        await pilot.press("d")
         select("project:payments-api")
         await pilot.press("n")
         await pilot.pause(0.4)
-        field = app.screen.query_one(TextArea)
-        field.text = GOAL
+        app.screen.query_one(TextArea).text = GOAL
         app.screen.query_one("#orchestration").focus()
         await pilot.pause(0.3)
-        shot(5, "Describe the change", "Choose the flow and models for this task.")
+        shot(5, "Choose who does the work", "Separate planner, writer and reviewer; a model for each.")
         await pilot.press("escape")
         await pilot.pause(0.3)
 
@@ -363,72 +255,74 @@ async def flow(moving: dict) -> None:
         made.plan_path.write_text(
             made.plan_path.read_text().replace('summary = ""', f'summary = "{SUMMARY}"', 1)
         )
+        spent(made, 0.03)
+        made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
         await settle()
         select(made.id)
         await pilot.press("d")
         await pilot.pause(0.3)
+        app.panel.scroll_to(y=6, animate=False)
+        await pilot.pause(0.2)
+        shot(4, "Approve the plan", "Agree on the approach and acceptance criteria before coding.")
 
-        spent(made, 0.03)
-        made.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
-        moving["cart"].event("gate", passed=True, iteration=1)
-        moving["cart"].transition(State.REVIEW, reason="verification passed")
-        await settle()
-        shot(5, "Approve the plan", "Read the approach and acceptance criteria before coding starts.")
-
-        accepted(made, ticked=0)
-        reviewed(moving["retry"], others=0)
-        RUNNING.discard(moving["retry"].id)
-        await settle()
-
-        ticks = made.meta / "handoff" / gate.CRITERIA_FILE
-        ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]", 2))
+        accepted(made, ticked=3)
         spent(made, 0.0, 0.08)
-        moving["vat"].transition(State.VERIFY)
-        await settle()
-        shot(3, "Let the writer work", "Implementation happens in a clone. Your checkout stays yours.")
-
-        ticks.write_text(ticks.read_text().replace("- [ ]", "- [x]"))
         committed(made, *COMMITS)
         made.transition(State.VERIFY)
-        (made.meta / "log" / "verify-1-120000.log").write_text("# fresh clone\n\n$ ./mvnw -B verify\n")
-        reviewed(moving["cart"], others=0)
-        RUNNING.discard(moving["cart"].id)
+        (made.meta / "log" / "verify-1-120000.log").write_text(
+            "# fresh clone of the committed work\n\n$ ./mvnw -B verify\nBUILD SUCCESS\n"
+        )
         await settle()
-        shot(3, "Verify the work", "Run the project’s build and tests on a fresh clone.")
+        shot(3, "Verify the committed work", "Build and test a fresh clone before independent review.")
 
         made.event("gate", passed=True, iteration=1, log="verify-1-120000.log")
         made.transition(State.REVIEW, reason="verification passed")
         await settle()
-        shot(3, "Get an independent review", "In this flow, a separate agent reviews the verified changes.")
+        shot(3, "Review after verification", "A separate agent reads the changes against the accepted plan.")
 
         note = (
-            "## Blocking\n\n## Not blocking\n\n- src/main/java/payments/InvoicePdf.java:52 — the font is"
-            " loaded per document; once, in a field, would do.\n"
+            "## Blocking\n\n- src/main/java/payments/InvoicePdf.java:52 — totals lose cents; "
+            "preserve decimal precision and add a fractional-total test.\n\n## Not blocking\n"
         )
-        spent(made, 0.0, review=0.02)
+        assert not reviewing.problem(note)
         reviewing.keep(made, 1, note)
         made.set_reviews(1)
-        made.event("review", round=1, blocking=0, not_blocking=1, problem="")
-        made.transition(State.CHECKPOINT_FINAL, reason="verification passed; review 1: no blocking notes")
+        spent(made, 0.0, review=0.02)
+        made.event("review", round=1, blocking=1, not_blocking=0, problem="")
+        made.transition(State.IMPLEMENT, reason="review 1: 1 blocking", why="1 blocking note")
+        await settle()
+        app.panel.scroll_to(y=13, animate=False)
+        await pilot.pause(0.2)
+        shot(4, "Send blocking feedback back", "The writer fixes it. Verification and review run again.")
+
+        committed(
+            made, ("Keep decimal precision in invoice totals", "src/main/java/payments/InvoicePdf.java")
+        )
+        spent(made, 0.0, 0.03)
+        made.transition(State.VERIFY)
+        made.event("gate", passed=True, iteration=2, log="verify-2-120000.log")
+        made.transition(State.REVIEW, reason="verification passed")
+        reviewing.keep(made, 2, "## Blocking\n\n## Not blocking\n")
+        made.set_reviews(2)
+        spent(made, 0.0, review=0.02)
+        made.event("review", round=2, blocking=0, not_blocking=0, problem="")
+        made.transition(State.CHECKPOINT_FINAL, reason="verification passed; review 2: no blocking notes")
         actions.prepare_review(made, load_project("payments-api"))
         RUNNING.discard(made.id)
         await settle()
-        shot(5, "Review the result", "Open the review copy in your IDE, try the app, or ask for changes.")
+        app.panel.scroll_home(animate=False)
+        await pilot.pause(0.2)
+        (HERE / "view.svg").write_text(shown(app.export_screenshot()))
+        shot(5, "You decide what lands", "Inspect the diff or review copy. Accept, or ask for changes.")
+    if "--gif" in sys.argv:
+        from animation import render_gif
 
-        await pilot.press("a")
-        await pilot.pause(0.3)
-        assert isinstance(app.screen, Confirm)
-        await pilot.press("enter")
-        await app.workers.wait_for_complete()
-        await pilot.pause(0.5)
-        assert isinstance(app.screen, CommitWork)
-        shot(4, "Choose how to commit", "After accepting the work, choose a branch and edit the message.")
-        await pilot.press("escape")
-        await pilot.pause(0.3)
-        await settle()
-        shot(3, "Keep work moving", "The accepted task is done. Other projects carry on alongside it.")
-    (HERE / "flow.svg").write_text(animated(frames))
+        await render_gif(frames, HERE / "flow.gif")
 
 
-asyncio.run(flow(world()))
-print(HERE / "flow.svg", HERE / "view.svg")
+try:
+    world()
+    asyncio.run(flow())
+finally:
+    shutil.rmtree(ROOT)
+print("Generated README tour and still view in", HERE)

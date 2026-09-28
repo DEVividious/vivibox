@@ -1,5 +1,7 @@
 # Configuring vivibox
 
+## Providers and models
+
 Run `vivibox`. The first time, it builds the agent image (a few minutes), writes a commented
 `~/.config/vivibox/config.toml` and opens the view. An update that changes the image builds it again
 on the next start and removes the older versions, about 2 GB each, except one a task's pod still runs
@@ -41,6 +43,8 @@ vivibox models anthropic
 
 Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable only by you.
 
+## Notifications
+
 The messages a task's supervisor prints, on your phone too: `ntfy` under `[notifications]` names
 a topic on [ntfy](https://ntfy.sh), the one the app on your phone subscribes to, and every
 message goes there as well, high priority when the task waits for you or has stopped. Pick a name
@@ -52,9 +56,11 @@ view). `ntfy_server` is ntfy.sh unless you run your own; a token, when the topic
 stage after that (implementing, verifying) to the decisions. The three rows are under `k` as well, and a change there
 reaches a running task from its next message.
 
+## Flows and limits
+
 `agent_orchestration_mode`, at the top of the file, says how a task is shared between the
-planner, the writer and the reviewer, and where the gate runs (docs/tasks.md, *Orchestration
-modes*): `single_agent`, `planner_executor`, `planner_maker_checker` (the default) or
+planner, the writer and the reviewer, and where the gate runs ([flow details](tasks.md#orchestration-modes)): `single_agent`,
+`planner_executor`, `planner_maker_checker` (the default) or
 `supervisor_worker`. Roles joined in one agent share one conversation and the first role's model,
 so `single_agent` needs a planner on an opencode model and `supervisor_worker` a planner on a
 model, not `manual`; a task that cannot run in its mode says so before it starts. The same
@@ -71,13 +77,17 @@ the gate or from the review, before the work comes to you (3; the first implemen
 of them, and your reply gives them back), and `verify_timeout`, the seconds one
 verification command may take (1800) before it is stopped and the task waits for you as on any
 failure outside the code. A project file may set its own `verify_timeout`. `cost_warning` and
-`cost_limit` are dollars a task may cost, planning and implementation together, before you are
-told and before it stops for you: it waits with the figures on its row (*cost limit reached*),
-and goes on once you raise the limit under `k` and press `s`. Both are checked before a turn, so
-a turn may run past the limit by its own cost; neither is set unless you set it. A file from
+`cost_limit` use the total reported task cost, including review, to decide when you are
+told and when it stops for you: it waits with the figures on its row (*cost limit reached*),
+and goes on once you raise the limit under `k` and press `s`. These checks run before planning
+and implementation steps, not before every model call. A turn, its self-review or a separate
+review can take the total past the limit; neither is set unless you set it. A file from
 before orchestration modes may still have `limits.max_iterations`, `limits.max_reviews` or the
-reviewer's `mode`: they are not read, `max_iterations` carries over as `max_rounds` when that is
-not set, and the supervisor says so once, in its window and in the task's timeline.
+reviewer's `mode`. `max_reviews` and `mode` are ignored; `max_iterations` supplies `max_rounds`
+only when the latter is absent. The supervisor reports these old fields once, in its window
+and in the task's timeline.
+
+## Project setup
 
 Once per repository you want agents to work on: press `i` in the view, and browse to its folder
 (or make a new one there, for a project from scratch), or from a shell inside it:
@@ -88,51 +98,52 @@ vivibox init
 vivibox init ~/projects/new-idea --git   # an empty or new folder: starts the repository too
 ```
 
-Either way vivibox reads the build files and proposes a project: how it is verified, and what a
-new task's clone runs first (`prepare`, a build without tests, so the writer starts on a built
-project: `./mvnw -B install -DskipTests`, `./gradlew assemble`, or the Node install by its
-lockfile; empty where the files say nothing, `--prepare` and Change… set it). The verification
-is a command you type, or left empty: the next task's writer, who builds the project while it works, then writes
-the command it ran to `/task/handoff/verify-proposal.md` (told to allow that build the
-verification's own time limit, `verify_timeout`, so its tool's default of two minutes does not
-cut a suite short), and before the first verification the
-task waits for you as `review the command`: `a` opens the same field as under `e` with the
-command in it, Enter keeps it for every task of the project and the gate runs with it; `e` changes it first,
-`r` sends the writer back for another. A writer that proposed none leaves the field empty, for
-you to type the command or to ask for one; a command that picks some tests (`-Dtest=`, `--tests`,
-`-k`, a test file named) or one part of the project (`-pl`, `:module:test`, a Go package,
-`cargo -p`, a workspace) is shown with its selection, because every task verified by a part alone
-would pass whatever it broke elsewhere; the first task's writer tends to propose the part that
-task was about. With `--auto` a whole command is kept without
-stopping, and a narrowed or missing one still waits for you. The project's next task has the
-command and skips this. A command that runs a file the repository's commits do not have (`./mvnw`
-after a move to Gradle, a wrapper never committed) leaves the task waiting for you with
-"verification could not run", no attempt spent: change it under `e`. A
-plan with `verify = false` runs no build in its task and settles nothing: when the task leaves
-build files behind, its panel names the command they call for. A repository
-with nothing to build or test ever (documents, configuration) says so with `verify = false` in the
-project file: the verification then checks the criteria and the commits only. In the view, `e` on
-the project's row shows the command as it is, one line that Enter saves, and a box that leaves it
-to the writer; `i` asks the same before the project exists. What the build files and the pipeline
-run (read from `.github/workflows`, `.gitlab-ci.yml`, `Jenkinsfile`, `bitbucket-pipelines.yml` and
-`azure-pipelines.yml`: the steps that start with a build tool, deploys left out) is listed in the
-notes of `i` and `vivibox init`, never taken for the verification by itself: a pipeline often
-builds with more than its build files say, and a command that builds the wrong thing passes. For a Node project the gate installs the dependencies on the fresh clone first (`npm ci`, or
-Yarn or pnpm by the lockfile) when the command does not do that itself, as a command of its own
-in the log; a command that starts in a folder (`cd apps/web && yarn test`, a monorepo's app) is
-installed for in that folder, by its lockfile; a `package.json` without a lockfile next to it, a
-monorepo's root, gets no install, and the notes name each package with a test script instead
-(`cd apps/web && yarn install --frozen-lockfile && yarn test`). A tool the fresh clone lacks
-(`tsc: not found`) is a failure of the environment, not of the code: the task waits for you to
-put the install in front of the command. Otherwise: the command the gate runs (`./gradlew
-test`, `./mvnw -B verify` (`bash ./mvnw` for a wrapper committed without its executable bit), `mvn -B verify`, `npm ci && npm test`, or the same with Yarn or pnpm
-when `packageManager` in `package.json` or the lockfile names them; for Python, `pytest` through
-uv: `uv run --frozen pytest` with a `uv.lock`, else in a throwaway environment from
-`pyproject.toml` or the requirements files) and, when the build needs it,
-a JDK other than the image's Java 21, for example Java 17 for Gradle 7. It shows the file and writes
-it to `~/.config/vivibox/projects/<name>.toml` only when you confirm. For a folder that is empty or
-does not exist yet, it starts a git repository there with a first commit, so an app can be built
-from nothing. Nothing is set up by just running `vivibox` somewhere.
+vivibox reads the build files and proposes preparation commands, toolchains and notes about
+verification. It shows the project file and writes it to
+`~/.config/vivibox/projects/<name>.toml` only when you confirm. A new or empty folder gets a Git
+repository with an initial commit. An existing repository needs your Git identity configured
+(`user.name` and `user.email`) before its first task. Merely launching `vivibox` does not register
+the current folder.
+
+### Choosing verification
+
+Type a verification command during project setup, or leave it to the first task's writer.
+The notes list commands found in build files and CI pipelines; these are evidence to inspect,
+not commands vivibox automatically trusts. Large Maven reactors can get a scoped command;
+see [scoped verification](#scoped-verification-and-preparation).
+
+When the writer proposes a command, the task stops at **review the command** before its first
+verification. `a` opens the command field; Enter keeps it for future tasks in the project.
+`e` changes it and `r` asks the writer for another proposal. A missing proposal leaves the field
+empty for you to fill. Commands selecting only some tests or modules are labelled as narrowed:
+a passing subset can miss regressions elsewhere. `--auto` keeps a whole command without stopping;
+a narrowed or missing command still waits for you.
+
+`e` on a project's row changes its verification later. If the command refers to a file missing
+from the commits (an uncommitted wrapper, for example), the task waits with **verification could
+not run**, without spending a fix round. Correct the command and verify again.
+
+Use `verify = false` in a task's plan for work that needs no build. In a project file it means
+that repository has nothing to build or test. The other mechanical checks still run; a task
+that gains build files without a verification command names them in its details.
+
+### Dependencies and toolchains
+
+Preparation (`prepare`) runs once in the task clone: for example, `./mvnw -B install -DskipTests`,
+`./gradlew assemble`, or the Node install selected by the lockfile. It runs during planning,
+and the writer waits for it before implementation. `--prepare` or **Change…** during setup
+sets your own commands.
+
+Verification uses a fresh clone. For Node projects, vivibox adds the dependency install
+(`npm ci`, Yarn or pnpm according to the lockfile) when the command does not already do so.
+A command such as `cd apps/web && yarn test` installs in that folder. Without a lockfile there,
+no install is inferred: include it in the verification command. A missing tool such as `tsc`
+is treated as an environment problem and waits for you.
+
+Build-file notes also show Maven/Gradle wrappers and Python verification through uv:
+`uv run --frozen pytest` with `uv.lock`, otherwise a temporary environment from the project's
+metadata or requirements. A Maven wrapper without its executable bit is invoked as
+`bash ./mvnw`. Choose a different JDK in the project settings when its build needs one.
 
 The pod comes with Node, npm, Python, uv and Java 21 ready to run (uv's downloads are shared
 between tasks, and Python writes no `__pycache__` into the clone), and `mise` installs any other
@@ -157,9 +168,11 @@ verify = ["./gradlew test --no-daemon --console=plain"]
 java = "17"                                     # empty for Java 21
 host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
-prepare = ["./mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
-tools = ["go@1.25.3"]                           # optional, toolchains the image does not have
+prepare = ["./gradlew assemble"]                # optional, once per new task clone
+# tools = ["go@1.25.3"]                        # for a Go project; installed by mise
 ```
+
+## Scoped verification and preparation
 
 `{modules}` in `verify` is for a project whose whole build outlasts a verification, hundreds of
 modules and a frontend: `verify = ["./mvnw -B -pl {modules} -am verify"]`. A task's plan then
@@ -184,6 +197,8 @@ cache (`maven.build.cache.enabled=false` in its `MAVEN_OPTS`): a cache hit would
 phases after the one an earlier command reached, skipping what `initialize` sets for the tests,
 such as Mockito's agent path, and the test JVM would not start.
 
+## Build credentials
+
 `pass_env` is for what a build reads from its environment, such as a package registry token that a
 settings file in the repository refers to (`${env.REPO_TOKEN}` in Maven's settings.xml). The agent
 and the gate get the values from the shell you start vivibox in, so set them first, for example
@@ -193,6 +208,8 @@ model keys, they are in the containers' environment, where `docker inspect` show
 log shows `***` in their place. A token that expires needs a fresh start: log in again, start
 vivibox from that shell, and stop and start the task with `s`; a task that got blocked on it is
 verified again with `g`.
+
+## Docker image downloads
 
 Every pod has a Docker of its own, so two tasks that run the same database in their tests download
 its image twice. With `hub_mirror = true` under `[network]` in `config.toml`, vivibox starts one

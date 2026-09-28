@@ -191,6 +191,8 @@ First public version.
   Docker network that holds it, and the other checks go on instead of stopping there.
 - The list's columns are as wide as what they show now: a long status gone from the list no
   longer keeps its column wide and pushes the goal off the screen.
+- The list no longer breathes: its columns kept a frame at their headings' width on every
+  refresh, which the mouse made visible.
 - A Maven or Gradle wrapper is proposed by its path: `./mvnw` when committed executable,
   `bash ./mvnw` when not, in the verification, the preparation and the notes. `bash mvnw` made a
   wrapper that finds the project by `${0%/*}` look for it under `mvnw/`.

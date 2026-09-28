@@ -130,10 +130,6 @@ class TaskTable:
     def fill_table(self, pairs: list, selected: str | None) -> None:
         table = self.table
         table.clear()
-        # A column keeps the width of the widest cell it ever held, past clear(): a long status
-        # gone from the list would keep its width and push the goal off the screen.
-        for column in table.columns.values():
-            column.content_width = column.label.cell_len
         planned: list[tuple[dict[str, str], str]] = []
         for name in self.project_order(pairs):
             own = [(t, st) for t, st in pairs if st.project == name]
@@ -186,12 +182,18 @@ class TaskTable:
                 ))  # fmt: skip
         # The goal gets what the other columns leave: a goal that runs off the screen is a goal
         # nobody reads. Its width comes from the widest thing each other column shows.
+        # Each column is set to it here, at once: a column keeps the width of the widest cell it
+        # ever held past clear(), which kept a long status gone from the list pushing the goal off
+        # the screen; and the table measures new rows only when idle, so a width left for it to
+        # measure was drawn narrow for a frame on every refill.
         taken = 0
         for name in self.columns:
             if name != "GOAL":
                 widest = max(
                     (Text.from_markup(cells.get(name, "")).cell_len for cells, _ in planned), default=0
                 )
+                column = table.columns[name]
+                column.content_width = max(widest, column.label.cell_len)
                 taken += max(widest, len(name)) + 2
         goal_width = max(self.size.width - taken - 3, 16)
         # The goal's column reaches the right edge whatever its goals: a wide terminal is used, and

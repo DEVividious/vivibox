@@ -114,6 +114,23 @@ def test_the_status_column_is_as_wide_as_the_statuses_listed_now(env):
     run(scenario)
 
 
+def test_a_refill_draws_no_frame_with_narrow_columns(env):
+    """The table measures new rows only when it is idle; a width set back to the heading's and left
+    for it to measure was drawn narrow once on every refill, and the list breathed under the mouse."""
+    new_task("A goal long enough to be cut")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        settled = {key: column.content_width for key, column in app.table.columns.items()}
+        app.drawn = ()  # the next reload refills, as a change of any task does
+        app.reload()
+        now = {key: column.content_width for key, column in app.table.columns.items()}
+        assert now == settled, "before the table is idle, as the next frame draws it"
+
+    run(scenario)
+
+
 def test_lists_tasks_waiting_for_you_first(env, monkeypatch):
     planning = new_task("Still planning")
     planning.event("started", model="m")

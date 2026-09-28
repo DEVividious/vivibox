@@ -85,6 +85,13 @@ def check_plan(plan: Plan) -> None:
     if not plan.criteria:
         # Name the heading: the criteria are usually written, just not where this looks for them.
         raise GateError("no '- [ ]' criteria under an 'Acceptance criteria' heading in the plan")
+    if len(plan.summary) > MAX_SUBJECT:
+        # The summary is the proposed commit's subject; past the limit the subject fell back to the
+        # agent's last commit, a review round's small fix.
+        raise GateError(
+            f"the summary is {len(plan.summary)} characters, and it is the commit's subject: at most"
+            f" {MAX_SUBJECT} characters; shorten it"
+        )
     if named := command_criteria(plan):
         raise GateError(
             "the verification command is not a criterion (the orchestrator runs it after every turn,"

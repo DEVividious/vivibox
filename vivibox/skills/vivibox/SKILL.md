@@ -58,8 +58,9 @@ on standard input. The first line of the output names the task: `Created <id> fr
 
 1. Run `vivibox wait <id> --json` until the task's `state` is `checkpoint:plan`. vivibox first
    starts the task's container, which can take a minute.
-2. Run `vivibox plan prompt <id>` and follow the prompt it prints: read the repository,
-   discuss the plan with the user, and write the final plan to the file it names.
+2. Run `vivibox plan prompt <id>` and follow the prompt it prints: read the repository and
+   discuss the plan with the user. Show them the whole plan here and ask whether it is final;
+   write it to the file the prompt names only after they say it is.
 3. Run `vivibox plan import <id>`. If it fails, it says what is wrong; fix the file and import
    again.
 4. Show the user the plan's summary and its acceptance criteria. When they accept it, run
@@ -88,9 +89,10 @@ and ask the user what to do; after their decision, wait again.
   `vivibox status <id>` and `vivibox timeline <id>`; the user answers the agent
   (`vivibox reply <id> "<comment>"`) or, after fixing the environment, runs
   `vivibox verify-again <id>`.
-- `state` `checkpoint:final`: the work passed the gate. `vivibox review <id>` prints the path of
-  the review copy; read `git -C <path> status --short` and `git -C <path> diff`, and summarise the
-  change against the plan's criteria. The user accepts (`vivibox accept <id>`: the work lands in
+- `state` `checkpoint:final`: the work passed the gate. `vivibox review <id>` prints
+  `Review copy: <path>` on its first line. The work there is staged: read
+  `git -C <path> status --short` and `git -C <path> diff --cached`, and summarise the change
+  against the plan's criteria. The user accepts (`vivibox accept <id>`: the work lands in
   their checkout uncommitted, with a suggested commit message; commit only when they ask),
   accepts it onto a branch (`vivibox accept <id> --branch`) or sends it back
   (`vivibox reply <id> "<comment>"`).

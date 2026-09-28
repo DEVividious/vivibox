@@ -46,7 +46,7 @@ anything in the repository and do not plan the task. End the turn when context.m
 # Asking a chat to reproduce a TOML header after an hour of discussion got it back as a line of
 # prose, so the chat is asked only for what it decides, and asked last, where it is still read.
 FORMAT = """When I say the plan is final, {deliver} It starts with a line
-"Summary: <one sentence of at most 100 characters naming what the task does>", then the
+"Summary: <one sentence of at most 72 characters naming what the task does>", then the
 sections of the plan above as markdown headings, with each acceptance criterion as a "- [ ]" line
 that can be checked. Keep the first criterion as it is. The comments in the plan are guidance for
 you; leave them out."""

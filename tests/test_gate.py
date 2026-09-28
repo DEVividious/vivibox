@@ -1053,3 +1053,23 @@ def test_why_red_names_the_first_two_things_that_went_wrong():
     assert gate.why_red(result) == "`npm test` failed, 2 criteria not met"
     only = gate.GateResult(Path("/dev/null"), no_red_evidence=["t.py"], narrowed="-k x")
     assert gate.why_red(only) == "1 test without red evidence, command narrowed to -k x"
+
+
+def test_a_summary_too_long_for_a_commit_subject_is_refused():
+    """The summary is the proposed commit's subject; one past the limit left the subject to the
+    agent's last commit, which after a round of review was that round's small fix."""
+    from vivibox.plan import parse_plan
+
+    plan = parse_plan(
+        f'+++\nmode = "code-only"\nsummary = "{"x" * (gate.MAX_SUBJECT + 1)}"\nverify = []\n+++\n\n'
+        "# Goal\n\nG.\n\n## Acceptance criteria\n\n- [ ] it works\n"
+    )
+    with pytest.raises(gate.GateError, match=f"at most {gate.MAX_SUBJECT} characters"):
+        gate.check_plan(plan)
+
+
+def test_the_planning_prompts_give_the_summary_the_subject_s_limit():
+    from vivibox import manual, prompts
+
+    for text in (prompts.PLAN_PROMPT, manual.FORMAT):
+        assert f"at most {gate.MAX_SUBJECT}" in " ".join(text.split())

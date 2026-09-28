@@ -186,6 +186,11 @@ First public version.
 
 ### Fixed
 
+- A plan's summary longer than a commit subject (72 characters) is refused when the plan is
+  brought in or accepted, and the planning prompts give that limit: past it, the proposed commit's
+  subject was the agent's last commit, often a review round's small fix.
+- The vivibox skill waits for the user to call the plan final before writing it, and reads the
+  staged work in the review copy (`git diff --cached`).
 - `vivibox plan import` from a shell with no terminal (an agent's CLI) takes the answer file
   instead of emptying it with an empty standard input.
 - `vivibox plan import` refuses what accepting the plan would, such as a criterion asking the build

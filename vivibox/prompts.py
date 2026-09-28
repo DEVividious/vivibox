@@ -11,7 +11,7 @@ from .states import State
 # (templates/instructions.md) allows, and nothing else. docs/prompt-guidelines.md says why.
 PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
 /task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
-- keep the header between the +++ lines, except: set summary to one line of at most 100
+- keep the header between the +++ lines, except: set summary to one line of at most 72
   characters naming what the task does, and fill in modules where the header has it;
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
   check" with concrete "- [ ]" items, each checkable by reading or running code; keep the

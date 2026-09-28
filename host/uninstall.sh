@@ -9,6 +9,7 @@
 # What it removes:
 #   - every task's pod: containers, networks, volumes (the shared caches too) and the agent image;
 #   - the vivibox command (uv tool), the sudo rule and the firewall helper;
+#   - the vivibox skill for Claude Code and Codex, where vivibox installed it;
 #   - the tasks directory's bind mount and its /etc/fstab line;
 #   - Sysbox CE (restarts Docker);
 #   - the Docker network ranges setup.sh wrote: /etc/docker/daemon.json goes back to the copy
@@ -30,6 +31,22 @@ CHECK_ONLY=false
 [[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 
 die() { echo "uninstall: $*" >&2; exit 1; }
+
+# Where each agent CLI reads the vivibox skill, as in setup.sh; keep in step with PLACES in
+# vivibox/skill.py.
+SKILL_PLACES=(".claude .claude/skills" ".codex .agents/skills")
+
+# The copies of the skill vivibox installed (with .vivibox-version beside SKILL.md), a path a line.
+skill_copies() {
+  local place skills
+  for place in "${SKILL_PLACES[@]}"; do
+    skills=${place#* }
+    [[ -f "$HOME/$skills/vivibox/.vivibox-version" ]] && echo "$HOME/$skills/vivibox"
+  done
+  return 0
+}
+
+# Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 [[ $EUID -ne 0 ]] || die "run as your user, not root; the script uses sudo where needed"
@@ -69,6 +86,9 @@ if [[ -x "$UV" ]] && "$UV" tool list 2>/dev/null | grep -q '^vivibox '; then
 else
   absent "vivibox command"
 fi
+
+mapfile -t SKILLS < <(skill_copies)
+if ((${#SKILLS[@]})); then found "the vivibox skill in ${SKILLS[*]}" do_skill; else absent "the vivibox skill"; fi
 
 if [[ -e "$SUDOERS" ]]; then found "sudo rule $SUDOERS" do_sudoers; else absent "sudo rule $SUDOERS"; fi
 
@@ -134,6 +154,8 @@ do_pods() {
 }
 
 do_vivibox() { "$UV" tool uninstall vivibox; }
+
+do_skill() { rm -rf "${SKILLS[@]}"; }
 
 do_sudoers() { sudo rm -f "$SUDOERS"; }
 

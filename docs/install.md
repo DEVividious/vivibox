@@ -24,6 +24,10 @@ your user to run only the pod firewall helper through sudo. As you, without sudo
 [uv](https://docs.astral.sh/uv/) in `~/.local/bin` when you have none, and the `vivibox` command
 from this checkout, editable, so it follows the checkout as you update it. When an update changes
 `pyproject.toml`, run `uv tool install --force --editable .` for the new dependencies.
+Where Claude Code or Codex is installed (`~/.claude`, `~/.codex`), it also installs the vivibox
+skill for them (`vivibox skill install`). The skill is a copy, so it does not follow the checkout:
+after an update `--check` says when it is older, and running `host/setup.sh` again installs it anew.
+`host/uninstall.sh` removes the copies vivibox installed.
 
 Setup checks for Git and installs it when missing, just like tmux; `--check` only reports it.
 

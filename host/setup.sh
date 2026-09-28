@@ -14,7 +14,8 @@
 #   - Sysbox CE, the runtime for the per-task Docker sidecar;
 #   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev;
 #   - the egress firewall helper and a sudo rule that allows running only that helper;
-#   - uv, in ~/.local/bin, and the vivibox command installed from this checkout.
+#   - uv, in ~/.local/bin, and the vivibox command installed from this checkout;
+#   - the vivibox skill for Claude Code and Codex, where either is installed.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -38,6 +39,9 @@ UV_TARBALL=uv-x86_64-unknown-linux-gnu.tar.gz
 UV_SHA256=56dd1b66701ecb62fe896abb919444e4b83c5e8645cca953e6ddd496ff8a0feb
 BIN=$HOME/.local/bin
 REPO=$(dirname "$HERE")
+# Where each agent CLI reads the vivibox skill: "<the CLI's own folder> <its skills folder>" under
+# $HOME. Keep in step with PLACES in vivibox/skill.py.
+SKILL_PLACES=(".claude .claude/skills" ".codex .agents/skills")
 
 CHECK_ONLY=false
 [[ "${1:-}" == --check ]] && CHECK_ONLY=true
@@ -132,6 +136,21 @@ kernel_verdict() {
     echo "kernel $release: vivibox cannot run; Sysbox needs Linux 5.12 or newer" >&2
     return 1
   fi
+}
+
+# The copies of the skill missing or older than this checkout's, a path a line, for each agent CLI
+# installed here. A copy, not a link: a checkout that moved on leaves it behind. A folder of that
+# name vivibox did not install (no .vivibox-version) is someone else's, and left alone.
+skill_to_install() {
+  local place cli skills copy
+  for place in "${SKILL_PLACES[@]}"; do
+    read -r cli skills <<<"$place"
+    [[ -d "$HOME/$cli" || -d "$HOME/$skills" ]] || continue
+    copy=$HOME/$skills/vivibox
+    [[ -d "$copy" && ! -f "$copy/.vivibox-version" ]] && continue
+    cmp -s "$REPO/vivibox/skills/vivibox/SKILL.md" "$copy/SKILL.md" || echo "$copy"
+  done
+  return 0
 }
 
 # Sourced by the tests for the functions above.
@@ -248,6 +267,13 @@ else
   need "vivibox command in $BIN, installed from $REPO (editable: follows this checkout)" do_vivibox
 fi
 
+mapfile -t stale_skills < <(skill_to_install)
+if ((${#stale_skills[@]})); then
+  need "the vivibox skill for Claude Code or Codex in ${stale_skills[*]}" do_skill
+else
+  ok "the vivibox skill, for each agent CLI installed here"
+fi
+
 # --- actions ----------------------------------------------------------------------------------
 
 do_packages() {
@@ -344,6 +370,10 @@ do_uv() {
 
 do_vivibox() {
   "$UV" tool install --force --editable "$REPO"
+}
+
+do_skill() {
+  "$BIN/vivibox" skill install
 }
 
 # --- apply ------------------------------------------------------------------------------------

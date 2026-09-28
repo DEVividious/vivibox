@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+REPO = Path(__file__).parent.parent
 HOST = Path(__file__).parent.parent / "host"
 HELPER = HOST / "vivibox-netns"
 
@@ -279,3 +280,50 @@ def run_setup_without_host_changes(tmp_path, *, check, installed):
         env=env,
     )
     return result, calls.read_text() if calls.exists() else ""
+
+
+def test_setup_installs_the_skill_where_an_agent_cli_is_and_leaves_one_not_its_own(tmp_path):
+    """A copy, so a checkout that moved on leaves it behind: --check says so, and the step
+    installs it again. A skill of that name vivibox did not install is someone else's."""
+    home = tmp_path / "home"
+    home.mkdir()
+    stale = lambda: setup_fn("skill_to_install", {"HOME": str(home)}).stdout.split()  # noqa: E731
+    assert stale() == [], "no agent CLI here: nothing to install"
+    (home / ".claude").mkdir()
+    (home / ".codex").mkdir()
+    claude, codex = home / ".claude" / "skills" / "vivibox", home / ".agents" / "skills" / "vivibox"
+    assert stale() == [str(claude), str(codex)]
+    source = (REPO / "vivibox" / "skills" / "vivibox" / "SKILL.md").read_text()
+    for copy in (claude, codex):
+        copy.mkdir(parents=True)
+        (copy / "SKILL.md").write_text(source)
+        (copy / ".vivibox-version").write_text("0.1.0\n")
+    assert stale() == []
+    (codex / "SKILL.md").write_text("an older skill")
+    assert stale() == [str(codex)]
+    (codex / ".vivibox-version").unlink()
+    assert stale() == [], "not vivibox's copy: left alone"
+
+
+def test_uninstall_removes_only_the_skill_copies_vivibox_installed(tmp_path):
+    home = tmp_path / "home"
+    ours, theirs = home / ".claude" / "skills" / "vivibox", home / ".agents" / "skills" / "vivibox"
+    for copy in (ours, theirs):
+        copy.mkdir(parents=True)
+        (copy / "SKILL.md").write_text("skill")
+    (ours / ".vivibox-version").write_text("0.1.0\n")
+    script = f'source "{HOST / "uninstall.sh"}"; skill_copies'
+    found = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env={**os.environ, "HOME": str(home)}
+    )
+    assert found.stdout.split() == [str(ours)]
+
+
+def test_the_scripts_install_and_remove_the_skill_where_vivibox_does():
+    from vivibox import skill
+
+    wanted = [f"{place.home} {place.skills}" for place in skill.PLACES]
+    setup = re.search(r"^SKILL_PLACES=\((.*)\)$", (HOST / "setup.sh").read_text(), re.MULTILINE)
+    assert setup and re.findall(r'"([^"]+)"', setup.group(1)) == wanted
+    uninstall = re.search(r"^SKILL_PLACES=\((.*)\)$", (HOST / "uninstall.sh").read_text(), re.MULTILINE)
+    assert uninstall and re.findall(r'"([^"]+)"', uninstall.group(1)) == wanted

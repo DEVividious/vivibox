@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- `host/setup.sh` installs the vivibox skill where Claude Code or Codex is installed, and
+  `--check` says when a copy is older than the checkout; `host/uninstall.sh` removes vivibox's
+  copies.
 - `vivibox skill install` and `uninstall`: a skill for Claude Code and Codex that makes a vivibox
   task, plans it with you in the conversation, waits for it and brings every checkpoint back to
   you; `vivibox info` and the view say when a copy is older than vivibox.

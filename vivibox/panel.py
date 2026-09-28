@@ -308,6 +308,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         return "`s` start; it goes on from where it was"
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return "`c` copy the prompt for a browser · `C` for a CLI · `e` paste the plan"
+    if ui.planner_asks(task, st):
+        return "`r` answer, and it plans again · `e` write the plan yourself"
     if st.state is State.CHECKPOINT_PLAN:
         return "`a` accept the plan · `r` send it back with a comment · `e` edit it"
     if st.state is State.CHECKPOINT_COMMAND:
@@ -514,6 +516,7 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
         "accept": (
             st.state in (State.CHECKPOINT_PLAN, State.CHECKPOINT_COMMAND, State.CHECKPOINT_FINAL)
             and not st.awaiting_plan
+            and not ui.planner_asks(task, st)
         ),
         "edit_command": st.state is State.CHECKPOINT_COMMAND,
         "reply": st.state in WAITING_ONLY and not st.awaiting_plan and not st.box,
@@ -629,6 +632,8 @@ def detail(
             "",
             plan_text(read(task.plan_path)),
         ]
+    elif ui.planner_asks(task, st):
+        body = ["**The agent asks, instead of a plan:**", "", read(handoff / supervisor.QUESTION)]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
         body = [*plans_verify(task, st), plan_text(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_COMMAND:

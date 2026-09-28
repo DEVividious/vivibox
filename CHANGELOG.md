@@ -165,6 +165,9 @@ First public version.
 
 ### Fixed
 
+- A planner that asks instead of planning (the goal is met already) leaves the task at "agent
+  asks" with its question in the panel, not at "review the plan" with the template as the plan,
+  whose accept could only fail.
 - The paths suggested after `@` in a new task show which one is picked, Enter takes a folder as it
   is (Tab opens it), Escape closes only the list, and a click takes a path without leaving the
   goal.

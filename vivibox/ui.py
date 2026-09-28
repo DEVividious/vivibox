@@ -226,6 +226,24 @@ def group(st: TaskState) -> str:
     return "Stopped" if st.paused else "Working"
 
 
+def planner_asks(task: Task, st: TaskState) -> bool:
+    """The planner wrote a question instead of a plan (the goal is met already, say): the plan
+    checkpoint has only the template to show, and waits for your answer. A plan you write yourself
+    under e makes it a plan to review again."""
+    from . import gate  # the gate reads the view's words; imported here, not at the top
+    from .plan import PlanError, parse_plan
+
+    if st.state is not State.CHECKPOINT_PLAN or st.awaiting_plan:
+        return False
+    if not (task.meta / "handoff" / "question.md").exists():
+        return False
+    try:
+        gate.check_plan(parse_plan(task.plan_path.read_text()))
+    except (OSError, PlanError, gate.GateError):
+        return True
+    return False
+
+
 # A manual planner's checkpoint before you brought a plan: nothing to review yet.
 AWAITING_PLAN = ("plan it yourself", ["vivibox plan prompt {id}", "vivibox plan import {id}"])
 
@@ -313,6 +331,9 @@ def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
         return TaskView(activity(st, max_rounds), WAITS, DECISION, commands=commands)
     if st.state in WAITING:
         status = activity(st, max_rounds)
+        if planner_asks(task, st):
+            reply = [c for c in next_commands(st) if "reply" in c]
+            return TaskView("agent asks", WAITS, DECISION, commands=tuple(reply))
         if st.state is State.CHECKPOINT_BLOCKED:
             if (task.meta / "handoff" / "question.md").exists():
                 status = "agent asks"

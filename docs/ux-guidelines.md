@@ -52,7 +52,7 @@ Status labels, the only ones allowed:
 | verification running | `verifying` | Working |
 | the reviewer reading the work | `reviewing` | Working |
 | risky files changed | `approve risky files` | Waiting for you |
-| blocked on the agent's question | `agent asks` | Waiting for you |
+| blocked on the agent's question; or the planner asked instead of planning (the goal is met already), with only the template for a plan: its question in the panel, `r` to answer, `e` to write the plan, no `a` | `agent asks` | Waiting for you |
 | blocked with every round used | `verification failed N×` | Waiting for you |
 | blocked by something outside the code (Docker, network, a credential, the time limit); no round spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |

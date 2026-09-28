@@ -307,6 +307,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         if st.state is State.CHECKPOINT_BLOCKED:
             return "`s` start · `g` verify again, once you have fixed it · `r` tell the agent"
         return "`s` start; it goes on from where it was"
+    if st.awaiting_review and st.state is State.REVIEW:
+        return "your agent's CLI reviews this round · `m` put the supervisor on a model, then `s`"
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN and st.plan_in_cli:
         return "`C` copy the prompt for your agent's CLI · `e` paste the plan"
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
@@ -618,6 +620,13 @@ def detail(
             "task's comes; risky files wait for your approval like a task's.",
             "",
             f"Clone: `{task.repo}`",
+        ]
+    elif st.awaiting_review and st.state is State.REVIEW:
+        body = [
+            "**Review in your agent's CLI.** The verification passed, and the CLI that planned the task",
+            "reviews this round; `vivibox wait` told it so. With that conversation closed, a new one",
+            f"takes the round with `vivibox review {task.id} --prompt`, or `m` puts the supervisor on a",
+            "model, which reviews from the next start.",
         ]
     elif st.awaiting_plan and st.state is State.CHECKPOINT_PLAN and st.plan_in_cli:
         body = [

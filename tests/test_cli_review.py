@@ -151,3 +151,44 @@ def test_info_offers_supervisor_worker_to_a_planner_in_the_cli(env, capsys):
     assert main(["info", "--json", str(env / "repo")]) == 0
     flows = {f["name"]: f for f in json.loads(capsys.readouterr().out)["flows"]}
     assert flows["supervisor_worker"]["plan_in_cli"] and not flows["single_agent"]["plan_in_cli"]
+
+
+def test_the_ask_is_a_notification_without_the_open_in_ide_button(task, tmp_path):
+    """The work is not yet yours to open; the round is the CLI's."""
+    sup, _, _ = in_cli(task, tmp_path)
+    said = []
+    sup.ports.notify = lambda task_id, message, kind="": said.append((message, kind))
+    to_review(sup, task)
+    sup.step()
+    assert said[-1][0].startswith("review in your CLI") and said[-1][1] == ""
+
+
+def test_the_view_says_the_review_is_the_clis_and_how_to_get_past_a_closed_one(task, tmp_path):
+    from vivibox import panel, ui
+
+    sup, _, _ = in_cli(task, tmp_path)
+    to_review(sup, task)
+    sup.step()
+    st = task.read_state()
+    seen = ui.view(task, st, True, 3)
+    assert seen.status == "review in your CLI" and seen.group == "Working"
+    shown = panel.detail(task, st, 3, running=True)
+    assert "Review in your agent's CLI" in shown and f"vivibox review {task.id} --prompt" in shown
+    assert "`m`" in shown, "the way out when the CLI is gone"
+
+
+def test_a_supervisor_put_on_a_model_reviews_the_round_itself(task, tmp_path):
+    """m, then a start: the task waited for the CLI; its new supervisor has a model, and runs it."""
+    from test_supervisor import FakeReviewer
+
+    sup, _, _ = in_cli(task, tmp_path)
+    to_review(sup, task)
+    sup.step()
+    assert task.read_state().awaiting_review
+    out = task.meta / "review"
+    out.mkdir(exist_ok=True)
+    sup.planner = FakeReviewer(task, out, [CLEAN])
+    sup.step()  # the flag is the old supervisor's: taken down
+    sup.step()  # and the model reviews
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and not st.awaiting_review and len(sup.planner.prompts) == 1

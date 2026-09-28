@@ -56,11 +56,16 @@ class ReviewRound:
         self.ports.notify(
             self.task.id,
             f"review in your CLI, round {n}: vivibox review {self.task.id} --prompt",
-            kind="review",
         )
 
     def _watch_cli_review(self, st: TaskState) -> bool:
-        """The review the CLI brought in, taken as a reviewer's turn; False while there is none."""
+        """The review the CLI brought in, taken as a reviewer's turn; False while there is none.
+        A supervisor put on a model since (m, then a start) takes the old one's wait down and
+        reviews the round itself."""
+        if not self._reviews_in_cli():
+            self.task.set_awaiting_review(False)
+            self.task.event("review_taken_back", round=st.reviews + 1)
+            return True
         text = reviewing.brought_in(self.task)
         if text is None:
             return False

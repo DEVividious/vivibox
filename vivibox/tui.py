@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, ide, look, probe, ui
+from . import actions, code, gate, ide, look, probe, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -509,6 +509,8 @@ class Vivibox(
                     return
                 try:
                     actions.accept_plan(task, project)
+                except gate.GateError as e:  # what the plan lacks, and the two ways to give it that
+                    self.fail(gate.GateError(f"{e}: press e to edit the plan, or r to send it back"))
                 except Exception as e:
                     self.fail(e)
                 else:

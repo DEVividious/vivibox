@@ -430,6 +430,14 @@ class Supervisor:
                 return
             plan, problem = self._read_draft()
         if problem:
+            # The planner's draft, when it is a plan at all, is what you fix under e: one line short
+            # of acceptable is not a reason to start again from the template.
+            draft = self.task.meta / "handoff" / "plan-draft.md"
+            try:
+                parse_plan(draft.read_text())
+                self.task.plan_path.write_text(without_notes(draft.read_text()))
+            except (OSError, PlanError):
+                pass
             self._checkpoint(
                 State.CHECKPOINT_PLAN, f"no valid plan draft ({problem}); edit the plan yourself or reply"
             )

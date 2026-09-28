@@ -1452,3 +1452,16 @@ def test_after_a_clean_review_the_whole_build_is_the_last_step(task, tmp_path):
     assert whole == [], "not before the review: it may send the work back"
     sup.step()  # the review: clean
     assert whole == [State.REVIEW] and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_a_draft_still_refused_after_its_repair_is_the_plan_you_edit(task):
+    """The planner's work, one line short of acceptable: under e you fix that line, not write the
+    plan again from the template."""
+    kept = DRAFT + f"- [ ] {gate.PLACEHOLDER}\n"
+    write = lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(kept)  # noqa: E731
+    sup, _ = make(task, FakeHarness(task, [write, write]))
+    sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_PLAN and "no valid plan draft" in task.events()[-1]["data"]["reason"]
+    plan = task.plan_path.read_text()
+    assert "health endpoint returns 200" in plan and gate.PLACEHOLDER in plan

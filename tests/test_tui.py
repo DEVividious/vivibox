@@ -182,6 +182,21 @@ def test_accept_the_plan_with_a(env):
     run(scenario)
 
 
+def test_a_plan_a_refuses_says_how_to_fix_it(env):
+    task = new_task()
+    task.transition(State.CHECKPOINT_PLAN)  # the template's placeholder still in
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await pilot.pause()
+        said = [str(n.message) for n in app._notifications]
+        assert task.read_state().state is State.CHECKPOINT_PLAN
+        assert any("placeholder" in m and "press e to edit" in m and "r to send" in m for m in said), said
+
+    run(scenario, notifications=True)
+
+
 def fresh_project(env, name="clicker"):
     """A project from scratch, with no build of its own yet."""
     actions.setup_project(env / name, name, [], create=True)

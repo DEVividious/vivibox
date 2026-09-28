@@ -168,6 +168,9 @@ First public version.
 - A planner that asks instead of planning (the goal is met already) leaves the task at "agent
   asks" with its question in the panel, not at "review the plan" with the template as the plan,
   whose accept could only fail.
+- A planner's draft that is still refused after its repair turn is the plan you edit under `e`,
+  not the template.
+- A plan `a` refuses says how to fix it: e to edit the plan, r to send it back.
 - The paths suggested after `@` in a new task show which one is picked, Enter takes a folder as it
   is (Tab opens it), Escape closes only the list, and a click takes a path without leaving the
   goal.

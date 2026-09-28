@@ -48,8 +48,8 @@ it once it has no tasks; the repository stays.
 
 **Files as context.** *Attach…* in the new task dialog browses to a file or folder, or write
 `@src/Order.java` or `@~/tickets/PAY-123.md` (also `@/abs/path`, `@./relative`, a folder) in the
-description; after `@` the view suggests paths as you type (arrows, then Tab or Enter; a folder
-opens its contents), from the project's repository first, then from where you started `vivibox`
+description; after `@` the view suggests paths as you type (arrows pick, Enter takes a path as
+it is, a folder too, Tab opens a folder, Esc closes the list, a click takes one), from the project's repository first, then from where you started `vivibox`
 (`./`, `../`, `~/` and `/` mean where you are). A piece
 of a path is enough: `@OrderSer` or `@orders/OrderSer` finds `src/main/java/com/acme/orders/OrderService.java`
 anywhere in the project, files git ignores left out. A file

@@ -3855,6 +3855,48 @@ def test_at_suggests_the_projects_files_and_the_view_notes_uncommitted_ones(env,
     assert "uncommitted changes" in detail(task, task.read_state(), 3, running=False), "kept with the task"
 
 
+def test_at_suggestions_show_the_pick_take_a_folder_on_enter_and_close_on_escape(env, tmp_path, monkeypatch):
+    """The first suggestion is highlighted where you can see it while you type; arrows move it;
+    Enter takes what is highlighted, a folder too (Tab opens one); Escape closes the list and
+    leaves the dialog open; a click takes a suggestion and the goal keeps the cursor."""
+    from vivibox import newtask
+
+    for name in ("alpha", "beta"):
+        (tmp_path / "docs" / name).mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press(*"See @docs/")
+        await pilot.pause()
+        suggestions = app.screen.query_one("#suggestions")
+        goal = app.screen.query_one("#goal")
+        assert suggestions.display and suggestions.highlighted == 0 and not suggestions.can_focus
+
+        def background(y):  # of the path's own text on the line
+            return next(seg.style.bgcolor for seg in suggestions.render_line(y) if "docs" in seg.text)
+
+        assert background(0) != background(1), "the pick is visible"
+        await pilot.press("down")
+        assert suggestions.highlighted == 1
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, newtask.NewTask) and not suggestions.display, "only the list closes"
+        await pilot.press("backspace", "/")
+        await pilot.pause()
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert goal.text == "See @docs/beta/ " and not suggestions.display, "a folder is taken as it is"
+        await pilot.press(*"@docs/")
+        await pilot.pause()
+        await pilot.click("#suggestions", offset=(3, 1))
+        await pilot.pause()
+        assert goal.text.endswith("@docs/alpha/ ") and app.screen.focused is goal
+
+    run(scenario)
+
+
 def test_at_finds_a_file_deep_in_the_projects_tree(env, tmp_path, monkeypatch):
     orders = env / "repo" / "src" / "main" / "java" / "com" / "acme" / "orders"
     orders.mkdir(parents=True)

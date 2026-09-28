@@ -26,10 +26,17 @@ from .settings import ROLE_ABOUT as ROLE_HELP
 from .widgets import ContextHelp, Dialog, Fields, follow_highlight, leave_at_edge
 
 
+class Suggestions(OptionList):
+    """The paths offered after '@'. The goal keeps the focus while you type, so the list takes none:
+    a click picks a path and you go on typing."""
+
+    can_focus = False
+
+
 class DescriptionArea(TextArea):
     """A text area that suggests paths after '@', like Claude Code: a folder's entries, or any path in
-    the project that contains what you typed; arrows pick, Tab or Enter take one, Escape closes the
-    list."""
+    the project that contains what you typed; arrows pick, Enter takes one as it is, a folder too,
+    Tab opens a folder, Escape closes the list."""
 
     def __init__(self, suggestions: OptionList, cwd: Path, **kwargs):
         super().__init__(**kwargs)
@@ -65,13 +72,15 @@ class DescriptionArea(TextArea):
         if found:
             self.suggestions.highlighted = 0
 
-    def take(self, choice: str) -> None:
+    def take(self, choice: str, open_folder: bool = False) -> None:
         partial = self.mention() or ""
         row, col = self.cursor_location
         self.replace(choice, (row, col - len(partial)), (row, col))
-        if not choice.endswith("/"):
-            self.insert(" ")
-        self.suggest()  # a directory opens its contents
+        if open_folder and choice.endswith("/"):
+            self.suggest()  # its contents, to go on down
+            return
+        self.insert(" ")
+        self.suggestions.display = False
 
     async def _on_key(self, event: events.Key) -> None:
         if not self.suggestions.display and leave_at_edge(self, event):
@@ -87,7 +96,8 @@ class DescriptionArea(TextArea):
             elif event.key == "down":
                 options.action_cursor_down()
             elif options.highlighted is not None:
-                self.take(str(options.get_option_at_index(options.highlighted).prompt))
+                choice = str(options.get_option_at_index(options.highlighted).prompt)
+                self.take(choice, open_folder=event.key == "tab")
             return
         await super()._on_key(event)
 
@@ -212,7 +222,7 @@ class NewTask(Dialog):
                              ("Nothing to build or test: research, a ticket analysis", True)],
                             value=False, allow_blank=False, compact=True, id="no-build",
                         )  # fmt: skip
-                    suggestions = OptionList(id="suggestions")
+                    suggestions = Suggestions(id="suggestions")
                     suggestions.display = False
                     with Horizontal(classes="row text-row", id="task-row"):
                         yield Label("Goal", classes="key")
@@ -494,4 +504,14 @@ class NewTask(Dialog):
         self.query_one("#create", Button).press()
 
     def key_escape(self) -> None:
+        suggestions = self.query_one("#suggestions", Suggestions)
+        if suggestions.display:  # only the list: the goal you were typing stays
+            suggestions.display = False
+            return
         self.dismiss({})
+
+    @on(OptionList.OptionSelected, "#suggestions")
+    def suggestion_clicked(self, event: OptionList.OptionSelected) -> None:
+        goal = self.query_one("#goal", DescriptionArea)
+        goal.take(str(event.option.prompt))
+        goal.focus()

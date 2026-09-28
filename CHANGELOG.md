@@ -165,6 +165,9 @@ First public version.
 
 ### Fixed
 
+- The paths suggested after `@` in a new task show which one is picked, Enter takes a folder as it
+  is (Tab opens it), Escape closes only the list, and a click takes a path without leaving the
+  goal.
 - `vivibox attach` run without a terminal says it needs one, instead of leaving the agent's
   window running in the pod.
 - A command the writer proposes with Maven's or Gradle's debug output on (`mvn -X`, `--debug`,

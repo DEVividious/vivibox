@@ -112,6 +112,8 @@ ToggleButton.-on > .toggle--button { color: $success; }
 /* The browser takes the screen's height, the tree what the rows under it leave. */
 .dialog.browse { height: 90%; }
 #suggestions { max-height: 8; border: round $frame; background: $panel; }
+/* The list never has the focus (the goal keeps it while you type), so its pick is shown as if it had. */
+#suggestions > .option-list--option-highlighted { background: $selection; text-style: bold; }
 #editors { max-height: 40vh; margin: 1 0; }
 /* The settings list grows with the terminal; settings.py leaves room under it for what the
    highlighted row does (#about), set apart by a rule. */

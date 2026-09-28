@@ -238,5 +238,6 @@ First public version.
 - The agent's window (tmux, `w`) lives in `window.py`, reached through `actions`.
 - `vivibox auth` and `vivibox models` live in `cli_providers.py`, under the size limit.
 - `vivibox image` and `vivibox mirror` live in `cli_host.py`, under the size limit.
+- What a proposed command is refused for lives in `whole_build.py`; `gate` re-exports it.
 - `CHANGELOG.md` is written as the work is done: a change under `vivibox/` changes it in the
   same commit, and `tests/test_structure.py` fails on a branch that does not.

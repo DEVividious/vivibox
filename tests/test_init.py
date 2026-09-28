@@ -530,3 +530,21 @@ def test_go_before_toolchains_gets_a_go_that_builds_it(tmp_path):
     assert init.detect(go).tools == ["go@latest"]
     (go / "go.mod").write_text("module example.com/cli\n\ngo 1.21.0\n")
     assert init.detect(go).tools == ["go@1.21.0"]
+
+
+def test_a_large_maven_reactor_is_verified_by_the_modules_a_plan_names(tmp_path):
+    """Its whole build outlasts a verification (keycloak: hundreds of modules and a frontend), so
+    init writes the command with {modules} into the verification itself; a reactor of a few
+    modules builds whole in minutes and its writer proposes the command, as ever."""
+    big = make_repo(tmp_path / "big")
+    (big / "mvnw").write_text("")
+    modules = "".join(f"<module>m{i}</module>" for i in range(init.MANY_MODULES))
+    (big / "pom.xml").write_text(f"<project><modules>{modules}</modules></project>")
+    found = init.detect(big)
+    assert found.verify == ["bash mvnw -B -pl {modules} -am verify"]
+    assert any("{modules}" in note for note in found.notes), "and says why"
+    small = make_repo(tmp_path / "small")
+    (small / "pom.xml").write_text(
+        "<project><modules><module>core</module><module>app</module></modules></project>"
+    )
+    assert init.detect(small).verify == []

@@ -1,5 +1,5 @@
-"""A project of many modules verifies a task with the modules its plan names (verify_scoped), and
-with the whole build when the work reaches past them."""
+"""A project of many modules verifies a task with the modules its plan names ({modules} in its
+command), and with the whole build, the same command without them, when the work reaches past them."""
 
 import subprocess
 from pathlib import Path
@@ -8,7 +8,7 @@ import pytest
 from conftest import make_repo
 
 from vivibox import gate, proposal, repo
-from vivibox.config import ConfigError, Project, load_project
+from vivibox.config import Project, load_project
 from vivibox.plan import PlanError, parse_plan
 from vivibox.task import create_task
 
@@ -23,29 +23,25 @@ def write(path: Path, text: str) -> Path:
     return path
 
 
-def test_a_project_names_the_command_for_some_of_its_modules(tmp_path):
-    text = f'repo = "/r"\nverify = ["mvn -B verify"]\nverify_scoped = "{SCOPED}"\n'
-    write(tmp_path / "projects" / "shop.toml", text)
-    assert load_project("shop", tmp_path).verify_scoped == SCOPED
-    write(tmp_path / "projects" / "old.toml", 'repo = "/r"\nverify = ["x"]\n')
-    assert load_project("old", tmp_path).verify_scoped == ""
+def test_a_project_verified_by_module_has_modules_in_its_one_command(tmp_path):
+    write(tmp_path / "projects" / "shop.toml", f'repo = "/r"\nverify = ["{SCOPED}"]\n')
+    assert load_project("shop", tmp_path).by_module
+    write(tmp_path / "projects" / "old.toml", 'repo = "/r"\nverify = ["mvn -B verify"]\n')
+    assert not load_project("old", tmp_path).by_module
 
 
 @pytest.mark.parametrize(
-    "text, says",
+    "command, whole",
     [
-        ('verify = ["mvn -B verify"]\nverify_scoped = "mvn -B verify"\n', "{modules}"),
-        ('verify = []\nverify_scoped = "mvn -pl {modules} verify"\n', "verify"),
-        ('verify = false\nverify_scoped = "mvn -pl {modules} verify"\n', "verify"),
+        ("mvn -B -pl {modules} -am verify", "mvn -B verify"),
+        ("bash mvnw -B --projects={modules} --also-make test", "bash mvnw -B test"),
+        ("mvn -B -pl {modules} verify -DskipITs", "mvn -B verify -DskipITs"),
+        ("make test", "make test"),
     ],
 )
-def test_the_command_for_some_modules_needs_its_place_and_the_whole_build(tmp_path, text, says):
-    """Without {modules} it is the whole build under another name; without verify there is nothing
-    to fall back on when the work reaches past the modules."""
-    write(tmp_path / "projects" / "shop.toml", f'repo = "/r"\n{text}')
-    with pytest.raises(ConfigError, match="verify_scoped") as e:
-        load_project("shop", tmp_path)
-    assert says in str(e.value)
+def test_the_whole_build_is_the_command_without_its_modules(command, whole):
+    """One command: the whole build is what it runs with nothing chosen."""
+    assert proposal.whole(command) == whole
 
 
 def test_a_plan_names_the_modules_it_changes():
@@ -83,7 +79,7 @@ def task(tmp_path):
     return t
 
 
-SHOP = Project("shop", Path("/r"), WHOLE, verify_scoped=SCOPED)
+SHOP = Project("shop", Path("/r"), [SCOPED])
 
 
 def test_work_inside_the_planned_modules_is_verified_with_them(task):
@@ -104,7 +100,7 @@ def test_work_outside_the_planned_modules_is_verified_with_the_whole_build(task)
 
 def test_a_plan_without_modules_or_a_project_without_the_command_is_verified_whole(task):
     change(task, "core/src/Calc.java")
-    assert proposal.verify_commands(task, Project("shop", Path("/r"), WHOLE)) == WHOLE
+    assert proposal.verify_commands(task, Project("shop", Path("/r"), WHOLE)) == WHOLE, "not by module"
     (task.meta / gate.ACCEPTED_PLAN).write_text(PLAN.format(header=""))
     assert proposal.verify_commands(task, SHOP) == WHOLE
 
@@ -113,10 +109,10 @@ def test_a_task_in_a_scoped_project_gets_the_modules_line_in_its_plan(env):
     from vivibox import actions
 
     demo = env / "config" / "projects" / "demo.toml"
-    demo.write_text(demo.read_text() + f'verify_scoped = "{SCOPED}"\n')
+    demo.write_text(demo.read_text().replace('verify = ["true"]', f'verify = ["{SCOPED}"]'))
     task = actions.create("demo", "Add subtract")
     header = task.plan_path.read_text().split("+++")[1]
     assert "modules = []" in header and SCOPED in header, "the planner fills it in, told what it is for"
     plain = env / "config" / "projects" / "demo.toml"
-    plain.write_text(plain.read_text().replace(f'verify_scoped = "{SCOPED}"\n', ""))
+    plain.write_text(plain.read_text().replace(f'verify = ["{SCOPED}"]', 'verify = ["true"]'))
     assert "modules" not in actions.create("demo", "Add multiply").plan_path.read_text()

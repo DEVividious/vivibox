@@ -12,10 +12,12 @@ First public version.
 
 ### Added
 
-- `verify_scoped` in a project file, "verification by module" under `e`: for a project of many
-  modules, the command that builds some of them. A task's plan names the modules it changes, and
-  the task is verified with them while its commits stay inside; a change outside them is
-  verified with the whole build, and the timeline names the files.
+- `{modules}` in a project's verify command, for a project of many modules: a task's plan names
+  the modules it changes, and the task is verified with them while its commits stay inside; a
+  change outside them is verified with the same command without them, and the timeline names the
+  files. `vivibox init` writes such a command for a Maven reactor of ten modules or more.
+- "whole build before review" under `k` (`limits.whole_build_before_review`, off): a task
+  verified by its modules is built whole once before the work comes to you.
 - Shared cache disk usage, shown separately in `u` and `vivibox usage`, including when no tasks
   are live; the breakdown covers all projects without charging shared bytes to each task.
 

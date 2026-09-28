@@ -5,6 +5,8 @@ whether the project keeps it."""
 
 from __future__ import annotations
 
+import re
+
 from . import repo
 from .config import Project
 from .gate import ACCEPTED_PLAN
@@ -39,9 +41,23 @@ def nothing_to_build(task: Task) -> bool:
         return False
 
 
+# What chooses the modules in a command, besides the {modules} token itself: its flag, when the
+# token stands on its own after it, and Maven's "and what they need", which means nothing without it.
+CHOOSES = re.compile(r"\s+(?:(?:-pl|--projects)\s+)?\S*\{modules\}\S*|\s+(?:-am|--also-make)(?=\s|$)")
+
+
+def whole(command: str) -> str:
+    """The command with nothing chosen: the whole build, for work that reaches past the modules."""
+    return CHOOSES.sub("", command) if "{modules}" in command else command
+
+
+def for_modules(commands: list[str], modules: list[str]) -> list[str]:
+    return [c.replace("{modules}", ",".join(modules)) for c in commands]
+
+
 def planned_modules(task: Task, project: Project) -> list[str]:
     """The modules the accepted plan names, in a project verified by its modules; [] otherwise."""
-    if not project.verify_scoped:
+    if not project.by_module:
         return []
     try:
         return parse_plan((task.meta / ACCEPTED_PLAN).read_text()).modules
@@ -49,10 +65,10 @@ def planned_modules(task: Task, project: Project) -> list[str]:
         return []
 
 
-def modules_missing(plan: Plan, verify_scoped: str) -> str:
+def modules_missing(plan: Plan, by_module: bool) -> str:
     """Why a draft in a project verified by its modules is not ready: it names none, and the task
     would be verified with the whole build. "" when it names some, or there is nothing to build."""
-    if not verify_scoped or plan.modules or plan.no_build:
+    if not by_module or plan.modules or plan.no_build:
         return ""
     return 'modules in the header is empty; name the directories this task changes, e.g. ["core"]'
 
@@ -81,7 +97,9 @@ def verify_commands(task: Task, project: Project) -> list[str]:
     if nothing_to_build(task):
         return []
     if (modules := planned_modules(task, project)) and not outside_modules(task, project):
-        return [project.verify_scoped.replace("{modules}", ",".join(modules))]
+        return for_modules(project.verify, modules)
+    if project.by_module:
+        return [whole(c) for c in project.verify]
     if project.verify or not asked(task, project):
         return project.verify
     if not (found := proposed(task)) or narrowed_proposal_in(found):

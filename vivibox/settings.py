@@ -237,27 +237,25 @@ SETTINGS_ABOUT = {
     "task's next start.",
     "verify_timeout": "How long one verification command may run before it is stopped. Past it "
     "the task waits for you, and no round is spent.",
+    "whole_build": "For a project verified by module ({modules} in its verification): the "
+    "whole project is built once more before the work comes to you; red, it goes back to the "
+    "writer. Off: only the modules the plan names, and the pipeline builds the rest after a push. "
+    "A change applies from a task's next verification.",
     "cost_warning": "When a task has cost this many dollars, you are told once and the task goes "
     "on. None: you are never told. A change applies from a task's next turn.",
     "cost_limit": "When a task has cost this many dollars, it stops before its next turn and waits "
     "for you. None: no limit. A change applies from a task's next turn.",
     "file": "config.toml in your editor, for what has no row here.",
 }
-NO_SCOPE = "none: the whole build every time"
-SCOPE_QUESTION = "The command for some modules, with {modules} where the plan's go (comma-joined):"
-SCOPE_HINT = "Maven: mvn -B -pl {modules} -am verify. Empty: every task is verified whole."
-
 # The same for a project's rows (e on its row).
 PROJECT_ABOUT = {
     "prepare": "What a new task's clone runs once while the plan is made, usually a build "
     "without tests, so the writer starts on a built project. The writer's first turn waits for it.",
     "verify": "The command that proves the work: the gate runs it on a fresh clone of the "
-    "commits after every turn of the writer. Empty: the next task's writer proposes one. A "
-    "change applies from the next verification, in every task.",
-    "verify_scoped": "For a project of many modules: the command that builds and tests some of "
-    "them, with {modules} where a task's plan names them. A task is verified with it while its "
-    "work stays inside those modules, and with the verification when it does not. Empty: always "
-    "the whole build. A change applies from a task's next plan.",
+    "commits after every turn of the writer. Empty: the next task's writer proposes one. With "
+    "{modules} in it (mvn -B -pl {modules} -am verify), a task's plan names the modules it changes "
+    "and the gate builds those; work outside them, the same command without them. A change "
+    "applies from the next verification, in every task.",
     "demo": "How v runs the project in its pod so you can look at it.",
     "java": "The JDK this project builds with, when not the image's Java 21, e.g. 17 for an older "
     "Gradle. A change applies from a task's next start.",
@@ -344,6 +342,7 @@ class Settings(Rows):
             ("Limits", "", None),
             ("rounds", str(config.max_rounds), "max_rounds"),
             ("verification timeout", duration(config.verify_timeout), "verify_timeout"),
+            ("whole build before review", "on" if config.whole_build_before_review else "off", "whole_build"),
             (
                 "cost warning",
                 f"${config.cost_warning:.2f}" if config.cost_warning else "none",
@@ -426,6 +425,8 @@ class Settings(Rows):
         elif key == "notifications":
             on = not config.desktop_notifications
             self.write("desktop", on, "notifications")
+        elif key == "whole_build":
+            self.write("whole_build_before_review", not config.whole_build_before_review, "limits")
         elif key == "ntfy":
 
             def typed(value: str | None) -> None:
@@ -574,7 +575,6 @@ class ProjectSettings(Rows):
         return [
             ("preparation", " && ".join(project.prepare) or NOTHING_TO_PREPARE, "prepare"),
             ("verification", verify, "verify"),
-            ("verification by module", project.verify_scoped or NO_SCOPE, "verify_scoped"),
             (
                 "run app (v)",
                 ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
@@ -621,20 +621,6 @@ class ProjectSettings(Rows):
                 ),
                 lambda lines: lines is not None and self.write("demo", lines),
             )
-        elif key == "verify_scoped":
-
-            def typed(value: str | None) -> None:
-                if value is None:
-                    return
-                if value and "{modules}" not in value:
-                    self.say("The command needs {modules} where the plan's modules go.")
-                    return
-                if value and not project.verify:
-                    self.say("Set the verification first: work outside the modules is built whole.")
-                    return
-                self.write("verify_scoped", value)
-
-            self.app.push_screen(Ask(SCOPE_QUESTION, project.verify_scoped, SCOPE_HINT), typed)
         elif key == "prepare":
 
             def typed(value: str | None) -> None:

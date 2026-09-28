@@ -200,6 +200,9 @@ class Ports:
     # The commit the task's clone stands on, for the check that what is reviewed and what comes to
     # you is what the verification ran on; "" when nobody can say (a test), and nothing is checked.
     head: Callable[[], str] = lambda: ""
+    # The whole build, once, before the work comes to you (limits.whole_build_before_review), for a
+    # task verified by its modules; None when there is nothing to run.
+    run_whole_gate: Callable[[Task], gate.GateResult | None] = lambda task: None
 
 
 @dataclass
@@ -216,9 +219,6 @@ class Supervisor:
     project_no_build: bool = False
     # The project's preparation, which ran before the writer's first turn; that turn is told of it.
     prepared: list[str] = field(default_factory=list)
-    # The project's command for some modules (Project.verify_scoped): a draft names its modules,
-    # and the writer's first turn is told what verifies it.
-    verify_scoped: str = ""
     # The project file as it is now, read at every step; None keeps the fields above as given.
     current_project: Callable[[], Project] | None = None
     # The role that plans. None means the writer plans too, which is what a caller with one harness
@@ -260,7 +260,6 @@ class Supervisor:
         if self.current_project:
             p = self.current_project()
             self.project_verify, self.project_no_build, self.prepared = p.verify, p.no_build, p.prepare
-            self.verify_scoped = p.verify_scoped
         st = self.task.read_state()
         if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
             self._watch_answer()
@@ -473,8 +472,14 @@ class Supervisor:
             kind="plan",
         )
 
+    @property
+    def by_module(self) -> bool:
+        """The project's command has {modules}: a draft names its modules, and the writer's first
+        turn is told what verifies it."""
+        return any("{modules}" in command for command in self.project_verify)
+
     def _planned_modules(self) -> list[str]:
-        if not self.verify_scoped:
+        if not self.by_module:
             return []
         try:
             return parse_plan((self.task.meta / gate.ACCEPTED_PLAN).read_text()).modules
@@ -490,7 +495,7 @@ class Supervisor:
             gate.check_plan(plan)
         except (OSError, PlanError, gate.GateError) as e:
             return None, str(e)
-        if problem := proposal.modules_missing(plan, self.verify_scoped):
+        if problem := proposal.modules_missing(plan, self.by_module):
             return None, problem
         return plan, ""
 
@@ -543,7 +548,7 @@ class Supervisor:
         if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and (modules := self._planned_modules()):
-            command = self.verify_scoped.replace("{modules}", ",".join(modules))
+            command = "` && `".join(proposal.for_modules(self.project_verify, modules))
             prompt = SCOPED_PREFIX.format(modules=", ".join(modules), command=command) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
             # What the build files and the pipeline name, as init shows it: the writer, who never
@@ -643,6 +648,8 @@ class Supervisor:
         elif self.mode.supervisor or (self.mode.separate_reviewer and self.reviewer is not None):
             self.last_gate = result
             self._go(State.REVIEW, "verification passed")
+        elif not self._whole_build_holds(st):
+            return
         elif target is State.APPROVAL_RISKY:
             self._go(target, "verification passed", then=str(State.CHECKPOINT_FINAL))
             self.ports.notify(
@@ -651,6 +658,28 @@ class Supervisor:
         else:
             self._go(target, "verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
+
+    def _whole_build_holds(self, st: TaskState) -> bool:
+        """The whole build, when the work is about to come to you and it was verified by its modules
+        only; red, it goes back to the writer like any failed verification. True to go on."""
+        result = self.ports.run_whole_gate(self.task)
+        if result is None or result.passed:
+            return True
+        feedback.write_feedback(self.task, result)
+        target = gate.next_state(result, st.rounds, self.max_rounds)
+        why = gate.why_red(result)
+        if result.environment:
+            self._go(State.CHECKPOINT_BLOCKED, "the whole build could not run")
+            self.ports.notify(self.task.id, f"the whole build could not run: {result.environment[:150]}")
+        elif target is State.IMPLEMENT:
+            set_next_prompt(self.task, FEEDBACK_PROMPT)
+            self._go(target, f"the whole build failed: {why}", why=why)
+        else:
+            self._go(target, f"the whole build still failing: {why}")
+            self.ports.notify(
+                self.task.id, f"the whole build still failing after {ui.count(st.rounds, 'fix turn')}"
+            )
+        return False
 
     def _head_moved(self, st: TaskState) -> bool:
         """The commits are not the ones the verification ran on (you talked to the agent under w,
@@ -703,7 +732,7 @@ class Supervisor:
             self._go(State.IMPLEMENT, f"review {n}: {blocking} blocking", why=_notes(blocking))
             print(f"[{time.strftime('%H:%M:%S')}] {said}, back to the writer", flush=True)
             return
-        if self._head_moved(self.task.read_state()):
+        if self._head_moved(self.task.read_state()) or not self._whole_build_holds(st):
             return
         self._checkpoint(
             State.CHECKPOINT_FINAL, f"{self._review_message(self.last_gate)}; {said}", kind="review"

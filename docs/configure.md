@@ -157,16 +157,18 @@ host_services = ["host.docker.internal:5432"]   # optional, network access to se
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
 prepare = ["bash mvnw -B install -DskipTests"]  # optional, run once in a new task's clone
 tools = ["go@1.25.3"]                           # optional, toolchains the image does not have
-verify_scoped = "bash mvnw -B -pl {modules} -am test"  # optional, for a project of many modules
 ```
 
-`verify_scoped` is for a project whose whole build outlasts a verification, hundreds of modules
-and a frontend: a task's plan then names the directories it changes (`modules = ["core"]` in its
-header, which the planner fills in and you see when you accept the plan), and the verification
-runs this command with them, comma-joined, in place of `{modules}`. When a commit changes a file
-outside them, the root's build file included, that verification runs `verify`, the whole build,
-and the task's timeline says which files took it there. Set it under `e` on the project
-("verification by module"); it needs `verify` beside it.
+`{modules}` in `verify` is for a project whose whole build outlasts a verification, hundreds of
+modules and a frontend: `verify = ["bash mvnw -B -pl {modules} -am verify"]`. A task's plan then
+names the directories it changes (`modules = ["core"]` in its header, which the planner fills in
+and you see when you accept the plan), and the verification runs the command with them,
+comma-joined. When a commit changes a file outside them, the root's build file included, that
+verification runs the same command without them (`bash mvnw -B verify`), the whole build, and the
+task's timeline says which files took it there. `vivibox init` writes this command for a Maven
+reactor of ten modules or more. The whole build then runs only on such a change, or once before
+the work comes to you when `whole_build_before_review` is on (under `k`, "whole build before
+review"; off by default, when the project's pipeline builds it whole after a push).
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the

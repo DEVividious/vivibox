@@ -170,6 +170,9 @@ class Config:
     # Seconds one verification command may take before it is stopped and counted as a failure of
     # the environment, not of the code.
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT
+    # A task verified by its modules is built whole once more before the work comes to you
+    # (limits.whole_build_before_review); off, the project's pipeline builds it whole after a push.
+    whole_build_before_review: bool = False
     # Dollars a task may cost before you are told, and before it stops for you; 0 is no limit.
     cost_warning: float = 0.0
     cost_limit: float = 0.0
@@ -216,10 +219,13 @@ class Project:
     # Toolchains the image does not have, as mise versions ("go@1.25.3"), installed in the pod for
     # the agent and for the gate; nothing is written into the repository.
     tools: list[str] = field(default_factory=list)
-    # The command for some modules only, with {modules} where their directories go, comma-joined
-    # (Maven: "mvn -B -pl {modules} -am verify"): a task whose plan names its modules is verified
-    # with it, and with verify when its work reaches past them.
-    verify_scoped: str = ""
+
+    @property
+    def by_module(self) -> bool:
+        """Verified by the modules a task's plan names: {modules} in its command, where they go,
+        comma-joined (Maven: "mvn -B -pl {modules} -am verify"); the same command without them is
+        the whole build."""
+        return any("{modules}" in command for command in self.verify)
 
 
 def config_dir() -> Path:
@@ -261,6 +267,9 @@ def load_config(base: Path | None = None) -> Config:
     orchestration = data.get("agent_orchestration_mode", DEFAULT_ORCHESTRATION)
     if orchestration not in ORCHESTRATION_MODES:
         raise ConfigError(f"{path}: agent_orchestration_mode must be one of {', '.join(ORCHESTRATION_MODES)}")
+    whole = data.get("limits", {}).get("whole_build_before_review", False)
+    if not isinstance(whole, bool):
+        raise ConfigError(f"{path}: limits.whole_build_before_review must be true or false")
     verify_timeout = data.get("limits", {}).get("verify_timeout", DEFAULT_VERIFY_TIMEOUT)
     if not isinstance(verify_timeout, int) or verify_timeout < 1:
         raise ConfigError(f"{path}: limits.verify_timeout must be a number of seconds >= 1")
@@ -350,6 +359,7 @@ def load_config(base: Path | None = None) -> Config:
         ide,
         str(parsed),
         verify_timeout=verify_timeout,
+        whole_build_before_review=whole,
         ntfy=ntfy,
         orchestration=orchestration,
         notice=notice,
@@ -407,15 +417,7 @@ def load_project(name: str, base: Path | None = None) -> Project:
     verify_timeout = data.get("verify_timeout", 0)
     if not isinstance(verify_timeout, int) or verify_timeout < 0:
         raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
-    verify_scoped = data.get("verify_scoped", "")
-    if not isinstance(verify_scoped, str) or (verify_scoped and "{modules}" not in verify_scoped):
-        raise ConfigError(
-            f"{path}: verify_scoped must be a command with {{modules}}, "
-            'e.g. "mvn -B -pl {modules} -am verify"'
-        )
-    if verify_scoped and not verify:
-        raise ConfigError(f"{path}: verify_scoped needs verify, the whole build, for work past the modules")
     return Project(
         name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build,
-        prepare, tools, verify_scoped,
+        prepare, tools,
     )  # fmt: skip

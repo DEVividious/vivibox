@@ -2049,6 +2049,13 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         await pilot.pause()
         text = config.read_text()
         assert "[limits]\n# Kept.\nmax_rounds = 5\n" in text and app.config.max_rounds == 5
+        # The whole build before your review: a toggle, off by default.
+        whole = next(i for i, row in enumerate(labels(app)) if "whole build before review" in row)
+        assert "off" in labels(app)[whole]
+        app.screen.query_one("#rows", OptionList).highlighted = whole
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "whole_build_before_review = true" in config.read_text() and "on" in labels(app)[whole]
         # The verification's time limit: minutes to read, minutes or seconds to type.
         timeout = next(i for i, row in enumerate(labels(app)) if "verification timeout" in row)
         assert "30 min" in labels(app)[timeout] and "1800" not in labels(app)[timeout]
@@ -2108,18 +2115,7 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         assert isinstance(app.screen, settings.ProjectSettings)
         assert labels(app)[0].strip().startswith("preparation"), "what a new task does first, first"
         assert labels(app)[1].strip().startswith("verification") and "true" in labels(app)[1]
-        row = await go_to(app, pilot, "by module")
-        assert row == 2, "beside the whole build it stands in for"
-        app.screen.query_one(Input).value = "mvn -B verify"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert load_project("demo").verify_scoped == "", "without {modules} it is refused"
-        await go_to(app, pilot, "by module")
-        app.screen.query_one(Input).value = "mvn -B -pl {modules} -am verify"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert load_project("demo").verify_scoped == "mvn -B -pl {modules} -am verify"
-        assert "{modules}" in labels(app)[row]
+        assert not [text for text in labels(app) if "by module" in text], "{modules} is in the one command"
         await go_to(app, pilot, "run app")
         assert isinstance(app.screen, settings.AskLines)
         app.screen.query_one(TextArea).text = "npm install\nnpm start\n"

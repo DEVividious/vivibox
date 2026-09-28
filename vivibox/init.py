@@ -437,6 +437,21 @@ def ci_commands(repo: Path) -> list[tuple[str, str]]:
     return found[:MAX_CI]
 
 
+# A Maven reactor with this many modules is verified by the modules a task's plan names: its whole
+# build takes longer than one verification may (keycloak has hundreds); a smaller one builds whole.
+MANY_MODULES = 10
+MODULE_TAG = re.compile(r"<module>\s*[^<]+?\s*</module>")
+
+
+def by_module(repo: Path) -> list[str]:
+    """The verification of a large Maven reactor, with {modules} where a plan's modules go; [] for
+    any other project, whose writer proposes the command it ran."""
+    if len(MODULE_TAG.findall(_read(repo / "pom.xml"))) < MANY_MODULES:
+        return []
+    maven = "bash mvnw" if (repo / "mvnw").exists() else "mvn"
+    return [f"{maven} -B -pl {{modules}} -am verify"]
+
+
 def maven_notes(repo: Path) -> list[str]:
     """What Maven adds to every run by itself, from .mvn, where nobody looks while typing the
     command: its own -f or -pl, and the build cache."""
@@ -471,6 +486,12 @@ def detect(repo: Path) -> Detected:
     for command, source in options:
         found.notes.append(f"{source} runs: {command}")
     found.notes += maven_notes(repo)
+    found.verify = by_module(repo)
+    if found.verify:
+        found.notes.append(
+            f"{MANY_MODULES} or more Maven modules: verified by the ones a task's plan names ({{modules}}), "
+            "the whole build when its work reaches past them"
+        )
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.

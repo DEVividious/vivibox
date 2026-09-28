@@ -156,6 +156,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "unverified_head":
             was, now = data.get("verified", "")[:7], data.get("head", "")[:7]
             text = f"commits changed since the verification: {was} → {now}"
+        elif kind == "whole_build":
+            text = "whole build before your review"
         elif kind == "verify_widened":
             more = f" and {data['more']} more" if data.get("more") else ""
             outside = ", ".join(data.get("outside") or [])

@@ -1400,7 +1400,7 @@ def test_a_scoped_projects_draft_without_modules_gets_a_repair_turn(task):
         ],
     )
     sup, _ = make(task, harness)
-    sup.verify_scoped = "mvn -pl {modules} -am verify"
+    sup.project_verify = ["mvn -pl {modules} -am verify"]
     sup.step()
     assert task.read_state().state is State.CHECKPOINT_PLAN
     assert len(harness.prompts) == 2 and "modules" in harness.prompts[1], "told what is missing"
@@ -1411,8 +1411,44 @@ def test_the_writer_of_a_scoped_task_is_told_what_verifies_it(task):
     (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core", "app"]\n+++\n')
     harness = FakeHarness(task)
     sup, _ = make(task, harness, results=[gate_result(False)])
-    sup.verify_scoped = "mvn -pl {modules} -am verify"
+    sup.project_verify = ["mvn -pl {modules} -am verify"]
     sup.step()
     first = harness.prompts[0]
     assert first.endswith(prompts.IMPLEMENT_PROMPT)
     assert "`mvn -pl core,app -am verify`" in first and "core, app" in first
+
+
+def test_the_whole_build_runs_once_before_the_work_comes_to_you(task):
+    """whole_build_before_review: a task verified by its modules is built whole once, when the
+    work would come to you, not at every round."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    sup, _ = make(task, FakeHarness(task), results=[gate_result(True)])
+    whole = []
+    sup.ports.run_whole_gate = lambda t: whole.append(t.id) or gate_result(True)
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_FINAL and whole == [task.id]
+
+
+def test_a_red_whole_build_goes_back_to_the_writer_as_a_failed_verification(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    sup, _ = make(task, FakeHarness(task), results=[gate_result(True)])
+    sup.ports.run_whole_gate = lambda t: gate_result(False)
+    sup.step()
+    st = task.read_state()
+    assert st.state is State.IMPLEMENT and st.rounds == 1
+    assert (task.meta / "handoff" / "verify-feedback.md").exists()
+    sup.step()
+    assert sup.harness.prompts[-1].endswith(prompts.FEEDBACK_PROMPT)
+
+
+def test_after_a_clean_review_the_whole_build_is_the_last_step(task, tmp_path):
+    sup, _, _ = reviewed(task, tmp_path, [CLEAN])
+    whole = []
+    sup.ports.run_whole_gate = lambda t: whole.append(task.read_state().state) or gate_result(True)
+    sup.step()  # implement
+    sup.step()  # verify: by module, green
+    assert whole == [], "not before the review: it may send the work back"
+    sup.step()  # the review: clean
+    assert whole == [State.REVIEW] and task.read_state().state is State.CHECKPOINT_FINAL

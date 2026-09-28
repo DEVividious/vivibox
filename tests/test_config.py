@@ -25,6 +25,7 @@ def test_loads_config_with_defaults(tmp_path):
     assert config.max_rounds == 3 and config.orchestration == "planner_maker_checker" and config.notice == ""
     assert config.roles["writer"].harness == "opencode"
     assert config.desktop_notifications is True
+    assert config.whole_build_before_review is False, "the pipeline builds it whole after a push"
 
 
 def test_desktop_notifications_can_be_turned_off(tmp_path):

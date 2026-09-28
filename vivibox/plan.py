@@ -42,7 +42,7 @@ class Plan:
     # The plan says there is nothing to build or test: verify = false in its header.
     no_build: bool = False
     # The directories this task changes, from the repository's root, in a project verified by its
-    # modules (Project.verify_scoped).
+    # modules (Project.by_module).
     modules: list[str] = field(default_factory=list)
 
     @property

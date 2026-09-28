@@ -130,7 +130,6 @@ def project(
     verify: list[str],
     pass_env: tuple = (),
     prepare: tuple = (),
-    verify_scoped: str = "",
 ) -> Path:
     repo = make_repo(bench["tmp"] / name)
     # Bytecode a test run leaves would count as uncommitted files, and the gate builds commits only.
@@ -146,8 +145,6 @@ def project(
         text += f"pass_env = {json.dumps(list(pass_env))}\n"
     if prepare:
         text += f"prepare = {json.dumps(list(prepare))}\n"
-    if verify_scoped:
-        text += f"verify_scoped = {json.dumps(verify_scoped)}\n"
     (bench["cfg"] / "projects" / f"{name}.toml").write_text(text)
     return repo
 
@@ -522,9 +519,7 @@ def test_modules_the_planner_names_the_two_modules_and_the_verification_builds_t
     and not the third; the verification runs the command for them, never the whole build."""
     from vivibox.plan import parse_plan
 
-    project(
-        bench, "scoped", MAVEN_FILES, ["mvn -B -q verify"], verify_scoped="mvn -B -q -pl {modules} -am verify"
-    )
+    project(bench, "scoped", MAVEN_FILES, ["mvn -B -q -pl {modules} -am verify"])
     task, sup = begin("scoped", MAVEN_GOAL)
     try:
         st = drive(task, sup, {State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED}, steps=14)

@@ -56,7 +56,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
 
 
 # The project settings a running task reads at every step: a change to one is on its record.
-WATCHED = ("verify", "verify_scoped", "no_build", "prepare", "verify_timeout", "pass_env", "java")
+WATCHED = ("verify", "no_build", "prepare", "verify_timeout", "pass_env", "java")
 
 
 def live_config(start: Config) -> Callable[[], Config]:
@@ -160,8 +160,28 @@ def make_supervisor(
             tools=p.tools,
         )
 
+    def run_whole_gate(t: Task) -> gate.GateResult | None:
+        """The whole build before the work comes to you, when you asked for it under k and the task
+        was verified by its modules only."""
+        p = now()
+        if not (current or (lambda: config))().whole_build_before_review:
+            return None
+        if not actions.planned_modules(t, p) or actions.outside_modules(t, p):
+            return None
+        t.event("whole_build")
+        return gate.run_gate(
+            t,
+            pod,
+            [actions.whole(c) for c in p.verify],
+            p.risky_extra,
+            p.java,
+            timeout=p.verify_timeout or config.verify_timeout,
+            tools=p.tools,
+        )
+
     ports = supervisor.Ports(
         run_gate=run_gate,
+        run_whole_gate=run_whole_gate,
         risky_changes=lambda: Approvals(task.meta, task.repo, now().risky_extra).changes(),
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
@@ -184,7 +204,6 @@ def make_supervisor(
         project_verify=project.verify,
         project_no_build=project.no_build,
         prepared=project.prepare,
-        verify_scoped=project.verify_scoped,
         planner=planner,
         source=project.repo,
         current_project=now,

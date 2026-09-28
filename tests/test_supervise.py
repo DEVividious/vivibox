@@ -231,7 +231,9 @@ def test_work_past_the_planned_modules_is_verified_whole_and_the_timeline_says_w
     from vivibox.task import find_task
 
     path = env / "config" / "projects" / "demo.toml"
-    path.write_text(path.read_text() + 'verify_scoped = "mvn -pl {modules} -am verify"\n')
+    path.write_text(
+        path.read_text().replace('verify = ["true"]', 'verify = ["mvn -pl {modules} -am verify"]')
+    )
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
     (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
@@ -259,5 +261,47 @@ def test_work_past_the_planned_modules_is_verified_whole_and_the_timeline_says_w
     git("add", ".")
     git("commit", "-q", "-m", "Add the root build")
     sup.ports.run_gate(task)
-    assert ran[-1] == ["true"], "the project's whole build"
+    assert ran[-1] == ["mvn verify"], "the same command, without the modules"
     assert [e["data"]["outside"] for e in task.events() if e["type"] == "verify_widened"] == [["pom.xml"]]
+
+
+def test_the_whole_build_before_review_runs_only_when_asked_and_only_by_module(env, monkeypatch):
+    import subprocess
+
+    from vivibox import gate
+    from vivibox.cli import main
+    from vivibox.config import load_project
+    from vivibox.task import find_task
+
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(
+        path.read_text().replace('verify = ["true"]', 'verify = ["mvn -pl {modules} -am verify"]')
+    )
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(supervise.load_config().tasks_dir, "demo-1")
+    (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    ran = []
+    monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands) or "result")
+
+    class Pod:
+        def review_down(self):
+            pass
+
+        def review_side(self):
+            return self
+
+    git = lambda *a: subprocess.run(["git", *a], cwd=task.repo, check=True, capture_output=True)  # noqa: E731
+    (task.repo / "core").mkdir()
+    (task.repo / "core" / "Calc.java").write_text("class Calc {}\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "Add Calc")
+    sup = supervise.make_supervisor(task, load_project("demo"), Pod(), config())
+    assert sup.ports.run_whole_gate(task) is None, "off unless you turn it on"
+    sup = supervise.make_supervisor(task, load_project("demo"), Pod(), config(whole_build_before_review=True))
+    assert sup.ports.run_whole_gate(task) == "result" and ran == [["mvn verify"]]
+    assert [e for e in task.events() if e["type"] == "whole_build"]
+    (task.repo / "pom.xml").write_text("<project/>\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "Add the root build")
+    assert sup.ports.run_whole_gate(task) is None, "its verification was whole already"

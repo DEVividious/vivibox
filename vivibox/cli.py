@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import (
     actions,
+    cli_agent,
     context,
     gate,
     harness,
@@ -729,6 +730,7 @@ def parser() -> argparse.ArgumentParser:
     )
     pod.add_argument("task", help="task id")
     pod.set_defaults(func=cmd_pod)
+    cli_agent.register(sub)
     return p
 
 

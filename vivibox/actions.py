@@ -37,6 +37,7 @@ from . import (
     supervisor,
     toolchain,
     ui,
+    waiting,
 )
 from .box import (  # noqa: F401
     BOX_COMMIT,
@@ -159,7 +160,7 @@ from .roles import (  # noqa: F401
     writer,
 )
 from .states import State
-from .task import Task, create_task, find_task
+from .task import Task, TaskState, create_task, find_task
 from .window import (  # noqa: F401
     LEAVE_BINDING,
     LEAVE_KEY,
@@ -514,6 +515,11 @@ def supervisor_running(task: Task) -> bool:
     except (OSError, ValueError):
         return False
     return b"supervise" in cmdline and task.id.encode() in cmdline
+
+
+def wait(tasks: list[Task], timeout: float | None = None) -> list[tuple[Task, TaskState, str]]:
+    """Until one of the tasks needs you or stops moving (waiting.reason); [] after the timeout."""
+    return waiting.wait(tasks, supervisor_running, timeout=timeout)
 
 
 def start_supervisor(task: Task) -> None:

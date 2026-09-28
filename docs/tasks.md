@@ -85,6 +85,14 @@ vivibox status myproject-1            # one task: its next step and recent event
 vivibox attach myproject-1            # watch or talk to the agent, or the verification (Ctrl-q leaves)
 ```
 
+`vivibox wait <id>... [--timeout S] [--json]` returns as soon as one of the tasks needs you, is
+done, has a problem, was stopped, or has no supervisor running; a task already there returns at
+once. It reads the tasks every two seconds, for an agent's CLI that drives vivibox for you. It
+prints a line per task that ended the wait, with its next step; `--json` prints `version` and, per
+task, `id`, `state`, `reason` (`waiting`, `done`, `problem`, `stopped`, `not running`), `status`,
+`problem` and `next`. Exit code 0 when a task ended the wait, 124 when the timeout did (as
+`timeout` does), 1 for a task that does not exist.
+
 ### Your decisions
 
 | Command | When |

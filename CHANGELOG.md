@@ -12,6 +12,8 @@ First public version.
 
 ### Added
 
+- `vivibox wait <id>...`: returns when a task needs you, is done, has a problem or stopped, with
+  `--timeout` (exit code 124) and `--json`, for an agent's CLI that drives vivibox.
 - `vivibox new --plan-in-cli`: you plan the task in an agent's CLI (Claude Code, Codex) on your
   machine. The writer's report on the repository is skipped, and `C`, `vivibox plan prompt` and
   the panel give the CLI's prompt alone.

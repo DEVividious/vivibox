@@ -130,6 +130,10 @@ class TaskTable:
     def fill_table(self, pairs: list, selected: str | None) -> None:
         table = self.table
         table.clear()
+        # A column keeps the width of the widest cell it ever held, past clear(): a long status
+        # gone from the list would keep its width and push the goal off the screen.
+        for column in table.columns.values():
+            column.content_width = column.label.cell_len
         planned: list[tuple[dict[str, str], str]] = []
         for name in self.project_order(pairs):
             own = [(t, st) for t, st in pairs if st.project == name]

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import make_repo
 from rich.text import Text
+from textual.coordinate import Coordinate
 from textual.widgets import Checkbox, Input, Label, OptionList, Select, SelectionList, TextArea
 from textual.widgets._footer import FooterKey
 
@@ -84,6 +85,33 @@ def test_columns_follow_each_terminal_resize(env):
             assert "Resize task" in visible
 
     run(scenario, size=(80, 40))
+
+
+def test_the_status_column_is_as_wide_as_the_statuses_listed_now(env):
+    """A table keeps a column as wide as the widest cell it ever held; a long status gone from the
+    list left its width behind, and the goal was pushed off the screen."""
+    task = new_task("Short goal")
+    task.set_paused(True, problem="a start that failed for a long and winding reason: no image")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        long = app.table.columns["STATUS"].get_render_width(app.table)
+        task.set_paused(False)
+        st = task.read_state()
+        st.state = State.CHECKPOINT_FINAL
+        task._write_state(st)
+        app.reload()
+        await pilot.pause()
+        status = app.table.columns["STATUS"]
+        widest = max(
+            Text.from_markup(str(app.table.get_cell_at(Coordinate(row, 1)))).cell_len
+            for row in range(app.table.row_count)
+        )
+        assert status.get_render_width(app.table) < long
+        assert status.content_width == max(widest, len("STATUS"))
+
+    run(scenario)
 
 
 def test_lists_tasks_waiting_for_you_first(env, monkeypatch):

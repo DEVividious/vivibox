@@ -144,6 +144,9 @@ First public version.
 
 ### Fixed
 
+- `vivibox --version`, the timeline and the history name the commit that runs when vivibox runs
+  from a checkout, as an editable install does: they named the version of the day it was
+  installed, and every pull since went unnamed in a bug report.
 - "Started … (model)" and the timeline's "started on" name the model the writing runs on in the
   task's mode: the planner's in `single_agent`, where they named the writer's, which never ran.
 - `vivibox init` on a bun project (`bun.lock`): bun from mise in `tools`, `bun install

@@ -84,8 +84,29 @@ storage. It may restart Docker. First launch builds the agent image and opens th
 4. **Review:** after verification and review, `f` shows the diff, `o` opens the review copy,
    `r` requests changes. `a` applies the work; a separate dialog offers a branch and commit message.
 
-You can also plan in your existing Claude Code or Codex conversation and have it drive tasks
-through vivibox's CLI. [Planning from an agent's CLI](docs/tasks.md#driving-vivibox-from-an-agents-cli).
+### Plan with your existing subscription
+
+The **vivibox skill** lets Claude Code or Codex drive a task from your conversation. Use your
+existing subscription to plan with a strong model; assign cheaper API-backed models to
+implementation and review. Complete provider setup above first: those agents still need API access.
+
+`host/setup.sh` installs the skill for each supported CLI already installed. To install it
+later or refresh it after updating vivibox:
+
+```bash
+vivibox skill install
+```
+
+Open Claude Code or Codex in your project's repository and ask:
+
+> Use the vivibox skill to add CSV export. Plan it with me, then hand implementation to vivibox.
+
+In Claude Code you can also invoke `/vivibox`. The skill helps register the project, recommends
+a compatible flow, creates the task and imports the plan you prepare together. It waits for
+checkpoints, summarizes results and asks for your approval of the plan, risky changes and final
+work. You can also follow the task in the TUI.
+
+[Skill installation paths and CLI workflow](docs/tasks.md#driving-vivibox-from-an-agents-cli).
 
 ## Documentation
 

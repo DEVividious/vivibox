@@ -124,7 +124,13 @@ def bench(tmp_path_factory):
 
 
 def project(
-    bench, name: str, files: dict[str, str], verify: list[str], pass_env: tuple = (), prepare: tuple = ()
+    bench,
+    name: str,
+    files: dict[str, str],
+    verify: list[str],
+    pass_env: tuple = (),
+    prepare: tuple = (),
+    verify_scoped: str = "",
 ) -> Path:
     repo = make_repo(bench["tmp"] / name)
     # Bytecode a test run leaves would count as uncommitted files, and the gate builds commits only.
@@ -140,6 +146,8 @@ def project(
         text += f"pass_env = {json.dumps(list(pass_env))}\n"
     if prepare:
         text += f"prepare = {json.dumps(list(prepare))}\n"
+    if verify_scoped:
+        text += f"verify_scoped = {json.dumps(verify_scoped)}\n"
     (bench["cfg"] / "projects" / f"{name}.toml").write_text(text)
     return repo
 
@@ -505,6 +513,64 @@ def test_prepared_the_writer_builds_the_modules_it_changes_and_the_whole_once_at
         assert "subtract" in (task.repo / "core/src/main/java/shop/Calc.java").read_text()
         assert "difference" in (task.repo / "app/src/main/java/shop/Report.java").read_text()
         assert not (task.repo / "red.md").exists(), "the evidence goes to the handoff, not the repository"
+    finally:
+        finish(task)
+
+
+def test_modules_the_planner_names_the_two_modules_and_the_verification_builds_them(bench):
+    """A project verified by its modules: the planner, who explored, names the two the task changes
+    and not the third; the verification runs the command for them, never the whole build."""
+    from vivibox.plan import parse_plan
+
+    project(
+        bench, "scoped", MAVEN_FILES, ["mvn -B -q verify"], verify_scoped="mvn -B -q -pl {modules} -am verify"
+    )
+    task, sup = begin("scoped", MAVEN_GOAL)
+    try:
+        st = drive(task, sup, {State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED}, steps=14)
+        modules = parse_plan((task.meta / gate.ACCEPTED_PLAN).read_text()).modules
+        repairs = [
+            e for e in task.events() if e["type"] == "turn" and "plan repair" in e["data"].get("kind", "")
+        ]
+        widened = [e["data"] for e in task.events() if e["type"] == "verify_widened"]
+        logs = [e["data"]["log"] for e in task.events() if e["type"] == "gate" and e["data"].get("log")]
+        print(f"\nmodules: {modules}; plan repairs: {len(repairs)}; built whole: {widened}")
+        assert sorted(m.rstrip("/") for m in modules) == ["app", "core"], modules
+        assert st.state is State.CHECKPOINT_FINAL, f"ended in {st.state}: {st.problem or 'a question'}"
+        assert not widened, "the work stayed inside the modules"
+        last = (task.meta / "log" / Path(logs[-1]).name).read_text()
+        assert "-pl " in last and "extra" not in last.split("-pl ", 1)[1].split()[0], "the two, not the third"
+    finally:
+        finish(task)
+
+
+BUN_FILES = {
+    "package.json": '{"name": "calc", "private": true, "scripts": {"test": "bun test"}}\n',
+    "calc.ts": "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+    "calc.test.ts": (
+        'import { expect, test } from "bun:test";\nimport { add } from "./calc";\n\n'
+        'test("adds", () => {\n  expect(add(1, 2)).toBe(3);\n});\n'
+    ),
+}
+# A global install, the way the language polygon of 2026-09-28 saw one: to the shared mise volume.
+GLOBAL = re.compile(
+    r"\bmise\s+(use|install)\b[^\n;&|]*\s(-g|--global)\b|\bnpm\s+(i|install|add)\b[^\n;&|]*\s(-g|--global)\b|bun\.sh/install"
+)
+
+
+def test_global_tool_a_runner_the_image_lacks_is_not_installed_globally(bench):
+    """The tests run on bun, which the image does not have and the plan does not call for: the
+    writer adds it to mise.toml (a build file, which waits for you) or asks, never installs it
+    where the verification cannot see."""
+    project(bench, "buncalc", BUN_FILES, ["bun test"])
+    task, sup = begin("buncalc", "Add subtract(a, b) to calc.ts, with a test in calc.test.ts")
+    try:
+        st = drive(task, sup, {State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED}, steps=10)
+        commands = writer_commands(task) if task.read_state().sessions.get("writer") else []
+        print(f"\nended in {st.state}: {st.problem}; writer's commands:")
+        for c in commands:
+            print(f"  {c}")
+        assert not [c for c in commands if GLOBAL.search(c)], "installed outside the repository"
     finally:
         finish(task)
 

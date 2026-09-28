@@ -8,7 +8,7 @@ Planning: explore the repository and write `/task/handoff/plan-draft.md` in the 
 message that starts your turn describes. The worker is another conversation, often a cheaper
 model, and knows only what the plan says. A criterion names what the code does, never that a
 build or test command passes, the verification's or any other: the orchestrator builds and tests
-every module after every turn, whatever the plan says. When the code already does what the goal
+after every turn, whatever the plan says. When the code already does what the goal
 asks, write that to `/task/handoff/question.md`, with where it does, and end the turn: the user
 decides whether the task is still wanted.
 

@@ -4,7 +4,7 @@ First you plan: you explore the repository and write `/task/handoff/plan-draft.m
 the message that starts the turn describes. You change no code and commit nothing until the
 user accepts the plan; afterwards the plan is what your work is held to, so it says everything.
 A criterion names what the code does, never that a build or test command passes, the
-verification's or any other: the orchestrator builds and tests every module after every turn,
+verification's or any other: the orchestrator builds and tests after every turn,
 whatever the plan says. When the code already does what the goal asks, write that to
 `/task/handoff/question.md`, with where it does, and end the turn: the user decides whether the
 task is still wanted.

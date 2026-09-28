@@ -100,6 +100,7 @@ from .projects import (  # noqa: F401
 from .proposal import (  # noqa: F401
     missing_command,
     narrowed_proposal,
+    outside_modules,
     proposed,
     verify_commands,
 )
@@ -255,6 +256,14 @@ def used_numbers(project: Project) -> int:
     return max(found, default=0)
 
 
+# The header's line in a project verified by its modules (Project.verify_scoped), for the planner.
+MODULES_LINE = """# The directories this task changes, from the repository's root, e.g. ["core", "app"]. The
+# verification builds and tests only these, with `{command}`; a change outside them makes it
+# build the whole project.
+modules = []
+"""
+
+
 def create(
     project_name: str,
     description: str,
@@ -311,6 +320,9 @@ def create(
     plan = template.read_text().replace("{{kind}}", kind)
     if no_build:
         plan = plan.replace("\nverify = []\n", "\nverify = false\n", 1)
+    elif project.verify_scoped:
+        modules = MODULES_LINE.format(command=project.verify_scoped)
+        plan = plan.replace("\nverify = []\n", "\nverify = []\n" + modules, 1)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
     if (orchestration and orchestration != config.orchestration) or (
         max_rounds and max_rounds != config.max_rounds

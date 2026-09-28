@@ -1385,3 +1385,34 @@ def test_the_transcripts_heading_keeps_the_end_of_the_prompt_where_the_ask_is():
     assert shown.startswith("… ") and shown.endswith(prompts.IMPLEMENT_PROMPT.splitlines()[-1])
     assert "# Your role" not in shown
     assert transcript.shortened("one line") == "one line"
+
+
+def test_a_scoped_projects_draft_without_modules_gets_a_repair_turn(task):
+    """Without them the task is verified with the whole build, which in a project of hundreds of
+    modules outlasts the time limit: the planner, who has just explored, names them."""
+    scoped = DRAFT.replace('mode = "code-only"', "modules = []")
+    named = DRAFT.replace('mode = "code-only"', 'modules = ["core"]')
+    harness = FakeHarness(
+        task,
+        [
+            lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(scoped),
+            lambda t: (t.meta / "handoff" / "plan-draft.md").write_text(named),
+        ],
+    )
+    sup, _ = make(task, harness)
+    sup.verify_scoped = "mvn -pl {modules} -am verify"
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN
+    assert len(harness.prompts) == 2 and "modules" in harness.prompts[1], "told what is missing"
+
+
+def test_the_writer_of_a_scoped_task_is_told_what_verifies_it(task):
+    accepted(task)
+    (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core", "app"]\n+++\n')
+    harness = FakeHarness(task)
+    sup, _ = make(task, harness, results=[gate_result(False)])
+    sup.verify_scoped = "mvn -pl {modules} -am verify"
+    sup.step()
+    first = harness.prompts[0]
+    assert first.endswith(prompts.IMPLEMENT_PROMPT)
+    assert "`mvn -pl core,app -am verify`" in first and "core, app" in first

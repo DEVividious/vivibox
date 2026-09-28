@@ -41,6 +41,7 @@ broken, next to the line that broke it.
 | every test file added or changed is named in `red.md` | `gate.red_evidence_missing` |
 | the command a writer proposes builds the whole project, not a selection of tests, and without the build tool's debug output | `gate.narrowed_proposal` |
 | a criterion never asks a build or test command to pass, the verification's or any other | `gate.command_criteria` |
+| a plan in a project verified by its modules names them (`modules`) | `proposal.modules_missing` |
 | a review has its two sections and a place on every note | `reviewing.problem` |
 
 A sentence no row covers is one of two things: a fact about the pod ("Docker works here") or a
@@ -126,6 +127,10 @@ the commit that changed the prompt:
   of them, one depending on the other. The writer works on the modules it changes, together, and
   builds the whole reactor once at most, as its last check; the evidence stays out of the
   repository; the verification is green.
+- modules: the same project with `verify_scoped`; the planner names the two modules the task
+  changes, not the third, and the verification runs the command for them and passes.
+- global tool: a project whose tests need a runner the image lacks and the plan does not call
+  for; the writer installs nothing globally.
 
 A wording change that no mechanical test covers names, in its commit message, the behavioural
 run that confirmed it.

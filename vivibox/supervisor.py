@@ -33,6 +33,7 @@ from .prompts import (
     REVIEW_FIX_PROMPT,
     REVIEW_PROMPT,
     REVIEW_REPAIR_PROMPT,
+    SCOPED_PREFIX,
     SELF_REVIEW_PROMPT,
 )
 from .risky import Change
@@ -215,6 +216,9 @@ class Supervisor:
     project_no_build: bool = False
     # The project's preparation, which ran before the writer's first turn; that turn is told of it.
     prepared: list[str] = field(default_factory=list)
+    # The project's command for some modules (Project.verify_scoped): a draft names its modules,
+    # and the writer's first turn is told what verifies it.
+    verify_scoped: str = ""
     # The project file as it is now, read at every step; None keeps the fields above as given.
     current_project: Callable[[], Project] | None = None
     # The role that plans. None means the writer plans too, which is what a caller with one harness
@@ -256,6 +260,7 @@ class Supervisor:
         if self.current_project:
             p = self.current_project()
             self.project_verify, self.project_no_build, self.prepared = p.verify, p.no_build, p.prepare
+            self.verify_scoped = p.verify_scoped
         st = self.task.read_state()
         if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
             self._watch_answer()
@@ -468,6 +473,14 @@ class Supervisor:
             kind="plan",
         )
 
+    def _planned_modules(self) -> list[str]:
+        if not self.verify_scoped:
+            return []
+        try:
+            return parse_plan((self.task.meta / gate.ACCEPTED_PLAN).read_text()).modules
+        except (OSError, PlanError):
+            return []
+
     def _read_draft(self):
         """The draft as a plan, or what keeps it from being one: unreadable, or one acceptance
         would refuse."""
@@ -477,6 +490,8 @@ class Supervisor:
             gate.check_plan(plan)
         except (OSError, PlanError, gate.GateError) as e:
             return None, str(e)
+        if problem := proposal.modules_missing(plan, self.verify_scoped):
+            return None, problem
         return plan, ""
 
     def _plan_manually(self, st: TaskState) -> None:
@@ -527,6 +542,9 @@ class Supervisor:
         prompt = next_prompt(self.task, IMPLEMENT_PROMPT)
         if self.prepared and prompt.endswith(IMPLEMENT_PROMPT):
             prompt = PREPARED_PREFIX.format(commands=", ".join(f"`{c}`" for c in self.prepared)) + prompt
+        if prompt.endswith(IMPLEMENT_PROMPT) and (modules := self._planned_modules()):
+            command = self.verify_scoped.replace("{modules}", ",".join(modules))
+            prompt = SCOPED_PREFIX.format(modules=", ".join(modules), command=command) + prompt
         if prompt.endswith(IMPLEMENT_PROMPT) and self._asks_for_command():
             # What the build files and the pipeline name, as init shows it: the writer, who never
             # saw init's notes, proposed a plainer command than the project's own.

@@ -216,6 +216,10 @@ class Project:
     # Toolchains the image does not have, as mise versions ("go@1.25.3"), installed in the pod for
     # the agent and for the gate; nothing is written into the repository.
     tools: list[str] = field(default_factory=list)
+    # The command for some modules only, with {modules} where their directories go, comma-joined
+    # (Maven: "mvn -B -pl {modules} -am verify"): a task whose plan names its modules is verified
+    # with it, and with verify when its work reaches past them.
+    verify_scoped: str = ""
 
 
 def config_dir() -> Path:
@@ -403,7 +407,15 @@ def load_project(name: str, base: Path | None = None) -> Project:
     verify_timeout = data.get("verify_timeout", 0)
     if not isinstance(verify_timeout, int) or verify_timeout < 0:
         raise ConfigError(f"{path}: verify_timeout must be a number of seconds")
+    verify_scoped = data.get("verify_scoped", "")
+    if not isinstance(verify_scoped, str) or (verify_scoped and "{modules}" not in verify_scoped):
+        raise ConfigError(
+            f"{path}: verify_scoped must be a command with {{modules}}, "
+            'e.g. "mvn -B -pl {modules} -am verify"'
+        )
+    if verify_scoped and not verify:
+        raise ConfigError(f"{path}: verify_scoped needs verify, the whole build, for work past the modules")
     return Project(
         name, repo, verify, risky_extra, services, demo, java, ide, pass_env, verify_timeout, no_build,
-        prepare, tools,
+        prepare, tools, verify_scoped,
     )  # fmt: skip

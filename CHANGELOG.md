@@ -12,6 +12,10 @@ First public version.
 
 ### Added
 
+- `verify_scoped` in a project file, "verification by module" under `e`: for a project of many
+  modules, the command that builds some of them. A task's plan names the modules it changes, and
+  the task is verified with them while its commits stay inside; a change outside them is
+  verified with the whole build, and the timeline names the files.
 - Shared cache disk usage, shown separately in `u` and `vivibox usage`, including when no tasks
   are live; the breakdown covers all projects without charging shared bytes to each task.
 
@@ -110,6 +114,8 @@ First public version.
 
 ### Changed
 
+- The brief says a global install (`mise use --global`, `npm install -g`) is invisible to the
+  verification, and that a tool the plan does not call for is a question for you.
 - `vivibox usage --json` now returns an object with `tasks` and `shared_caches`, instead of a
   task array alone. `shared_caches` is null when Docker could not be measured.
 

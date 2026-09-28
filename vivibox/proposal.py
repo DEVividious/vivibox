@@ -5,10 +5,11 @@ whether the project keeps it."""
 
 from __future__ import annotations
 
+from . import repo
 from .config import Project
 from .gate import ACCEPTED_PLAN
 from .gate import narrowed_proposal as narrowed_proposal_in
-from .plan import PlanError, parse_plan
+from .plan import Plan, PlanError, parse_plan
 from .task import Task
 
 PROPOSAL = "verify-proposal.md"
@@ -38,6 +39,35 @@ def nothing_to_build(task: Task) -> bool:
         return False
 
 
+def planned_modules(task: Task, project: Project) -> list[str]:
+    """The modules the accepted plan names, in a project verified by its modules; [] otherwise."""
+    if not project.verify_scoped:
+        return []
+    try:
+        return parse_plan((task.meta / ACCEPTED_PLAN).read_text()).modules
+    except (OSError, PlanError):
+        return []
+
+
+def modules_missing(plan: Plan, verify_scoped: str) -> str:
+    """Why a draft in a project verified by its modules is not ready: it names none, and the task
+    would be verified with the whole build. "" when it names some, or there is nothing to build."""
+    if not verify_scoped or plan.modules or plan.no_build:
+        return ""
+    return 'modules in the header is empty; name the directories this task changes, e.g. ["core"]'
+
+
+def outside_modules(task: Task, project: Project) -> list[str]:
+    """The files the task's commits change outside the modules its plan names: no one builds those
+    with the modules' command, so the task is verified with the whole build."""
+    if not (modules := planned_modules(task, project)):
+        return []
+    base = task.read_state().base_commit
+    changed = repo.git("diff", "--name-only", f"{base}..HEAD", cwd=task.repo).stdout.split()
+    inside = tuple(f"{m.rstrip('/')}/" for m in modules)
+    return [path for path in changed if not path.startswith(inside)]
+
+
 def asked(task: Task, project: Project) -> bool:
     """Whether this task's writer is to propose the command: the project has none, and neither
     it nor the task says there is nothing to build."""
@@ -45,10 +75,13 @@ def asked(task: Task, project: Project) -> bool:
 
 
 def verify_commands(task: Task, project: Project) -> list[str]:
-    """The project's commands; for a project with none, the one this task's writer proposed. None
+    """The project's commands, or the one for the modules the task's plan names while its work stays
+    inside them; for a project with none, the one this task's writer proposed. None
     for a task made with nothing to build, whatever the project builds for its other tasks."""
     if nothing_to_build(task):
         return []
+    if (modules := planned_modules(task, project)) and not outside_modules(task, project):
+        return [project.verify_scoped.replace("{modules}", ",".join(modules))]
     if project.verify or not asked(task, project):
         return project.verify
     if not (found := proposed(task)) or narrowed_proposal_in(found):

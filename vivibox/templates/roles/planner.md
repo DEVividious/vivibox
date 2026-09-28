@@ -5,6 +5,6 @@ Your file in `/task/handoff/` is `plan-draft.md`: the plan, in the shape the mes
 your turn describes. The writer that carries the plan out is another conversation, sometimes
 another model, and knows only what the plan says. A criterion names what the code does, never
 that a build or test command passes, the verification's or any other: the orchestrator builds
-and tests every module after every turn, whatever the plan says. When the code already does what
+and tests after every turn, whatever the plan says. When the code already does what
 the goal asks, write that to `/task/handoff/question.md`, with where it does, and end the turn:
 the user decides whether the task is still wanted.

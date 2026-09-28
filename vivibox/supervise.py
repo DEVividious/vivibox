@@ -56,7 +56,7 @@ def cmd_supervise(args: argparse.Namespace) -> int:
 
 
 # The project settings a running task reads at every step: a change to one is on its record.
-WATCHED = ("verify", "no_build", "prepare", "verify_timeout", "pass_env", "java")
+WATCHED = ("verify", "verify_scoped", "no_build", "prepare", "verify_timeout", "pass_env", "java")
 
 
 def live_config(start: Config) -> Callable[[], Config]:
@@ -144,6 +144,9 @@ def make_supervisor(
 
     def run_gate(t: Task) -> gate.GateResult:
         p = now()
+        if outside := actions.outside_modules(t, p):
+            # Built whole this time, and the timeline says why a round took so long.
+            t.event("verify_widened", outside=outside[:5], more=max(0, len(outside) - 5))
         return gate.run_gate(
             t,
             pod,
@@ -181,6 +184,7 @@ def make_supervisor(
         project_verify=project.verify,
         project_no_build=project.no_build,
         prepared=project.prepare,
+        verify_scoped=project.verify_scoped,
         planner=planner,
         source=project.repo,
         current_project=now,

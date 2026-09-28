@@ -11,6 +11,8 @@ CRITERIA_HEADING = "Acceptance criteria"
 HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
 MAX_SUMMARY = 100
 CHECKBOX = re.compile(r"^\s*[-*] \[( |x|X)\] (.+)$")
+# A module's directory as a build tool takes it: relative, no spaces or commas, nothing above the root.
+MODULE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[\w.@+/-]+$")
 
 
 class PlanError(Exception):
@@ -39,6 +41,9 @@ class Plan:
     verify: list[str] = field(default_factory=list)
     # The plan says there is nothing to build or test: verify = false in its header.
     no_build: bool = False
+    # The directories this task changes, from the repository's root, in a project verified by its
+    # modules (Project.verify_scoped).
+    modules: list[str] = field(default_factory=list)
 
     @property
     def criteria_done(self) -> int:
@@ -128,4 +133,7 @@ def parse_plan(text: str) -> Plan:
     verify = [] if no_build else verify
     if not isinstance(verify, list) or not all(isinstance(c, str) and c.strip() for c in verify):
         raise PlanError("verify must be a list of commands, or false when there is nothing to build")
-    return Plan(_criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify, no_build)
+    modules = data.get("modules", [])
+    if not isinstance(modules, list) or not all(isinstance(m, str) and MODULE.match(m) for m in modules):
+        raise PlanError('modules must be a list of directories from the repository\'s root, e.g. ["core"]')
+    return Plan(_criteria(body), kind, summary.strip()[:MAX_SUMMARY], verify, no_build, modules)

@@ -12,7 +12,7 @@ from .states import State
 PLAN_PROMPT = """Read the goal in /task/plan.md and explore the repository. Write the plan to
 /task/handoff/plan-draft.md, a copy of /task/plan.md filled in:
 - keep the header between the +++ lines, except: set summary to one line of at most 100
-  characters naming what the task does;
+  characters naming what the task does, and fill in modules where the header has it;
 - under "## Acceptance criteria", replace the line "Replace with an observable outcome you can
   check" with concrete "- [ ]" items, each checkable by reading or running code; keep the
   first item;
@@ -81,6 +81,15 @@ PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in th
 built and installed is there; its output is in /task/handoff/prepare.log. Build only the modules you
 change, and all of them in one command (Maven: `-pl core,app`): a module built on its own takes its
 neighbours as they were installed, before your change.
+
+"""
+
+# Before the first implementing turn of a task whose plan names its modules (Project.verify_scoped):
+# what the verification runs, so the writer builds the same, and why it stays inside them.
+SCOPED_PREFIX = """The verification builds and tests the modules the plan names, {modules}, with `{command}`.
+A change outside them makes it build the whole project, which may outlast its time limit: keep
+the work inside them, and when the task cannot be done there, write that to
+/task/handoff/question.md and end the turn.
 
 """
 

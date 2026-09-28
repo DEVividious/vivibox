@@ -2108,6 +2108,18 @@ def test_e_opens_the_projects_screen_and_each_row_writes_its_own_key(env, monkey
         assert isinstance(app.screen, settings.ProjectSettings)
         assert labels(app)[0].strip().startswith("preparation"), "what a new task does first, first"
         assert labels(app)[1].strip().startswith("verification") and "true" in labels(app)[1]
+        row = await go_to(app, pilot, "by module")
+        assert row == 2, "beside the whole build it stands in for"
+        app.screen.query_one(Input).value = "mvn -B verify"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").verify_scoped == "", "without {modules} it is refused"
+        await go_to(app, pilot, "by module")
+        app.screen.query_one(Input).value = "mvn -B -pl {modules} -am verify"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert load_project("demo").verify_scoped == "mvn -B -pl {modules} -am verify"
+        assert "{modules}" in labels(app)[row]
         await go_to(app, pilot, "run app")
         assert isinstance(app.screen, settings.AskLines)
         app.screen.query_one(TextArea).text = "npm install\nnpm start\n"

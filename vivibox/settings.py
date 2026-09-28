@@ -243,6 +243,10 @@ SETTINGS_ABOUT = {
     "for you. None: no limit. A change applies from a task's next turn.",
     "file": "config.toml in your editor, for what has no row here.",
 }
+NO_SCOPE = "none: the whole build every time"
+SCOPE_QUESTION = "The command for some modules, with {modules} where the plan's go (comma-joined):"
+SCOPE_HINT = "Maven: mvn -B -pl {modules} -am verify. Empty: every task is verified whole."
+
 # The same for a project's rows (e on its row).
 PROJECT_ABOUT = {
     "prepare": "What a new task's clone runs once while the plan is made, usually a build "
@@ -250,6 +254,10 @@ PROJECT_ABOUT = {
     "verify": "The command that proves the work: the gate runs it on a fresh clone of the "
     "commits after every turn of the writer. Empty: the next task's writer proposes one. A "
     "change applies from the next verification, in every task.",
+    "verify_scoped": "For a project of many modules: the command that builds and tests some of "
+    "them, with {modules} where a task's plan names them. A task is verified with it while its "
+    "work stays inside those modules, and with the verification when it does not. Empty: always "
+    "the whole build. A change applies from a task's next plan.",
     "demo": "How v runs the project in its pod so you can look at it.",
     "java": "The JDK this project builds with, when not the image's Java 21, e.g. 17 for an older "
     "Gradle. A change applies from a task's next start.",
@@ -566,6 +574,7 @@ class ProjectSettings(Rows):
         return [
             ("preparation", " && ".join(project.prepare) or NOTHING_TO_PREPARE, "prepare"),
             ("verification", verify, "verify"),
+            ("verification by module", project.verify_scoped or NO_SCOPE, "verify_scoped"),
             (
                 "run app (v)",
                 ", ".join(project.demo) or "worked out from the repository, or asked of the agent",
@@ -612,6 +621,20 @@ class ProjectSettings(Rows):
                 ),
                 lambda lines: lines is not None and self.write("demo", lines),
             )
+        elif key == "verify_scoped":
+
+            def typed(value: str | None) -> None:
+                if value is None:
+                    return
+                if value and "{modules}" not in value:
+                    self.say("The command needs {modules} where the plan's modules go.")
+                    return
+                if value and not project.verify:
+                    self.say("Set the verification first: work outside the modules is built whole.")
+                    return
+                self.write("verify_scoped", value)
+
+            self.app.push_screen(Ask(SCOPE_QUESTION, project.verify_scoped, SCOPE_HINT), typed)
         elif key == "prepare":
 
             def typed(value: str | None) -> None:

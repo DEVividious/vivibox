@@ -220,3 +220,44 @@ def test_the_agents_window_opens_on_w_and_not_at_every_turn(env, monkeypatch):
     sup.ports.session_started(task.read_state())
     assert opened == [], "nothing opened for nobody"
     assert not hasattr(supervise, "agent_window")
+
+
+def test_work_past_the_planned_modules_is_verified_whole_and_the_timeline_says_why(env, monkeypatch):
+    import subprocess
+
+    from vivibox import gate
+    from vivibox.cli import main
+    from vivibox.config import load_project
+    from vivibox.task import find_task
+
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(path.read_text() + 'verify_scoped = "mvn -pl {modules} -am verify"\n')
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(supervise.load_config().tasks_dir, "demo-1")
+    (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    ran = []
+    monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands))
+
+    class Pod:
+        def review_down(self):
+            pass
+
+        def review_side(self):
+            return self
+
+    sup = supervise.make_supervisor(task, load_project("demo"), Pod(), config())
+    git = lambda *a: subprocess.run(["git", *a], cwd=task.repo, check=True, capture_output=True)  # noqa: E731
+    (task.repo / "core").mkdir()
+    (task.repo / "core" / "Calc.java").write_text("class Calc {}\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "Add Calc")
+    sup.ports.run_gate(task)
+    assert ran[-1] == ["mvn -pl core -am verify"]
+    assert not [e for e in task.events() if e["type"] == "verify_widened"]
+    (task.repo / "pom.xml").write_text("<project/>\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "Add the root build")
+    sup.ports.run_gate(task)
+    assert ran[-1] == ["true"], "the project's whole build"
+    assert [e["data"]["outside"] for e in task.events() if e["type"] == "verify_widened"] == [["pom.xml"]]

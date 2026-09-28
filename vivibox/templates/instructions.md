@@ -45,10 +45,10 @@ Each of these is checked when a turn ends; a change that breaks one comes back i
 ## What is true here
 
 - Docker, docker compose and Testcontainers work; published ports appear on localhost.
-- Node, npm, Python and uv are ready, and `mise` installs any other toolchain, Go and Ruby
-  included. Pick the language the task calls for, not the one that happens to be installed:
-  `mise use <tool>@<version>` writes a `mise.toml` the verification reads too; it is a build file,
-  so the plan has to call for it.
+- Node, npm, Python and uv are ready; use the task's language. `mise use <tool>@<version>` adds
+  another toolchain to `mise.toml`, a build file the verification reads: only when the plan calls
+  for it. A global install (`mise use --global`, `npm install -g`) is invisible to the
+  verification: a tool the plan lacks is a question, as above.
 - There is no remote to push to.
 - When a turn ends, the orchestrator runs this on a fresh clone of the commits, dependencies
   installed first:

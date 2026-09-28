@@ -102,3 +102,12 @@ def test_what_the_task_started_with_and_what_changed_since_are_in_the_timeline(t
     )
     assert what[3] == "you: changed verify → npm run check, prepare → nothing"
     assert what[4] == "you: changed writer → deepseek/deepseek-v4-pro (config.toml's harness)"
+
+
+def test_a_verification_built_whole_says_which_changes_took_it_past_the_modules(tmp_path):
+    task = create_task(tmp_path, "shop", "Add subtract", "")
+    task.event("verify_widened", outside=["pom.xml", "extra/X.java"], more=0)
+    task.event("verify_widened", outside=["a", "b", "c", "d", "e"], more=2)
+    what = [text for _, text in timeline.entries(task)]
+    assert "whole build: changes outside the planned modules, pom.xml, extra/X.java" in what
+    assert "whole build: changes outside the planned modules, a, b, c, d, e and 2 more" in what

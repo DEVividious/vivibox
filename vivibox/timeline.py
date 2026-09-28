@@ -156,6 +156,10 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "unverified_head":
             was, now = data.get("verified", "")[:7], data.get("head", "")[:7]
             text = f"commits changed since the verification: {was} → {now}"
+        elif kind == "verify_widened":
+            more = f" and {data['more']} more" if data.get("more") else ""
+            outside = ", ".join(data.get("outside") or [])
+            text = f"whole build: changes outside the planned modules, {outside}{more}"
         elif kind == "turn_retry":
             text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":

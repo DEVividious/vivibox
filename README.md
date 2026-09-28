@@ -3,8 +3,9 @@
 vivibox is a terminal orchestrator for coding agents: plan, implement, verify and review tasks
 in isolated clones, then bring the work back for your approval.
 
-Spend a strong model on the plan, choose other models for writing and review, and let your
-project's build and tests check each revision before independent review.
+Built for limited access to a strong model and plentiful access to smaller ones. Plan in your
+existing chat subscription, then let API-backed models implement and review, with your project's
+build and tests checking their work.
 
 ![vivibox: choose models, approve a plan, verify the changes, send review feedback to the writer, then inspect the result.](docs/img/flow.gif)
 

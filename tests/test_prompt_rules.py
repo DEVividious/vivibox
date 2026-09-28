@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import actions, brief, feedback, gate, manual, proposal, reviewing, risky, supervisor
+from vivibox import actions, brief, feedback, gate, manual, prompts, proposal, reviewing, risky
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
 # The brief each role gets: the common part and its own, as the agent reads them.
@@ -21,7 +21,9 @@ BRIEFS = {
 TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
 # What starts a turn of an agent, wherever vivibox keeps it.
 TURN_PROMPTS = {
-    **{n: t for n, t in vars(supervisor).items() if n.endswith("_PROMPT") and len(t.split()) > 5},
+    # From prompts.py, where every turn prompt lives: gathered from a module that imports them, a
+    # prompt moved elsewhere dropped out of these checks without a sound.
+    **{n: t for n, t in vars(prompts).items() if n.endswith("_PROMPT") and len(t.split()) > 5},
     "RECON_PROMPT": manual.RECON_PROMPT,
     "DEMO_ASK": actions.DEMO_ASK,
 }

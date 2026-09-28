@@ -305,6 +305,8 @@ First public version.
 
 ### Internal
 
+- The supervisor's review state lives in `review_round.py`, and the prompt rules test reads
+  every turn prompt from `prompts.py`.
 - Counts ("1 turn", "2 turns") are said by one function, `ui.count`.
 - The details panel's sections live in `sections.py`; `panel.py` keeps the header and the states.
 - The gate's feedback text moves to `vivibox/feedback.py`.

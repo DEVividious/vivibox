@@ -29,6 +29,8 @@ def reason(st: TaskState, running: bool) -> str:
         return "stopped"
     if not running:
         return "not running"
+    if st.awaiting_review and st.state is State.REVIEW:
+        return "review"  # for the agent's CLI, which reviews the round (ADR-0035)
     return ""
 
 

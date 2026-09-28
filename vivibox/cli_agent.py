@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import about, actions, skill, ui
+from . import about, actions, reviewing, skill, ui
 from .config import load_config
 from .waiting import JSON_VERSION, TIMED_OUT
 
@@ -60,6 +60,38 @@ def cmd_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(args: argparse.Namespace) -> int:
+    """The review copy, as ever; with --prompt and --import, a review in your agent's CLI."""
+    task, project = actions.load(args.task)
+    if args.prompt:
+        print(reviewing.cli_prompt(task), end="")
+        return 0
+    if args.answer is not None:
+        text = None
+        if args.answer == "-" or (not args.answer and not sys.stdin.isatty()):
+            # An agent's shell has no terminal and nothing on stdin: the answer file.
+            text = sys.stdin.read() or None
+        elif args.answer:
+            text = Path(args.answer).expanduser().read_text()
+        try:
+            review = reviewing.import_answer(task, text)
+        except reviewing.ReviewError as e:
+            print(f"vivibox: {e}", file=sys.stderr)
+            return 1
+        notes = ui.count(len(review.blocking), "blocking note")
+        went = (
+            f"{notes}; they go to the writer"
+            if review.blocking
+            else "no blocking notes; the work comes to the user"
+        )
+        print(f"Review brought in: {went}.")
+        return 0
+    path = actions.prepare_review(task, project)
+    print(f"Review copy: {path}")
+    print("The agent's work shows as uncommitted changes (IntelliJ: Commit tool window, Alt+0).")
+    return 0
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     wait = sub.add_parser(
         "wait", help="wait until a task needs you, is done, has a problem or stopped (for an agent's CLI)"
@@ -83,3 +115,21 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     agent.add_argument("action", choices=["install", "uninstall"])
     agent.set_defaults(func=cmd_skill)
+
+    review = sub.add_parser(
+        "review",
+        help="bring the work into your repository and update the review copy (automatic when ready);"
+        " with --prompt and --import, review a round in your agent's CLI",
+    )
+    review.add_argument("task", help="task id")
+    asked = review.add_mutually_exclusive_group()
+    asked.add_argument("--prompt", action="store_true", help="the prompt for this round's review in your CLI")
+    asked.add_argument(
+        "--import",
+        dest="answer",
+        nargs="?",
+        const="",
+        metavar="FILE",
+        help="bring the review in: FILE, '-' for stdin, or the answer file the prompt names",
+    )
+    review.set_defaults(func=cmd_review)

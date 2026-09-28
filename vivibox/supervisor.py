@@ -261,6 +261,8 @@ class Supervisor(ReviewRound):
         if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
             self._watch_answer()
             return False
+        if st.state is State.REVIEW and st.awaiting_review and not st.paused:
+            return self._watch_cli_review(st)
         if st.paused or st.state is State.DONE or waits_for_user(st.state):
             return False
         if st.state in (State.PLAN, State.IMPLEMENT) and self._past_the_limit():

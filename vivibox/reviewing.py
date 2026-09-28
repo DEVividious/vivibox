@@ -14,9 +14,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, opencode, providers, repo, roles, secrets
+from . import brief, gate, opencode, providers, repo, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
+from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
+from .prompts import CLI_REVIEW_REPLY
+from .states import State
 from .task import Task
 
 # Where the reviewer writes, in its container: outside the handoff, which it only reads.
@@ -32,6 +35,9 @@ MARK = re.compile(r"^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?")
 # What a reviewer writes under a section it leaves empty.
 EMPTY = re.compile(r"^[(_*]*(?:none|nothing|n/a|-)[.)_*]*$", re.IGNORECASE)
 FILE = "review-{n}.md"
+# A review in an agent's CLI (ADR-0035), in the task's own directory: the prompt it reads, the file
+# it writes, and the review it brought in, which the supervisor takes as a reviewer's turn.
+CLI_PROMPT, CLI_ANSWER, CLI_REVIEW = "review-prompt-cli.md", "review-answer.md", "review-cli.md"
 NUMBERED = re.compile(r"^review-(\d+)\.md$")
 
 
@@ -78,6 +84,70 @@ def problem(text: str) -> str:
         if not PLACE.match(note):
             return f"a note has no place (path:line) to act on: {note[:80]}"
     return ""
+
+
+class ReviewError(Exception):
+    pass
+
+
+def ask_cli(task: Task, n: int, copy: Path | None) -> None:
+    """The prompt for round n of a review in the agent's CLI, which then waits for it."""
+    meta, handoff = task.meta, task.meta / "handoff"
+    reply = handoff / f"review-{n - 1}-reply.md"
+    text = CLI_REVIEW_TEXT.format(
+        task=task.id,
+        n=n,
+        plan=meta / gate.ACCEPTED_PLAN,
+        criteria=handoff / "criteria.md",
+        red=handoff / "red.md",
+        reply=CLI_REVIEW_REPLY.format(path=reply) if n > 1 and reply.exists() else "",
+        copy=copy or f"(prepare it: vivibox review {task.id})",
+        answer=meta / CLI_ANSWER,
+    )
+    (meta / CLI_ANSWER).unlink(missing_ok=True)
+    (meta / CLI_REVIEW).unlink(missing_ok=True)
+    (meta / CLI_PROMPT).write_text(text)
+    task.set_awaiting_review(True)
+    task.event("review_asked", round=n)
+
+
+def _asked(task: Task) -> None:
+    st = task.read_state()
+    if st.state is not State.REVIEW or not st.awaiting_review:
+        raise ReviewError(f"{task.id} is not waiting for a review from your CLI")
+
+
+def cli_prompt(task: Task) -> str:
+    _asked(task)
+    return (task.meta / CLI_PROMPT).read_text()
+
+
+def import_answer(task: Task, text: str | None = None) -> Review:
+    """The CLI's review, checked as the supervisor would read it, handed to the supervisor. Without
+    text, the answer file the CLI wrote."""
+    _asked(task)
+    if text is None:
+        path = task.meta / CLI_ANSWER
+        text = path.read_text() if path.exists() else ""
+    if not text.strip():
+        raise ReviewError(f"no review to bring in; write it to {task.meta / CLI_ANSWER}")
+    if why := problem(text):
+        raise ReviewError(f"that is not a review vivibox can read: {why}")
+    temporary = task.meta / (CLI_REVIEW + ".tmp")
+    temporary.write_text(text)
+    temporary.replace(task.meta / CLI_REVIEW)
+    return parse_review(text)
+
+
+def brought_in(task: Task) -> str | None:
+    """The review the CLI brought in, taken once by the supervisor."""
+    path = task.meta / CLI_REVIEW
+    if not path.exists():
+        return None
+    text = path.read_text()
+    path.unlink()
+    task.set_awaiting_review(False)
+    return text
 
 
 def keep(task: Task, n: int, text: str) -> Path:

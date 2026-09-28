@@ -246,6 +246,8 @@ def planner_asks(task: Task, st: TaskState) -> bool:
 
 # A manual planner's checkpoint before you brought a plan: nothing to review yet.
 AWAITING_PLAN = ("plan it yourself", ["vivibox plan prompt {id}", "vivibox plan import {id}"])
+# The review of a round is the agent's in your CLI (ADR-0035): at work there, not waiting for you.
+AWAITING_REVIEW = ("review in your CLI", ["vivibox review {id} --prompt", "vivibox review {id} --import"])
 
 
 def task_number(task_id: str) -> int:
@@ -258,6 +260,8 @@ def activity(st: TaskState, max_rounds: int) -> str:
     """max_rounds: the task's own limit, or config.toml's (orchestration.max_rounds_of)."""
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return AWAITING_PLAN[0]
+    if st.awaiting_review and st.state is State.REVIEW:
+        return AWAITING_REVIEW[0]
     if st.state in WAITING:
         return WAITING[st.state][0]
     if st.state is State.DONE:
@@ -349,6 +353,9 @@ def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
         if any(e["type"] == "started" for e in task.events()):
             return TaskView("not running", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
         return TaskView("not started", WAITS, IDLE, commands=(f"vivibox start {st.id}",))
+    if st.awaiting_review and st.state is State.REVIEW:
+        commands = tuple(c.format(id=st.id) for c in AWAITING_REVIEW[1])
+        return TaskView(AWAITING_REVIEW[0], WORKS, AT_WORK, commands=commands)
     if st.state is State.IMPLEMENT and prepare.underway(task):
         # The writer's turn waits for the project's preparation; nobody implements yet.
         return TaskView("preparing", WORKS, AT_WORK, commands=(f"vivibox attach {st.id}",))

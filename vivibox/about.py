@@ -38,7 +38,7 @@ def gather(path: Path) -> dict:
     in_cli = Role(manual.NAME, "")
     flows = []
     for name, mode in ORCHESTRATION_MODES.items():
-        why_not = problem(name, in_cli)
+        why_not = problem(name, in_cli, plan_in_cli=True)
         flows.append(
             {
                 "name": name,

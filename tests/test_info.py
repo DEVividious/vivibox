@@ -40,9 +40,9 @@ def test_a_folder_outside_git_has_no_project(env, capsys):
 def test_the_flows_say_which_a_planner_in_your_cli_can_run(env, capsys):
     flows = {flow["name"]: flow for flow in info(capsys, env / "repo")["flows"]}
     assert list(flows) == list(ORCHESTRATION_MODES)
-    for name in ("single_agent", "supervisor_worker"):
-        assert not flows[name]["plan_in_cli"] and flows[name]["why_not"]
-    for name in ("planner_executor", "planner_maker_checker"):
+    assert not flows["single_agent"]["plan_in_cli"] and flows["single_agent"]["why_not"]
+    # Supervisor ⇄ Worker too since ADR-0035: the CLI that planned reviews each round.
+    for name in ("planner_executor", "planner_maker_checker", "supervisor_worker"):
         assert flows[name]["plan_in_cli"] and flows[name]["why_not"] == ""
     mode = ORCHESTRATION_MODES["planner_executor"]
     assert flows["planner_executor"]["title"] == mode.label

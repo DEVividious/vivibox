@@ -54,6 +54,9 @@ class TaskState:
     # You plan in an agent's CLI on your machine (vivibox new --plan-in-cli), which reads your
     # checkout itself: no report on the repository is written for it, and its prompt is the CLI's.
     plan_in_cli: bool = False
+    # In REVIEW with the review in an agent's CLI (ADR-0035): the prompt is written, and the task
+    # waits for the review the CLI brings in.
+    awaiting_review: bool = False
     # Why the task is not moving, when that was not your doing: "<what happened>: <the reason in
     # the failing tool's words>". Kept until the task starts again, so the view can go on saying it.
     problem: str = ""
@@ -161,6 +164,12 @@ class Task:
     def set_plan_in_cli(self, in_cli: bool) -> None:
         st = self.read_state()
         st.plan_in_cli = in_cli
+        self._write_state(st)
+
+    def set_awaiting_review(self, waiting: bool) -> None:
+        st = self.read_state()
+        st.awaiting_review = waiting
+        st.updated = now()
         self._write_state(st)
 
     def set_awaiting_plan(self, waiting: bool) -> None:

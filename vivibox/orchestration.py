@@ -70,18 +70,20 @@ def max_rounds_of(task: Task | None, config: Config) -> int:
     return chosen or config.max_rounds
 
 
-def problem(mode_name: str, planner: Role) -> str:
+def problem(mode_name: str, planner: Role, plan_in_cli: bool = False) -> str:
     """Why a mode cannot run on this planner, or "" when it can. An agent that plans and writes in
-    one conversation cannot be you in your own chat, nor a tool that cannot write."""
+    one conversation cannot be you in your own chat, nor a tool that cannot write. A supervisor can
+    be you only in an agent's CLI, which reads the work where a chat in a browser cannot."""
     mode = MODES[mode_name]
     if mode.agents["writer"] == "planner" and planner.harness != opencode.NAME:
         return (
             f"{mode_name} needs a planner that can write: put the planner on an opencode model "
             "(provider/model), or pick planner_executor"
         )
-    if mode.supervisor and planner.harness not in (opencode.NAME, claudecode.NAME):
+    if mode.supervisor and planner.harness not in (opencode.NAME, claudecode.NAME) and not plan_in_cli:
         return (
             f"{mode_name} needs a planner that runs on a model, not {manual.NAME}: with a manual "
-            "planner pick planner_executor or planner_maker_checker"
+            "planner pick planner_executor or planner_maker_checker, or plan in an agent's CLI "
+            "(vivibox new --plan-in-cli), which then reviews each round"
         )
     return ""

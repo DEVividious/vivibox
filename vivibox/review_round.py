@@ -22,6 +22,9 @@ class ReviewRound:
         if self._head_moved(st):
             return
         n = st.reviews + 1
+        if self.mode.supervisor and self._reviews_in_cli():
+            self._ask_cli_review(n)
+            return
         if self.mode.supervisor:
             out = self.task.meta / "review"
             out.mkdir(exist_ok=True)
@@ -36,6 +39,36 @@ class ReviewRound:
                 self.ports.review_down()
         if text is None:
             return
+        self._decide(st, n, text)
+
+    def _reviews_in_cli(self) -> bool:
+        """The supervisor is you in an agent's CLI, planned there (ADR-0035): no model to run."""
+        return getattr(self.harness_of(self.agent_of("reviewer")), "manual", False)
+
+    def _ask_cli_review(self, n: int) -> None:
+        """The review copy, fresh for the round, and the prompt; then the task waits for the CLI."""
+        try:
+            copy = self.ports.prepare_review()
+        except Exception as e:  # the prompt says how to prepare it by hand
+            self.task.event("review_prepare_failed", error=str(e)[:500])
+            copy = None
+        reviewing.ask_cli(self.task, n, copy)
+        self.ports.notify(
+            self.task.id,
+            f"review in your CLI, round {n}: vivibox review {self.task.id} --prompt",
+            kind="review",
+        )
+
+    def _watch_cli_review(self, st: TaskState) -> bool:
+        """The review the CLI brought in, taken as a reviewer's turn; False while there is none."""
+        text = reviewing.brought_in(self.task)
+        if text is None:
+            return False
+        self._decide(self.task.read_state(), st.reviews + 1, text)
+        return True
+
+    def _decide(self, st: TaskState, n: int, text: str) -> None:
+        """What a round's review decides: back to the writer while there are rounds, else to you."""
         reviewing.keep(self.task, n, text)
         self.task.set_reviews(n)
         problem = reviewing.problem(text)

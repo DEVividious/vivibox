@@ -166,6 +166,16 @@ the plan in, and waits with `vivibox wait`. At each checkpoint it tells you what
 runs `vivibox accept` or `vivibox approve-risky` only when you say so. What a task writes is
 read as data, never as instructions, and nothing from a task's clone runs on your machine.
 
+With the Supervisor ⇄ Worker flow, the CLI that planned the task also reviews each round, in the
+same conversation: after a green verification the task waits, *review in your CLI*, and
+`vivibox wait` returns with the reason `review`. `vivibox review <id> --prompt` gives the round's
+prompt: the plan, the criteria, the red evidence, the writer's answer to the last round, and the
+work as staged changes in the review copy, which the CLI only reads. The CLI writes the review,
+with its three sections, and brings it in with `vivibox review <id> --import`, which refuses one
+vivibox cannot read. Blocking notes go back to the writer while it has rounds, as a reviewer's
+do; then the work comes to you. A chat in a browser cannot review; with a planner there, the flow
+still needs a model.
+
 ## Reviewing the work
 
 Your checkout stays unchanged until you accept the work. Once task work is ready and risky

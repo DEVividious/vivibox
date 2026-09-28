@@ -312,7 +312,7 @@ def create(
         if harness != manual.NAME and not model:
             raise ConfigError(f"the {role} has no model yet; pick one, or add a provider")
     planner = Role(*(chosen.get("planner") or configured_choice(config, "planner")))
-    if why := orchestration_problem(orchestration or config.orchestration, planner):
+    if why := orchestration_problem(orchestration or config.orchestration, planner, plan_in_cli):
         raise ConfigError(why)
     project = load_project(project_name)
     if not project.repo.is_dir():
@@ -450,7 +450,8 @@ def _start(
             "(pass_env). Set them, e.g. with your login command, then start vivibox from that shell."
         )
     _, model = writer(config, task)
-    if why := orchestration_problem(mode_of(task, config).name, role_of(task, "planner", config)):
+    planner = role_of(task, "planner", config)
+    if why := orchestration_problem(mode_of(task, config).name, planner, task.read_state().plan_in_cli):
         raise PodError(why)
     if not image.exists(image.image_ref()):
         raise PodError("the agent image is not built; run 'vivibox image build'")

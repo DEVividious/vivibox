@@ -342,14 +342,6 @@ def cmd_reply(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_review(args: argparse.Namespace) -> int:
-    task, project = actions.load(args.task)
-    path = actions.prepare_review(task, project)
-    print(f"Review copy: {path}")
-    print("The agent's work shows as uncommitted changes (IntelliJ: Commit tool window, Alt+0).")
-    return 0
-
-
 def cmd_pod(args: argparse.Namespace) -> int:
     pod = actions.task_pod(args.task)
     if args.action == "up":
@@ -718,12 +710,6 @@ def parser() -> argparse.ArgumentParser:
     models = sub.add_parser("models", help="list models opencode knows for your providers")
     models.add_argument("provider", nargs="?", help="only this provider")
     models.set_defaults(func=cmd_models)
-
-    review = sub.add_parser(
-        "review", help="bring the work into your repository and update the review copy (automatic when ready)"
-    )
-    review.add_argument("task", help="task id")
-    review.set_defaults(func=cmd_review)
 
     pod = sub.add_parser("pod", help="manage a task's containers directly")
     pod.add_argument(

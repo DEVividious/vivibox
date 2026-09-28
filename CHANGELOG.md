@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- Supervisor ⇄ Worker with the plan made in an agent's CLI: the CLI reviews each round, with
+  `vivibox review <id> --prompt` and `--import`, and `vivibox wait` returns with the reason
+  `review` when a round waits for it; blocking notes go back to the writer as a reviewer's do.
 - `host/setup.sh` installs the vivibox skill where Claude Code or Codex is installed, and
   `--check` says when a copy is older than the checkout; `host/uninstall.sh` removes vivibox's
   copies.

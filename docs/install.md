@@ -31,6 +31,11 @@ after an update `--check` says when it is older, and running `host/setup.sh` aga
 
 Setup checks for Git and installs it when missing, just like tmux; `--check` only reports it.
 
+Setup also checks that the range task networks are cut from (`network.pool` in `config.toml`,
+`198.51.100.0/24` unless you set it) is one nothing on your machine routes. When something does,
+it says what, and which Docker network it is when it is one, and goes on with the other checks;
+remove that network or set another `network.pool`, and run it again.
+
 A running view keeps the code it started with, and so does every task's supervisor. After an
 update the view's title says *vivibox changed on disk: quit and start it again*, and the details of
 a task whose supervisor is older say so too; stop and start that task (`s`) when it suits you.

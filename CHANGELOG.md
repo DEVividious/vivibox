@@ -183,6 +183,9 @@ First public version.
 
 ### Fixed
 
+- `host/setup.sh` checks the task network pool `network.pool` in `config.toml` sets, not always
+  the default, so the advice it gives works. A range something else routes is listed with the
+  Docker network that holds it, and the other checks go on instead of stopping there.
 - The list's columns are as wide as what they show now: a long status gone from the list no
   longer keeps its column wide and pushes the goal off the screen.
 - A Maven or Gradle wrapper is proposed by its path: `./mvnw` when committed executable,

@@ -244,13 +244,17 @@ def test_setup_installs_missing_git_after_confirmation(tmp_path):
     assert "apt-get install -y -q git" in calls
 
 
-def run_setup_without_host_changes(tmp_path, *, check, installed):
+def run_setup_without_host_changes(tmp_path, *, check, installed, routes="", networks="", config=""):
     fake = tmp_path / "bin"
     fake.mkdir()
     calls = tmp_path / "sudo-calls"
     scripts = {
-        "docker": "echo sysbox-runc",
-        "ip": "exit 0",
+        "docker": (
+            'case "$*" in *--no-trunc*) printf "%s" "$TEST_NETWORKS" ;;\n'
+            "  network*) ;;\n  *) echo sysbox-runc ;;\nesac"
+        ),
+        # `ip -4 route show table all`, and `docker network ls` for the name of a bridge's network.
+        "ip": 'printf "%s" "$TEST_ROUTES"',
         "modinfo": "exit 0",
         "dpkg-query": (
             "for arg do\n"
@@ -271,7 +275,13 @@ def run_setup_without_host_changes(tmp_path, *, check, installed):
         "TEST_GIT_INSTALLED": "yes" if installed else "no",
         "TEST_SUDO_CALLS": str(calls),
         "TEST_TOOL_DIR": str(tmp_path / "tools"),
+        "TEST_ROUTES": routes,
+        "TEST_NETWORKS": networks,
+        "VIVIBOX_CONFIG_DIR": str(tmp_path / "config"),
     }
+    if config:
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "config.toml").write_text(config)
     result = subprocess.run(
         ["bash", str(HOST / "setup.sh"), *(["--check"] if check else [])],
         input="y\n",
@@ -327,3 +337,43 @@ def test_the_scripts_install_and_remove_the_skill_where_vivibox_does():
     assert setup and re.findall(r'"([^"]+)"', setup.group(1)) == wanted
     uninstall = re.search(r"^SKILL_PLACES=\((.*)\)$", (HOST / "uninstall.sh").read_text(), re.MULTILINE)
     assert uninstall and re.findall(r'"([^"]+)"', uninstall.group(1)) == wanted
+
+
+SPIKE = "198.51.100.240/28 dev br-d9c3d14812d4 proto kernel scope link src 198.51.100.241 linkdown\n"
+
+
+def test_a_taken_task_pool_is_named_and_the_check_goes_on(tmp_path):
+    """A range something else routes is for you to fix, not for setup to stop at: the rest of the
+    checks still say what they found, and the network that holds the range is named."""
+    result, _ = run_setup_without_host_changes(
+        tmp_path, check=True, installed=True, routes=SPIKE, networks="d9c3d14812d4 spike-net\n"
+    )
+    assert result.returncode == 1
+    line = next(line for line in result.stdout.splitlines() if "198.51.100.240/28" in line)
+    assert line.startswith("  problem") and "Docker network spike-net" in line
+    assert "network.pool" in line
+    assert "vivibox command" in result.stdout, "the checks after it ran"
+
+
+def test_setup_checks_the_task_pool_config_toml_sets(tmp_path):
+    """The advice is network.pool in config.toml; a check that ignored it would refuse forever."""
+    result, _ = run_setup_without_host_changes(
+        tmp_path, check=True, installed=True, routes=SPIKE, config='[network]\npool = "10.123.0.0/24"\n'
+    )
+    assert "ok       task network pool 10.123.0.0/24 is free" in result.stdout
+    assert "problem" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "config,pool",
+    [
+        ("", "198.51.100.0/24"),
+        ('[network]\npool = "10.1.0.0/24"\n', "10.1.0.0/24"),
+        ("[network]\n# a comment\npool = '10.2.0.0/24'  # mine\n", "10.2.0.0/24"),
+        ('[review]\npool = "no"\n[network]\nmtu = 1280\n', "198.51.100.0/24"),
+        ('network.pool = "10.3.0.0/24"\n', "10.3.0.0/24"),
+    ],
+)
+def test_the_task_pool_is_read_as_vivibox_reads_it(tmp_path, config, pool):
+    (tmp_path / "config.toml").write_text(config)
+    assert setup_fn("task_pool", {"VIVIBOX_CONFIG_DIR": str(tmp_path)}).stdout.strip() == pool

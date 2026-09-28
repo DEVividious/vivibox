@@ -29,8 +29,10 @@ PACKAGES=(git tmux jq libnotify-bin curl)
 # taken; VIVIBOX_DOCKER_RANGES="<bridge> <pool>" chooses them instead. Not 172.17.0.0/16: Docker
 # inside Sysbox containers uses it.
 DOCKER_CANDIDATES=(172.20.0.0/16 172.25.0.0/16 172.{21..24}.0.0/16 172.{26..31}.0.0/16 10.{200..209}.0.0/16)
-# Where task networks are cut from; keep in step with DEFAULT_NETWORK_POOL in vivibox/config.py.
+# Where task networks are cut from unless config.toml's network.pool says otherwise; keep in step
+# with DEFAULT_NETWORK_POOL in vivibox/config.py.
 TASK_POOL=198.51.100.0/24
+CONFIG_TOML=${VIVIBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/vivibox}/config.toml
 SYSBOX_VERSION=0.7.1
 SYSBOX_DEB="sysbox-ce_${SYSBOX_VERSION}.linux_amd64.deb"
 SYSBOX_SHA256=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5
@@ -87,6 +89,33 @@ routed() {
     if (bits < 8) next
     print $1
   }'
+}
+
+# The pool vivibox cuts task networks from: network.pool in config.toml, as a [network] table or a
+# dotted key, else the default. Read by lines: setup runs before vivibox, and Python may not be here.
+task_pool() {
+  local found=""
+  [[ -r "$CONFIG_TOML" ]] && found=$(awk '
+    { line = $0; sub(/[ \t]*#.*/, "", line) }
+    line ~ /^[ \t]*\[/ { section = line; gsub(/[ \t\[\]]/, "", section); next }
+    index(line, "=") {
+      key = line; sub(/=.*/, "", key); gsub(/[ \t]/, "", key)
+      if ((section == "network" && key == "pool") || (section == "" && key == "network.pool")) {
+        value = line; sub(/^[^=]*=/, "", value); gsub(/["\047 \t]/, "", value); print value; exit
+      }
+    }' "$CONFIG_TOML")
+  echo "${found:-$TASK_POOL}"
+}
+
+# The Docker network a route leads to, by its bridge (br-<network id>); nothing for another route.
+route_owner() {
+  local dev
+  dev=$(ip -4 route show table all | awk -v r="$1" '$1 == r {
+    for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }
+  }')
+  [[ $dev == br-* ]] || return 0
+  docker network ls --no-trunc --format '{{.ID}} {{.Name}}' 2>/dev/null \
+    | awk -v id="${dev#br-}" 'index($1, id) == 1 { print $2; exit }'
 }
 
 is_free() {
@@ -159,6 +188,13 @@ skill_to_install() {
 [[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 ok() { printf '  ok       %s\n' "$1"; }
 
+# What setup cannot change for you: said with the rest, and the check goes on.
+problems=()
+problem() {
+  printf '  problem  %s\n' "$1"
+  problems+=("$1")
+}
+
 todo=() actions=()
 need() {
   printf '  missing  %s\n' "$1"
@@ -206,10 +242,15 @@ else
   need "Docker networks: bridge $bridge, address pool $POOL in $DOCKER_CFG (restarts Docker)" do_docker_networks
 fi
 
-# A task's address must not be one your machine already routes somewhere else (a VPN, a LAN).
-is_free "$TASK_POOL" "${ROUTES[@]}" \
-  || die "set network.pool in ~/.config/vivibox/config.toml to a range nothing routes"
-ok "task network pool $TASK_POOL is free"
+# A task's address must not be one your machine already routes somewhere else (a VPN, a LAN, a
+# Docker network something else made).
+pool=$(task_pool)
+if clash=$(is_free "$pool" "${ROUTES[@]}" 2>&1); then
+  ok "task network pool $pool is free"
+else
+  owner=$(route_owner "${clash##* }")
+  problem "task network pool $clash${owner:+ (Docker network $owner)}: remove it, or set network.pool in $CONFIG_TOML to a range nothing routes"
+fi
 
 sysbox_registered() { docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw sysbox-runc; }
 if dpkg-query -W -f='${Status}' sysbox-ce 2>/dev/null | grep -q 'install ok installed' && sysbox_registered; then
@@ -378,7 +419,16 @@ do_skill() {
 
 # --- apply ------------------------------------------------------------------------------------
 
+still_to_fix() {
+  ((${#problems[@]})) || return 0
+  echo
+  echo "Still to fix by hand:"
+  printf '  - %s\n' "${problems[@]}"
+  exit 1
+}
+
 if ((${#todo[@]} == 0)); then
+  still_to_fix
   echo "Nothing to do."
   exit 0
 fi
@@ -399,3 +449,4 @@ done
 echo "Done. Run '$0 --check' to confirm."
 # A fresh ~/.local/bin is on PATH only from the next login (Ubuntu's ~/.profile adds it).
 [[ ":$PATH:" == *":$BIN:"* ]] || echo "$BIN is not on your PATH yet: log out and in, or open a new login shell."
+still_to_fix

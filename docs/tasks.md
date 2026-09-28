@@ -93,6 +93,12 @@ task, `id`, `state`, `reason` (`waiting`, `done`, `problem`, `stopped`, `not run
 `problem` and `next`. Exit code 0 when a task ended the wait, 124 when the timeout did (as
 `timeout` does), 1 for a task that does not exist.
 
+`vivibox info [path] [--json]` says what an agent's CLI needs before it makes a task for you, from
+a folder in your repository: the project set up for it (or `vivibox init <root>` when there is
+none), the flows with what each is best for and whether a planner in your CLI can run it, what
+each role runs on, and the vivibox version. `--json` also carries `version`, the shape of the
+output.
+
 ### Your decisions
 
 | Command | When |

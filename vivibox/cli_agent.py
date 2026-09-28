@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
-from . import actions, ui
+from . import about, actions, ui
 from .config import load_config
 from .waiting import JSON_VERSION, TIMED_OUT
 
@@ -39,6 +40,12 @@ def cmd_wait(args: argparse.Namespace) -> int:
     return 0 if found else TIMED_OUT
 
 
+def cmd_info(args: argparse.Namespace) -> int:
+    found = about.gather(Path(args.path))
+    print(json.dumps(found, indent=2) if args.json else about.describe(found), end="\n" if args.json else "")
+    return 0
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     wait = sub.add_parser(
         "wait", help="wait until a task needs you, is done, has a problem or stopped (for an agent's CLI)"
@@ -49,3 +56,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     wait.add_argument("--json", action="store_true", help="as JSON, for a script")
     wait.set_defaults(func=cmd_wait)
+
+    info = sub.add_parser(
+        "info", help="the project of a folder, the flows and the roles' models (for an agent's CLI)"
+    )
+    info.add_argument("path", nargs="?", default=".", help="a folder in the repository (default: this one)")
+    info.add_argument("--json", action="store_true", help="as JSON, for a script")
+    info.set_defaults(func=cmd_info)

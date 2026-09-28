@@ -34,7 +34,7 @@ class Orchestration:
     review: str
     models: str  # the usual choice of models, whatever the ones picked
     rounds: str  # what sends the writer back for a fix turn, the thing limits.max_rounds counts
-    best_for: str
+    best_for: str  # the README's "Best for", which a test keeps the same
     tradeoff: str
     # The agents, in the order they work: the role whose model runs the agent, the agent's name
     # in the view, and the roles it plays when it plays more than one.
@@ -70,7 +70,7 @@ ORCHESTRATION_MODES = {
         "The executor's own, before every Gate",
         "A strong planner, used once; a cheaper executor",
         "a failed verification",
-        "routine work that needs a good plan",
+        "a strong plan with cheaper execution",
         "A strong plan without an independent reviewer.",
         (("planner", "Planner", ""), ("writer", "Executor", "writer + reviewer")),
         "2 sessions · strong planner once · executor self-reviews",
@@ -84,7 +84,7 @@ ORCHESTRATION_MODES = {
         "Independent, after Gate passes",
         "A strong planner, used once; a cheaper writer; a reviewer of another family",
         "a failed verification or blocking reviewer notes",
-        "most larger programming tasks",
+        "independent review with automatic fix rounds",
         "The most turns per task, and the most checks.",
         (("planner", "Planner", ""), ("writer", "Writer", ""), ("reviewer", "Reviewer", "")),
         "3 sessions · independent review after Gate · strong planner once",
@@ -98,7 +98,7 @@ ORCHESTRATION_MODES = {
         "The supervisor's, after Gate passes; the strong model every round",
         "A strong supervisor, used again every round; a cheaper worker",
         "a failed verification or blocking supervisor notes",
-        "hard, multi-step changes and refactors",
+        "keeping the planning context through complex changes",
         "Guidance with the plan in mind; the strong model is spent every round.",
         (("planner", "Supervisor", "planner + reviewer"), ("writer", "Worker", "")),
         "2 sessions · supervisor reviews after Gate · strong model every round",

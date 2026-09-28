@@ -12,6 +12,8 @@ First public version.
 
 ### Added
 
+- `vivibox info [path] [--json]`: the project of a folder, the flows and which of them a planner
+  in your CLI can run, and the roles' models, for an agent's CLI that drives vivibox.
 - `vivibox wait <id>...`: returns when a task needs you, is done, has a problem or stopped, with
   `--timeout` (exit code 124) and `--json`, for an agent's CLI that drives vivibox.
 - `vivibox new --plan-in-cli`: you plan the task in an agent's CLI (Claude Code, Codex) on your
@@ -121,6 +123,7 @@ First public version.
 
 ### Changed
 
+- What a flow is best for says the same in the view as in the README.
 - A proposed command that builds one part of the project (`-pl`, `:module:test`, a Go package,
   `cargo -p`, a workspace) is told as narrowed, like one that picks some tests: the first task's
   writer proposes the part that task was about, and every task is verified with it. Keeping the

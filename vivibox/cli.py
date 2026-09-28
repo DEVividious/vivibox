@@ -319,7 +319,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 0
     answer = None
     if args.file == "-" or (args.file is None and not sys.stdin.isatty()):
-        answer = sys.stdin.read()
+        # An agent's shell has no terminal and nothing on stdin: the answer file, not an empty answer.
+        answer = sys.stdin.read() or None
     elif args.file:
         answer = Path(args.file).expanduser().read_text()
     try:

@@ -24,6 +24,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
+from . import gate
 from .harness import Harness, HarnessError, Turn
 from .plan import HEADING, PlanError, _split_header, parse_plan, without_notes
 from .task import Task
@@ -59,7 +60,8 @@ anything on the way, so the plan must say everything, and each criterion must be
 # What a planning chat asked about in the first real run, and cannot know: vivibox decides these.
 DECIDED = """Already decided, not for the plan: the agent keeps red.md and its checklist of criteria in
 its own handoff folder, and the task's kind and mode are set. The gate builds and tests the project
-with {verify}."""
+with {verify} after every turn, so a criterion names what the code does, never that a build or test
+command passes."""
 # Four backticks: a plan quotes code in blocks of three, which would end a block of three early.
 WHOLE_PLAN = "answer with the whole plan in one code block fenced with ````markdown, nothing else in it."
 
@@ -253,6 +255,11 @@ def import_answer(task: Task) -> str:
     if not plan.criteria:
         # With the header vivibox's own, this is what tells a plan from the chat asking a question.
         raise PlanError('no "- [ ]" acceptance criteria under an "Acceptance criteria" heading')
+    try:
+        # What accept would refuse, said while the chat can still fix it.
+        gate.check_plan(plan)
+    except gate.GateError as e:
+        raise PlanError(str(e)) from None
     task.plan_path.write_text(plan_text)
     if plan.summary:
         task.set_goal(plan.summary)

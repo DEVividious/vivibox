@@ -186,6 +186,10 @@ First public version.
 
 ### Fixed
 
+- `vivibox plan import` from a shell with no terminal (an agent's CLI) takes the answer file
+  instead of emptying it with an empty standard input.
+- `vivibox plan import` refuses what accepting the plan would, such as a criterion asking the build
+  to pass, while the chat can still fix it; the planning prompts say a criterion never does.
 - `host/setup.sh` checks the task network pool `network.pool` in `config.toml` sets, not always
   the default, so the advice it gives works. A range something else routes is listed with the
   Docker network that holds it, and the other checks go on instead of stopping there.

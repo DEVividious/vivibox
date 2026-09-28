@@ -368,3 +368,37 @@ def test_plan_in_cli_is_refused_with_another_planner_or_a_flow_it_cannot_run(env
     with pytest.raises(ConfigError, match="needs a planner that can write"):
         actions.create("demo", "Add health endpoint", orchestration="single_agent", plan_in_cli=True)
     assert not list((env / "tasks").glob("*/*")), "nothing created"
+
+
+def test_an_empty_stdin_takes_the_answer_file_and_leaves_it(manual_env, capsys, monkeypatch):
+    """An agent's shell has no terminal, and nothing on its standard input: that is not an empty
+    answer. Read as one, it emptied the file the agent had just written, at every import."""
+    import io
+
+    from vivibox.cli import main
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    actions.answer_path(manual_env).write_text(PLAN)
+    assert main(["plan", "import", manual_env.id]) == 0
+    assert actions.answer_path(manual_env).read_text() == PLAN
+    assert "Add a health endpoint" in capsys.readouterr().out
+
+
+def test_import_refuses_what_accept_would(manual_env, capsys, monkeypatch):
+    """A criterion asking the build to pass was taken in, and refused only at accept, after the chat
+    had moved on; the chat is told at import, where it can still fix it."""
+    from vivibox.cli import main
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    before = manual_env.plan_path.read_text()
+    actions.answer_path(manual_env).write_text(PLAN + "- [ ] `npm test` passes\n")
+    assert main(["plan", "import", manual_env.id]) == 1
+    assert "verification command is not a criterion" in capsys.readouterr().err
+    assert manual_env.plan_path.read_text() == before
+    assert manual_env.read_state().awaiting_plan
+
+
+def test_the_planning_prompts_say_what_a_criterion_is_not(task, tmp_path):
+    web, cli = manual.prompts(task, tmp_path, ["npm test"])
+    for text in (web, cli):
+        assert "never that a build or test command passes" in " ".join(text.split())

@@ -277,6 +277,7 @@ def create(
     max_rounds: int = 0,
     no_build: bool = False,
     base_ref: str = "",
+    plan_in_cli: bool = False,
 ) -> Task:
     """no_build: nothing to build or test in this task (research, a ticket analysis): verify = false
     in its plan, for this task only.
@@ -284,12 +285,17 @@ def create(
     @path mentions in it are copied into the task (relative ones from cwd). roles: what a role runs
     on for this task only, as m would set it; config.toml's own choice is no choice at all.
     orchestration: how this task is shared between the roles (config.ORCHESTRATION_MODES); "" is
-    config.toml's. max_rounds: this task's fix turns before the work comes to you; 0 is config.toml's."""
+    config.toml's. max_rounds: this task's fix turns before the work comes to you; 0 is config.toml's.
+    plan_in_cli: you plan this task in an agent's CLI on your machine, which makes you its planner."""
     config = load_config()
     if orchestration not in ("", *ORCHESTRATION_MODES):
         raise ConfigError(f"orchestration must be one of {', '.join(ORCHESTRATION_MODES)}")
     if not isinstance(max_rounds, int) or max_rounds < 0:
         raise ConfigError("max_rounds is a whole number of fix turns; 0 for config.toml's")
+    if plan_in_cli:
+        if "planner" in (roles or {}):
+            raise ConfigError("--plan-in-cli makes you the planner; leave out --model planner=")
+        roles = {**(roles or {}), "planner": (manual.NAME, "")}
     chosen: dict[str, Choice] = {}
     for role, (harness, model) in (roles or {}).items():
         if role not in config.roles:
@@ -355,6 +361,8 @@ def create(
         task.set_role(role, harness if harness != config.roles[role].harness else "", model)
     if auto:
         task.set_auto_plan(True)
+    if plan_in_cli:
+        task.set_plan_in_cli(True)
     # The risky files as they are in your repository are the starting approval.
     Approvals(task.meta, task.repo, project.risky_extra).approve()
     return task
@@ -602,6 +610,8 @@ def accept_command(task: Task, project: Project, command: str = "") -> None:
 
 def plan_prompt(task: Task, cli: bool = False) -> str:
     """The prompt for planning this task in your own chat, in a browser or in a CLI."""
+    # Planned in an agent's CLI: the browser prompt has no report on the repository to carry.
+    cli = cli or task.read_state().plan_in_cli
     path = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
     if not path.exists():
         raise gate.GateError(f"{task.id} has no plan prompt; its planner is not manual")

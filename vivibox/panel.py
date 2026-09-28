@@ -307,6 +307,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
         if st.state is State.CHECKPOINT_BLOCKED:
             return "`s` start · `g` verify again, once you have fixed it · `r` tell the agent"
         return "`s` start; it goes on from where it was"
+    if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN and st.plan_in_cli:
+        return "`C` copy the prompt for your agent's CLI · `e` paste the plan"
     if st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         return "`c` copy the prompt for a browser · `C` for a CLI · `e` paste the plan"
     if ui.planner_asks(task, st):
@@ -527,7 +529,7 @@ def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running:
         "open_ide": st.state is State.CHECKPOINT_FINAL,
         "show_diff": st.state is State.CHECKPOINT_FINAL,
         # Also once a plan is in: going back to the same chat is how you change it.
-        "copy_prompt": st.state is State.CHECKPOINT_PLAN and planned_by_you(task),
+        "copy_prompt": st.state is State.CHECKPOINT_PLAN and planned_by_you(task) and not st.plan_in_cli,
         "copy_prompt_cli": st.state is State.CHECKPOINT_PLAN and planned_by_you(task),
         "approve_risky": st.state is State.APPROVAL_RISKY,
         # With a question too: the agent asks about the environment more often than the gate
@@ -616,6 +618,15 @@ def detail(
             "task's comes; risky files wait for your approval like a task's.",
             "",
             f"Clone: `{task.repo}`",
+        ]
+    elif st.awaiting_plan and st.state is State.CHECKPOINT_PLAN and st.plan_in_cli:
+        body = [
+            "**Plan this task in your agent's CLI.** C copies the prompt for it: the CLI reads your",
+            "checkout, and when the plan is final it writes it to the answer file itself.",
+            "",
+            "#### The plan to fill in",
+            "",
+            plan_text(read(task.plan_path)),
         ]
     elif st.awaiting_plan and st.state is State.CHECKPOINT_PLAN:
         body = [

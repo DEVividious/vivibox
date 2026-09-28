@@ -51,6 +51,9 @@ class TaskState:
     auto_plan: bool = False
     # At the plan checkpoint with a manual planner: no plan yet, the task waits for one from you.
     awaiting_plan: bool = False
+    # You plan in an agent's CLI on your machine (vivibox new --plan-in-cli), which reads your
+    # checkout itself: no report on the repository is written for it, and its prompt is the CLI's.
+    plan_in_cli: bool = False
     # Why the task is not moving, when that was not your doing: "<what happened>: <the reason in
     # the failing tool's words>". Kept until the task starts again, so the view can go on saying it.
     problem: str = ""
@@ -154,6 +157,11 @@ class Task:
         st.auto_plan = auto
         self._write_state(st)
         self.event("auto_plan", enabled=auto)
+
+    def set_plan_in_cli(self, in_cli: bool) -> None:
+        st = self.read_state()
+        st.plan_in_cli = in_cli
+        self._write_state(st)
 
     def set_awaiting_plan(self, waiting: bool) -> None:
         """Moves updated too: the state stays at the plan checkpoint either way, and a view that

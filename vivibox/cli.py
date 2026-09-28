@@ -55,6 +55,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         no_build=args.no_build,
         base_ref=args.base,
         orchestration=args.flow,
+        plan_in_cli=args.plan_in_cli,
     )
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     for note in actions.context_notes(task):
@@ -541,6 +542,11 @@ def parser() -> argparse.ArgumentParser:
     )
     new.add_argument(
         "--draft", action="store_true", help="only create the task, to edit its plan before 'vivibox start'"
+    )
+    new.add_argument(
+        "--plan-in-cli",
+        action="store_true",
+        help="plan this task yourself in an agent's CLI (claude, codex): no report on the repository first",
     )
     new.add_argument(
         "--auto", action="store_true", help="accept the agent's plan without stopping; you review the work"

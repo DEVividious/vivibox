@@ -128,6 +128,10 @@ on its own, on the writer's key.
    chat to fix it is in your clipboard.
 
 The same from a shell: `vivibox plan prompt <id> [--cli]` and `vivibox plan import <id> [file|-]`.
+`vivibox new <project> "<goal>" --plan-in-cli` makes you the planner of one task, in an agent's
+CLI (`claude`, `codex`), whatever config.toml says: the writer's report is skipped, since the CLI
+reads your checkout, and the task waits for your plan at once, with the CLI's prompt alone. It is
+refused with `--model planner=` and with a flow a manual planner cannot run.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 

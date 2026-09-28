@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- `vivibox new --plan-in-cli`: you plan the task in an agent's CLI (Claude Code, Codex) on your
+  machine. The writer's report on the repository is skipped, and `C`, `vivibox plan prompt` and
+  the panel give the CLI's prompt alone.
 - `{modules}` in a project's verify command, for a project of many modules: a task's plan names
   the modules it changes, and the task is verified with them while its commits stay inside; a
   change outside them is verified with the same command without them, and the timeline names the

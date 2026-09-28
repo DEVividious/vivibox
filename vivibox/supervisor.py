@@ -509,9 +509,10 @@ class Supervisor:
 
     def _plan_manually(self, st: TaskState) -> None:
         """You plan in your own chat. A chat in a browser cannot see the repository, so the writer
-        first reports on it, for cents; a new project has nothing to report."""
+        first reports on it, for cents; a new project has nothing to report, and an agent's CLI
+        reads your checkout itself."""
         context = self.task.meta / "handoff" / manual.CONTEXT
-        known = context.exists() or manual.repository_is_empty(self.task.repo)
+        known = st.plan_in_cli or context.exists() or manual.repository_is_empty(self.task.repo)
         if not known and self._turn(st, manual.RECON_PROMPT, "writer") is None:
             return
         manual.write_prompts(self.task, self.source or self.task.repo, self.project_verify)

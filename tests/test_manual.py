@@ -5,7 +5,7 @@ from importlib.resources import files
 import pytest
 
 from vivibox import actions, gate, manual, supervisor, ui
-from vivibox.config import load_config, load_project
+from vivibox.config import ConfigError, load_config, load_project
 from vivibox.harness import Harness, HarnessError, Turn
 from vivibox.plan import PlanError, parse_plan
 from vivibox.states import State
@@ -317,3 +317,54 @@ def test_a_chat_is_told_when_the_agent_wrote_no_report(task, tmp_path):
     (task.repo / "app.js").write_text("x")
     web, _ = manual.prompts(task, tmp_path / "src")
     assert "wrote no report" in web and "new project" not in web, "an empty report is not a new project"
+
+
+def test_a_task_planned_in_an_agents_cli_goes_to_you_without_a_report(task, tmp_path):
+    """The agent's CLI reads your checkout itself, so no writer's turn is spent reporting on it,
+    and its prompt is the one asked for, with or without --cli."""
+    task.repo.mkdir(parents=True, exist_ok=True)
+    (task.repo / "package.json").write_text("{}")
+    task.set_plan_in_cli(True)
+    writer = Writer(task)
+    sup, _ = make(task, writer, tmp_path / "checkout")
+    assert sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_PLAN and st.awaiting_plan
+    assert writer.prompts == []
+    cli = (task.meta / manual.PROMPT_CLI).read_text()
+    assert actions.plan_prompt(task) == cli == actions.plan_prompt(task, cli=True)
+
+
+def test_the_view_offers_only_the_cli_prompt_to_a_task_planned_in_an_agents_cli(task):
+    from vivibox import panel
+
+    task.transition(State.CHECKPOINT_PLAN)
+    task.set_awaiting_plan(True)
+    (task.meta / manual.PROMPT).write_text("the browser prompt")
+    (task.meta / manual.PROMPT_CLI).write_text("the cli prompt")
+    (task.meta / "handoff" / manual.CONTEXT).write_text("REPORT")
+    keys = panel.keys_for(task, task.read_state(), False, False, False)
+    assert keys["copy_prompt"] and keys["copy_prompt_cli"], "a task planned anywhere: both"
+    task.set_plan_in_cli(True)
+    st = task.read_state()
+    keys = panel.keys_for(task, st, False, False, False)
+    assert not keys["copy_prompt"] and keys["copy_prompt_cli"]
+    shown = panel.detail(task, st, 3, running=False)
+    assert "REPORT" not in shown and "browser" not in shown
+
+
+def test_new_plan_in_cli_makes_you_the_planner_of_that_task(env, capsys):
+    from vivibox.cli import main
+
+    assert main(["new", "demo", "Add health endpoint", "--plan-in-cli", "--draft"]) == 0
+    task = actions.load(capsys.readouterr().out.split()[1])[0]
+    st = task.read_state()
+    assert st.plan_in_cli and st.harnesses.get("planner") == manual.NAME
+
+
+def test_plan_in_cli_is_refused_with_another_planner_or_a_flow_it_cannot_run(env):
+    with pytest.raises(ConfigError, match="--plan-in-cli"):
+        actions.create("demo", "Add health endpoint", roles={"planner": ("opencode", "x")}, plan_in_cli=True)
+    with pytest.raises(ConfigError, match="needs a planner that can write"):
+        actions.create("demo", "Add health endpoint", orchestration="single_agent", plan_in_cli=True)
+    assert not list((env / "tasks").glob("*/*")), "nothing created"

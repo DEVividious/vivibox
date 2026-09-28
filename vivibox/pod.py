@@ -53,6 +53,7 @@ CACHES = {
     "m2": "/cache/m2",
     "gradle": "/cache/gradle",
     "npm": "/cache/npm",
+    "yarn": "/cache/yarn",
     "mise": "/cache/mise",
     "corepack": "/cache/corepack",
     "uv": "/cache/uv",

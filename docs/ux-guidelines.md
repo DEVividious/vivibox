@@ -26,6 +26,7 @@ One word per thing, everywhere: list, panel, dialogs, command line output, notif
 | Thing | Word | Not |
 |---|---|---|
 | unit of work | task | job, run |
+| storage reused across tasks and projects | Shared caches (all projects) | disk charged to each task |
 | checks after implementation | verification; "Gate" only in a flow's diagram, where its legend says so | "gate" in a sentence, which stays in code and docs/security.md |
 | a fix turn the writer is sent on, by the verification or the review | round | attempt, iteration, retry |
 | stopping and continuing a task | stop, start | pause; `resume` is a command line alias |
@@ -227,6 +228,11 @@ starts again. A toast may repeat it; a toast alone is not enough, because it is 
 - A state that can last minutes shows how long it has lasted.
 - What costs Docker seconds (`docker stats`, `docker system df`) is asked only by the screen that
   shows it, in its own thread, while it is open: `u`. The list and the panel never wait for it.
+
+The usage view (`u`) and `vivibox usage` show shared cache sizes separately from each task's
+DISK figure, with a total and a breakdown by tool. The shared section covers all projects even
+when the task list is filtered or empty. Failed measurement shows a reason, never a zero that
+looks like an empty cache.
 
 ## 7. The next step is always visible
 

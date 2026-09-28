@@ -659,3 +659,11 @@ def test_every_tmpfs_has_a_size_so_scratch_files_cannot_take_the_hosts_memory(po
         mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tmpfs"]
         assert mounts and all(f"size={pod_module.TMP_SIZE}" in m for m in mounts), mounts
         assert all(m.split(":")[0] in ("/tmp", "/config") for m in mounts)
+
+
+def test_yarn_downloads_are_shared_but_gate_results_stay_private(pod):
+    for command in (pod.agent_command(), pod.gate_command()):
+        assert "vivibox-cache-yarn:/cache/yarn" in binds(command)
+    assert not any("-gate-" in mount for mount in binds(pod.agent_command()))
+    pod.remove()
+    assert not any("vivibox-cache-yarn" in call for call in pod.runner.find("docker", "volume", "rm"))

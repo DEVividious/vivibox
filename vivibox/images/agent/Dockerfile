@@ -64,8 +64,15 @@ RUN mkdir -p /etc/mise \
 RUN groupadd -o -g "${GID}" agent \
  && useradd -o -u "${UID}" -g "${GID}" -d /config -M -s /bin/bash agent \
  && mkdir -p /config /cache/m2 /cache/gradle /cache/npm /cache/mise /cache/corepack /cache/build-cache \
-    /cache/m2/installed /cache/uv /cache/go /cache/cargo /cache/rustup \
+    /cache/yarn/classic /cache/yarn/berry /cache/m2/installed /cache/uv /cache/go /cache/cargo /cache/rustup \
  && chown -R agent:agent /config /cache
+
+# Classic reads the Node installation's global yarnrc; a project's cache-folder wins.
+# Berry ignores this file. Its global cache (or mirror for a local cache) lives under
+# YARN_GLOBAL_FOLDER. Do not force enableGlobalCache or cacheFolder: zero-install projects
+# may deliberately keep archives in their repository.
+RUN mkdir -p /usr/local/etc \
+ && printf 'cache-folder "/cache/yarn/classic"\n' > /usr/local/etc/yarnrc
 
 # HOME is /config, so Java's user.home, git, opencode and the docker client agree on one place.
 # Caches live under /cache, mounted as volumes shared between tasks.
@@ -92,6 +99,7 @@ ENV HOME=/config \
     MAVEN_OPTS="-Dmaven.repo.local=/cache/m2" \
     GRADLE_USER_HOME=/cache/gradle \
     npm_config_cache=/cache/npm \
+    YARN_GLOBAL_FOLDER=/cache/yarn/berry \
     npm_config_update_notifier=false \
     COREPACK_HOME=/cache/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \

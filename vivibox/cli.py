@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -19,15 +18,14 @@ from . import (
     manual,
     providers,
     repo,
-    stats,
     timeline,
     ui,
-    usage,
     version,
 )
 from . import init as project_init
 from .cli_host import cmd_image_build, cmd_image_check, cmd_mirror
 from .cli_providers import cmd_auth, cmd_models
+from .cli_reports import cmd_stats, cmd_usage
 from .config import ORCHESTRATION_MODES, ConfigError, config_dir, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
@@ -117,40 +115,6 @@ def cmd_timeline(args: argparse.Namespace) -> int:
     """What happened to a task, one line each, on your clock."""
     task, _ = actions.load(args.task)
     print(timeline.render(task), end="")
-    return 0
-
-
-def cmd_stats(args: argparse.Namespace) -> int:
-    """What the events of every task, live and finished, add up to: the numbers to look at before
-    changing a prompt."""
-    config = load_config()
-    sources = []
-    for task in list_tasks(config.tasks_dir):
-        if not args.project or task.read_state().project == args.project:
-            sources.append((task.events(), True))
-    live = {t.id for t in list_tasks(config.tasks_dir)}
-    for entry in actions.history(limit=None):
-        if entry["id"] in live or (args.project and entry.get("project") != args.project):
-            continue
-        sources.append((stats.read_events(actions.archive_path(entry["id"]) / "events.jsonl"), False))
-    found = stats.collect(sources, since=args.since or "")
-    if args.json:
-        print(json.dumps(stats.as_dict(found), indent=2))
-    else:
-        print(stats.report(found), end="")
-    return 0
-
-
-def cmd_usage(args: argparse.Namespace) -> int:
-    """How long each role and the verification took, per task: live ones, then finished ones."""
-    problems: list[str] = []
-    rows = usage.gather(finished=not args.live, project=args.project or "", measure=True, problems=problems)
-    if args.json:
-        print(json.dumps(usage.as_dicts(rows), indent=2))
-    else:
-        print(usage.report(rows), end="")
-    for problem in problems:
-        print(f"CPU, RAM and DISK not measured: {problem}", file=sys.stderr)
     return 0
 
 

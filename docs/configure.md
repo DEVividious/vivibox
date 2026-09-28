@@ -196,5 +196,21 @@ A repository you move or delete leaves its project file behind. vivibox does not
 cannot work in: it names those on start and offers to forget them, which removes the project file
 and nothing else.
 
+## Yarn downloads
+
+The agent and verification share downloaded Yarn packages in `/cache/yarn`; deleting a task
+keeps this cache. `node_modules` and other installed project files stay in the task's clone,
+and verification installs them again in a fresh clone.
+
+Yarn Classic defaults to `/cache/yarn/classic` through `/usr/local/etc/yarnrc` in the image. Your own
+`cache-folder`, CLI flag or `YARN_CACHE_FOLDER` can override it. Yarn 2 and later use
+`YARN_GLOBAL_FOLDER=/cache/yarn/berry` for the global cache or the download mirror of a local
+cache. vivibox leaves `enableGlobalCache`, `cacheFolder` and `enableMirror` to the project,
+so checked-in caches and zero-installs keep working. A project that chooses a local cache and
+disables its mirror will still download again unless those archives are committed.
+
+After updating vivibox, run `vivibox image build`, then stop and start existing tasks to use
+the new image and mount. `u` or `vivibox usage` shows the shared caches separately from tasks.
+
 ---
 Back to the [README](../README.md).

@@ -96,7 +96,7 @@ def test_vivibox_usage_prints_a_row_per_task_and_json_for_a_note(env, capsys):
     ]
     assert out.splitlines()[1].startswith("demo-1")
     assert main(["usage", "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)
+    rows = json.loads(capsys.readouterr().out)["tasks"]
     assert rows[0]["task"] == "demo-1" and rows[0]["live"] is True
     assert set(rows[0]) >= {"plan", "write", "review", "gate", "total"}
 
@@ -143,7 +143,7 @@ def test_u_measures_the_pods_only_while_it_is_open(env, monkeypatch):
     task = new_task()
     sampled = []
 
-    def sample(roots, run=None, problems=None):
+    def sample(roots, run=None, problems=None, shared_caches=None):
         sampled.append(sorted(roots))
         return {
             task.id: resources.Resources(
@@ -180,7 +180,7 @@ def test_vivibox_usage_json_has_each_containers_figures(env, capsys, monkeypatch
     monkeypatch.setattr(
         resources,
         "sample",
-        lambda roots, run=None, problems=None: {
+        lambda roots, run=None, problems=None, shared_caches=None: {
             "demo-1": resources.Resources(
                 [resources.Container("agent", 12.5, 2**30, 2**34)], {"docker": 2 * 10**9}, 4096
             )
@@ -188,7 +188,7 @@ def test_vivibox_usage_json_has_each_containers_figures(env, capsys, monkeypatch
     )
     capsys.readouterr()
     assert main(["usage", "--json"]) == 0
-    row = json.loads(capsys.readouterr().out)[0]
+    row = json.loads(capsys.readouterr().out)["tasks"][0]
     assert row["resources"]["containers"] == [
         {"role": "agent", "cpu": 12.5, "memory": 2**30, "memory_limit": 2**34}
     ]
@@ -211,7 +211,7 @@ def test_u_says_why_the_pods_figures_are_dashes_when_docker_does_not_answer(env,
 
     new_task()
 
-    def sample(roots, run=None, problems=None):
+    def sample(roots, run=None, problems=None, shared_caches=None):
         if problems is not None:
             problems.append("Docker did not answer: Cannot connect to the Docker daemon")
         return {}
@@ -227,3 +227,74 @@ def test_u_says_why_the_pods_figures_are_dashes_when_docker_does_not_answer(env,
         assert "CPU, RAM and DISK not measured: Docker did not answer: Cannot connect" in text
 
     run(scenario)
+
+
+def shared_cache_docker(command):
+    if command[:3] == ["docker", "system", "df"]:
+        return json.dumps({"Volumes": [{"Name": "vivibox-cache-yarn", "Size": "100MB"}]})
+    return ""
+
+
+def test_usage_reports_shared_caches_without_tasks_and_with_a_project_filter(env, capsys, monkeypatch):
+    monkeypatch.setattr(resources, "default_run", shared_cache_docker)
+    assert main(["usage", "--project", "demo"]) == 0
+    text = capsys.readouterr().out
+    assert "No tasks yet" in text
+    assert "Shared caches (all projects): 100 MB" in text and "yarn: 100 MB" in text
+    assert main(["usage", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report == {"tasks": [], "shared_caches": {"yarn": 100_000_000}}
+
+
+def test_u_shows_shared_caches_separately_on_a_small_terminal(env, monkeypatch):
+    from test_tui import run
+    from ux import screen_text
+
+    monkeypatch.setattr(resources, "default_run", shared_cache_docker)
+
+    async def scenario(app, pilot):
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        text = " ".join(screen_text(app).split())
+        assert "Shared caches (all projects): 100 MB" in text
+        assert "yarn: 100 MB" in text and "No tasks yet" in text
+
+    run(scenario, size=(80, 24))
+
+
+def test_u_keeps_the_whole_cache_breakdown_visible_at_80_columns(env, monkeypatch):
+    from test_tui import new_task, run
+    from ux import screen_text
+
+    from vivibox.pod import CACHES
+
+    new_task()
+
+    def run_docker(command):
+        if command[:3] == ["docker", "system", "df"]:
+            return json.dumps(
+                {"Volumes": [{"Name": f"vivibox-cache-{name}", "Size": "1GB"} for name in CACHES]}
+            )
+        return ""
+
+    monkeypatch.setattr(resources, "default_run", run_docker)
+
+    async def scenario(app, pilot):
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        text = " ".join(screen_text(app).split())
+        assert "demo-1" in text and "Shared caches (all projects): 11 GB" in text
+        for name in CACHES:
+            assert f"{name}: 1.0 GB" in text
+        assert "Esc closes" in text
+
+    run(scenario, size=(80, 24))
+
+
+def test_missing_docker_does_not_report_an_empty_cache(env, capsys):
+    assert main(["usage", "--json"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["shared_caches"] is None
+    assert "Docker did not answer" in captured.err

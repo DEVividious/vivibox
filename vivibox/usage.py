@@ -79,7 +79,11 @@ def of_events(
 
 
 def gather(
-    finished: bool = True, project: str = "", measure: bool = False, problems: list[str] | None = None
+    finished: bool = True,
+    project: str = "",
+    measure: bool = False,
+    problems: list[str] | None = None,
+    shared_caches: dict[str, int] | None = None,
 ) -> list[Usage]:
     """Every live task, newest first, then the finished ones from their archive when asked for.
     measure: what the live tasks' pods use now, which takes Docker seconds; why it could not be
@@ -90,7 +94,11 @@ def gather(
         for t in reversed(list_tasks(load_config().tasks_dir))
         if not project or t.read_state().project == project
     ]
-    found = resources.sample({t.id: t.root for t in live}, problems=problems) if measure and live else {}
+    found = (
+        resources.sample({t.id: t.root for t in live}, problems=problems, shared_caches=shared_caches)
+        if measure
+        else {}
+    )
     for task in live:
         used = of_events(task.id, task.read_state().project, task.events(), live=True)
         used.now = found.get(task.id)
@@ -129,10 +137,11 @@ def cells(used: Usage) -> list[str]:
     return [used.task, *(duration(getattr(used, c.lower())) for c in TIMES), *measured]
 
 
-def report(rows: list[Usage]) -> str:
+def report(rows: list[Usage], shared_caches: dict[str, int] | None = None) -> str:
     """The rows as a table for a terminal: one task a row, the columns u shows."""
+    shared = "\n" + cache_summary(shared_caches) + "\n" if shared_caches is not None else ""
     if not rows:
-        return "No tasks yet.\n"
+        return "No tasks yet.\n" + shared
     table = [list(COLUMNS), *(cells(u) for u in rows)]
     widths = [max(len(row[i]) for row in table) for i in range(len(COLUMNS))]
     lines = []
@@ -142,7 +151,7 @@ def report(rows: list[Usage]) -> str:
             for i, (cell, w) in enumerate(zip(row, widths, strict=True))
         ]
         lines.append("  ".join(padded).rstrip())
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" + shared
 
 
 def as_dicts(rows: list[Usage]) -> list[dict]:
@@ -153,3 +162,10 @@ def as_dicts(rows: list[Usage]) -> list[dict]:
         row = {k: round(v, 1) if isinstance(v, float) else v for k, v in row.items()}
         found.append({**row, "resources": resources.as_dict(u.now) if u.now else None})
     return found
+
+
+def cache_summary(caches: dict[str, int]) -> str:
+    """Shared storage is machine-wide, not part of any task's DISK figure."""
+    total = resources.size(sum(caches.values())) if any(caches.values()) else "0 B"
+    details = " · ".join(f"{name}: {resources.size(n) if n else '0 B'}" for name, n in sorted(caches.items()))
+    return f"Shared caches (all projects): {total}" + (f"\n{details}" if details else "")

@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .pod import CACHES
+
 # The containers of a task's pod, by the ending of their names (pod.Pod).
 ROLES = ("agent", "dind", "gate", "review")
 # The volumes of a task (pod.Pod.volumes), with its opencode configuration.
@@ -88,14 +90,18 @@ def sample(
     roots: dict[str, Path],
     run: Callable[[list[str]], str] | None = None,
     problems: list[str] | None = None,
+    shared_caches: dict[str, int] | None = None,
 ) -> dict[str, Resources]:
     """roots: each live task's folder, by its id. {} when Docker does not answer, with why in
-    problems, when given: a screen of dashes alone would read as pods doing nothing."""
+    problems, when given: a screen of dashes alone would read as pods doing nothing.
+    Shared caches are measured once, separately, including when roots is empty."""
+    if shared_caches is not None:
+        shared_caches.clear()
     run = run or default_run
     ids = list(roots)
     found = {task_id: Resources() for task_id in ids}
     try:
-        stats = run(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
+        stats = run(["docker", "stats", "--no-stream", "--format", "{{json .}}"]) if ids else ""
         df = json.loads(run(["docker", "system", "df", "-v", "--format", "{{json .}}"]) or "{}")
     except Unavailable as e:
         if problems is not None:
@@ -114,7 +120,11 @@ def sample(
             used, _, limit = (row.get("MemUsage") or "").partition("/")
             cpu = float((row.get("CPUPerc") or "0").rstrip("%") or 0)
             found[mine[0]].containers.append(Container(mine[1], cpu, parse_size(used), parse_size(limit)))
+    shared_names = {f"vivibox-cache-{name}": name for name in CACHES}
     for volume in df.get("Volumes") or []:
+        name = volume.get("Name", "")
+        if shared_caches is not None and name in shared_names:
+            shared_caches[shared_names[name]] = parse_size(volume.get("Size", ""))
         if mine := owner(volume.get("Name", ""), ids, VOLUMES):
             found[mine[0]].volumes[mine[1]] = parse_size(volume.get("Size", ""))
     for task_id, root in roots.items():

@@ -314,7 +314,11 @@ the role's turns, `GATE` the verifications, `TOTAL` runs from the task's creatio
 now while it lives; `CPU`, `RAM` and `DISK` are what a live task's pod uses now (one `docker stats
 --no-stream` for every container, `docker system df -v` for the volumes, `du` for the task's
 folder). `--live` leaves the finished ones out, `--project` narrows it, `--json` gives seconds,
-and bytes per container and per volume, for a note or a script.
+and bytes per container and per volume, for a note or a script. Shared cache sizes appear
+separately below the tasks, as a total and a breakdown by tool. They cover all projects, even
+with `--project` or no live tasks, and are never added to a task's DISK figure. The JSON report
+is an object with `tasks` (the task rows) and `shared_caches` (tool names mapped to bytes,
+`null` when Docker could not be measured).
 
 ### When a task costs too much
 

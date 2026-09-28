@@ -31,6 +31,7 @@ class Usage(Dialog):
             table = DataTable(id="usage", cursor_type="row")
             table.add_columns(*usage.COLUMNS)
             yield table
+            yield Label("", id="usage-caches", classes="spaced wrap")
             yield Label("", id="usage-problem", classes="files")
             yield Label("Reading the tasks' events…", id="usage-note", classes="files")
 
@@ -44,12 +45,15 @@ class Usage(Dialog):
         if not self.measured:  # the first time: the times at once, without waiting for Docker
             self.app.call_from_thread(self.show, usage.gather(finished=self.finished), [])
         problems: list[str] = []
-        rows = usage.gather(finished=self.finished, measure=True, problems=problems)
+        caches: dict[str, int] = {}
+        rows = usage.gather(finished=self.finished, measure=True, problems=problems, shared_caches=caches)
         self.measured = True
         if self.is_attached:
-            self.app.call_from_thread(self.show, rows, problems)
+            self.app.call_from_thread(self.show, rows, problems, caches)
 
-    def show(self, rows: list[usage.Usage], problems: list[str]) -> None:
+    def show(
+        self, rows: list[usage.Usage], problems: list[str], caches: dict[str, int] | None = None
+    ) -> None:
         if not self.is_attached:
             return
         table = self.query_one(DataTable)
@@ -60,6 +64,9 @@ class Usage(Dialog):
         # pods' figures are dashes, when they are: without it dashes read as pods doing nothing.
         which = "Live and finished tasks, as the list shows them" if self.finished else "Live tasks"
         self.query_one("#usage-note", Label).update(f"{which if rows else 'No tasks yet'}. Esc closes.")
+        shared = self.query_one("#usage-caches", Label)
+        shared.display = caches is not None and not problems
+        shared.update(usage.cache_summary(caches) if shared.display else "")
         problem = self.query_one("#usage-problem", Label)
         problem.update(f"CPU, RAM and DISK not measured: {problems[0][:70]}" if problems else "")
         problem.display = bool(problems)

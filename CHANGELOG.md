@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- Shared cache disk usage, shown separately in `u` and `vivibox usage`, including when no tasks
+  are live; the breakdown covers all projects without charging shared bytes to each task.
+
 - The agent runs in a pod: an unprivileged container with its own Docker daemon under Sysbox, cut
   off from the host, the LAN and the host's Docker socket. Scratch space in a pod is capped at 4 GB.
 - A task goes plan, accept, implement, gate, review, accept. The agent works on a clone and its
@@ -107,6 +110,9 @@ First public version.
 
 ### Changed
 
+- `vivibox usage --json` now returns an object with `tasks` and `shared_caches`, instead of a
+  task array alone. `shared_caches` is null when Docker could not be measured.
+
 - The view has one look: a theme of its own (`vivibox/look.py`) with neutral surfaces and one
   accent for what takes your keys. Focus, selection, status and the primary button are drawn
   apart: the focused field's label and band in the accent, the row under the cursor a lighter
@@ -176,6 +182,9 @@ First public version.
 - The gate's fresh clone has the project's git submodules, as the task's clone has them: the
   Angular RealWorld app's build read its theme from one. A submodule that cannot be fetched is
   a failure of the environment.
+- Yarn downloads persist across verification containers and tasks, for Classic and modern Yarn,
+  including the mirror of a project-local cache. Project cache choices remain available;
+  installed files and verification build results retain their separate lifetimes.
 
 - A Rust project's build files are risky files, their changes waiting for your approval like
   `pom.xml`'s: `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain(.toml)`.

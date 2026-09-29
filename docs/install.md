@@ -13,9 +13,11 @@ git clone git@github.com:DEVividious/vivibox.git
 cd vivibox
 host/setup.sh            # lists changes, then asks before applying them
 host/setup.sh --check    # read-only; exits 1 if setup is incomplete
-export PATH="$HOME/.local/bin:$PATH"
 vivibox
 ```
+
+`vivibox` goes to `~/.local/bin`. If that folder did not exist before, Ubuntu puts it on your
+PATH at the next login; setup says so, with the `export PATH=…` line for the terminal you are in.
 
 First launch builds the agent image, writes `~/.config/vivibox/config.toml` and opens the view.
 Press `k` → **Providers & MCP** to add a provider with its key or import `opencode.json`.

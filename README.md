@@ -67,9 +67,8 @@ Docker Engine accessible without sudo, and a model API key or provider configura
 ```bash
 git clone git@github.com:DEVividious/vivibox.git
 cd vivibox
-host/setup.sh                            # install
-export PATH="$HOME/.local/bin:$PATH"     # the installed command, in this shell
-vivibox                                  # open the view
+host/setup.sh    # install
+vivibox          # open the view
 ```
 
 Setup asks before changing Sysbox, Docker networking, host tools or task storage; it may restart

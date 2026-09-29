@@ -337,6 +337,8 @@ First public version.
 
 ### Internal
 
+- The unit tests run in parallel (`uv run pytest -n auto`, pytest-xdist), locally and in CI:
+  under a minute instead of about five; behavioural runs stay in one process for their limit.
 - `pricing.py` holds the list prices of the Claude and OpenAI models an agent's CLI runs on, and
   a task's cost keeps what a subscription's use would have cost apart from money spent on keys,
   in its history line too; a harness turn with `metered = False` counts there.

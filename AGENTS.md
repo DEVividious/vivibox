@@ -27,10 +27,12 @@
   commit past it is `X.Y.(Z+1).devN+g<commit>`, and `vivibox --version` names it, so a bug
   report names the commit. A release is the `Unreleased` section given a number and a date, a
   commit, and an annotated tag pushed by the person.
-- Before committing: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
+- Before committing: `uv run pytest -n auto` (in parallel, a tenth of the time), `uv run ruff check .`,
+  `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
 - A change to a prompt that no mechanical test covers gets a behavioural run:
-  `uv run pytest -m model tests/behavioural -x`. It runs agents on real models for money (a
+  `uv run pytest -m model tests/behavioural -x`, never with `-n`: its spending limit is counted
+  in one process. It runs agents on real models for money (a
   limit of USD 2 per run, `VIVIBOX_BEHAVIOURAL_LIMIT`), so it is run only when the person asked
   for that run; the commit names its date, and the planning notes keep its cost and outcome.
 - The repository is public: nothing from an employer or a private project goes into it.

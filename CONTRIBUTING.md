@@ -20,7 +20,7 @@ change that: the second line of isolation needs a Docker daemon of the pod's own
 git clone git@github.com:DEVividious/vivibox.git
 cd vivibox
 uv sync                      # Python 3.12, the dependencies, vivibox in editable mode
-uv run pytest                # the unit tests, a few minutes
+uv run pytest -n auto        # the unit tests, in parallel: under a minute
 uv run ruff check . && uv run ruff format --check .
 ```
 

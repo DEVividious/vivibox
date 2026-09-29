@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,6 +83,15 @@ class Spend:
     review: float = 0.0
     # False for a box, which never plans: one number, not a split whose left side is always zero.
     split: bool = True
+    # What your subscription's use would have cost on an API key, by stage (planning,
+    # implementation, review, conversation): never in the figures above (ADR-0036).
+    subscription: dict[str, float] = field(default_factory=dict)
+    # A model with no list price was used: the sum is short of the whole.
+    subscription_unknown: bool = False
+
+    @property
+    def subscription_total(self) -> float:
+        return round(sum(self.subscription.values()), 6)
 
     @property
     def total(self) -> float:
@@ -111,10 +120,22 @@ def finished_spend(entry: dict) -> Spend:
     """A finished task's cost as the list shows a live one; tasks finished before the split was
     kept show their total as one figure."""
     total = entry.get("cost", 0)
+    subscription = dict(entry.get("subscription") or {})
     if "planning" not in entry:
-        return Spend(0.0, total, split=False)
+        return Spend(0.0, total, split=False, subscription=subscription)
     review = entry.get("review", 0)
-    return Spend(entry["planning"], round(total - entry["planning"] - review, 6), review)
+    return Spend(
+        entry["planning"], round(total - entry["planning"] - review, 6), review, subscription=subscription
+    )
+
+
+def history_subscription(spent: Spend) -> dict:
+    """The subscription's sums for a finished task's history line; nothing when there were none."""
+    return (
+        {"subscription": {k: round(v, 4) for k, v in spent.subscription.items()}}
+        if spent.subscription
+        else {}
+    )
 
 
 def finished_cost(entry: dict) -> str:
@@ -130,17 +151,35 @@ def cost_cells(spent: Spend | None) -> tuple[str, str, str]:
     return (plan, money(spent.implementation), money(spent.review) if spent.review else "-")
 
 
+def _stage(state: str | None) -> str:
+    if state in PLANNING_STATES:
+        return "planning"
+    return "review" if state == str(State.REVIEW) else "implementation"
+
+
 def cost(task: Task) -> Spend:
     """What vivibox itself spent on the task, from its turn events. For a box that is only the
     turn that works out how to run the app; what you run in it by hand is on your own keys."""
     planning = implementation = review = 0.0
+    subscription: dict[str, float] = {}
+    unknown = False
     for event in task.events():
+        data = event["data"]
+        if event["type"] == "cli_usage":
+            if data.get("cost") is None:
+                unknown = True
+            else:
+                subscription[data["stage"]] = subscription.get(data["stage"], 0.0) + data["cost"]
+            continue
         if event["type"] != "turn":
             continue
-        spent = event["data"].get("cost") or 0
-        if event["data"].get("state") in PLANNING_STATES:
+        spent = data.get("cost") or 0
+        stage = _stage(data.get("state"))
+        if data.get("metered") is False:
+            subscription[stage] = subscription.get(stage, 0.0) + spent
+        elif stage == "planning":
             planning += spent
-        elif event["data"].get("state") == str(State.REVIEW):
+        elif stage == "review":
             review += spent
         else:
             implementation += spent
@@ -154,7 +193,14 @@ def cost(task: Task) -> Spend:
             review += live["cost"]
         else:
             implementation += live["cost"]
-    return Spend(round(planning, 6), round(implementation, 6), round(review, 6), split=not st.box)
+    return Spend(
+        round(planning, 6),
+        round(implementation, 6),
+        round(review, 6),
+        split=not st.box,
+        subscription={k: round(v, 6) for k, v in subscription.items()},
+        subscription_unknown=unknown,
+    )
 
 
 # What the task needs, in words, and the commands for your next step.

@@ -328,6 +328,9 @@ First public version.
 
 ### Internal
 
+- `pricing.py` holds the list prices of the Claude and OpenAI models an agent's CLI runs on, and
+  a task's cost keeps what a subscription's use would have cost apart from money spent on keys,
+  in its history line too; a harness turn with `metered = False` counts there.
 - The supervisor's review state lives in `review_round.py`, and the prompt rules test reads
   every turn prompt from `prompts.py`.
 - Counts ("1 turn", "2 turns") are said by one function, `ui.count`.

@@ -64,26 +64,13 @@ correction and verification. [Flow details](docs/tasks.md#orchestration-modes).
 **Alpha · Linux only.** Setup targets Ubuntu on x86-64. Have Git, GitHub SSH access,
 Docker Engine accessible without sudo, and a model API key or provider configuration to import.
 
-1. Clone:
-   ```bash
-   git clone git@github.com:DEVividious/vivibox.git
-   ```
-2. Enter the checkout:
-   ```bash
-   cd vivibox
-   ```
-3. Install:
-   ```bash
-   host/setup.sh
-   ```
-4. Make the installed command available in this shell:
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
-5. Open the view:
-   ```bash
-   vivibox
-   ```
+```bash
+git clone git@github.com:DEVividious/vivibox.git
+cd vivibox
+host/setup.sh                            # install
+export PATH="$HOME/.local/bin:$PATH"     # the installed command, in this shell
+vivibox                                  # open the view
+```
 
 Setup asks before changing Sysbox, Docker networking, host tools or task storage; it may restart
 Docker. It also installs or updates the vivibox skill for installed Claude Code and Codex CLIs.
@@ -104,6 +91,8 @@ In the view:
 After provider setup, open your agent's CLI in the project's repository and ask:
 
 > Use the vivibox skill to add CSV export. Plan it with me, then hand implementation to vivibox.
+
+In Claude Code, `/vivibox` invokes the skill directly.
 
 The skill uses `vivibox info`, creates a task with `vivibox new --plan-in-cli`, brings your
 approved plan in with `vivibox plan import`, and follows it with `vivibox wait`.

@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import io
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
 
 from . import (
     actions,
+    answers,
     cli_agent,
     context,
     gate,
@@ -313,27 +312,13 @@ def where_to_commit(done: actions.Finished) -> tuple[str, bool]:
     return (done.new_branch, True) if value == "new" else (done.start_branch, False)
 
 
-def _socket(stream) -> bool:
-    """A socket for stdin, as Claude Code's shell gives a command, stays open with nothing on it:
-    read, it never ends. What is piped or redirected is a pipe or a file."""
-    try:
-        return stat.S_ISSOCK(os.fstat(stream.fileno()).st_mode)
-    except (OSError, ValueError, AttributeError, io.UnsupportedOperation):
-        return False
-
-
 def cmd_plan(args: argparse.Namespace) -> int:
     """For a manual planner: the prompt to take to your chat, and bringing its plan back."""
     task, _ = actions.load(args.task)
     if args.action == "prompt":
         print(actions.plan_prompt(task, cli=args.cli), end="")
         return 0
-    answer = None
-    if args.file == "-" or (args.file is None and not sys.stdin.isatty() and not _socket(sys.stdin)):
-        # An agent's shell has no terminal and nothing on stdin: the answer file, not an empty answer.
-        answer = sys.stdin.read() or None
-    elif args.file:
-        answer = Path(args.file).expanduser().read_text()
+    answer = answers.read(args.file)
     try:
         summary = actions.import_plan(task, answer)
     except PlanError as e:

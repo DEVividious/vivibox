@@ -211,8 +211,8 @@ First public version.
 
 ### Fixed
 
-- `vivibox plan import` without a file no longer waits for good on a standard input that is an
-  open socket, as Claude Code's shell gives one; and a plan the supervisor brings in from the
+- `vivibox plan import` and `vivibox review --import` without a file no longer wait for good on
+  a standard input that is an open socket, as Claude Code's shell gives one; and a plan the supervisor brings in from the
   answer file counts the CLI session's planning too.
 - The vivibox skill writes exactly the plan the user said yes to; an addition is shown and asked
   about first.

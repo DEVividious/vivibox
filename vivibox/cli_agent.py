@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import about, actions, reviewing, skill, ui, waiting
+from . import about, actions, answers, reviewing, skill, ui, waiting
 from .config import load_config
 from .waiting import JSON_VERSION, TIMED_OUT
 
@@ -68,12 +68,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         print(reviewing.cli_prompt(task), end="")
         return 0
     if args.answer is not None:
-        text = None
-        if args.answer == "-" or (not args.answer and not sys.stdin.isatty()):
-            # An agent's shell has no terminal and nothing on stdin: the answer file.
-            text = sys.stdin.read() or None
-        elif args.answer:
-            text = Path(args.answer).expanduser().read_text()
+        text = answers.read(args.answer)
         try:
             review = reviewing.import_answer(task, text)
         except reviewing.ReviewError as e:

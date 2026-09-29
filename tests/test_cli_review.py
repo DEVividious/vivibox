@@ -163,7 +163,7 @@ def test_the_ask_is_a_notification_without_the_open_in_ide_button(task, tmp_path
     assert said[-1][0].startswith("review in your CLI") and said[-1][1] == ""
 
 
-def test_the_view_says_the_review_is_the_clis_and_how_to_get_past_a_closed_one(task, tmp_path):
+def test_the_view_says_the_review_is_the_clis_and_how_to_get_past_a_closed_one(env, task, tmp_path):
     from vivibox import panel, ui
 
     sup, _, _ = in_cli(task, tmp_path)
@@ -192,3 +192,26 @@ def test_a_supervisor_put_on_a_model_reviews_the_round_itself(task, tmp_path):
     sup.step()  # and the model reviews
     st = task.read_state()
     assert st.state is State.CHECKPOINT_FINAL and not st.awaiting_review and len(sup.planner.prompts) == 1
+
+
+def test_import_does_not_wait_on_a_stdin_that_never_ends(env, task, tmp_path, monkeypatch, capsys):
+    """Claude Code's shell gives a command an open socket for stdin: review --import read it and
+    hung, as plan import had."""
+    import socket
+
+    from vivibox.cli import main
+
+    sup, _, _ = in_cli(task, tmp_path)
+    to_review(sup, task)
+    sup.step()
+    monkeypatch.setattr(actions, "load", lambda task_id: (task, None))
+    (task.meta / reviewing.CLI_ANSWER).write_text(CLEAN)
+    ours, theirs = socket.socketpair()
+    theirs.settimeout(2)  # read by mistake, the test fails in two seconds instead of hanging
+    monkeypatch.setattr("sys.stdin", theirs.makefile("r"))
+    try:
+        assert main(["review", task.id, "--import"]) == 0
+    finally:
+        ours.close()
+        theirs.close()
+    assert "no blocking notes" in capsys.readouterr().out

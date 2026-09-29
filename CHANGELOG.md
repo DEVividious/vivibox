@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- A task planned in Codex counts what that session used too: its thread from `CODEX_THREAD_ID`,
+  each response's usage from the rollout at list prices, and the share of the plan's 5-hour and
+  weekly windows used, in the Cost section.
 - What an agent's CLI used on a task shows as `$0.41 sub`, in a colour of its own: in the PLAN
   and REVIEW cells, beside today's spending above the list, in a Cost section of the details, in
   `vivibox status`, `u`, `vivibox usage` and `vivibox stats`, and in the help's legend.

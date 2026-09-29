@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import pricing
-from .cli_session import CLAUDE_CODE
+from .cli_session import CLAUDE_CODE, CODEX, codex_rollout
 from .pricing import Tokens
 from .task import Task
 
@@ -87,6 +87,82 @@ def claude_replies(path: Path) -> list[Reply]:
     return found
 
 
+def _at(entry: dict) -> datetime:
+    at = datetime.fromisoformat(entry["timestamp"])
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+def codex_replies(path: Path) -> list[Reply]:
+    """Codex writes a record of each response's usage, with the cached input inside the input and
+    the reasoning inside the output; the model is the turn's. A resumed thread may write a record
+    again: each response is counted once."""
+    found: list[Reply] = []
+    seen: set[str] = set()
+    model = ""
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            entry = json.loads(line)
+            payload = entry.get("payload") or {}
+            if entry.get("type") == "turn_context":
+                model = str(payload.get("model") or model)
+                continue
+            if entry.get("type") != "token_usage_record":
+                continue
+            usage, id_ = payload["usage"], payload.get("response_id") or f"{entry['timestamp']}"
+            cached = usage.get("cached_input_tokens") or 0
+            tokens = Tokens(
+                input=max((usage.get("input_tokens") or 0) - cached, 0),
+                output=usage.get("output_tokens") or 0,
+                cache_read=cached,
+                cache_write_5m=usage.get("cache_write_input_tokens") or 0,
+            )
+            at = _at(entry)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if id_ in seen or not tokens.total:
+            continue
+        seen.add(id_)
+        found.append(Reply(at, model, tokens))
+    return found
+
+
+# Codex's windows by their length in minutes, as the Cost section names them.
+WINDOWS = {300: "5h", 10080: "week"}
+
+
+def codex_limits(path: Path, until: datetime) -> dict[str, float]:
+    """How much of the plan's windows was used, as Codex last said it by until; {} for nothing."""
+    limits: dict[str, float] = {}
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            entry = json.loads(line)
+            payload = entry.get("payload") or {}
+            if payload.get("type") != "token_count" or not payload.get("rate_limits") or _at(entry) > until:
+                continue
+            said = {}
+            for window in payload["rate_limits"].values():
+                if isinstance(window, dict) and window.get("window_minutes") in WINDOWS:
+                    said[WINDOWS[window["window_minutes"]]] = float(window["used_percent"])
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        limits = said or limits
+    return limits
+
+
+def transcript(session: dict, environ=os.environ) -> Path:
+    """The session's transcript; Codex's looked for again when it was not written at new."""
+    if session.get("tool") == CODEX and not (session.get("path") and Path(session["path"]).exists()):
+        found = codex_rollout(environ, session["id"])
+        if found is None:
+            raise FileNotFoundError(2, "no rollout for this thread", session["id"])
+        return found
+    return Path(session["path"])
+
+
 def _ledger(session: str) -> Path:
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(base) / "vivibox" / "cli-sessions" / f"{session}.json"
@@ -107,7 +183,9 @@ def _keep(session: str, until: datetime) -> None:
     temporary.replace(path)
 
 
-def _record(task: Task, stage: str, replies: list[Reply], since: datetime | None, until: datetime) -> None:
+def _record(
+    task: Task, stage: str, replies: list[Reply], since: datetime | None, until: datetime, **extra
+) -> None:
     by_model: dict[str, list[Reply]] = defaultdict(list)
     for reply in replies:
         if (since is None or reply.at > since) and reply.at <= until:
@@ -124,16 +202,18 @@ def _record(task: Task, stage: str, replies: list[Reply], since: datetime | None
             replies=len(group),
             tokens=asdict(tokens),
             cost=None if None in prices else round(sum(prices), 6),
+            **extra,
         )
 
 
 def _count(task: Task, windows: list[tuple[str, datetime]]) -> None:
     session = task.read_state().cli_session
-    if session.get("tool") != CLAUDE_CODE:
+    if session.get("tool") not in (CLAUDE_CODE, CODEX):
         return
     since = counted_until(session["id"])
     try:
-        replies = claude_replies(Path(session["path"]))
+        path = transcript(session)
+        replies = (codex_replies if session["tool"] == CODEX else claude_replies)(path)
     except OSError as e:
         task.event(
             "cli_usage", stage=windows[-1][0], cost=None, problem=f"transcript not read: {e.strerror or e}"
@@ -142,7 +222,10 @@ def _count(task: Task, windows: list[tuple[str, datetime]]) -> None:
     for stage, until in windows:
         if since is not None and until <= since:
             continue
-        _record(task, stage, replies, since, until)
+        extra = {}
+        if session["tool"] == CODEX and (limits := codex_limits(path, until)):
+            extra["limits"] = limits
+        _record(task, stage, replies, since, until, **extra)
         since = until
     if since is not None:
         _keep(session["id"], since)

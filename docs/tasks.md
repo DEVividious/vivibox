@@ -145,8 +145,8 @@ The same from a shell: `vivibox plan prompt <id> [--cli]` and `vivibox plan impo
 `vivibox new <project> "<goal>" --plan-in-cli` makes you the planner of one task, in an agent's
 CLI (`claude`, `codex`), whatever config.toml says: the writer's report is skipped, since the CLI
 reads your checkout, and the task waits for your plan at once, with the CLI's prompt alone. It is
-refused with `--model planner=` and with a flow a manual planner cannot run. Run from Claude Code,
-the task keeps the CLI's session id and where its transcript lies, which `vivibox status <id>`
+refused with `--model planner=` and with a flow a manual planner cannot run. Run from Claude Code
+or Codex, the task keeps the CLI's session id and where its transcript lies, which `vivibox status <id>`
 names; `vivibox info` says which session a task made there would keep. When the plan comes in,
 when each review round from the CLI comes in, and when the task is accepted or deleted, vivibox
 reads that transcript's token counts and models, never the conversation, and prices them at the
@@ -154,7 +154,8 @@ providers' list prices: planning, each review round and the rest of the conversa
 once per session, and kept apart from what vivibox spent on API keys. A transcript it cannot
 read, or a model with no price, leaves the sum unknown and the task as it was. The list shows it
 in the PLAN and REVIEW cells as `$0.41 sub`, in a colour of its own; the bar above the list has
-today's apart from today's spending, and the task's details a Cost section with both.
+today's apart from today's spending, and the task's details a Cost section with both; for
+Codex, also how much of the plan's 5-hour and weekly windows it had used.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 

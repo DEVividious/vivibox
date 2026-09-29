@@ -192,6 +192,12 @@ def split(amounts: dict[str, float]) -> str:
     return ", ".join(f"{stage} {ui.money(amounts[stage])}" for stage in STAGES if amounts.get(stage))
 
 
+def limits_line(limits: dict[str, float]) -> str:
+    said = {"5h": "of the 5-hour window", "week": "of the week"}
+    parts = [f"{limits[k]:.0f}% {said[k]}" for k in said if k in limits]
+    return f"- Codex's limits used: {', '.join(parts)}"
+
+
 def cost_section(task: Task, st: TaskState) -> list[str]:
     """Money spent on keys and what an agent's CLI used on your subscription, a line each and
     never one sum, the subscription's by stage; only for a task that has the second."""
@@ -210,6 +216,7 @@ def cost_section(task: Task, st: TaskState) -> list[str]:
         "",
         f"- **API keys** · {ui.money(spent.total)}" + (f" · {parts}" if (parts := split(keys)) else ""),
         f"- **Subscription** · {' · '.join(used)}",
+        *([limits_line(spent.subscription_limits)] if spent.subscription_limits else []),
         "",
         "*The subscription's figure is its use at API list prices, not money spent.*",
     ]

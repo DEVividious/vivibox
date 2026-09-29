@@ -91,6 +91,8 @@ class Spend:
     subscription_unknown: frozenset[str] = frozenset()
     # The tokens the agent's CLI used on the task, every kind together.
     subscription_tokens: int = 0
+    # How much of the plan's windows Codex had used when last counted, in percent ("5h", "week").
+    subscription_limits: dict[str, float] = field(default_factory=dict)
 
     @property
     def subscription_total(self) -> float:
@@ -211,6 +213,7 @@ def cost(task: Task) -> Spend:
     subscription: dict[str, float] = {}
     unknown: set[str] = set()
     tokens = 0
+    limits: dict[str, float] = {}
     for event in task.events():
         data = event["data"]
         if event["type"] == "cli_usage":
@@ -220,6 +223,7 @@ def cost(task: Task) -> Spend:
             else:
                 subscription[stage] = subscription.get(stage, 0.0) + data["cost"]
             tokens += sum(n for n in (data.get("tokens") or {}).values() if isinstance(n, int))
+            limits = data.get("limits") or limits
             continue
         if event["type"] != "turn":
             continue
@@ -251,6 +255,7 @@ def cost(task: Task) -> Spend:
         subscription={k: round(v, 6) for k, v in subscription.items()},
         subscription_unknown=frozenset(unknown),
         subscription_tokens=tokens,
+        subscription_limits=dict(limits),
     )
 
 

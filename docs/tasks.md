@@ -236,8 +236,9 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
 - **The reviewer** of `planner_maker_checker` works in a container of its own on a fresh clone of
   the commits, with the writer's tree read-only and only its own key, after a green gate, and
   writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
-  (`path:line`), what is wrong and what would make it right: what keeps the work from being what
-  the plan says, and, besides the plan, what a senior reviewer sends back (code the repository
+  (`path:line`), what is wrong and what would make it right, and under **Checked** what it read
+  and checked, so a review with no notes says what it stands on. It looks for what keeps the
+  work from being what the plan says, and, besides the plan, what a senior reviewer sends back (code the repository
   already has, an abstraction with one caller, behaviour nobody asked for, a comment that
   restates the code, a test of how the code is written, a name that says the type). It runs no
   build, asks nothing and adds no criteria. Blocking notes go back to the writer, then the gate
@@ -250,7 +251,8 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   reviewer's do: blocking notes back to the worker, the gate again, the supervisor again, until it
   accepts or the rounds are out. Nothing the gate would catch reaches it: a red gate goes back to
   the worker by itself. What differs from `planner_maker_checker` is who reviews and where, not
-  where the gate stands.
+  where the gate stands. With the plan made in an agent's CLI (`--plan-in-cli`), the supervisor
+  is that CLI: each round waits for its review (see *Driving vivibox from an agent's CLI*).
 
 One limit, `max_rounds` (3 in config.toml, or the task's own from `n`), counts the fix turns the
 writer gets before the work comes to you: a red gate is one, a review with blocking notes is

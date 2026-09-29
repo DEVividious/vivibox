@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .config import current_mode
 from .states import State, check_transition
 
 TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
@@ -212,6 +213,8 @@ class Task:
     def read_state(self) -> TaskState:
         data = json.loads((self.meta / "state.json").read_text())
         data["state"] = State(data["state"])
+        # A flow chosen under a name it has since changed (config.RENAMED_MODES).
+        data["orchestration"] = current_mode(data.get("orchestration", ""))
         # Tasks written before roles carry one session, and it was always the writer's; tasks
         # written before roles owned sessions keep them under the harness's name, and opencode
         # could only be the writer's, claude-code only the planner's.

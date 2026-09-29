@@ -52,7 +52,7 @@ First public version.
   criterion that is only the build passing is refused.
 - Orchestration modes (`agent_orchestration_mode`, in `config.toml`, under `k` and per task under
   `n`): `single_agent` (P+W+R → Gate), `planner_executor` (P → W+R → Gate),
-  `planner_maker_checker` (P → W → Gate → R ⇄ W, the default) and `supervisor_worker`
+  `planner_writer_reviewer` (P → W → Gate → R ⇄ W, the default) and `supervisor_worker`
   (P → W → Gate → (P+R) ⇄ W). Roles joined in one agent share one conversation and the first
   role's model; a writer that reviews its own work gets a self-review turn before every
   verification; a supervisor, the planner, reviews the worker's work after a green
@@ -137,6 +137,9 @@ First public version.
 
 ### Changed
 
+- The flow Planner → Writer → Reviewer is `planner_writer_reviewer`, after its title, in
+  config.toml and `--flow`; `planner_maker_checker`, its former name, is read still, and
+  config.toml's says so once.
 - A review has a third section, `## Checked`: what the reviewer read and checked, at least one
   line, so a review with no notes says what it stands on; a review without it goes back to the
   reviewer once, like one without places on its notes.

@@ -168,7 +168,7 @@ FIELD_HELP = {
 ROUND_IS = {
     "single_agent": "after a failed verification",
     "planner_executor": "after a failed verification",
-    "planner_maker_checker": "after a failed verification or the reviewer's blocking notes",
+    "planner_writer_reviewer": "after a failed verification or the reviewer's blocking notes",
     "supervisor_worker": "after a failed verification or the supervisor's blocking notes",
 }
 

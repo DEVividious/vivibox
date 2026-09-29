@@ -22,7 +22,9 @@ def test_loads_config_with_defaults(tmp_path):
     )
     config = load_config(base)
     assert config.tasks_dir == Path("/srv/vivibox")
-    assert config.max_rounds == 3 and config.orchestration == "planner_maker_checker" and config.notice == ""
+    assert (
+        config.max_rounds == 3 and config.orchestration == "planner_writer_reviewer" and config.notice == ""
+    )
     assert config.roles["writer"].harness == "opencode"
     assert config.desktop_notifications is True
     assert config.whole_build_before_review is False, "the pipeline builds it whole after a push"
@@ -223,7 +225,7 @@ def test_a_reviewer_is_a_role_like_the_others_and_the_old_review_keys_are_one_no
     config = load_config(write(tmp_path / "config.toml", text))
     assert config.max_rounds == 5, "the old limit carries over"
     assert "limits.max_iterations, limits.max_reviews, roles.reviewer.mode" in config.notice
-    assert "limits.max_rounds (5)" in config.notice and "planner_maker_checker" in config.notice
+    assert "limits.max_rounds (5)" in config.notice and "planner_writer_reviewer" in config.notice
     text = 'tasks_dir = "/t"\n[limits]\nmax_iterations = 5\nmax_rounds = 2\n' + ROLES
     assert load_config(write(tmp_path / "config.toml", text)).max_rounds == 2, "the new key wins"
     text = 'tasks_dir = "/t"\n[roles.reviewer]\nharness = "manual"\nmodel = ""\n' + ROLES
@@ -234,13 +236,13 @@ def test_a_reviewer_is_a_role_like_the_others_and_the_old_review_keys_are_one_no
 def test_the_orchestration_modes_are_the_four_of_the_decision(tmp_path):
     from vivibox.config import ORCHESTRATION_LEGEND, ORCHESTRATION_MODES
 
-    modes = ["single_agent", "planner_executor", "planner_maker_checker", "supervisor_worker"]
+    modes = ["single_agent", "planner_executor", "planner_writer_reviewer", "supervisor_worker"]
     assert list(ORCHESTRATION_MODES) == modes
     for name, mode in ORCHESTRATION_MODES.items():
         assert mode.label and mode.subtitle and "Gate" in mode.flow and mode.summary and mode.tradeoff, name
         assert {role for role, _, _ in mode.agents} <= {"planner", "writer", "reviewer"}, name
     # Where the verification runs: before the reviewer, never after it.
-    assert ORCHESTRATION_MODES["planner_maker_checker"].flow == "P → W → Gate → R ⇄ W"
+    assert ORCHESTRATION_MODES["planner_writer_reviewer"].flow == "P → W → Gate → R ⇄ W"
     assert ORCHESTRATION_MODES["supervisor_worker"].flow == "P → W → Gate → (P+R) ⇄ W"
     assert "⇄" in ORCHESTRATION_LEGEND and "Rounds" in ORCHESTRATION_LEGEND
     text = 'tasks_dir = "/t"\nagent_orchestration_mode = "supervisor_worker"\n[limits]\nmax_rounds = 4\n'

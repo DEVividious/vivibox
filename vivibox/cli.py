@@ -27,7 +27,7 @@ from . import init as project_init
 from .cli_host import cmd_image_build, cmd_image_check, cmd_mirror
 from .cli_providers import cmd_auth, cmd_models
 from .cli_reports import cmd_stats, cmd_usage
-from .config import ORCHESTRATION_MODES, ConfigError, config_dir, load_config, load_project
+from .config import ORCHESTRATION_MODES, ConfigError, config_dir, current_mode, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
 from .pod import PodError
 from .states import State
@@ -553,6 +553,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument(
         "--flow",
         choices=ORCHESTRATION_MODES,
+        type=current_mode,  # a flow's former name too (config.RENAMED_MODES)
         default="",
         help="how this task is shared between the roles, as the Flow row in n (default: config.toml's)",
     )

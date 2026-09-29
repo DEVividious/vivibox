@@ -176,7 +176,7 @@ def forget(task_id: str) -> None:
 def up(task: Task, pod: Pod, config: Config) -> Path:
     """The reviewer's container, ready for a turn: a fresh clone, the reviewer's own key and
     harness files, the task's files to read, and the directory its review goes to, returned."""
-    # The reviewer's model where config.toml names one, else the writer's (planner_maker_checker
+    # The reviewer's model where config.toml names one, else the writer's (planner_writer_reviewer
     # without [roles.reviewer]).
     role = roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
     provider = opencode.provider_of(role.model)

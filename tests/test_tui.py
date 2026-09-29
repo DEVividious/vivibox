@@ -4464,7 +4464,7 @@ def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(e
         assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04"
 
     run(without)
-    with_mode(env, "planner_maker_checker")
+    with_mode(env, "planner_writer_reviewer")
     task.event("turn", state="review", role="reviewer", cost=0.02, tokens=1)
 
     async def with_(app, pilot):
@@ -4557,7 +4557,7 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
         await pilot.press(*"Add divide")
         mode = app.screen.query_one("#orchestration", Select)
         reviewer = app.screen.query_one("#role-reviewer", Select)
-        assert mode.value == "planner_maker_checker", "config.toml's mode, ready to keep or change"
+        assert mode.value == "planner_writer_reviewer", "config.toml's mode, ready to keep or change"
         labels = [str(t) for t, _ in mode._options]
         names = ["Single agent", "Planner → Executor", "Planner → Writer → Reviewer", "Supervisor ⇄ Worker"]
         assert [label.split("  ")[0] for label in labels] == names, "names that say how the agents work"
@@ -4579,7 +4579,7 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
         # A row per agent of the flow, as the flow names it; the diagram in the help says where
         # the verification runs.
         for name, shown, flow in (
-            ("planner_maker_checker", ["Planner", "Writer", "Reviewer"], "P → W → Gate → R ⇄ W"),
+            ("planner_writer_reviewer", ["Planner", "Writer", "Reviewer"], "P → W → Gate → R ⇄ W"),
             ("single_agent", ["Agent"], "P+W+R → Gate"),
             ("planner_executor", ["Planner", "Executor"], "P → W+R → Gate"),
             ("supervisor_worker", ["Supervisor", "Worker"], "P → W → Gate → (P+R) ⇄ W"),
@@ -4600,7 +4600,7 @@ def test_n_asks_how_the_task_is_orchestrated_and_the_reviewers_model_follows(env
         app.screen.query_one("#max-rounds").focus()
         await pilot.pause()
         assert "supervisor's blocking notes" in help_.said.summary
-        mode.value = "planner_maker_checker"
+        mode.value = "planner_writer_reviewer"
         await pilot.pause()
         assert reviewer.parent.display
         mode.value = "planner_executor"

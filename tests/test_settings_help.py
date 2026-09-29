@@ -55,7 +55,7 @@ def test_orchestration_describes_the_mode_it_is_on_and_enter_moves_on_without_a_
         await pilot.pause()
         pick(app, "flow")
         await pilot.pause()
-        now = ORCHESTRATION_MODES["planner_maker_checker"]
+        now = ORCHESTRATION_MODES["planner_writer_reviewer"]
         lines = about(app).splitlines()
         assert lines[0].startswith(now.label) and lines[1] == now.flow, "the name, then the flow"
         assert any(line.startswith("Review") for line in lines), "facts, a line each"

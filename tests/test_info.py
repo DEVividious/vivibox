@@ -42,7 +42,7 @@ def test_the_flows_say_which_a_planner_in_your_cli_can_run(env, capsys):
     assert list(flows) == list(ORCHESTRATION_MODES)
     assert not flows["single_agent"]["plan_in_cli"] and flows["single_agent"]["why_not"]
     # Supervisor ⇄ Worker too since ADR-0035: the CLI that planned reviews each round.
-    for name in ("planner_executor", "planner_maker_checker", "supervisor_worker"):
+    for name in ("planner_executor", "planner_writer_reviewer", "supervisor_worker"):
         assert flows[name]["plan_in_cli"] and flows[name]["why_not"] == ""
     mode = ORCHESTRATION_MODES["planner_executor"]
     assert flows["planner_executor"]["title"] == mode.label

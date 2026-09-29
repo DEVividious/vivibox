@@ -222,7 +222,7 @@ conversation, on the first role's model; `→` is then; `⇄` is rounds of fixes
 |---|---|---|---|
 | `single_agent` | Single agent | P+W+R → Gate | small, routine, cheap tasks; no independent review |
 | `planner_executor` | Planner → Executor | P → W+R → Gate | a good plan matters and the implementation is routine |
-| `planner_maker_checker` (default) | Planner → Writer → Reviewer | P → W → Gate → R ⇄ W | an independent review at every round |
+| `planner_writer_reviewer` (default) | Planner → Writer → Reviewer | P → W → Gate → R ⇄ W | an independent review at every round |
 | `supervisor_worker` | Supervisor ⇄ Worker | P → W → Gate → (P+R) ⇄ W | hard, multi-step changes under a strong model's constant supervision |
 
 Every mode plans first and stops for your acceptance of the plan (`--auto` does not). Then:
@@ -233,7 +233,7 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   the criteria, for what the gate cannot see (a test that cannot fail, a criterion ticked on
   faith, behaviour the plan did not ask for), and to fix it. Then the gate runs. The timeline
   says `writer turn (self-review)`.
-- **The reviewer** of `planner_maker_checker` works in a container of its own on a fresh clone of
+- **The reviewer** of `planner_writer_reviewer` works in a container of its own on a fresh clone of
   the commits, with the writer's tree read-only and only its own key, after a green gate, and
   writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
   (`path:line`), what is wrong and what would make it right, and under **Checked** what it read
@@ -250,7 +250,7 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   writes the same `review-N.md`; it changes nothing and commits nothing. The rounds go as the
   reviewer's do: blocking notes back to the worker, the gate again, the supervisor again, until it
   accepts or the rounds are out. Nothing the gate would catch reaches it: a red gate goes back to
-  the worker by itself. What differs from `planner_maker_checker` is who reviews and where, not
+  the worker by itself. What differs from `planner_writer_reviewer` is who reviews and where, not
   where the gate stands. With the plan made in an agent's CLI (`--plan-in-cli`), the supervisor
   is that CLI: each round waits for its review (see *Driving vivibox from an agent's CLI*).
 

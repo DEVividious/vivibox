@@ -60,13 +60,14 @@ reaches a running task from its next message.
 
 `agent_orchestration_mode`, at the top of the file, says how a task is shared between the
 planner, the writer and the reviewer, and where the gate runs ([flow details](tasks.md#orchestration-modes)): `single_agent`,
-`planner_executor`, `planner_maker_checker` (the default) or
-`supervisor_worker`. Roles joined in one agent share one conversation and the first role's model,
-so `single_agent` needs a planner on an opencode model and `supervisor_worker` a planner on a
-model, not `manual`; a task that cannot run in its mode says so before it starts. The same
+`planner_executor`, `planner_writer_reviewer` (the default; `planner_maker_checker`, its former
+name, is read too) or `supervisor_worker`. Roles joined in one agent share one conversation and
+the first role's model, so `single_agent` needs a planner on an opencode model and
+`supervisor_worker` a planner on a model or in an agent's CLI (`--plan-in-cli`), not in a
+browser; a task that cannot run in its mode says so before it starts. The same
 setting is a row under `k` and a row under `n`, for one task.
 
-A third role, `[roles.reviewer]`, is the reviewer of `planner_maker_checker`: it reads the work
+A third role, `[roles.reviewer]`, is the reviewer of `planner_writer_reviewer`: it reads the work
 after a green gate in a container of its own, through opencode, on a model of your choice;
 another family than the writer's is what makes the review worth its cost. Without it, the mode
 reviews on the writer's model, and the reviewer's row under `k` says so. The other modes have

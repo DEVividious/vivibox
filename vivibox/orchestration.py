@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import claudecode, manual, opencode
-from .config import DEFAULT_ORCHESTRATION, ORCHESTRATION_MODES, Config, Role
+from .config import DEFAULT_ORCHESTRATION, ORCHESTRATION_MODES, Config, Role, current_mode
 from .task import Task
 
 ROLES = ("planner", "writer", "reviewer")
@@ -44,8 +44,8 @@ MODES = {
     "planner_executor": Mode(
         "planner_executor", {"planner": "planner", "writer": "writer", "reviewer": "writer"}, self_review=True
     ),
-    "planner_maker_checker": Mode(
-        "planner_maker_checker",
+    "planner_writer_reviewer": Mode(
+        "planner_writer_reviewer",
         {"planner": "planner", "writer": "writer", "reviewer": "reviewer"},
         separate_reviewer=True,
     ),
@@ -62,7 +62,7 @@ DEFAULT = MODES[DEFAULT_ORCHESTRATION]
 def mode_of(task: Task | None, config: Config) -> Mode:
     """The task's own mode when it chose one, else config.toml's."""
     chosen = task.read_state().orchestration if task else ""
-    return MODES[chosen or config.orchestration]
+    return MODES[current_mode(chosen or config.orchestration)]
 
 
 def max_rounds_of(task: Task | None, config: Config) -> int:
@@ -74,7 +74,7 @@ def problem(mode_name: str, planner: Role, plan_in_cli: bool = False) -> str:
     """Why a mode cannot run on this planner, or "" when it can. An agent that plans and writes in
     one conversation cannot be you in your own chat, nor a tool that cannot write. A supervisor can
     be you only in an agent's CLI, which reads the work where a chat in a browser cannot."""
-    mode = MODES[mode_name]
+    mode = MODES[current_mode(mode_name)]
     if mode.agents["writer"] == "planner" and planner.harness != opencode.NAME:
         return (
             f"{mode_name} needs a planner that can write: put the planner on an opencode model "
@@ -83,7 +83,7 @@ def problem(mode_name: str, planner: Role, plan_in_cli: bool = False) -> str:
     if mode.supervisor and planner.harness not in (opencode.NAME, claudecode.NAME) and not plan_in_cli:
         return (
             f"{mode_name} needs a planner that runs on a model, not {manual.NAME}: with a manual "
-            "planner pick planner_executor or planner_maker_checker, or plan in an agent's CLI "
+            "planner pick planner_executor or planner_writer_reviewer, or plan in an agent's CLI "
             "(vivibox new --plan-in-cli), which then reviews each round"
         )
     return ""

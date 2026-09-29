@@ -42,7 +42,7 @@ Offer only the flows whose `plan_in_cli` is true; the others need an agent plann
 refuses them here. Recommend one by comparing the task with each flow's `best_for`, name the
 `default_flow`, and let the user choose. With `supervisor_worker` you also review each round of
 the work yourself, and blocking notes go back to the writer without the user: say so when you
-offer it. With `planner_maker_checker` a reviewer of vivibox's does that instead.
+offer it. With `planner_writer_reviewer` a reviewer of vivibox's does that instead.
 
 ## 4. Uncommitted changes
 

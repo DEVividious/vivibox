@@ -59,6 +59,7 @@ from .config import (
     Project,
     Role,
     config_dir,
+    current_mode,
     load_config,
     load_project,
 )
@@ -289,6 +290,7 @@ def create(
     config.toml's. max_rounds: this task's fix turns before the work comes to you; 0 is config.toml's.
     plan_in_cli: you plan this task in an agent's CLI on your machine, which makes you its planner."""
     config = load_config()
+    orchestration = current_mode(orchestration)
     if orchestration not in ("", *ORCHESTRATION_MODES):
         raise ConfigError(f"orchestration must be one of {', '.join(ORCHESTRATION_MODES)}")
     if not isinstance(max_rounds, int) or max_rounds < 0:

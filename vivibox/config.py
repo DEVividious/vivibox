@@ -75,7 +75,7 @@ ORCHESTRATION_MODES = {
         (("planner", "Planner", ""), ("writer", "Executor", "writer + reviewer")),
         "2 sessions · strong planner once · executor self-reviews",
     ),
-    "planner_maker_checker": Orchestration(
+    "planner_writer_reviewer": Orchestration(
         "Planner → Writer → Reviewer",
         "3 sessions · independent review",
         "P → W → Gate → R ⇄ W",
@@ -104,7 +104,15 @@ ORCHESTRATION_MODES = {
         "2 sessions · supervisor reviews after Gate · strong model every round",
     ),
 }
-DEFAULT_ORCHESTRATION = "planner_maker_checker"
+DEFAULT_ORCHESTRATION = "planner_writer_reviewer"
+# Names a flow had before: read as the new one, from config.toml, a task's state and --flow.
+RENAMED_MODES = {"planner_maker_checker": "planner_writer_reviewer"}
+
+
+def current_mode(name: str) -> str:
+    return RENAMED_MODES.get(name, name)
+
+
 ORCHESTRATION_LEGEND = (
     "P planner · W writer · R reviewer · Gate the verification (build, tests, criteria, commits) · "
     "+ one agent, one session, one model · → then · ⇄ rounds of fixes, up to Rounds"
@@ -264,7 +272,8 @@ def load_config(base: Path | None = None) -> Config:
     max_rounds = limits.get("max_rounds", limits.get("max_iterations", DEFAULT_MAX_ROUNDS))
     if isinstance(max_rounds, bool) or not isinstance(max_rounds, int) or max_rounds < 1:
         raise ConfigError(f"{path}: limits.max_rounds must be an integer >= 1")
-    orchestration = data.get("agent_orchestration_mode", DEFAULT_ORCHESTRATION)
+    written = data.get("agent_orchestration_mode", DEFAULT_ORCHESTRATION)
+    orchestration = current_mode(written)
     if orchestration not in ORCHESTRATION_MODES:
         raise ConfigError(f"{path}: agent_orchestration_mode must be one of {', '.join(ORCHESTRATION_MODES)}")
     whole = data.get("limits", {}).get("whole_build_before_review", False)
@@ -305,12 +314,17 @@ def load_config(base: Path | None = None) -> Config:
             if "mode" in role:
                 old.append("roles.reviewer.mode")
         roles[name] = Role(harness, role["model"])
-    notice = (
-        f"{path}: {', '.join(old)} is from before orchestration modes and is not read; the limit is"
-        f" limits.max_rounds ({max_rounds}) and the flow is agent_orchestration_mode ({orchestration})"
-        if old
-        else ""
-    )
+    notices = []
+    if old:
+        notices.append(
+            f"{path}: {', '.join(old)} is from before orchestration modes and is not read; the limit is"
+            f" limits.max_rounds ({max_rounds}) and the flow is agent_orchestration_mode ({orchestration})"
+        )
+    if written != orchestration:
+        notices.append(
+            f'{path}: agent_orchestration_mode "{written}" is "{orchestration}" now; both are read'
+        )
+    notice = "; ".join(notices)
     for needed in ("planner", "writer"):
         if needed not in roles:
             raise ConfigError(

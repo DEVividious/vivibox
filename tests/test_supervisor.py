@@ -1163,7 +1163,7 @@ def test_planner_executor_keeps_the_planner_apart_and_the_writer_reviews_itself(
 
 
 def test_the_default_mode_has_no_self_review_and_one_pool_for_the_gate_and_the_review(task, tmp_path):
-    """planner_maker_checker: a red gate and a blocking review draw on the same rounds."""
+    """planner_writer_reviewer: a red gate and a blocking review draw on the same rounds."""
     sup, notes, reviewer = reviewed(
         task,
         tmp_path,
@@ -1231,7 +1231,7 @@ def supervised(task, tmp_path, texts, results=(), max_rounds=2):
 def test_the_supervisor_reads_the_work_after_a_green_gate_in_the_pod_in_the_planners_conversation(
     task, tmp_path
 ):
-    """supervisor_worker: the flow is planner_maker_checker's; who reviews, and where, differs: the
+    """supervisor_worker: the flow is planner_writer_reviewer's; who reviews, and where, differs: the
     planner's own conversation, on the worker's clone in the pod, no review container."""
     sup, notes, reviewer = supervised(task, tmp_path, [BLOCKING, CLEAN])
     sup.step()  # implement: to the gate, as in every mode
@@ -1306,7 +1306,7 @@ def test_a_mode_refuses_a_planner_it_cannot_run_on():
         "supervisor_worker needs a planner that runs on a model"
     )
     assert orchestration.problem("supervisor_worker", Role("claude-code", "claude-opus-5")) == ""
-    for mode in ("planner_executor", "planner_maker_checker"):
+    for mode in ("planner_executor", "planner_writer_reviewer"):
         assert orchestration.problem(mode, Role("manual", "")) == ""
 
 
@@ -1314,7 +1314,7 @@ def test_each_mode_names_its_agents_and_their_briefs():
     modes = orchestration.MODES
     assert modes["single_agent"].brief_of("planner") == "planner-writer-reviewer"
     assert modes["planner_executor"].brief_of("writer") == "writer-reviewer"
-    assert modes["planner_maker_checker"].brief_of("reviewer") == "reviewer"
+    assert modes["planner_writer_reviewer"].brief_of("reviewer") == "reviewer"
     assert modes["supervisor_worker"].brief_of("planner") == "planner-reviewer"
     assert [m.reviews() for m in modes.values()] == [False, False, True, True]
     assert [m.self_review for m in modes.values()] == [True, True, False, False]

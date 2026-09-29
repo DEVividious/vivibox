@@ -107,6 +107,7 @@ from .proposal import (  # noqa: F401
     outside_modules,
     planned_modules,
     proposed,
+    scope,
     verify_commands,
     whole,
 )

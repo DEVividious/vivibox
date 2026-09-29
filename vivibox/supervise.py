@@ -147,6 +147,8 @@ def make_supervisor(
         if outside := actions.outside_modules(t, p):
             # Built whole this time, and the timeline says why a round took so long.
             t.event("verify_widened", outside=outside[:5], more=max(0, len(outside) - 5))
+        elif (found := actions.scope(t, p))[0]:
+            t.event("verify_scope", modules=found[0], added=found[1])
         return gate.run_gate(
             t,
             pod,
@@ -166,7 +168,7 @@ def make_supervisor(
         p = now()
         if not (current or (lambda: config))().whole_build_before_review:
             return None
-        if not actions.planned_modules(t, p) or actions.outside_modules(t, p):
+        if not actions.scope(t, p)[0]:
             return None
         t.event("whole_build")
         return gate.run_gate(

@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A task verified by modules builds the plan's modules and any other module its work changed,
+  instead of the whole project; only a change in no module, such as the root's build file,
+  builds everything. The timeline says which modules came from the changes.
 - The README, `docs/install.md` and `CONTRIBUTING.md` clone over HTTPS, which needs no GitHub SSH
   key, and point to Docker's install and post-install guides.
 - The README opens "Why vivibox" with what vivibox runs for a task, from handoffs to your approval.

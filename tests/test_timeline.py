@@ -109,5 +109,14 @@ def test_a_verification_built_whole_says_which_changes_took_it_past_the_modules(
     task.event("verify_widened", outside=["pom.xml", "extra/X.java"], more=0)
     task.event("verify_widened", outside=["a", "b", "c", "d", "e"], more=2)
     what = [text for _, text in timeline.entries(task)]
-    assert "whole build: changes outside the planned modules, pom.xml, extra/X.java" in what
-    assert "whole build: changes outside the planned modules, a, b, c, d, e and 2 more" in what
+    assert "whole build: changes outside every module, pom.xml, extra/X.java" in what
+    assert "whole build: changes outside every module, a, b, c, d, e and 2 more" in what
+
+
+def test_a_verification_by_modules_says_which_came_from_the_changes(tmp_path):
+    task = create_task(tmp_path, "shop", "Add subtract", "")
+    task.event("verify_scope", modules=["core", "app", "extra"], added=["extra"])
+    task.event("verify_scope", modules=["core"], added=[])
+    what = [text for _, text in timeline.entries(task)]
+    assert "modules: core, app, extra (+extra from the changes)" in what
+    assert "modules: core" in what

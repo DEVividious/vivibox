@@ -98,11 +98,41 @@ def test_work_outside_the_planned_modules_is_verified_with_the_whole_build(task)
     assert proposal.outside_modules(task, SHOP) == ["pom.xml"]
 
 
-def test_a_plan_without_modules_or_a_project_without_the_command_is_verified_whole(task):
+def test_a_project_without_the_command_is_verified_whole_and_a_plan_without_modules_by_its_changes(task):
     change(task, "core/src/Calc.java")
     assert proposal.verify_commands(task, Project("shop", Path("/r"), WHOLE)) == WHOLE, "not by module"
     (task.meta / gate.ACCEPTED_PLAN).write_text(PLAN.format(header=""))
+    assert proposal.verify_commands(task, SHOP) == ["mvn -B -pl core -am verify"]
+
+
+def test_a_module_the_work_reached_is_added_not_the_whole_build(task):
+    """Task 2 changes A and B, and its plan named A: the verification builds both (ADR-0033,
+    change of 2026-09-29), where it used to build the whole project."""
+    change(task, "core/src/Calc.java")
+    change(task, "extra/src/Tax.java")
+    assert proposal.verify_commands(task, SHOP) == ["mvn -B -pl core,app,extra -am verify"]
+    assert proposal.outside_modules(task, SHOP) == []
+    assert proposal.scope(task, SHOP) == (["core", "app", "extra"], ["extra"])
+
+
+def test_a_file_belongs_to_the_nearest_folder_with_a_build_file(task):
+    write(task.repo / "extra" / "tax" / "pom.xml", "<project/>\n")
+    change(task, "extra/tax/src/Rate.java")
+    assert proposal.module_of(task.repo, "extra/tax/src/Rate.java") == "extra/tax"
+    assert proposal.module_of(task.repo, "core/src/Calc.java") == "core"
+    assert proposal.module_of(task.repo, "pom.xml") is None, "the root is every module's"
+    assert proposal.module_of(task.repo, "gone/src/Old.java") is None
+    for build_file in ("build.gradle", "build.gradle.kts", "package.json"):
+        write(task.repo / "web" / build_file, "{}\n")
+        assert proposal.module_of(task.repo, "web/src/app.ts") == "web", build_file
+        (task.repo / "web" / build_file).unlink()
+
+
+def test_a_file_in_no_module_builds_the_whole_project(task):
+    change(task, "core/src/Calc.java")
+    change(task, ".github/workflows/ci.yml")
     assert proposal.verify_commands(task, SHOP) == WHOLE
+    assert proposal.outside_modules(task, SHOP) == [".github/workflows/ci.yml"]
 
 
 def test_a_task_in_a_scoped_project_gets_the_modules_line_in_its_plan(env):

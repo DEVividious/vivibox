@@ -6,6 +6,7 @@ whether the project keeps it."""
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from . import repo
 from .config import Project
@@ -84,15 +85,58 @@ def modules_missing(plan: Plan, by_module: bool) -> str:
     return 'modules in the header is empty; name the directories this task changes, e.g. ["core"]'
 
 
-def outside_modules(task: Task, project: Project) -> list[str]:
-    """The files the task's commits change outside the modules its plan names: no one builds those
-    with the modules' command, so the task is verified with the whole build."""
-    if not (modules := planned_modules(task, project)):
-        return []
+# What makes a folder a module of the build: Maven, Gradle, npm or pnpm workspaces.
+BUILD_FILES = ("pom.xml", "build.gradle", "build.gradle.kts", "package.json")
+
+
+def module_of(root: Path, path: str) -> str | None:
+    """The module a file of the repository belongs to: the nearest folder above it with a build
+    file of its own. None for a file at the root, or in no module, which every module builds on."""
+    parts = Path(path).parts[:-1]
+    for depth in range(len(parts), 0, -1):
+        folder = root.joinpath(*parts[:depth])
+        if any((folder / name).is_file() for name in BUILD_FILES):
+            return "/".join(parts[:depth])
+    return None
+
+
+def _changed(task: Task) -> list[str]:
     base = task.read_state().base_commit
-    changed = repo.git("diff", "--name-only", f"{base}..HEAD", cwd=task.repo).stdout.split()
-    inside = tuple(f"{m.rstrip('/')}/" for m in modules)
-    return [path for path in changed if not path.startswith(inside)]
+    return repo.git("diff", "--name-only", f"{base}..HEAD", cwd=task.repo).stdout.split()
+
+
+def _placed(task: Task, project: Project) -> tuple[list[str], list[str], list[str]]:
+    """The planned modules, the modules the work reached beyond them, and the files in no module."""
+    if not project.by_module:
+        return [], [], []
+    planned = planned_modules(task, project)
+    inside = tuple(f"{m.rstrip('/')}/" for m in planned)
+    added: list[str] = []
+    outside: list[str] = []
+    for path in _changed(task):
+        module = module_of(task.repo, path)
+        if module is not None:
+            if module not in planned and module not in added:
+                added.append(module)
+        elif not path.startswith(inside):
+            outside.append(path)
+    return planned, added, outside
+
+
+def scope(task: Task, project: Project) -> tuple[list[str], list[str]]:
+    """The modules a verification builds, the plan's and the ones the work reached (ADR-0033,
+    change of 2026-09-29), and which of them came from the changes; nothing when the work reached
+    past every module, and the whole project is built."""
+    planned, added, outside = _placed(task, project)
+    if outside or not (planned or added):
+        return [], []
+    return planned + added, added
+
+
+def outside_modules(task: Task, project: Project) -> list[str]:
+    """The files the task's commits change in no module, such as the root's build file: every
+    module builds on those, so the task is verified with the whole build."""
+    return _placed(task, project)[2]
 
 
 def asked(task: Task, project: Project) -> bool:
@@ -107,7 +151,7 @@ def verify_commands(task: Task, project: Project) -> list[str]:
     for a task made with nothing to build, whatever the project builds for its other tasks."""
     if nothing_to_build(task):
         return []
-    if (modules := planned_modules(task, project)) and not outside_modules(task, project):
+    if modules := scope(task, project)[0]:
         return for_modules(project.verify, modules)
     if project.by_module:
         return [whole(c) for c in project.verify]

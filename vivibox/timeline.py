@@ -161,7 +161,12 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "verify_widened":
             more = f" and {data['more']} more" if data.get("more") else ""
             outside = ", ".join(data.get("outside") or [])
-            text = f"whole build: changes outside the planned modules, {outside}{more}"
+            text = f"whole build: changes outside every module, {outside}{more}"
+        elif kind == "verify_scope":
+            added = data.get("added") or []
+            text = "modules: " + ", ".join(data.get("modules") or [])
+            if added:
+                text += f" (+{', '.join(added)} from the changes)"
         elif kind == "turn_retry":
             text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":

@@ -113,8 +113,9 @@ neighbours as they were installed, before your change.
 # Before the first implementing turn of a task whose plan names its modules (Project.by_module):
 # what the verification runs, so the writer builds the same, and why it stays inside them.
 SCOPED_PREFIX = """The verification builds and tests the modules the plan names, {modules}, with `{command}`.
-A change outside them makes it build the whole project, which may outlast its time limit: keep
-the work inside them, and when the task cannot be done there, write that to
+A change in another module adds that module to it; a change to the build files at the root, or to
+files in no module, makes it build the whole project, which may outlast its time limit: leave
+those as they are, and when the task cannot be done without them, write that to
 /task/handoff/question.md and end the turn.
 
 """

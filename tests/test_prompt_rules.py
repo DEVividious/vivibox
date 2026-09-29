@@ -213,3 +213,15 @@ def test_the_skill_keeps_its_rules():
     # Three comparisons of the flows planned in the CLI (2026-09-29): same quality, the plan settles
     # the risk; Supervisor ⇄ Worker cheaper, and the CLI reviews the work in the end anyway.
     assert "recommend `supervisor_worker` unless" in plain
+    # go-humanize-7 (Codex): staged changes seen at the start, and accept refused them at the end.
+    assert "`vivibox accept` refuses a checkout with staged changes" in plain
+    assert "`vivibox accept <id> --branch`" in plain
+
+
+def test_a_plan_made_in_a_chat_asks_for_criteria_with_values():
+    """go-humanize-7: "the correct suffix for int64 values, including 11/12/13 and MinInt64" let
+    a missing case through, where Claude's "returns 111th for 111" had caught it."""
+    from vivibox import manual
+
+    plain = " ".join(manual.READER.split())
+    assert "names the input and what it must give" in plain

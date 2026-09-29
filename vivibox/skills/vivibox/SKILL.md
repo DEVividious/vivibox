@@ -50,7 +50,9 @@ the work again at the end: offer it when the user wants you to plan only. Name t
 
 Run `git status --short` in the repository. A task starts from the last commit, so uncommitted
 changes are not part of it. If there are any, tell the user, and ask whether to commit them
-first or to go on without them.
+first or to go on without them. Say now that `vivibox accept` refuses a checkout with staged
+changes: at the end they commit or stash them first, or take the work onto a branch with
+`vivibox accept <id> --branch`.
 
 ## 5. The task
 

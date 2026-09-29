@@ -55,7 +55,9 @@ READER = """How the plan is used: I paste it into vivibox, a tool that runs codi
 carries it out alone, in an isolated container with a copy of the repository: it writes the code and
 tests, commits, and ticks off the acceptance criteria. vivibox then builds and tests the commits on a
 fresh clone and checks every criterion is ticked, and I review the result. Nobody can ask you or me
-anything on the way, so the plan must say everything, and each criterion must be checkable."""
+anything on the way, so the plan must say everything, and each criterion must be checkable: it
+names the input and what it must give ("parse_duration('1h30m') returns 5400"), not a kind of
+value ("parses every valid duration"), which lets a missing case through."""
 
 # What a planning chat asked about in the first real run, and cannot know: vivibox decides these.
 DECIDED = """Already decided, not for the plan: the agent keeps red.md and its checklist of criteria in

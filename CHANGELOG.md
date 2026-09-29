@@ -148,6 +148,9 @@ First public version.
 
 ### Changed
 
+- The planning prompt for a chat or an agent's CLI asks for criteria that name an input and what
+  it must give, not a kind of value; the skill says at the start that `vivibox accept` refuses a
+  checkout with staged changes, and offers `--branch`.
 - Desktop notifications are off until you turn them on (`desktop = true` under
   `[notifications]`, or under `k`); a `config.toml` that names no value now means off.
 - The vivibox skill recommends Supervisor ⇄ Worker for a task planned in the CLI, and Planner →

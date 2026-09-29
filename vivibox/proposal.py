@@ -60,7 +60,7 @@ CHOOSES = re.compile(r"\s+(?:(?:-pl|--projects)\s+)?\S*\{modules\}\S*|\s+(?:-am|
 
 # The whole build of a command that names each module its own way: Gradle runs a task without a
 # project path in every project, npm and pnpm run it in every workspace.
-EVERY_MODULE = (("%p:", ""), ("--workspace=%s", "--workspaces"), ("--filter=%s", "-r"))
+EVERY_MODULE = (("%p:", ""), ("--workspace=%s", "--workspaces"), ("--filter=./%s", "-r"))
 
 
 def _every(form: str) -> str:

@@ -561,7 +561,7 @@ def scoped(command: str, repo: Path | None = None) -> str | None:
     if m := PNPM.match(command):
         if _root_runner(repo, _script(command)):
             return f"{command} {{modules:%s}}"
-        return f"{m.group(1)} {{modules:--filter=%s}}{command[m.end() :]}"
+        return f"{m.group(1)} {{modules:--filter=./%s}}{command[m.end() :]}"
     if not (m := MAVEN.match(command)):
         return None
     # After the options, before the first goal: "mvn -B -pl {modules} -am verify".

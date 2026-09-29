@@ -183,7 +183,7 @@ prepare = ["./gradlew assemble"]                # optional, once per new task cl
 `verify = ["./mvnw -B -pl {modules} -am verify"]`. Build tools that name modules their own way take
 `{modules:FORMAT}`, each module written by FORMAT (`%s` its folder, `%p` Gradle's project path)
 and joined by spaces: `./gradlew {modules:%p:check}` runs `:core:check :web:api:check`,
-`npm test {modules:--workspace=%s}` and `pnpm {modules:--filter=%s} test` their workspaces; the
+`npm test {modules:--workspace=%s}` and `pnpm {modules:--filter=./%s} test` their workspaces; the
 whole build is `./gradlew check`, `npm test --workspaces`, `pnpm -r test`. A task's plan names the directories it changes
 (`modules = ["core"]` in its header; a plan from a chat or an agent's CLI gives a
 `Modules: core, app` line), you see them when you accept the plan, and each verification runs the

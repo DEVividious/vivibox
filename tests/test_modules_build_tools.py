@@ -56,7 +56,7 @@ def test_npm_and_pnpm_workspaces_are_modules(tmp_path):
             "npm test --workspace=packages/a --workspace=packages/b",
             "npm test --workspaces",
         ),
-        ("pnpm {modules:--filter=%s} test", ["apps/web"], "pnpm --filter=apps/web test", "pnpm -r test"),
+        ("pnpm {modules:--filter=./%s} test", ["apps/web"], "pnpm --filter=./apps/web test", "pnpm -r test"),
         (
             "mvn -B -pl {modules} -am verify",
             ["core", "app"],
@@ -79,7 +79,7 @@ def test_each_build_tool_names_its_modules_its_own_way(command, modules, runs, w
         ("./gradlew build check", "./gradlew {modules:%p:build} {modules:%p:check}"),
         ("npm test", "npm test {modules:--workspace=%s}"),
         ("npm run check", "npm run check {modules:--workspace=%s}"),
-        ("pnpm test", "pnpm {modules:--filter=%s} test"),
+        ("pnpm test", "pnpm {modules:--filter=./%s} test"),
     ],
 )
 def test_a_gradle_or_npm_command_becomes_the_one_by_modules(command, scoped):
@@ -131,7 +131,7 @@ def test_a_runner_at_the_root_gets_the_modules_as_paths(tmp_path):
     assert proposal.for_modules(["pnpm test {modules:%s}"], ["packages/a"]) == ["pnpm test packages/a"]
     assert proposal.whole("pnpm test {modules:%s}") == "pnpm test"
     each = pnpm_repo(tmp_path / "each", package_script=True)
-    assert init.scoped("pnpm test", each) == "pnpm {modules:--filter=%s} test", "each package runs its own"
+    assert init.scoped("pnpm test", each) == "pnpm {modules:--filter=./%s} test", "each package runs its own"
     npm = tmp_path / "npm"
     write(npm / "package.json", json.dumps({"workspaces": ["p/*"], "scripts": {"test": "jest"}}))
     write(npm / "p" / "a" / "package.json", "{}")

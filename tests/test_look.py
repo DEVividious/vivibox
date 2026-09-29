@@ -57,7 +57,10 @@ def test_colours_are_named_by_meaning_not_by_hue():
 def test_every_status_has_a_mark_so_it_reads_without_colour():
     """● waits for you, ✕ failed, ○ nobody runs it, ‖ you stopped it, ✓ done; at work, the spinner."""
     marks = {rank: mark for rank, (mark, _) in look.MARKS.items()}
-    shown = [mark for rank, mark in marks.items() if rank != ui.AT_WORK]
+    # One mark, one meaning: ‖ is "you stopped it", a task at work or a decision whose pod you
+    # stopped (which also says " · stopped", and keeps the waiting colour).
+    assert marks[ui.STOPPED_DECISION] == marks[ui.PARKED] == "‖"
+    shown = [mark for rank, mark in marks.items() if rank not in (ui.AT_WORK, ui.STOPPED_DECISION)]
     assert len(set(shown)) == len(shown) and all(shown), marks
     view = ui.TaskView("agent turn failed", ui.WAITS, ui.FAILED)
     assert "✕ agent turn failed" in look.badge(view)

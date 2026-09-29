@@ -410,7 +410,29 @@ class TaskView:
 
 WAITS, WORKS, STOPPED, DONE = ORDER
 # Within "Waiting for you": a decision of yours, something that failed, something nobody is running.
-DECISION, FAILED, IDLE, AT_WORK, PARKED, FINISHED = range(6)
+# A decision whose pod you stopped sorts with the decisions: it is still yours to make.
+DECISION, STOPPED_DECISION, FAILED, IDLE, AT_WORK, PARKED, FINISHED = range(7)
+
+
+def _decision(task: Task, st: TaskState, max_rounds: int) -> TaskView:
+    """What waits for you. With its pod stopped (s at a review) the decision stays yours, and the
+    row says the pod is down: "review the work · stopped"."""
+    status, commands = activity(st, max_rounds), tuple(next_commands(st))
+    if st.box:
+        # Nobody in a box to reply to; its work is yours to accept or to delete.
+        commands = tuple(c for c in commands if "reply" not in c)
+    elif planner_asks(task, st):
+        status, commands = "agent asks", tuple(c for c in commands if "reply" in c)
+    elif st.state is State.CHECKPOINT_BLOCKED:
+        if (task.meta / "handoff" / "question.md").exists():
+            status = "agent asks"
+        elif environment_problem(task):
+            status = "verification could not run"
+        else:
+            status = f"verification failed {st.iteration}×"
+    if st.paused:
+        return TaskView(f"{status} · stopped", WAITS, STOPPED_DECISION, commands=commands)
+    return TaskView(status, WAITS, DECISION, commands=commands)
 
 
 def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
@@ -431,23 +453,8 @@ def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
             what, _, why = st.problem.partition(": ")
             return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))
         return TaskView("stopped", STOPPED, PARKED, commands=tuple(next_commands(st)))
-    if st.box and st.state in WAITING:
-        # Nobody in a box to reply to; its work is yours to accept or to delete.
-        commands = tuple(c for c in next_commands(st) if "reply" not in c)
-        return TaskView(activity(st, max_rounds), WAITS, DECISION, commands=commands)
     if st.state in WAITING:
-        status = activity(st, max_rounds)
-        if planner_asks(task, st):
-            reply = [c for c in next_commands(st) if "reply" in c]
-            return TaskView("agent asks", WAITS, DECISION, commands=tuple(reply))
-        if st.state is State.CHECKPOINT_BLOCKED:
-            if (task.meta / "handoff" / "question.md").exists():
-                status = "agent asks"
-            elif environment_problem(task):
-                status = "verification could not run"
-            else:
-                status = f"verification failed {st.iteration}×"
-        return TaskView(status, WAITS, DECISION, commands=tuple(next_commands(st)))
+        return _decision(task, st, max_rounds)
     if st.problem:
         what, _, why = st.problem.partition(": ")
         return TaskView(what, WAITS, FAILED, why, (f"vivibox start {st.id}",))

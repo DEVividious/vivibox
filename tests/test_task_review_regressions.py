@@ -70,8 +70,11 @@ def test_stopping_pod_keeps_review_decisions_visible(env, state, decision):
     task.set_paused(True)
     st = task.read_state()
     after = ui.view(task, st, False, 3)
-    assert after.status == before.status
+    # The decision stays in Waiting for you, and the row says its pod is down (the person's word,
+    # 2026-09-29: "review the work" after a stop read as if nothing had happened).
+    assert after.status == f"{before.status} · stopped"
     assert after.group == ui.group(st) == "Waiting for you"
+    assert after.rank == ui.STOPPED_DECISION
     assert any(decision in command for command in after.commands)
     shown = panel.next_steps(task, st, after, False, panel.PodView())
     assert ("`p`" if state is State.APPROVAL_RISKY else "`a`") in shown
@@ -194,3 +197,11 @@ def test_latest_subject_is_kept_when_it_repeats_an_earlier_commit(env):
     assert review.suggested_message(source, base, "HEAD", "Fix input") == (
         "Fix input\n\n- Handle empty input\n- Cover an edge case"
     ), "a subject repeated is listed once"
+
+
+def test_a_stopped_decision_sorts_with_the_decisions_and_is_drawn_stopped():
+    from vivibox import look
+
+    assert ui.DECISION < ui.STOPPED_DECISION < ui.FAILED < ui.AT_WORK < ui.PARKED
+    mark, color = look.MARKS[ui.STOPPED_DECISION]
+    assert (mark, color) == ("‖", look.WAITING), "stopped, and yours to decide"

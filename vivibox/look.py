@@ -99,6 +99,7 @@ THEME = Theme(
 # colour too. The spinner stands in the mark of a task at work.
 MARKS = {
     ui.DECISION: ("●", WAITING),
+    ui.STOPPED_DECISION: ("‖", WAITING),
     ui.FAILED: ("✕", ERROR),
     ui.IDLE: ("○", WAITING),
     ui.AT_WORK: ("", WORKING),

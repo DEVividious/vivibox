@@ -56,6 +56,7 @@ Status labels, the only ones allowed:
 | blocked with every round used | `verification failed N×` | Waiting for you |
 | blocked by something outside the code (Docker, network, a credential, the time limit); no round spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |
+| a decision (plan, command, work, risky files) whose pod you stopped (`s`); ‖ in the waiting colour | `review the work · stopped` | Waiting for you |
 | stopped by the person | `stopped` | Stopped |
 | stopped by force (`S`), the turn under way lost | `stopped by force` | Waiting for you |
 | the agent's turn failed | `agent turn failed` | Waiting for you |
@@ -72,8 +73,8 @@ Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the 
 
 Stopping a blocked task, including `verification could not run`, shows `stopped`. The panel keeps
 the error and offers start, reply and verification again. At plan review, work review and risky-file
-approval, stopping just the pod keeps the decision visible in Waiting for you; the next decision
-starts the pod when needed.
+approval, stopping just the pod keeps the decision in Waiting for you, its label followed by
+` · stopped` and marked ‖ in the waiting colour; the next decision starts the pod when needed.
 
 ## 3. Keys
 

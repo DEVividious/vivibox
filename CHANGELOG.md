@@ -148,6 +148,8 @@ First public version.
 
 ### Changed
 
+- A decision whose pod you stopped (plan, command, work or risky files) says so: `review the work
+  · stopped`, marked ‖ in the waiting colour, still among what waits for you.
 - The planning prompt for a chat or an agent's CLI asks for criteria that name an input and what
   it must give, not a kind of value; the skill says at the start that `vivibox accept` refuses a
   checkout with staged changes, and offers `--branch`.

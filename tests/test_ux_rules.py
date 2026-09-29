@@ -27,7 +27,7 @@ from vivibox.states import State
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
 # round n/N and N× vary; everything else is a fixed word from the table.
-VARIABLE = re.compile(r" \(round \d+/\d+(: [^)]*)?\)$|\d+×$")
+VARIABLE = re.compile(r" \(round \d+/\d+(: [^)]*)?\)$|\d+×$| · stopped$")
 
 
 def allowed_labels() -> set[str]:

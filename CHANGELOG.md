@@ -38,6 +38,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   Desktop, neither of which Sysbox runs under, and names the guide when Docker is missing or
   your user cannot reach it.
 
+### Fixed
+
+- A plan brought in twice, by the supervisor from the file your CLI wrote and then by
+  `vivibox plan import`, counts once: one goal, one planning in the CLI usage.
+- `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing
+  one of `-pl "$(…)"`.
+
 ## [0.1.0] - 2026-09-29
 
 First public version.

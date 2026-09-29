@@ -427,7 +427,9 @@ def _build_command(repo: Path, step: list[str]) -> str:
     """The build lines of a step joined as the gate runs them, or "" when the step is no build."""
     kept = []
     for line in step:
-        line = line.strip().strip("'\"")
+        line = line.strip()
+        if len(line) > 1 and line[0] == line[-1] and line[0] in "'\"":
+            line = line[1:-1]  # a YAML string in quotes; a quote of the command's own stays
         words = line[2:].split() if line.startswith("./") else line.split()
         if not words or words[0] not in TOOLS or "${{" in line or NOT_A_CHECK.search(line):
             continue

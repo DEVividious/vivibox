@@ -433,3 +433,18 @@ def test_a_plan_the_supervisor_brings_in_counts_the_cli_session_too(manual_env, 
     actions.answer_path(manual_env).write_text(PLAN)
     manual.import_answer(manual_env)
     assert counted == ["planning"]
+
+
+def test_the_same_plan_brought_in_twice_counts_once(task, tmp_path):
+    """The supervisor takes the plan a CLI wrote to the answer file, then the skill runs
+    plan import on the same file: one plan, one goal, one planning in the CLI usage."""
+    sup, _ = make(task, Writer(task), tmp_path / "checkout")
+    sup.step()
+    (task.meta / manual.ANSWER).write_text(PLAN)
+    manual.import_answer(task)
+    assert actions.import_plan(task) == "Add a health endpoint"
+    kinds = [e["type"] for e in task.events()]
+    assert kinds.count("plan_imported") == 1 and kinds.count("goal") <= 1
+    (task.meta / manual.ANSWER).write_text(PLAN.replace("returns 200", "returns 200 with ok"))
+    actions.import_plan(task)
+    assert [e["type"] for e in task.events()].count("plan_imported") == 2, "a changed plan is new"

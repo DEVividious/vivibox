@@ -279,6 +279,10 @@ def repair_prompt(error: str) -> str:
     )
 
 
+def _read(path: Path) -> str:
+    return path.read_text() if path.exists() else ""
+
+
 def import_answer(task: Task) -> str:
     """Makes your answer the task's plan. Returns its summary; PlanError says what is wrong."""
     plan_text = without_notes(assemble(task, (task.meta / ANSWER).read_text()))
@@ -293,6 +297,9 @@ def import_answer(task: Task) -> str:
         raise PlanError(str(e)) from None
     if by_module(task) and not plan.modules and not plan.no_build:
         raise PlanError(MODULES_MISSING)
+    if not task.read_state().awaiting_plan and _read(task.plan_path) == plan_text:
+        # In already: the supervisor took the file the CLI wrote, and the skill imports it again.
+        return plan.summary
     task.plan_path.write_text(plan_text)
     if plan.summary:
         task.set_goal(plan.summary)

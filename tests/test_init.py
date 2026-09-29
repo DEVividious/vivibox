@@ -331,6 +331,21 @@ def test_a_pipelines_variables_are_filled_in_so_the_note_says_what_ci_runs(tmp_p
     assert ("bash ./gradlew test --offline $UNKNOWN", ".gitlab-ci.yml") in init.ci_commands(tmp_path)
 
 
+def test_a_quote_that_belongs_to_the_command_stays(tmp_path):
+    """keycloak: `./mvnw test -am -pl "$(find-modules.sh)"` lost its closing quote in the note."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text(
+        "jobs:\n  build:\n    steps:\n"
+        '      - run: |\n          ./mvnw test -pl "$(find-modules.sh)"\n'
+        "      - run: './mvnw verify'\n"
+    )
+    assert [c for c, _ in init.ci_commands(tmp_path)] == [
+        'bash ./mvnw test -pl "$(find-modules.sh)"',
+        "bash ./mvnw verify",
+    ]
+
+
 def test_a_narrowed_proposal_is_not_run_but_named_for_the_gate(env, tmp_path):
     """A writer that proposes `-Dtest=Mine test` would be verified by its own tests alone: the
     gate gets the selection to refuse, and nothing to run; a project's own command is its choice."""

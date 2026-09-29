@@ -33,6 +33,7 @@ WORKING = "#7cc7e8"  # an agent or the verification at work
 WAITING = "#e2b563"  # something waits for you
 SUCCESS = "#95cf6f"  # done, passed
 ERROR = "#e17a85"  # failed, refused, destroys
+SUBSCRIPTION = "#b99cf2"  # what an agent's CLI used on your subscription, never money spent
 
 THEME = Theme(
     name="vivibox",
@@ -60,6 +61,7 @@ THEME = Theme(
                 "frame": BORDER,
                 "text-secondary": SECONDARY,
                 "text-disabled-dim": DISABLED,
+                "text-subscription": SUBSCRIPTION,
             }
         ),
         "block-cursor-background": SELECTION,
@@ -127,6 +129,10 @@ def secondary(text: str) -> str:
 
 def faint(text: str) -> str:
     return f"[{FAINT}]{escape(text)}[/]"
+
+
+def subscription(text: str) -> str:
+    return f"[{SUBSCRIPTION}]{escape(text)}[/]"
 
 
 def colored(text: str, color: str) -> str:

@@ -400,10 +400,16 @@ HELP = """[b]Your decisions[/b], on the selected task
 [b]Anywhere[/b]
   i     set up a project
   k     settings: providers & MCP, roles, orchestration, editor, ntfy, limits
-  u     usage: how long each role and the verification took, per task
+  u     usage: time and cost of each role and the verification, per task
   h     show or hide the tasks you accepted
   H     Shift+h: show or hide the tasks you deleted (hidden to start with)
   q     quit
+
+[b]Costs[/b] (in the list, the details, u and stats)
+  $0.41      spent on your API keys
+  $0.41 sub  what your agent CLI used on the task on your subscription, priced
+        at API list prices; never added to money spent; ≥ when a model had
+        no price
 """
 
 
@@ -438,7 +444,15 @@ def help_text(note: str = "") -> Group:
         grid.add_column(no_wrap=True, min_width=5)
         grid.add_column()
         for keys, said in rows:
-            grid.add_row(Text(keys, style=f"bold {look.ACCENT}"), Text(said))
+            # The costs' legend is figures, drawn as the list draws them; the rest are keys.
+            style = (
+                look.SUBSCRIPTION
+                if keys.endswith(" sub")
+                else look.SECONDARY
+                if keys.startswith("$")
+                else f"bold {look.ACCENT}"
+            )
+            grid.add_row(Text(keys, style=style), Text(said))
         parts.append(Padding(grid, (0, 0, 0, 2)))
     return Group(*parts)
 

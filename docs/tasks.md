@@ -152,7 +152,9 @@ when each review round from the CLI comes in, and when the task is accepted or d
 reads that transcript's token counts and models, never the conversation, and prices them at the
 providers' list prices: planning, each review round and the rest of the conversation, counted
 once per session, and kept apart from what vivibox spent on API keys. A transcript it cannot
-read, or a model with no price, leaves the sum unknown and the task as it was.
+read, or a model with no price, leaves the sum unknown and the task as it was. The list shows it
+in the PLAN and REVIEW cells as `$0.41 sub`, in a colour of its own; the bar above the list has
+today's apart from today's spending, and the task's details a Cost section with both.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 

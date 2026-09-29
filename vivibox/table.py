@@ -94,9 +94,9 @@ class TaskTable:
         self.done = sorted((e for e in kept if shown(e)), key=lambda e: ui.task_number(e["id"]), reverse=True)
         # What the tasks finished today cost; the live ones are added where the header is set.
         today = datetime.now().astimezone().date()
-        self.spent_finished = sum(
-            e.get("cost") or 0 for e in kept if e.get("finished") and finished_on(e["finished"]) == today
-        )
+        finished_today = [e for e in kept if e.get("finished") and finished_on(e["finished"]) == today]
+        self.spent_finished = sum(e.get("cost") or 0 for e in finished_today)
+        self.used_finished = sum(sum((e.get("subscription") or {}).values()) for e in finished_today)
         self.hidden = {}
         for entry in kept:
             if not shown(entry):
@@ -234,7 +234,9 @@ class TaskTable:
         self.waiting_ids = waiting_now
         self.waiting = len(waiting_now)
         self.working = sum(self.busy(st) for _, st in pairs)
-        self.spent_today = self.spent_finished + sum(ui.cost(task).total for task, _ in pairs)
+        spent = [ui.cost(task) for task, _ in pairs]
+        self.spent_today = self.spent_finished + sum(s.total for s in spent)
+        self.used_today = self.used_finished + sum(s.subscription_total for s in spent)
         self.set_sub_title()
         self.show_detail()
         self.refresh_bindings()
@@ -257,16 +259,22 @@ class TaskTable:
 
     @staticmethod
     def cost_cells(spent: ui.Spend, muted: bool = False) -> tuple[str, ...]:
-        """PLAN, IMPL and REVIEW: a figure each, a faint dot for none."""
+        """PLAN, IMPL and REVIEW: a figure each, a faint dot for none; a stage done in an agent's
+        CLI in the subscription's colour, finished or not, since muted would hide what it is."""
         return tuple(
-            NONE if cell == "-" else (look.muted if muted else look.secondary)(cell)
-            for cell in ui.cost_cells(spent)
+            NONE
+            if cell == "-"
+            else look.subscription(cell)
+            if on_subscription
+            else (look.muted if muted else look.secondary)(cell)
+            for cell, on_subscription in ui.marked_cost_cells(spent)
         )
 
     @staticmethod
     def total_cell(spent: ui.Spend, muted: bool = False) -> str:
+        """COST: money spent; with none, what an agent's CLI used, in its colour."""
         if not spent:
-            return NONE
+            return look.subscription(spent.subscription_text()) if spent.on_subscription else NONE
         return (look.muted if muted else look.secondary)(ui.money(spent.total))
 
     def demo_cell(self, task_id: str) -> str:
@@ -300,6 +308,9 @@ class TaskTable:
         # The limits are in dollars and every row shows its own figure; the day's sum is here.
         if self.spent_today:
             parts.append((f"${self.spent_today:.2f} today", look.MUTED))
+        # What agents' CLIs used on your subscription today: apart, never added to the above.
+        if self.used_today:
+            parts.append((f"{ui.sub_money(self.used_today)} today", look.SUBSCRIPTION))
         if self.code_changed:
             parts.append((CODE_CHANGED, look.WAITING))
         self.sub_title = " · ".join(text.removeprefix("● ") for text, _ in parts)

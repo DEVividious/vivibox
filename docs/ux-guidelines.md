@@ -291,6 +291,7 @@ theme's variables and the code the constants, by meaning, never a hue by name
 | warning | waits for you | ● statuses, "N waiting for you" |
 | error | failed, refused, destroys | ✕ statuses, a problem, the Delete button |
 | success | done, passed | ✓ done, a ticked box |
+| subscription | what an agent's CLI used on your subscription, at list prices | a PLAN or REVIEW cell of a stage done in the CLI, "$… sub today", the costs' legend |
 
 - **Focus** is the accent: the focused row's label, in bold, an edge of the accent on the left
   of its field (every field keeps that column, empty, so nothing moves) and a faint tint; a text
@@ -315,7 +316,10 @@ theme's variables and the code the constants, by meaning, never a hue by name
   id whole in the foreground, a finished one secondary with its project's part muted; figures and times (`now`, `12m`, `3h`, `2d`) on the right; a
   faint dot for nothing; finished tasks muted. Columns go with the width: under 100, TASK,
   STATUS and GOAL; under 130, CRITERIA, COST (one figure) and UPDATED too; from 130, APP, PLAN,
-  IMPL, REVIEW (where someone other than the writer reviews) and CREATED. The goal's column
+  IMPL, REVIEW (where someone other than the writer reviews) and CREATED. A stage done in an
+  agent's CLI shows what the CLI used there, in the subscription's colour and marked `sub`
+  (`$0.41 sub`), so it reads apart without colour; money spent and a subscription's use are never
+  one sum, in the list, the header, the details (`#### Cost`), `u` or `stats`. The goal's column
   takes the rest of the width, to the screen's edge, and a goal longer than it ends in an
   ellipsis.
 - The command bar: keys in the accent, what they do in the secondary tone; the decisions' words

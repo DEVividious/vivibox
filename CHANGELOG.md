@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- What an agent's CLI used on a task shows as `$0.41 sub`, in a colour of its own: in the PLAN
+  and REVIEW cells, beside today's spending above the list, in a Cost section of the details, in
+  `vivibox status`, `u`, `vivibox usage` and `vivibox stats`, and in the help's legend.
 - A task planned in Claude Code counts what that session used on it: at the plan's import, each
   review round's import, and when the task is accepted or deleted, vivibox reads the transcript's
   token counts (never its text) and prices them at list prices, apart from money spent on keys.

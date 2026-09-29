@@ -1,5 +1,6 @@
 """How long a task took, from its events: each role's turns (turn_started to turn), the
-verifications, and the whole of it from its creation to done, or to now while it lives; and, when
+verifications, and the whole of it from its creation to done, or to now while it lives; what it
+cost on keys and what an agent's CLI used on your subscription, apart (ADR-0036); and, when
 asked, what a live task's pod uses now (resources.py). What u shows and `vivibox usage` prints,
 for a note to paste the numbers into.
 """
@@ -14,7 +15,7 @@ from .config import load_config
 from .task import list_tasks
 
 TIMES = ("PLAN", "WRITE", "REVIEW", "GATE", "TOTAL")
-COLUMNS = ("TASK", *TIMES, "CPU", "RAM", "DISK")
+COLUMNS = ("TASK", *TIMES, "COST", "SUB", "CPU", "RAM", "DISK")
 # A role's turns come from the states it works in, for events written before turns named their role.
 ROLE_OF_STATE = {**dict.fromkeys(ui.PLANNING_STATES, "planner"), "review": "reviewer"}
 COLUMN_OF_ROLE = {"planner": "plan", "writer": "write", "reviewer": "review"}
@@ -31,6 +32,11 @@ class Usage:
     review: float = 0.0
     gate: float = 0.0
     total: float = 0.0
+    # Dollars: spent on keys, and an agent's CLI's use at list prices, never added together.
+    cost: float = 0.0
+    subscription: float = 0.0
+    # Some of the CLI's use had no price: the figure is short of the whole.
+    subscription_unknown: bool = False
     # What its pod uses now; None when not measured, or finished.
     now: resources.Resources | None = None
 
@@ -51,6 +57,16 @@ def of_events(
     verifying = ""
     for event in events:
         kind, data, ts = event["type"], event.get("data", {}), event["ts"]
+        if kind == "turn":
+            if data.get("metered") is False:
+                used.subscription += data.get("cost") or 0
+            else:
+                used.cost += data.get("cost") or 0
+        elif kind == "cli_usage":
+            if data.get("cost") is None:
+                used.subscription_unknown = True
+            else:
+                used.subscription += data["cost"]
         if kind == "turn_started":
             role = data.get("role") or ROLE_OF_STATE.get(data.get("state"), "writer")
             started = (COLUMN_OF_ROLE.get(role, "write"), ts)
@@ -134,7 +150,10 @@ def cells(used: Usage) -> list[str]:
         resources.size(now.memory) if running else "-",
         resources.size(now.disk) if now else "-",
     ]
-    return [used.task, *(duration(getattr(used, c.lower())) for c in TIMES), *measured]
+    spent = ui.money(used.cost) if used.cost else "-"
+    on_subscription = used.subscription or used.subscription_unknown
+    sub = ui.sub_money(used.subscription, used.subscription_unknown) if on_subscription else "-"
+    return [used.task, *(duration(getattr(used, c.lower())) for c in TIMES), spent, sub, *measured]
 
 
 def report(rows: list[Usage], shared_caches: dict[str, int] | None = None) -> str:
@@ -159,7 +178,10 @@ def as_dicts(rows: list[Usage]) -> list[dict]:
     found = []
     for u in rows:
         row = {f.name: getattr(u, f.name) for f in fields(u) if f.name != "now"}
-        row = {k: round(v, 1) if isinstance(v, float) else v for k, v in row.items()}
+        row = {
+            k: round(v, 4 if k in ("cost", "subscription") else 1) if isinstance(v, float) else v
+            for k, v in row.items()
+        }
         found.append({**row, "resources": resources.as_dict(u.now) if u.now else None})
     return found
 

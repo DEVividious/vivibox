@@ -35,6 +35,7 @@ from .plan import parse_plan
 from .sections import (  # noqa: F401 (criteria and checklist: the list reads them from here)
     build_files_left,
     checklist,
+    cost_section,
     criteria,
     criteria_section,
     gate_failed,
@@ -579,7 +580,8 @@ def detail(
         f"### {st.id} · {seen.status}",
         "",
         f"*{st.project} · created {ui.ago(st.created)} · updated {ui.ago(st.updated)}"
-        f" · {ui.money(ui.cost(task).total)} so far"
+        f" · {ui.money((spent := ui.cost(task)).total)} so far"
+        + (f" · {spent.subscription_text()}" if spent.on_subscription else "")
         # During a turn: the cost above grows with it, and this says the agent is still at it.
         + (f" · last step {ui.ago(live['at'])}" if (live := task.live_turn()) else "")
         + "*",
@@ -739,7 +741,7 @@ def detail(
     # The same sections in the same order in every state: the plan under review is the body.
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += [*reviewers_notes(task), *criteria_section(task)]
-    body += roles_section(task, st)
+    body += roles_section(task, st) + cost_section(task, st)
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += plan_section(task)
     return "\n".join(head + body)

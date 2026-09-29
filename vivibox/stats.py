@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import ui
+
 # What a failed gate run can be refused for, in the order the report lists them, with the summary
 # key each comes from (gate.GateResult.summary).
 REASONS = (
@@ -42,6 +44,15 @@ class Stats:
     # role -> [cost, tokens, turns]; the same by state.
     by_role: dict[str, list[float]] = field(default_factory=lambda: defaultdict(lambda: [0.0, 0, 0]))
     by_state: dict[str, list[float]] = field(default_factory=lambda: defaultdict(lambda: [0.0, 0, 0]))
+
+    # What agents' CLIs used on your subscription, at list prices: never in cost (ADR-0036).
+    subscription_used: float = 0.0
+    # The CLI's uses with no price: a model not in the table, or a transcript not read.
+    unpriced: int = 0
+
+    @property
+    def subscription(self) -> float:
+        return round(self.subscription_used, 4)
 
     @property
     def cost(self) -> float:
@@ -78,6 +89,11 @@ def add_task(stats: Stats, events: list[dict], live: bool, since: str = "") -> N
                 bucket[0] += data.get("cost") or 0
                 bucket[1] += data.get("tokens") or 0
                 bucket[2] += 1
+        elif kind == "cli_usage":
+            if data.get("cost") is None:
+                stats.unpriced += 1
+            else:
+                stats.subscription_used += data["cost"]
         elif kind == "turn_retry":
             stats.retries += 1
     if passed_at:
@@ -131,6 +147,7 @@ def as_dict(stats: Stats) -> dict:
             "retried": stats.retries,
             "cost": stats.cost,
         },
+        "subscription": {"cost": stats.subscription, "unpriced": stats.unpriced},
         "per_turn": {
             "by_role": [
                 {"role": r, "turns": n, "cost": c, "tokens": t} for r, n, c, t in _per_turn(stats.by_role)
@@ -163,6 +180,12 @@ def report(stats: Stats) -> str:
         + (f", {failed}" if failed else "")
         + f", {stats.retries} retried, ${stats.cost:.2f}"
     )
+    if stats.subscription or stats.unpriced:
+        lines.append(
+            "Subscription (agent CLI, at list prices): "
+            + ui.sub_money(stats.subscription, bool(stats.unpriced))
+            + (f", {stats.unpriced} with no price" if stats.unpriced else "")
+        )
     for title, buckets in (("by role", stats.by_role), ("by state", stats.by_state)):
         rows = _per_turn(buckets)
         if not rows:

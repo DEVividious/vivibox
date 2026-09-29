@@ -34,12 +34,13 @@ def test_the_cli_s_use_is_a_subscription_sum_by_stage(tmp_path):
     assert ui.cost(task).subscription_unknown
 
 
-def test_the_views_show_what_they_did(tmp_path):
+def test_money_spent_reads_as_before_with_the_subscription_beside_it(tmp_path):
     task = create_task(tmp_path, "demo", "goal", "")
     task.event("turn", state="plan", cost=0.40, tokens=1)
     task.event("cli_usage", stage="review", cost=0.10)
     assert str(ui.cost(task)) == "$0.40 + $0.00"
-    assert ui.cost_cells(ui.cost(task)) == ("$0.40", "$0.00", "-")
+    assert ui.with_subscription(ui.cost(task)) == "$0.40 + $0.00 · $0.10 sub"
+    assert ui.cost_cells(ui.cost(task)) == ("$0.40", "$0.00", "$0.10 sub")
 
 
 def test_a_finished_task_keeps_its_subscription_sum_apart(tmp_path):

@@ -184,7 +184,7 @@ class Vivibox(
         # Kept by hand: a dialog on top changes what a query would find, and the timers keep running.
         self.pods: dict[str, PodView] = {}  # what each task's pod is doing, refreshed off the loop
         self.waiting = self.working = 0
-        self.spent_today = self.spent_finished = 0.0
+        self.spent_today = self.spent_finished = self.used_today = self.used_finished = 0.0
         # Whether the daemon answered when last asked (None: not yet), and when; asked off the
         # loop with the pods, every DOCKER_EVERY seconds, since docker info takes a moment.
         self.docker_ok: bool | None = None

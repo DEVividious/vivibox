@@ -86,12 +86,22 @@ class Spend:
     # What your subscription's use would have cost on an API key, by stage (planning,
     # implementation, review, conversation): never in the figures above (ADR-0036).
     subscription: dict[str, float] = field(default_factory=dict)
-    # A model with no list price was used: the sum is short of the whole.
-    subscription_unknown: bool = False
+    # The stages in which a model with no list price was used, or the transcript went unread:
+    # their sums are short of the whole.
+    subscription_unknown: frozenset[str] = frozenset()
+    # The tokens the agent's CLI used on the task, every kind together.
+    subscription_tokens: int = 0
 
     @property
     def subscription_total(self) -> float:
         return round(sum(self.subscription.values()), 6)
+
+    @property
+    def on_subscription(self) -> bool:
+        return bool(self.subscription or self.subscription_unknown)
+
+    def subscription_text(self) -> str:
+        return sub_money(self.subscription_total, bool(self.subscription_unknown))
 
     @property
     def total(self) -> float:
@@ -116,6 +126,22 @@ def money(amount: float) -> str:
     return f"${amount:.2f}"
 
 
+def sub_money(amount: float, unknown: bool = False) -> str:
+    """What a subscription's use would have cost on a key, marked so it reads apart from money
+    spent without colour: "$0.41 sub"; "≥$0.41 sub" when a model had no price, "? sub" for
+    nothing priced at all."""
+    if unknown and not amount:
+        return "? sub"
+    return f"{'≥' if unknown else ''}{money(amount)} sub"
+
+
+def tokens_short(n: int) -> str:
+    """ "950", "201.5k", "1.2M"."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
 def finished_spend(entry: dict) -> Spend:
     """A finished task's cost as the list shows a live one; tasks finished before the split was
     kept show their total as one figure."""
@@ -138,17 +164,38 @@ def history_subscription(spent: Spend) -> dict:
     )
 
 
+def with_subscription(spent: Spend) -> str:
+    """Money spent, then the subscription's use apart: "$0.00 + $0.06 · $0.41 sub"."""
+    return f"{spent} · {spent.subscription_text()}" if spent.on_subscription else str(spent)
+
+
 def finished_cost(entry: dict) -> str:
-    return str(finished_spend(entry))
+    return with_subscription(finished_spend(entry))
+
+
+def marked_cost_cells(spent: Spend | None) -> list[tuple[str, bool]]:
+    """PLAN, IMPL and REVIEW as the lists show them, each with whether it is the subscription's:
+    a stage done in an agent's CLI (nothing spent on keys in it) shows what the CLI used there."""
+    if spent is None:
+        return [("-", False)] * 3
+    cells = []
+    for stage, amount, shown in (
+        ("planning", spent.planning, bool(spent) and spent.split),
+        ("implementation", spent.implementation, bool(spent)),
+        ("review", spent.review, bool(spent.review)),
+    ):
+        unknown = stage in spent.subscription_unknown
+        if not amount and (stage in spent.subscription or unknown):
+            cells.append((sub_money(spent.subscription.get(stage, 0.0), unknown), True))
+        else:
+            cells.append((money(amount) if shown else "-", False))
+    return cells
 
 
 def cost_cells(spent: Spend | None) -> tuple[str, str, str]:
-    """PLAN, IMPL and REVIEW as the lists show them: one figure each, "-" for nothing; a box's
-    one figure under IMPL."""
-    if not spent:
-        return ("-", "-", "-")
-    plan = money(spent.planning) if spent.split else "-"
-    return (plan, money(spent.implementation), money(spent.review) if spent.review else "-")
+    """PLAN, IMPL and REVIEW: one figure each, "-" for nothing; a box's one figure under IMPL."""
+    plan, impl, review = (text for text, _ in marked_cost_cells(spent))
+    return plan, impl, review
 
 
 def _stage(state: str | None) -> str:
@@ -162,14 +209,17 @@ def cost(task: Task) -> Spend:
     turn that works out how to run the app; what you run in it by hand is on your own keys."""
     planning = implementation = review = 0.0
     subscription: dict[str, float] = {}
-    unknown = False
+    unknown: set[str] = set()
+    tokens = 0
     for event in task.events():
         data = event["data"]
         if event["type"] == "cli_usage":
+            stage = data.get("stage") or "conversation"
             if data.get("cost") is None:
-                unknown = True
+                unknown.add(stage)
             else:
-                subscription[data["stage"]] = subscription.get(data["stage"], 0.0) + data["cost"]
+                subscription[stage] = subscription.get(stage, 0.0) + data["cost"]
+            tokens += sum(n for n in (data.get("tokens") or {}).values() if isinstance(n, int))
             continue
         if event["type"] != "turn":
             continue
@@ -199,7 +249,8 @@ def cost(task: Task) -> Spend:
         round(review, 6),
         split=not st.box,
         subscription={k: round(v, 6) for k, v in subscription.items()},
-        subscription_unknown=unknown,
+        subscription_unknown=frozenset(unknown),
+        subscription_tokens=tokens,
     )
 
 
@@ -469,8 +520,9 @@ def task_detail(
     st = task.read_state()
     shown = view(task, st, running, max_rounds)
     meta = [ago(st.updated)] if st.box else [f"{criteria(task)} criteria", ago(st.updated)]
-    if spent := cost(task):
-        meta.append(str(spent))
+    spent = cost(task)
+    if spent or spent.on_subscription:
+        meta.append(with_subscription(spent))
     if live := task.live_turn():
         meta.append(f"last step {ago(live['at'])}")
     lines = [

@@ -90,6 +90,8 @@ def test_vivibox_usage_prints_a_row_per_task_and_json_for_a_note(env, capsys):
         "REVIEW",
         "GATE",
         "TOTAL",
+        "COST",
+        "SUB",
         "CPU",
         "RAM",
         "DISK",

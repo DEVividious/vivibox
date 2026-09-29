@@ -149,7 +149,9 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
         agent = data.get("agent") if data.get("agent") in found else mode.agents.get(role, role)
         found.setdefault(agent, Agent(role, "-"))
         found[agent].turns += 1
-        found[agent].cost += data.get("cost") or 0
+        # A turn on a subscription is not money this agent spent (ADR-0036).
+        if data.get("metered") is not False:
+            found[agent].cost += data.get("cost") or 0
     # The turn under way, so far: its event comes when it ends.
     agent = mode.agents.get(ROLE_OF_STATE.get(str(st.state), "writer"))
     if (live := task.live_turn()) and agent in found:
@@ -180,6 +182,37 @@ def roles_section(task: Task, st: TaskState) -> list[str]:
     if len(rows) > 1:
         lines.append(f"- **Total** · {used(sum(a.turns for a in rows), sum(a.cost for a in rows))}")
     return lines
+
+
+# The stages a task's cost is split into, in the order they happen.
+STAGES = ("planning", "implementation", "review", "conversation")
+
+
+def split(amounts: dict[str, float]) -> str:
+    return ", ".join(f"{stage} {ui.money(amounts[stage])}" for stage in STAGES if amounts.get(stage))
+
+
+def cost_section(task: Task, st: TaskState) -> list[str]:
+    """Money spent on keys and what an agent's CLI used on your subscription, a line each and
+    never one sum, the subscription's by stage; only for a task that has the second."""
+    spent = ui.cost(task)
+    if not spent.on_subscription:
+        return []  # keys alone: Roles says it
+    keys = {"planning": spent.planning, "implementation": spent.implementation, "review": spent.review}
+    used = [spent.subscription_text()]
+    if spent.subscription_tokens:
+        used.append(f"{ui.tokens_short(spent.subscription_tokens)} tokens")
+    if parts := split(spent.subscription):
+        used.append(parts)
+    return [
+        "",
+        "#### Cost",
+        "",
+        f"- **API keys** · {ui.money(spent.total)}" + (f" · {parts}" if (parts := split(keys)) else ""),
+        f"- **Subscription** · {' · '.join(used)}",
+        "",
+        "*The subscription's figure is its use at API list prices, not money spent.*",
+    ]
 
 
 def demoted(text: str) -> str:

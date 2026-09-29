@@ -5,10 +5,12 @@ amd64 Sysbox and uv packages; it is not a distribution-independent installer. ma
 are not supported.
 
 Before starting, install Git and [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
-and make sure `docker info` works as your user without sudo: add yourself to the `docker` group
-(`sudo usermod -aG docker $USER`), then log out and back in, or run `newgrp docker` in the
-terminal you install from. You also need a model API key, or an `opencode.json` defining a
-provider you can use.
+and make sure `docker info` works as your user without sudo (Docker's
+[post-install steps](https://docs.docker.com/engine/install/linux-postinstall/): the `docker`
+group, then a new login). Not the snap package, which Ubuntu suggests when `docker` is missing,
+and not Docker Desktop, whose engine runs in a VM of its own: Sysbox runs under neither, and
+`host/setup.sh` stops and says so. You also need a model API key, or an `opencode.json`
+defining a provider you can use.
 
 ```bash
 git clone https://github.com/DEVividious/vivibox.git

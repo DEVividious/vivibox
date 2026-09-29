@@ -11,7 +11,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 ### Changed
 
 - The README, `docs/install.md` and `CONTRIBUTING.md` clone over HTTPS, which needs no GitHub SSH
-  key, and point to Docker's install guide, with the new login the `docker` group needs.
+  key, and point to Docker's install and post-install guides.
+- `host/setup.sh` stops at once, with what to do, on Docker from the snap package or Docker
+  Desktop, neither of which Sysbox runs under, and names the guide when Docker is missing or
+  your user cannot reach it.
 
 ## [0.1.0] - 2026-09-29
 

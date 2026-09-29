@@ -204,6 +204,32 @@ path_hint() {
   echo 'To use vivibox in this terminal now, run: export PATH="$HOME/.local/bin:$PATH"'
 }
 
+# Sysbox runs under Docker Engine from Docker's or Ubuntu's packages. The snap package and Docker
+# Desktop (whose engine runs in a VM of its own) cannot host it: said here, before anything is
+# changed, rather than when Sysbox or the first task fails.
+DOCKER_INSTALL=https://docs.docker.com/engine/install/ubuntu/
+DOCKER_POSTINSTALL=https://docs.docker.com/engine/install/linux-postinstall/
+docker_problem() {
+  local path context
+  if ! path=$(command -v docker); then
+    echo "Docker is not installed; install Docker Engine: $DOCKER_INSTALL"
+    return 0
+  fi
+  path=$(readlink -f "$path")
+  if [[ $path == "${SNAP_ROOT:-/snap}"/* ]]; then
+    echo "Docker from the snap package cannot run Sysbox; remove it (sudo snap remove docker) and install Docker Engine: $DOCKER_INSTALL"
+    return 0
+  fi
+  context=$(docker context show 2>/dev/null) || context=""
+  if [[ $context == desktop-linux ]]; then
+    echo "Docker Desktop's engine cannot run Sysbox; switch to Docker Engine (docker context use default) or install it: $DOCKER_INSTALL"
+    return 0
+  fi
+  docker info >/dev/null 2>&1 \
+    || echo "cannot talk to Docker as $USER; join the docker group and log in again: $DOCKER_POSTINSTALL"
+  return 0
+}
+
 # Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -235,8 +261,8 @@ update() {
 
 [[ $EUID -ne 0 ]] || die "run as your user, not root; the script uses sudo where needed"
 [[ "$TASKS_DIR" == /* && "$TASKS_DIR" != "$HOME"* ]] || die "VIVIBOX_TASKS_DIR must be absolute and outside \$HOME"
-command -v docker >/dev/null || die "Docker is not installed"
-docker info >/dev/null 2>&1 || die "cannot talk to Docker; is your user in the docker group?"
+why=$(docker_problem)
+[[ -z "$why" ]] || die "$why"
 
 echo "Checking host…"
 

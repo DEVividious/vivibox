@@ -62,8 +62,10 @@ correction and verification. [Flow details](docs/tasks.md#orchestration-modes).
 ## Quick start
 
 **Alpha · Linux only.** Setup targets Ubuntu on x86-64. Have Git,
-[Docker Engine](https://docs.docker.com/engine/install/ubuntu/) usable without sudo (after
-joining the `docker` group, log in again), and a model API key or provider configuration to import.
+[Docker Engine](https://docs.docker.com/engine/install/ubuntu/) usable without sudo
+([post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)), not the snap
+package or Docker Desktop, which Sysbox cannot run under, and a model API key or provider
+configuration to import.
 
 ```bash
 git clone https://github.com/DEVividious/vivibox.git

@@ -426,3 +426,44 @@ def test_a_fresh_local_bin_is_explained_with_the_command_for_this_terminal(tmp_p
     assert lines[1] == 'To use vivibox in this terminal now, run: export PATH="$HOME/.local/bin:$PATH"'
     there = setup_fn(f'BIN="{home}/.local/bin"; PATH="{home}/.local/bin:/usr/bin:/bin"; path_hint')
     assert there.stdout == "" and there.returncode == 0
+
+
+def fake_docker(tmp_path, where: str, context: str = "default", info_ok: bool = True):
+    """A docker command in a folder of the test's own, as the snap or Docker Desktop would give."""
+    bin_dir = tmp_path / where
+    bin_dir.mkdir(parents=True)
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        f'[ "$1 $2" = "context show" ] && echo {context} && exit 0\n'
+        f'[ "$1" = "info" ] && exit {0 if info_ok else 1}\n'
+        "exit 0\n"
+    )
+    docker.chmod(0o755)
+    return bin_dir
+
+
+@pytest.mark.parametrize(
+    "where, context, info_ok, said",
+    [
+        ("usr/bin", "default", True, ""),
+        ("snap/bin", "default", True, "snap"),
+        ("usr/bin", "desktop-linux", True, "Docker Desktop"),
+        ("usr/bin", "default", False, "docker group"),
+    ],
+)
+def test_setup_says_which_docker_cannot_run_sysbox(tmp_path, where, context, info_ok, said):
+    """Ubuntu offers `snap install docker` where docker is missing, and Docker Desktop runs its
+    engine in a VM of its own: Sysbox runs under neither, and setup said so only when it failed."""
+    bin_dir = fake_docker(tmp_path, where, context, info_ok)
+    found = setup_fn(f'SNAP_ROOT="{tmp_path / "snap"}"; PATH="{bin_dir}:/usr/bin:/bin"; docker_problem')
+    if said:
+        assert said in found.stdout and "https://docs.docker.com/engine/install/" in found.stdout
+    else:
+        assert found.stdout == ""
+
+
+def test_setup_says_where_to_get_docker_when_there_is_none(tmp_path):
+    found = setup_fn(f'PATH="{tmp_path}"; docker_problem')
+    assert "Docker is not installed" in found.stdout
+    assert "https://docs.docker.com/engine/install/ubuntu/" in found.stdout

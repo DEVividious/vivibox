@@ -4,12 +4,14 @@ The setup script targets **Ubuntu on x86-64**, tested on 24.04. It uses apt/dpkg
 amd64 Sysbox and uv packages; it is not a distribution-independent installer. macOS and Windows
 are not supported.
 
-Before starting, install Git and Docker Engine and make sure `docker info` works as your user
-without sudo. The clone command below uses your GitHub SSH access. You also need a model API key,
-or an `opencode.json` defining a provider you can use.
+Before starting, install Git and [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
+and make sure `docker info` works as your user without sudo: add yourself to the `docker` group
+(`sudo usermod -aG docker $USER`), then log out and back in, or run `newgrp docker` in the
+terminal you install from. You also need a model API key, or an `opencode.json` defining a
+provider you can use.
 
 ```bash
-git clone git@github.com:DEVividious/vivibox.git
+git clone https://github.com/DEVividious/vivibox.git
 cd vivibox
 host/setup.sh            # lists changes, then asks before applying them
 host/setup.sh --check    # read-only; exits 1 if setup is incomplete

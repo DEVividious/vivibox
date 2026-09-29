@@ -8,6 +8,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+### Changed
+
+- The README, `docs/install.md` and `CONTRIBUTING.md` clone over HTTPS, which needs no GitHub SSH
+  key, and point to Docker's install guide, with the new login the `docker` group needs.
+
 ## [0.1.0] - 2026-09-29
 
 First public version.

@@ -18,7 +18,7 @@ change that: the second line of isolation needs a Docker daemon of the pod's own
 ## Working on the code
 
 ```bash
-git clone git@github.com:DEVividious/vivibox.git
+git clone https://github.com/DEVividious/vivibox.git
 cd vivibox
 uv sync                      # Python 3.12, the dependencies, vivibox in editable mode
 uv run pytest -n auto        # the unit tests, in parallel: under a minute

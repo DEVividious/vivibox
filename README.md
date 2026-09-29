@@ -61,11 +61,12 @@ correction and verification. [Flow details](docs/tasks.md#orchestration-modes).
 
 ## Quick start
 
-**Alpha · Linux only.** Setup targets Ubuntu on x86-64. Have Git, GitHub SSH access,
-Docker Engine accessible without sudo, and a model API key or provider configuration to import.
+**Alpha · Linux only.** Setup targets Ubuntu on x86-64. Have Git,
+[Docker Engine](https://docs.docker.com/engine/install/ubuntu/) usable without sudo (after
+joining the `docker` group, log in again), and a model API key or provider configuration to import.
 
 ```bash
-git clone git@github.com:DEVividious/vivibox.git
+git clone https://github.com/DEVividious/vivibox.git
 cd vivibox
 host/setup.sh    # install
 vivibox          # open the view

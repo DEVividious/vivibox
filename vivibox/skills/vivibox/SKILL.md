@@ -64,8 +64,9 @@ on standard input. The first line of the output names the task: `Created <id> fr
    discuss the plan with the user. Show them the whole plan here and ask whether this is the
    plan vivibox should carry out. Their yes is the plan's acceptance: ask once, not again
    after the import.
-3. After their yes, write the plan to the file the prompt names and run
-   `vivibox plan import <id>`, then `vivibox accept <id>`.
+3. After their yes, write exactly the plan they saw to the file the prompt names, nothing added,
+   and run `vivibox plan import <id>`, then `vivibox accept <id>`. Anything you would add is a
+   change: show it and ask again first.
 4. If the import or the accept fails, it says what is wrong. Fix the plan, show the user what
    changed, and ask again before importing it.
 

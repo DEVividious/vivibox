@@ -197,6 +197,8 @@ First public version.
 
 ### Fixed
 
+- The vivibox skill writes exactly the plan the user said yes to; an addition is shown and asked
+  about first.
 - A test moved within its file, or to another test file, is no longer reported as removed, and
   one in a deleted test file now is.
 - `vivibox wait --json` carries `said`, what vivibox said of the task, so a CLI tells the user of

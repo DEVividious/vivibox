@@ -31,8 +31,8 @@
   `uv run ruff format --check .`.
   Run `uv run pytest -m docker` only when the change touches the pod.
 - A change to a prompt that no mechanical test covers gets a behavioural run:
-  `uv run pytest -m model tests/behavioural -x`, never with `-n`: its spending limit is counted
-  in one process. It runs agents on real models for money (a
+  `uv run pytest -m model tests/behavioural -x`, or `-n auto` for its scenarios in parallel (the
+  spending limit is the whole run's either way). It runs agents on real models for money (a
   limit of USD 2 per run, `VIVIBOX_BEHAVIOURAL_LIMIT`), so it is run only when the person asked
   for that run; the commit names its date, and the planning notes keep its cost and outcome.
 - The repository is public: nothing from an employer or a private project goes into it.

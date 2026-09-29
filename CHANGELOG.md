@@ -213,6 +213,8 @@ First public version.
 
 ### Fixed
 
+- Tasks started at the same moment no longer fail with "Pool overlaps": a task whose network
+  range another took first tries the next one.
 - `vivibox plan import` and `vivibox review --import` without a file no longer wait for good on
   a standard input that is an open socket, as Claude Code's shell gives one; and a plan the supervisor brings in from the
   answer file counts the CLI session's planning too.
@@ -339,6 +341,8 @@ First public version.
 
 ### Internal
 
+- A task's network lives in `pod_network.py`, out of `pod.py`; behavioural runs can go in
+  parallel (`-n auto`) under one spending limit for the whole run.
 - The unit tests run in parallel (`uv run pytest -n auto`, pytest-xdist), locally and in CI:
   under a minute instead of about five; behavioural runs stay in one process for their limit.
 - `pricing.py` holds the list prices of the Claude and OpenAI models an agent's CLI runs on, and

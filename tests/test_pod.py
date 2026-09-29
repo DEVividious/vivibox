@@ -667,3 +667,42 @@ def test_yarn_downloads_are_shared_but_gate_results_stay_private(pod):
     assert not any("-gate-" in mount for mount in binds(pod.agent_command()))
     pod.remove()
     assert not any("vivibox-cache-yarn" in call for call in pod.runner.find("docker", "volume", "rm"))
+
+
+def test_a_range_another_task_took_meanwhile_is_given_up_for_the_next(pod):
+    """Two tasks started at once both find the same range free; Docker gives it to one, and the
+    other was left with "Pool overlaps", a task that could not start."""
+    real = pod.runner
+    raced = []
+
+    def racing(cmd):
+        cmd = list(cmd)
+        if cmd[:3] == ["docker", "network", "create"] and not raced:
+            raced.append(cmd)
+            real.subnets = "198.51.100.0/28"  # the other task's, created in between
+            real.calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                stdout="",
+                stderr="Error response from daemon: Pool overlaps with other one on this address space",
+            )
+        return real(cmd)
+
+    pod.runner = racing
+    assert str(pod.ensure_network()) == "198.51.100.16/28"
+    made = real.find("docker", "network", "create")
+    assert [c[c.index("--subnet") + 1] for c in made] == ["198.51.100.0/28", "198.51.100.16/28"]
+
+
+def test_a_network_docker_refuses_for_another_reason_says_so(pod):
+    real = pod.runner
+
+    def refusing(cmd):
+        if list(cmd)[:3] == ["docker", "network", "create"]:
+            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="permission denied")
+        return real(cmd)
+
+    pod.runner = refusing
+    with pytest.raises(PodError, match="permission denied"):
+        pod.ensure_network()

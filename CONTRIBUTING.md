@@ -26,7 +26,7 @@ uv run ruff check . && uv run ruff format --check .
 
 Tests that start containers need Docker and Sysbox: `uv run pytest -m docker`. Tests that run
 agents on real models cost money and are run only on purpose: `uv run pytest -m model
-tests/behavioural -x`.
+tests/behavioural -x` (`-n auto` runs them in parallel, under one spending limit).
 
 The rules the code follows are in [AGENTS.md](AGENTS.md); the ones that can be checked are
 checked by tests. In short:

@@ -8,7 +8,6 @@ read-only: under Sysbox, root in a nested container would otherwise write to it 
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import os
 import re
@@ -22,7 +21,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import DEFAULT_NETWORK_POOL, TASK_NETWORK_BITS, HostService
+from .config import DEFAULT_NETWORK_POOL, HostService
+from .pod_network import PodError, PodNetwork
 from .probe import (
     DEMO_ALIVE,
     DEMO_KILL,
@@ -91,10 +91,6 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CA_LABEL = "vivibox.ca"
 # Running the project for you to look at: its process group, its output, both inside the pod.
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
-
-
-class PodError(Exception):
-    pass
 
 
 def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:
@@ -169,7 +165,7 @@ def ca_digest() -> str:
 
 
 @dataclass
-class Pod:
+class Pod(PodNetwork):
     task_id: str
     repo: Path
     image: str
@@ -247,45 +243,6 @@ class Pod:
         return p.stdout.strip() if p.returncode == 0 else None
 
     # --- commands ---------------------------------------------------------------------------
-
-    def taken_subnets(self) -> list[ipaddress.IPv4Network]:
-        """Every subnet Docker has handed out, here or to anything else on this machine."""
-        ids = self._run("docker", "network", "ls", "-q").stdout.split()
-        if not ids:
-            return []
-        listed = self._run(
-            "docker", "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", *ids
-        ).stdout
-        taken = []
-        for word in listed.split():
-            try:
-                taken.append(ipaddress.IPv4Network(word, strict=False))
-            except ValueError:
-                continue  # an IPv6 subnet, or anything else that is not one of ours to avoid
-        return taken
-
-    def free_subnet(self) -> ipaddress.IPv4Network:
-        pool = ipaddress.IPv4Network(self.network_pool)
-        taken = self.taken_subnets()
-        for candidate in pool.subnets(new_prefix=TASK_NETWORK_BITS):
-            if not any(candidate.overlaps(other) for other in taken):
-                return candidate
-        raise PodError(
-            f"no free address range left in {pool}: every /{TASK_NETWORK_BITS} is in use. "
-            "Remove tasks you have finished with, or widen network.pool in config.toml"
-        )
-
-    def ensure_network(self) -> ipaddress.IPv4Network:
-        """The task's own network. Its address is then its own, so its ports are nobody else's."""
-        found = self._run(
-            "docker", "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}}{{end}}",
-            self.network, check=False,
-        )  # fmt: skip
-        if found.returncode == 0 and found.stdout.strip():
-            return ipaddress.IPv4Network(found.stdout.strip())
-        subnet = self.free_subnet()
-        self._run("docker", "network", "create", "--subnet", str(subnet), self.network)
-        return subnet
 
     def address(self) -> str:
         """Where the pod answers, from the host and from inside itself alike. Empty when it is down."""

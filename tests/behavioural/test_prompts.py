@@ -5,9 +5,12 @@ then looks at what the agent left: a question, a commit, a checklist. Costs mone
 it is off by default and run only when asked for:
 
     uv run pytest -m model tests/behavioural -x -s
+    uv run pytest -m model tests/behavioural -n auto    # the scenarios in parallel
+
 
 The planner is a stronger model than the writer, as in a real setup (VIVIBOX_BEHAVIOURAL_PLANNER,
-VIVIBOX_BEHAVIOURAL_WRITER); the whole run stops past VIVIBOX_BEHAVIOURAL_LIMIT dollars.
+VIVIBOX_BEHAVIOURAL_WRITER); the whole run stops past VIVIBOX_BEHAVIOURAL_LIMIT dollars, what
+all its processes spent together when it runs in parallel.
 
 The last test is a measurement, not a check: what one writer session costs turn after turn.
 Run it alone with -k tokens_per_turn.
@@ -15,12 +18,14 @@ Run it alone with -k tokens_per_turn.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import secrets
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -41,8 +46,19 @@ LIMIT = float(os.environ.get("VIVIBOX_BEHAVIOURAL_LIMIT", "2"))
 KEEP = bool(os.environ.get("VIVIBOX_BEHAVIOURAL_KEEP"))
 TASKS_ROOT = Path("/srv/vivibox")
 VERIFY = ["python3 -m unittest -q"]
-# What every task of the run has cost so far, by task: the limit is for the run as a whole.
-SPENT: dict[str, float] = {}
+# What every task of the run has cost so far, a file per task: the limit is for the run as a
+# whole, and under pytest -n its processes share the folder (one id per run, from xdist).
+LEDGER = (
+    Path(tempfile.gettempdir())
+    / f"vivibox-behavioural-{os.environ.get('PYTEST_XDIST_TESTRUNUID') or os.getpid()}"
+)
+# One process builds the agent image; the others wait for it and find it built.
+IMAGE_LOCK = Path(tempfile.gettempdir()) / "vivibox-behavioural-image.lock"
+
+
+def spent() -> float:
+    return sum(float(p.read_text() or 0) for p in LEDGER.glob("*.cost"))
+
 
 CALC = "def add(a, b):\n    return a + b\n"
 TESTS = """import unittest
@@ -111,11 +127,13 @@ def bench(tmp_path_factory):
     mp.setenv("XDG_DATA_HOME", str(tmp / "data"))
     mp.setenv("XDG_CONFIG_HOME", str(tmp / "xdg"))
     mp.delenv("OPENCODE_CONFIG", raising=False)
-    image.build()
+    with IMAGE_LOCK.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        image.build()
     try:
         yield {"tmp": tmp, "cfg": cfg}
     finally:
-        print(f"\nbehavioural run: ${sum(SPENT.values()):.3f} spent, planner {PLANNER}, writer {WRITER}")
+        print(f"\nbehavioural run: ${spent():.3f} spent, planner {PLANNER}, writer {WRITER}")
         if KEEP:
             print(f"kept: {tasks_dir} (VIVIBOX_CONFIG_DIR={cfg})")
         else:
@@ -158,8 +176,11 @@ def begin(name: str, goal: str, orchestration: str = ""):
 
 
 def spend(task) -> None:
-    SPENT[task.id] = ui.cost(task).total
-    total = sum(SPENT.values())
+    LEDGER.mkdir(exist_ok=True)
+    kept = LEDGER / f"{task.id}.tmp"
+    kept.write_text(str(ui.cost(task).total))
+    kept.replace(LEDGER / f"{task.id}.cost")
+    total = spent()
     if total > LIMIT:
         pytest.fail(f"the run has cost ${total:.2f}, past the limit of ${LIMIT:.2f}; stopped")
 

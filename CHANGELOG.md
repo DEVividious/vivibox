@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A plan made in a chat or an agent's CLI, in a project verified by its modules, names them in a
+  "Modules:" line, which the import puts in the plan and asks for when it is missing; the
+  details and `vivibox status` say which modules a task is verified by.
 - A task verified by modules builds the plan's modules and any other module its work changed,
   instead of the whole project; only a change in no module, such as the root's build file,
   builds everything. The timeline says which modules came from the changes.

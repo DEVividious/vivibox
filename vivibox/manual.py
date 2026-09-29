@@ -50,6 +50,18 @@ FORMAT = """When I say the plan is final, {deliver} It starts with a line
 sections of the plan above as markdown headings, with each acceptance criterion as a "- [ ]" line
 that can be checked. Keep the first criterion as it is. The comments in the plan are guidance for
 you; leave them out."""
+# In a project verified by its modules (ADR-0033): the chat, which read the repository or was told
+# about it, names the modules; vivibox cannot, and a plan without them would build everything.
+MODULES_FORMAT = """Right after the Summary line, add a line
+"Modules: <the directories this task changes, from the repository's root, comma-separated, e.g.
+core, web/app>": the verification builds and tests only those, and any other module the work
+changes."""
+MODULES_MISSING = (
+    'no "Modules: ..." line: name the directories this task changes, from the repository\'s root, '
+    'e.g. "Modules: core, app", right after the Summary line'
+)
+MODULES = re.compile(r"^modules\s*:\s*(.+)$", re.IGNORECASE)
+MODULES_KEY = re.compile(r"^modules\s*=", re.MULTILINE)
 # Who reads the plan. Without it a planning chat asked what UI it was talking to.
 READER = """How the plan is used: I paste it into vivibox, a tool that runs coding agents. An agent then
 carries it out alone, in an isolated container with a copy of the repository: it writes the code and
@@ -97,6 +109,19 @@ def _plan_template(task: Task, context_dir: str) -> str:
     return _body(task.plan_path.read_text()).strip().replace("/task/context/", f"{context_dir}/")
 
 
+def by_module(task: Task) -> bool:
+    """The task's plan has a modules key: its project is verified by its modules."""
+    try:
+        return bool(MODULES_KEY.search(_split_header(task.plan_path.read_text())[0]))
+    except (OSError, PlanError):
+        return False
+
+
+def _format(task: Task, deliver: str) -> str:
+    said = FORMAT.format(deliver=deliver)
+    return f"{said}\n{MODULES_FORMAT}" if by_module(task) else said
+
+
 def _attachments(task: Task) -> list[Path]:
     folder = task.meta / "context"
     return sorted(folder.iterdir()) if folder.is_dir() else []
@@ -129,7 +154,7 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
     decided = DECIDED.format(
         verify=f"`{' && '.join(project_verify)}`" if project_verify else "the command the agent proposes"
     )
-    web += ["# When the plan is final", "", decided, "", FORMAT.format(deliver=WHOLE_PLAN), ""]
+    web += ["# When the plan is final", "", decided, "", _format(task, WHOLE_PLAN), ""]
 
     answer = task.meta / ANSWER
     cli = [
@@ -147,7 +172,7 @@ def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) ->
         "",
         decided,
         "",
-        FORMAT.format(deliver=f"write the whole plan to {answer} with your file tool, not to the screen."),
+        _format(task, f"write the whole plan to {answer} with your file tool, not to the screen."),
         "",
     ]
     return "\n".join(web), "\n".join(cli)
@@ -214,11 +239,13 @@ def assemble(task: Task, answer: str) -> str:
         for line in template_body.splitlines()
         if (m := HEADING.match(line))
     }
-    summary, verify, lines = "", [], []
+    summary, verify, modules, lines = "", [], [], []
     for line in text.splitlines():
         plain = _plain(line)
         if not summary and (m := SUMMARY.match(plain)):
             summary = m.group(1).strip().strip("`")
+        elif not modules and (m := MODULES.match(plain)):
+            modules = [name.strip("`/") for name in re.split(r"[,\s]+", m.group(1)) if name.strip("`/")]
         elif m := VERIFY.match(plain):
             verify = _verify(m.group(1))
         elif HEADER_PROSE.match(plain):
@@ -237,6 +264,8 @@ def assemble(task: Task, answer: str) -> str:
         header = _set(header, "summary", summary)
     if verify:
         header = _set(header, "verify", verify)
+    if modules:
+        header = _set(header, "modules", modules)
     return f"+++\n{header.strip()}\n+++\n\n{body}\n"
 
 
@@ -262,6 +291,8 @@ def import_answer(task: Task) -> str:
         gate.check_plan(plan)
     except gate.GateError as e:
         raise PlanError(str(e)) from None
+    if by_module(task) and not plan.modules and not plan.no_build:
+        raise PlanError(MODULES_MISSING)
     task.plan_path.write_text(plan_text)
     if plan.summary:
         task.set_goal(plan.summary)

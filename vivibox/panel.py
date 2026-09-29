@@ -588,6 +588,7 @@ def detail(
         "",
         f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
         "",
+        *([f"*{note}*", ""] if (note := ui.modules_note(task)) else []),
     ]
     if running and code.older_supervisor(task.meta):
         head += [f"*This task's supervisor {OLDER_SUPERVISOR}.*", ""]

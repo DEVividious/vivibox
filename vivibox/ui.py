@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import cli_session, prepare
+from .plan import PlanError, parse_plan
 from .states import State
 from .task import Task, TaskState
 
@@ -526,6 +527,16 @@ def task_list(
     return "\n".join(lines) + "\n"
 
 
+def modules_note(task: Task) -> str:
+    """What the verification builds, in a task verified by its modules: said where the plan is
+    decided and after, so a wrong module shows before the work starts."""
+    try:
+        modules = parse_plan(task.plan_path.read_text()).modules
+    except (OSError, PlanError):
+        return ""
+    return f"Verified by modules: {', '.join(modules)}" if modules else ""
+
+
 def task_detail(
     task: Task, criteria, max_rounds: int, events: int, style: Style, running: bool = True
 ) -> str:
@@ -544,6 +555,7 @@ def task_detail(
         st.goal,
         "",
         *([] if st.box else [f"{style('Plan', 'bold')}  {task.plan_path}"]),
+        *([f"{style('Build', 'bold')} {note}"] if (note := modules_note(task)) else []),
         *(
             [f"{style('CLI', 'bold')}   planned in {cli_session.describe(st.cli_session)}"]
             if st.cli_session

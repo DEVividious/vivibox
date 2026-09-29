@@ -104,6 +104,11 @@ def propose_project(path: Path) -> project_init.Detected:
     return project_init.detect(git_root(path) or path)
 
 
+def project_modules(path: Path) -> list[str]:
+    """The modules a project's build names, for choosing to verify it by them."""
+    return project_init.modules(path)
+
+
 def start_repository(path: Path) -> Path:
     """A new git repository for a project from scratch: an empty one with a first commit."""
     path.mkdir(parents=True, exist_ok=True)

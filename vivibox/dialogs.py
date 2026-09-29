@@ -233,6 +233,7 @@ class NewProject(Dialog):
         root = actions.git_root(where)
         self.taken = actions.project_at(root) if root else ""
         self.verify, self.no_build = list(found.verify), False
+        self.modules = list(found.modules)
         self.prepare = list(found.prepare)
         name = self.query_one("#name", Input)
         name.value = self.taken or found.name
@@ -252,6 +253,8 @@ class NewProject(Dialog):
 
     def show_verify(self) -> None:
         how = escape(" && ".join(self.verify)) if self.verify else actions.WRITER_PROPOSES
+        if any("{modules}" in c for c in self.verify):
+            how += " · only the modules a task changes"
         self.query_one("#verify", Label).update(how)
 
     def pick_verify(self, choice: dict) -> None:
@@ -274,7 +277,9 @@ class NewProject(Dialog):
             self.app.push_screen(Browse(FOLDER, "Pick the project's folder"), self.use_folder)
         elif event.button.id == "change":
             name = self.query_one("#name", Input).value.strip() or "this project"
-            self.app.push_screen(AskVerify(name, self.verify, self.no_build), self.pick_verify)
+            self.app.push_screen(
+                AskVerify(name, self.verify, self.no_build, modules=self.modules), self.pick_verify
+            )
         elif event.button.id == "change-prepare":
             from .settings import Ask  # settings builds on this module
 

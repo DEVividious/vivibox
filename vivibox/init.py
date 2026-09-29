@@ -35,6 +35,8 @@ class Detected:
     prepare: list[str] = field(default_factory=list)
     # Toolchains the image does not have that the build files ask for, as mise versions.
     tools: list[str] = field(default_factory=list)
+    # The build's modules, as folders from the root: what the verification can build one by one.
+    modules: list[str] = field(default_factory=list)
 
 
 def project_name(repo: Path) -> str:
@@ -445,16 +447,40 @@ def ci_commands(repo: Path) -> list[tuple[str, str]]:
     return found[:MAX_CI]
 
 
-# A Maven reactor with this many modules is verified by the modules a task's plan names: its whole
-# build takes longer than one verification may (keycloak has hundreds); a smaller one builds whole.
-MANY_MODULES = 10
-MODULE_TAG = re.compile(r"<module>\s*[^<]+?\s*</module>")
+# From this many modules a project is verified by the ones a task changes unless you choose the
+# whole build (ADR-0033, change of 2026-09-29); from two, the choice is offered.
+MANY_MODULES = 3
+MODULE_TAG = re.compile(r"<module>\s*([^<]+?)\s*</module>")
+# The build tool at the start of a command: Maven, or its wrapper run as itself or through bash.
+MAVEN = re.compile(r"^((?:bash\s+)?\S*mvnw?)(?=\s|$)")
+MAVEN_TAKES_A_VALUE = {"-f", "--file", "-s", "--settings", "-P", "--activate-profiles", "-D"}
+
+
+def modules(repo: Path) -> list[str]:
+    """The modules the build names, as folders from the root; [] for a project of one."""
+    return [m.strip("/") for m in MODULE_TAG.findall(_read(repo / "pom.xml"))]
+
+
+def scoped(command: str) -> str | None:
+    """The command building only the modules a task changes, {modules} where they go; None for a
+    build tool it does not know how to narrow."""
+    if "{modules}" in command:
+        return command
+    if not (m := MAVEN.match(command)):
+        return None
+    # After the options, before the first goal: "mvn -B -pl {modules} -am verify".
+    words = command[m.end() :].split(" ")
+    at = 0
+    while at < len(words) and (not words[at] or words[at].startswith("-")):
+        at += 2 if words[at] in MAVEN_TAKES_A_VALUE else 1
+    words[at:at] = ["-pl", "{modules}", "-am"]
+    return m.group(1) + " ".join(words)
 
 
 def by_module(repo: Path) -> list[str]:
-    """The verification of a large Maven reactor, with {modules} where a plan's modules go; [] for
-    any other project, whose writer proposes the command it ran."""
-    if len(MODULE_TAG.findall(_read(repo / "pom.xml"))) < MANY_MODULES:
+    """The verification of a project of many modules, with {modules} where a plan's modules go; []
+    for any other project, whose writer proposes the command it ran."""
+    if len(modules(repo)) < MANY_MODULES:
         return []
     maven = wrapper(repo, "mvnw") if (repo / "mvnw").exists() else "mvn"
     return [f"{maven} -B -pl {{modules}} -am verify"]
@@ -494,11 +520,12 @@ def detect(repo: Path) -> Detected:
     for command, source in options:
         found.notes.append(f"{source} runs: {command}")
     found.notes += maven_notes(repo)
+    found.modules = modules(repo)
     found.verify = by_module(repo)
     if found.verify:
         found.notes.append(
-            f"{MANY_MODULES} or more Maven modules: verified by the ones a task's plan names ({{modules}}), "
-            "the whole build when its work reaches past them"
+            f"{len(found.modules)} Maven modules: verified by the ones a task changes ({{modules}}), "
+            "the whole build when its work reaches past every module"
         )
     if level and level > newest:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")

@@ -133,4 +133,7 @@ class PlanKeys:
             self.go_on(task, "Command kept")
             self.reload()
 
-        self.push_screen(AskVerify(project.name, [command], heading=heading, writer_box=False), chosen)
+        found = actions.project_modules(project.repo)
+        self.push_screen(
+            AskVerify(project.name, [command], heading=heading, writer_box=False, modules=found), chosen
+        )

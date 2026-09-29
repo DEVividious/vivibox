@@ -611,7 +611,10 @@ class ProjectSettings(Rows):
                 actions.save_verify(project, choice["verify"], choice["no_build"])
                 self.changed()
 
-            self.app.push_screen(AskVerify(self.project_name, project.verify, project.no_build), chosen)
+            found = project_init.modules(project.repo)
+            self.app.push_screen(
+                AskVerify(self.project_name, project.verify, project.no_build, modules=found), chosen
+            )
         elif key == "demo":
             self.app.push_screen(
                 AskLines(

@@ -8,10 +8,11 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Checkbox, Input, Label
 
-from . import look
+from . import init, look, proposal
 from .widgets import Dialog
 
 WRITER = "let the writer find the command and propose it after the work"
+MODULES = "build only the modules a task changes ({count} modules)"
 
 
 class AskVerify(Dialog):
@@ -22,10 +23,18 @@ class AskVerify(Dialog):
     hint_keys = (("enter", "save"), look.ESC_CANCELS)
 
     def __init__(
-        self, name: str, verify: list[str], no_build: bool = False, heading: str = "", writer_box: bool = True
+        self,
+        name: str,
+        verify: list[str],
+        no_build: bool = False,
+        heading: str = "",
+        writer_box: bool = True,
+        modules: list[str] | tuple = (),
     ):
         super().__init__()
         self.project_name, self.verify, self.no_build = name, verify, no_build
+        # From two modules the command can build only the ones a task changes (ADR-0033).
+        self.modules = list(modules) if len(modules) >= 2 else []
         # At the command checkpoint the writer has just had its say: the box is not a choice.
         self.writer_box = writer_box
         self.heading = heading or (
@@ -36,6 +45,12 @@ class AskVerify(Dialog):
         with Vertical(classes="dialog"):
             yield Label(self.heading, classes="wrap")
             yield Input(" && ".join(self.verify), id="command", compact=True)
+            if self.modules:
+                command = " && ".join(self.verify)
+                yield Checkbox(
+                    MODULES.format(count=len(self.modules)), value="{modules}" in command, id="modules"
+                )
+                yield Label("", id="modules-preview", classes="files wrap")
             if self.writer_box:
                 yield Checkbox(WRITER, value=not self.verify and not self.no_build, id="writer")
             if self.no_build:
@@ -47,22 +62,46 @@ class AskVerify(Dialog):
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
+        self.preview()
+
+    def preview(self) -> None:
+        """What a task changing the first module would run: the command by modules, made plain."""
+        if not self.modules:
+            return
+        command = self.query_one(Input).value.strip()
+        shown = self.query_one("#modules-preview", Label)
+        if "{modules}" in command:
+            example = proposal.for_modules([command], self.modules[:1])[0]
+            shown.update(f"A task changing {self.modules[0]} runs: {example}")
+        else:
+            shown.update("Every task builds the whole project.")
 
     @on(Input.Changed)
     def typed(self, event: Input.Changed) -> None:
         if event.value.strip() and self.writer_box:
-            self.query_one(Checkbox).value = False
+            self.query_one("#writer", Checkbox).value = False
+        self.preview()
 
     @on(Input.Submitted)
     def submitted(self, event: Input.Submitted) -> None:
         if command := event.value.strip():
             self.dismiss({"verify": [command], "no_build": False})
-        elif self.no_build and self.writer_box and not self.query_one(Checkbox).value:
+        elif self.no_build and self.writer_box and not self.query_one("#writer", Checkbox).value:
             self.dismiss({})  # nothing typed and the box left alone: the file stays as it says
         else:
             self.dismiss({"verify": [], "no_build": False})
 
-    @on(Checkbox.Changed)
+    @on(Checkbox.Changed, "#modules")
+    def by_modules(self, event: Checkbox.Changed) -> None:
+        field = self.query_one(Input)
+        command = field.value.strip()
+        if event.value:
+            field.value = init.scoped(command) or command
+        else:
+            field.value = proposal.whole(command)
+        self.preview()
+
+    @on(Checkbox.Changed, "#writer")
     def ticked(self, event: Checkbox.Changed) -> None:
         if event.value:
             self.dismiss({"verify": [], "no_build": False})

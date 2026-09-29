@@ -179,16 +179,19 @@ prepare = ["./gradlew assemble"]                # optional, once per new task cl
 
 ## Scoped verification and preparation
 
-`{modules}` in `verify` is for a project whose whole build outlasts a verification, hundreds of
-modules and a frontend: `verify = ["./mvnw -B -pl {modules} -am verify"]`. A task's plan then
-names the directories it changes (`modules = ["core"]` in its header, which the planner fills in
-and you see when you accept the plan), and the verification runs the command with them,
-comma-joined. When a commit changes a file outside them, the root's build file included, that
-verification runs the same command without them (`./mvnw -B verify`), the whole build, and the
-task's timeline says which files took it there. `vivibox init` writes this command for a Maven
-reactor of ten modules or more. The whole build then runs only on such a change, or once before
-the work comes to you when `whole_build_before_review` is on (under `k`, "whole build before
-review"; off by default, when the project's pipeline builds it whole after a push).
+`{modules}` in `verify` builds only the modules a task changes, for a project of several:
+`verify = ["./mvnw -B -pl {modules} -am verify"]`. A task's plan names the directories it changes
+(`modules = ["core"]` in its header; a plan from a chat or an agent's CLI gives a
+`Modules: core, app` line), you see them when you accept the plan, and each verification runs the
+command with them and with any other module its commits changed, comma-joined. A module is the
+nearest folder above a file with a build file of its own (`pom.xml`, `build.gradle(.kts)`, a
+workspace's `package.json`). Only a change in no module, the root's build file included, runs the
+same command without them (`./mvnw -B verify`), the whole build; the task's timeline says which
+modules came from the changes, or which files took it whole. `vivibox init` writes this command
+for a Maven project of three modules or more, and the verification dialog (`i`, `e`) offers it
+as a box, "build only the modules a task changes", from two. The whole build otherwise runs once
+before the work comes to you when `whole_build_before_review` is on (under `k`, "whole build
+before review"; off by default, when the project's pipeline builds it whole after a push).
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the

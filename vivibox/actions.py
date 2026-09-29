@@ -96,6 +96,7 @@ from .projects import (  # noqa: F401
     git_root,
     project_at,
     project_files,
+    project_modules,
     project_problem,
     propose_project,
     setup_project,

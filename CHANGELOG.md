@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The verification dialog (`i`, `e`) offers "build only the modules a task changes" for a project
+  of two modules or more, with the command it makes; `vivibox init` verifies a Maven project of
+  three modules or more that way, where it took ten.
 - A plan made in a chat or an agent's CLI, in a project verified by its modules, names them in a
   "Modules:" line, which the import puts in the plan and asks for when it is missing; the
   details and `vivibox status` say which modules a task is verified by.

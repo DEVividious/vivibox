@@ -192,7 +192,8 @@ nearest folder above a file with a build file of its own (`pom.xml`, `build.grad
 workspace's `package.json`). Only a change in no module, the root's build file included, runs the
 same command without them (`./mvnw -B verify`), the whole build; the task's timeline says which
 modules came from the changes, or which files took it whole. `vivibox init` writes this command
-for a Maven or Gradle project of three modules or more (an npm or pnpm one gets its test command
+for a Maven or Gradle project of three modules or more, a Maven reactor under another name
+included (`-f build-pom.xml`) (an npm or pnpm one gets its test command
 from the writer, which the box then narrows), and the verification dialog (`i`, `e`) offers it
 as a box, "build only the modules a task changes", from two. The whole build otherwise runs once
 before the work comes to you when `whole_build_before_review` is on (under `k`, "whole build

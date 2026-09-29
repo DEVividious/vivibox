@@ -92,7 +92,9 @@ def test_init_verifies_a_gradle_build_by_modules_and_leaves_npm_to_the_writer(tm
     write(gradle / "gradlew", "")
     found = init.detect(gradle)
     assert found.modules == ["a", "b", "c"]
-    assert found.verify == ["bash ./gradlew {modules:%p:check}"]
+    assert found.verify == ["bash ./gradlew {modules:%p:check} --no-daemon --console=plain"], (
+        "the flags of the whole build's command, so the gate's log has no colours and no daemon"
+    )
     npm = tmp_path / "npm"
     write(npm / "package.json", json.dumps({"workspaces": ["p/*"]}))
     for name in ("a", "b", "c"):
@@ -112,6 +114,26 @@ def test_nested_maven_modules_are_found(tmp_path):
     write(tmp_path / "model" / "jpa" / "pom.xml", "<project/>")
     write(tmp_path / "model" / "api" / "pom.xml", "<project/>")
     assert init.modules(tmp_path) == ["model", "model/jpa", "model/api"]
+
+
+def test_a_maven_aggregator_under_another_name_is_found(tmp_path):
+    """google/auto: no pom.xml at the root, the reactor is build-pom.xml."""
+    write(
+        tmp_path / "build-pom.xml",
+        "<project><modules><module>common</module><module>value</module>"
+        "<module>service</module></modules></project>",
+    )
+    for name in ("common", "value", "service"):
+        write(tmp_path / name / "pom.xml", "<project/>")
+    write(tmp_path / "mvnw", "")
+    assert init.modules(tmp_path) == ["common", "value", "service"]
+    assert init.by_module(tmp_path) == ["bash ./mvnw -B -f build-pom.xml -pl {modules} -am verify"]
+
+
+def test_a_pom_at_the_root_wins_over_another_aggregator(tmp_path):
+    write(tmp_path / "pom.xml", "<project><modules><module>a</module></modules></project>")
+    write(tmp_path / "other-pom.xml", "<project><modules><module>b</module></modules></project>")
+    assert init.modules(tmp_path) == ["a"]
 
 
 def pnpm_repo(path: Path, package_script: bool) -> Path:

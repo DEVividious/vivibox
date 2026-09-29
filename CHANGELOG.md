@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- `vivibox init` finds a Maven reactor kept under another name at the root (`build-pom.xml`) and
+  verifies it by modules with `-f`, and keeps `--no-daemon --console=plain` in the command it
+  writes for a Gradle project of modules.
 - A verification by modules also builds the modules nested under the ones in scope (an API check
   kept in a project of its own, for one), and narrows an npm or pnpm command to the modules'
   folders when one runner at the root tests every package, instead of `--filter`.

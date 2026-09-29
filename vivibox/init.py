@@ -502,12 +502,23 @@ def _declared_workspaces(repo: Path) -> list[str]:
     return found
 
 
-def _maven_modules(repo: Path, folder: str, depth: int = 0) -> list[str]:
+def maven_reactor(repo: Path) -> str:
+    """The file at the root that lists Maven's modules: pom.xml, or an aggregator under another
+    name (google/auto's build-pom.xml); "" for none."""
+    if (repo / "pom.xml").exists():
+        return "pom.xml"
+    for path in sorted(repo.glob("*pom*.xml")):
+        if MODULE_TAG.search(_read(path)):
+            return path.name
+    return ""
+
+
+def _maven_modules(repo: Path, folder: str, depth: int = 0, pom: str = "pom.xml") -> list[str]:
     """A reactor's modules and theirs in turn: a module's own pom.xml may list modules of its own."""
     found: list[str] = []
     if depth > 5:
         return found
-    for name in MODULE_TAG.findall(_read(repo / folder / "pom.xml")):
+    for name in MODULE_TAG.findall(_read(repo / folder / pom)):
         path = f"{folder}/{name.strip('/')}".strip("/")
         if ".." in path.split("/") or name.endswith(".xml"):
             continue
@@ -518,7 +529,7 @@ def _maven_modules(repo: Path, folder: str, depth: int = 0) -> list[str]:
 def modules(repo: Path) -> list[str]:
     """The modules the build names, as folders from the root: Maven's modules, Gradle's included
     projects, npm or pnpm workspaces; [] for a project of one."""
-    if maven := _maven_modules(repo, ""):
+    if (reactor := maven_reactor(repo)) and (maven := _maven_modules(repo, "", pom=reactor)):
         return maven
     settings = _read(repo / "settings.gradle") or _read(repo / "settings.gradle.kts")
     if gradle := [
@@ -579,12 +590,13 @@ def by_module(repo: Path) -> list[str]:
     script is the project's own to name)."""
     if len(modules(repo)) < MANY_MODULES:
         return []
-    if (repo / "pom.xml").exists():
+    if reactor := maven_reactor(repo):
         maven = wrapper(repo, "mvnw") if (repo / "mvnw").exists() else "mvn"
-        return [f"{maven} -B -pl {{modules}} -am verify"]
+        file = "" if reactor == "pom.xml" else f" -f {reactor}"
+        return [f"{maven} -B{file} -pl {{modules}} -am verify"]
     if (repo / "settings.gradle").exists() or (repo / "settings.gradle.kts").exists():
         gradle = wrapper(repo, "gradlew") if (repo / "gradlew").exists() else "gradle"
-        return [f"{gradle} {{modules:%p:check}}"]
+        return [f"{gradle} {{modules:%p:check}} --no-daemon --console=plain"]
     return []
 
 

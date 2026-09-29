@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, gate, opencode, providers, repo, roles, secrets
+from . import brief, cli_usage, gate, opencode, providers, repo, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
@@ -136,6 +136,7 @@ def import_answer(task: Task, text: str | None = None) -> Review:
     temporary = task.meta / (CLI_REVIEW + ".tmp")
     temporary.write_text(text)
     temporary.replace(task.meta / CLI_REVIEW)
+    cli_usage.count_review(task)
     return parse_review(text)
 
 

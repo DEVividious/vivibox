@@ -20,6 +20,7 @@ from pathlib import Path
 from . import (
     claudecode,
     cli_session,
+    cli_usage,
     code,
     context,
     firstrun,
@@ -580,6 +581,7 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     Returns the review copy it removed, if there was one."""
     stop_supervisor(task)
     if not accepted:
+        cli_usage.count(task, "conversation")
         remember_removed(task, project)
     archive(task)
     task_pod(task.id).remove()
@@ -644,7 +646,9 @@ def import_plan(task: Task, answer: str | None = None) -> str:
         path.write_text(answer)
     if not path.exists() or not path.read_text().strip():
         raise gate.GateError(f"no plan to bring in; paste your chat's answer into {path}")
-    return manual.import_answer(task)
+    summary = manual.import_answer(task)
+    cli_usage.count(task, "planning")
+    return summary
 
 
 # What a project with nothing to build or test is told, and told about, in one wording.

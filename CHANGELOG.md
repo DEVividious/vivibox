@@ -12,6 +12,9 @@ First public version.
 
 ### Added
 
+- A task planned in Claude Code counts what that session used on it: at the plan's import, each
+  review round's import, and when the task is accepted or deleted, vivibox reads the transcript's
+  token counts (never its text) and prices them at list prices, apart from money spent on keys.
 - A task made with `--plan-in-cli` from Claude Code keeps that session's id and the path of its
   transcript, taken from the environment; `vivibox status <id>` and `vivibox info` name it.
 - Supervisor ⇄ Worker with the plan made in an agent's CLI: the CLI reviews each round, with

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import (
     actions,
+    cli_usage,
     gate,
     ide,
     repo,
@@ -247,6 +248,7 @@ def finish(
         )
     commit = fetch_work(task, project)
     st = task.read_state()
+    cli_usage.count(task, "conversation")
     spent = ui.cost(task)
     criteria = accepted_criteria(task)
     # A box's "Work in the box" is not a message for your history: that one is yours to write.

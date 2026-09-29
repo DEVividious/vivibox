@@ -147,7 +147,12 @@ CLI (`claude`, `codex`), whatever config.toml says: the writer's report is skipp
 reads your checkout, and the task waits for your plan at once, with the CLI's prompt alone. It is
 refused with `--model planner=` and with a flow a manual planner cannot run. Run from Claude Code,
 the task keeps the CLI's session id and where its transcript lies, which `vivibox status <id>`
-names; `vivibox info` says which session a task made there would keep.
+names; `vivibox info` says which session a task made there would keep. When the plan comes in,
+when each review round from the CLI comes in, and when the task is accepted or deleted, vivibox
+reads that transcript's token counts and models, never the conversation, and prices them at the
+providers' list prices: planning, each review round and the rest of the conversation, counted
+once per session, and kept apart from what vivibox spent on API keys. A transcript it cannot
+read, or a model with no price, leaves the sum unknown and the task as it was.
 A subscription is for your own use of the chat, which is why vivibox does not run a model on it;
 for planning without you, give the planner an API key (`harness = "claude-code"`).
 

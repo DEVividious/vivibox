@@ -1,7 +1,8 @@
 # Contributing
 
 Thank you for looking. vivibox is one person's tool, in the open; issues and pull requests are
-welcome, and small ones land fastest.
+welcome, and small ones land fastest. Everyone here follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting a problem
 

@@ -347,6 +347,9 @@ First public version.
 
 ### Internal
 
+- The repository: a code of conduct, a pull request template and code owners; CI pins its
+  actions to commits (on Node 24), reads with a read-only token, and Dependabot proposes updates
+  of the actions and the Python dependencies weekly.
 - A task's network lives in `pod_network.py`, out of `pod.py`; behavioural runs can go in
   parallel (`-n auto`) under one spending limit for the whole run.
 - The unit tests run in parallel (`uv run pytest -n auto`, pytest-xdist), locally and in CI:

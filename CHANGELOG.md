@@ -13,9 +13,6 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - A verification by modules also builds the modules nested under the ones in scope (an API check
   kept in a project of its own, for one), and narrows an npm or pnpm command to the modules'
   folders when one runner at the root tests every package, instead of `--filter`.
-- A verification by modules also builds the modules nested under the ones in scope (an API check
-  kept in a project of its own, for one), and narrows an npm or pnpm command to the modules'
-  folders when one runner at the root tests every package, instead of `--filter`.
 - Gradle projects and npm or pnpm workspaces can be verified by modules too, with
   `{modules:FORMAT}` in the command (`./gradlew {modules:%p:check}`); `vivibox init` finds their
   modules and verifies a Gradle project of three or more that way.

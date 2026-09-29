@@ -15,6 +15,11 @@ Fictional tasks, simulated progress and illustrative costs.*
 
 ## Why vivibox
 
+vivibox manages the handoffs between planning, implementation, verification and review. Each
+task gets a separate clone and Docker daemon. It runs your configured build and test commands on
+a fresh clone of the commits, sends failed checks and blocking review notes back for bounded fix
+rounds, and waits for your approval before applying changes to your checkout.
+
 - **Choose where the strong model works.** Use it once to plan, or keep it involved in every
   review. Each task can use a different flow and models.
 - **Check the work before accepting it.** Build and test committed changes in a fresh clone.

@@ -52,29 +52,44 @@ and animation at a normal GitHub desktop width.
 
 ### README visuals
 
-The hero is a 27-second GIF of the **real Textual UI at 100×32**, driven by Textual's Pilot.
-The fixtures simulate task progress, model usage and reviews in disposable repositories; no
-pods or model APIs run, and no real configuration or keys are read. The seven scenes show the
-dashboard, role models, plan approval, verification, independent review, a correction round and
-the final human checkpoint. The demo ends before acceptance: the result still belongs to you
-to inspect.
+The hero is a 44-second GIF of the **real Textual UI at 130×40**, driven by Textual's Pilot.
+This width exposes PLAN, IMPL and REVIEW, including the separate `$… sub` cells. The fixtures
+simulate task progress, usage and reviews in disposable repositories; no pods or model APIs
+run, and no real configuration, keys or CLI transcripts are read. The four flow forms use the
+product's own diagrams and role names. The CLI scenes show vivibox waiting for a plan or review;
+they do not imitate Claude Code or Codex. The tour ends before final acceptance.
+
+| Scene | What the real view shows | Seconds |
+|---|---|---|
+| 1 | Supervisor ⇄ Worker task waiting for a plan from your CLI | 3 |
+| 2 | Single agent: one session for planning, writing and self-review | 4 |
+| 3 | Planner → Executor: separate plan, execution with self-review | 4 |
+| 4 | Planner → Writer → Reviewer: independent review after verification | 4 |
+| 5 | Supervisor ⇄ Worker: the planner also reviews each verified round | 4 |
+| 6 | Default flow: your plan approval and acceptance criteria | 4 |
+| 7 | Default flow: verification of committed work | 3 |
+| 8 | Default flow: independent review | 3 |
+| 9 | Default flow: a blocking note sends the writer back | 4 |
+| 10 | Supervisor ⇄ Worker: next CLI review, API spending and subscription usage | 6 |
+| 11 | Default flow: review the work · stopped; review copy and your final decision | 5 |
 
 Rebuild the GIF and the static SVG with optional recording tools (not application dependencies):
 
 ```bash
 uv run --with playwright==1.63.0 playwright install chromium
-uv run --with pillow==12.3.0 --with playwright==1.63.0 python docs/img/screenshot.py --gif
+VIVIBOX_DEMO_FRAMES=/tmp/vivibox-demo uv run --with pillow==12.3.0 --with playwright==1.63.0 python docs/img/screenshot.py --gif
 ```
 
 The renderer uses Chromium via Playwright, DejaVu Sans / DejaVu Sans Mono fonts and Pillow.
 Install the fonts with `sudo apt install fonts-dejavu-core` on Ubuntu if missing. For an existing
 Chrome/Chromium, set `VIVIBOX_DEMO_BROWSER` to its executable and skip the browser download.
-Network requests are blocked while rendering. `VIVIBOX_DEMO_FRAMES=/tmp/vivibox-demo` also saves
-individual PNG scenes for inspection. Without `--gif`, only `docs/img/view.svg` is rebuilt.
+Network requests are blocked while rendering. The command saves every scene as a PNG in
+`/tmp/vivibox-demo` for inspection; set `VIVIBOX_DEMO_FRAMES` to another folder if needed.
+Without `--gif`, only `docs/img/view.svg` is rebuilt.
 
 The GIF is 1000 pixels wide, uses one 128-colour palette, has 200 ms transitions and holds each
-scene for 3–5 seconds. It loops without a blank frame. Check every scene and the loop at normal
-README width after regenerating; the linked static SVG is the alternative for readers who do
+scene for 3–6 seconds, including the transition. It is about 1.8 MB. It loops without a blank
+frame. Check every scene and the loop at normal README width after regenerating; the linked static SVG is the alternative for readers who do
 not want animation (GIF does not honour reduced-motion preferences). The README explains the
 same workflow in text.
 

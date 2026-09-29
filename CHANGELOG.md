@@ -150,6 +150,10 @@ First public version.
 
 - A decision whose pod you stopped (plan, command, work or risky files) says so: `review the work
   · stopped`, marked ‖ in the waiting colour, still among what waits for you.
+- The README introduces the task workflow and CLI planning with fewer words. Its 44-second
+  tour shows all four flows, CLI plan and review checkpoints, and subscription usage apart
+  from API spending; the static view and recording instructions match the current UI.
+
 - The planning prompt for a chat or an agent's CLI asks for criteria that name an input and what
   it must give, not a kind of value; the skill says at the start that `vivibox accept` refuses a
   checkout with staged changes, and offers `--branch`.

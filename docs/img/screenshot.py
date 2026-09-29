@@ -25,6 +25,8 @@ ROOT = Path(tempfile.mkdtemp(prefix="v-"))
 # The panel shows the review copy's path, and a temp path would be a lie about where it lives.
 SHOWN_ROOT = "/srv/vivibox"
 PROJECTS = ("payments-api", "storefront")
+# No personal Git hooks, signing settings or identities enter the disposable repositories.
+os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
 
 def git(*args: str, cwd: Path) -> None:
@@ -64,14 +66,18 @@ os.environ.update(
     XDG_CACHE_HOME=str(ROOT / "cache"),
 )
 
+# Never discover the recording session or read its transcript.
+for name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
+    os.environ.pop(name, None)
+
 # Render the product palette even when the invoking shell disables terminal colour.
 os.environ.pop("NO_COLOR", None)
 os.environ["TZ"] = "UTC"
 time.tzset()
 
-from vivibox import actions, gate, keys, probe, reviewing, table, tui, ui  # noqa: E402
+from vivibox import actions, gate, keys, probe, reviewing, skill, table, tui, ui  # noqa: E402
 from vivibox import task as task_module  # noqa: E402
-from vivibox.config import load_project  # noqa: E402
+from vivibox.config import ORCHESTRATION_MODES, load_project  # noqa: E402
 from vivibox.states import State  # noqa: E402
 
 PLAN = """## Approach
@@ -91,6 +97,7 @@ actions.available_models = lambda refresh=False: {}
 actions.provider_catalog = lambda refresh=False: []
 tui.pod_views = lambda ids: {i: SERVING.get(i, tui.PodView()) for i in ids}
 probe.docker_running = lambda: True
+skill.copies = lambda: []
 
 
 class DemoClock(datetime):
@@ -104,8 +111,8 @@ class DemoClock(datetime):
 task_module.datetime = ui.datetime = table.datetime = DemoClock
 
 
-def task(project: str, goal: str, criteria: list[str], minutes_ago: int, approach: str = "…"):
-    made = actions.create(project, goal, cwd=ROOT)
+def task(project: str, goal: str, criteria: list[str], minutes_ago: int, approach: str = "…", **options):
+    made = actions.create(project, goal, cwd=ROOT, **options)
     head = made.plan_path.read_text().split("## ", 1)[0]
     listed = "\n".join(f"- [ ] {c}" for c in criteria)
     made.plan_path.write_text(head + PLAN.format(approach=approach, criteria=listed))
@@ -119,6 +126,11 @@ def spent(made, planning: float, implementing: float = 0.0, review: float = 0.0)
     for state, cost in (("plan", planning), ("implement", implementing), ("review", review)):
         if cost:
             made.event("turn", state=state, ok=True, cost=cost, tokens=int(cost * 6e6), error="")
+
+
+def subscription(made, stage: str, cost: float) -> None:
+    """Fictional usage records; no CLI session or transcript is opened."""
+    made.event("cli_usage", stage=stage, cost=cost, tokens={"input": 12000, "output": 1000})
 
 
 def accepted(made, ticked: int = 0):
@@ -151,22 +163,45 @@ def committed(made, *commits: tuple[str, str]) -> None:
         )
 
 
-def world() -> None:
-    """A quiet dashboard: one other task working and one awaiting a decision."""
+def world():
+    """All four flows will have a task; the CLI supervisor starts with no plan."""
     waiting = task(
         "payments-api",
         "Reject expired cards",
         ["Expired card gives 402"],
         9,
         approach="Validate the expiry date before submitting the charge.",
+        orchestration="planner_executor",
+        plan_in_cli=True,
     )
-    spent(waiting, 0.03)
+    subscription(waiting, "planning", 0.41)
     waiting.transition(State.CHECKPOINT_PLAN, reason="plan ready for review")
     aged(waiting, 2)
-    working = task("storefront", "Show the cart total with VAT", ["Total includes VAT"], 12)
+    working = task(
+        "storefront",
+        "Show the cart total with VAT",
+        ["Total includes VAT"],
+        12,
+        orchestration="single_agent",
+    )
     spent(working, 0.02, 0.06)
     accepted(working)
     aged(working, 1)
+    cli = task(
+        "storefront",
+        "Add CSV export",
+        [],
+        2,
+        orchestration="supervisor_worker",
+        plan_in_cli=True,
+    )
+    # The CLI has not imported a plan yet.
+    head = cli.plan_path.read_text().split("## ", 1)[0]
+    cli.plan_path.write_text(head + "## Approach\n\n## Acceptance criteria\n")
+    cli.transition(State.CHECKPOINT_PLAN, reason="waiting for the CLI's plan")
+    cli.set_awaiting_plan(True)
+    aged(cli, 0)
+    return cli
 
 
 TEXT = re.compile(r'(<text[^>]*textLength=")([\d.]+)("[^>]*>)(.*?)(</text>)', re.S)
@@ -215,9 +250,9 @@ COMMITS = (
 )
 
 
-async def flow() -> None:
-    """Seven scenes, 27 seconds; synthetic progress, real Textual screens and key presses."""
-    from textual.widgets import TextArea
+async def flow(cli) -> None:
+    """Eleven scenes, 44 seconds; synthetic progress, real screens and flow descriptions."""
+    from textual.widgets import Select, TextArea
 
     frames: list[tuple[str, float, str, str]] = []
 
@@ -232,13 +267,13 @@ async def flow() -> None:
         app.table.move_cursor(row=[str(k.value) for k in app.table.rows].index(row_id))
 
     app = tui.Vivibox()
-    async with app.run_test(size=(100, 32)) as pilot:
+    async with app.run_test(size=(130, 40)) as pilot:
         await pilot.pause(0.5)
         await settle()
-        select("payments-api-1")
+        select(cli.id)
         await pilot.press("d")
         await pilot.pause(0.3)
-        shot(3, "Tasks keep working", "Two projects. Progress, costs and decisions in one terminal.")
+        shot(3, "Plan in your CLI", "This task waits for a plan from Claude Code or Codex.")
 
         await pilot.press("d")
         select("project:payments-api")
@@ -247,7 +282,16 @@ async def flow() -> None:
         app.screen.query_one(TextArea).text = GOAL
         app.screen.query_one("#orchestration").focus()
         await pilot.pause(0.3)
-        shot(5, "Choose who does the work", "Separate planner, writer and reviewer; a model for each.")
+        captions = (
+            "One session plans, writes and self-reviews; then verification and you.",
+            "Planner hands off; Executor writes and self-reviews; you accept the result.",
+            "You approve the plan; Writer codes; verification passes; Reviewer reads.",
+            "Supervisor plans and reviews each verified round; you accept the result.",
+        )
+        for (name, mode), caption in zip(ORCHESTRATION_MODES.items(), captions, strict=True):
+            app.screen.query_one("#orchestration", Select).value = name
+            await pilot.pause(0.3)
+            shot(4, mode.label, caption)
         await pilot.press("escape")
         await pilot.pause(0.3)
 
@@ -261,9 +305,9 @@ async def flow() -> None:
         select(made.id)
         await pilot.press("d")
         await pilot.pause(0.3)
-        app.panel.scroll_to(y=6, animate=False)
+        app.panel.scroll_home(animate=False)
         await pilot.pause(0.2)
-        shot(4, "Approve the plan", "Agree on the approach and acceptance criteria before coding.")
+        shot(4, "You approve the plan", "Planner → Writer → Reviewer: agree on the criteria before coding.")
 
         accepted(made, ticked=3)
         spent(made, 0.0, 0.08)
@@ -282,7 +326,8 @@ async def flow() -> None:
 
         note = (
             "## Blocking\n\n- src/main/java/payments/InvoicePdf.java:52 — totals lose cents; "
-            "preserve decimal precision and add a fractional-total test.\n\n## Not blocking\n"
+            "preserve decimal precision and add a fractional-total test.\n\n## Not blocking\n\n"
+            "## Checked\n\n- PDF endpoint, missing invoice and decimal-total coverage.\n"
         )
         assert not reviewing.problem(note)
         reviewing.keep(made, 1, note)
@@ -291,7 +336,7 @@ async def flow() -> None:
         made.event("review", round=1, blocking=1, not_blocking=0, problem="")
         made.transition(State.IMPLEMENT, reason="review 1: 1 blocking", why="1 blocking note")
         await settle()
-        app.panel.scroll_to(y=13, animate=False)
+        app.panel.scroll_to(y=5, animate=False)
         await pilot.pause(0.2)
         shot(4, "Send blocking feedback back", "The writer fixes it. Verification and review run again.")
 
@@ -302,18 +347,68 @@ async def flow() -> None:
         made.transition(State.VERIFY)
         made.event("gate", passed=True, iteration=2, log="verify-2-120000.log")
         made.transition(State.REVIEW, reason="verification passed")
-        reviewing.keep(made, 2, "## Blocking\n\n## Not blocking\n")
+        clean = "## Blocking\n\n## Not blocking\n\n## Checked\n\n- Endpoint and regression tests.\n"
+        assert not reviewing.problem(clean)
+        reviewing.keep(made, 2, clean)
         made.set_reviews(2)
         spent(made, 0.0, review=0.02)
         made.event("review", round=2, blocking=0, not_blocking=0, problem="")
         made.transition(State.CHECKPOINT_FINAL, reason="verification passed; review 2: no blocking notes")
         actions.prepare_review(made, load_project("payments-api"))
         RUNNING.discard(made.id)
+        # A different task: the same CLI that planned it reads the second verified round.
+        head = cli.plan_path.read_text().split("## ", 1)[0]
+        cli.plan_path.write_text(
+            head
+            + PLAN.format(
+                approach="Export each order once, with its identifier and total.",
+                criteria="- [ ] Export includes each order exactly once",
+            )
+        )
+        cli.set_awaiting_plan(False)
+        subscription(cli, "planning", 0.62)
+        accepted(cli, ticked=1)
+        committed(cli, ("Export orders as CSV", "src/orders/export.ts"))
+        spent(cli, 0, 0.06)
+        cli.transition(State.VERIFY)
+        cli.event("gate", passed=True, iteration=1)
+        cli.transition(State.REVIEW)
+        cli_note = (
+            "## Blocking\n\n- src/orders/export.ts:8 — repeated page cursors "
+            "duplicate orders; deduplicate and cover overlapping pages.\n\n"
+            "## Not blocking\n\n## Checked\n\n- Export and pagination tests.\n"
+        )
+        assert not reviewing.problem(cli_note)
+        reviewing.keep(cli, 1, cli_note)
+        cli.set_reviews(1)
+        subscription(cli, "review", 0.28)
+        cli.event("review", round=1, blocking=1, not_blocking=0, problem="")
+        cli.transition(State.IMPLEMENT, why="1 blocking note")
+        committed(cli, ("Deduplicate orders across export pages", "src/orders/export.ts"))
+        spent(cli, 0, 0.02)
+        cli.transition(State.VERIFY)
+        cli.event("gate", passed=True, iteration=2)
+        cli.transition(State.REVIEW)
+        copy = actions.prepare_review(cli, load_project("storefront"))
+        reviewing.ask_cli(cli, 2, copy)
         await settle()
+        select(cli.id)
+        app.panel.scroll_home(animate=False)
+        await pilot.pause(0.3)
+        shot(
+            6,
+            "Supervisor ⇄ Worker · review in your CLI",
+            "Same CLI, next review. $… sub is estimated usage, apart from API spending.",
+        )
+
+        made.set_paused(True)
+        await settle()
+        select(made.id)
+        await pilot.pause(0.3)
         app.panel.scroll_home(animate=False)
         await pilot.pause(0.2)
         (HERE / "view.svg").write_text(shown(app.export_screenshot()))
-        shot(5, "You decide what lands", "Inspect the diff or review copy. Accept, or ask for changes.")
+        shot(5, "You decide what lands", "Pod stopped. Inspect the review copy; accept, or ask for changes.")
     if "--gif" in sys.argv:
         from animation import render_gif
 
@@ -321,8 +416,7 @@ async def flow() -> None:
 
 
 try:
-    world()
-    asyncio.run(flow())
+    asyncio.run(flow(world()))
 finally:
     shutil.rmtree(ROOT)
 print("Generated README tour and still view in", HERE)

@@ -411,3 +411,18 @@ def test_a_vivibox_command_from_another_checkout_is_an_update(tmp_path):
     assert (
         "  update   vivibox command, installed from /elsewhere/vivibox, from this checkout" in result.stdout
     )
+
+
+def test_a_fresh_local_bin_is_explained_with_the_command_for_this_terminal(tmp_path):
+    """Ubuntu puts ~/.local/bin on PATH at the next login only: setup says so, and gives the line
+    that makes vivibox work in the terminal it ran in."""
+    home = tmp_path / "home"
+    missing = setup_fn(f'HOME="{home}"; BIN="{home}/.local/bin"; PATH=/usr/bin:/bin; path_hint')
+    lines = missing.stdout.splitlines()
+    assert (
+        lines[0]
+        == f"{home}/.local/bin is not on your PATH yet: " + "log out and in, or open a new login shell."
+    )
+    assert lines[1] == 'To use vivibox in this terminal now, run: export PATH="$HOME/.local/bin:$PATH"'
+    there = setup_fn(f'BIN="{home}/.local/bin"; PATH="{home}/.local/bin:/usr/bin:/bin"; path_hint')
+    assert there.stdout == "" and there.returncode == 0

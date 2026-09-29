@@ -195,6 +195,15 @@ skill_to_install() {
   return 0
 }
 
+# A fresh ~/.local/bin is on PATH only from the next login (Ubuntu's ~/.profile adds it); until
+# then, what makes vivibox work in this terminal too.
+path_hint() {
+  [[ ":$PATH:" == *":$BIN:"* ]] && return 0
+  echo "$BIN is not on your PATH yet: log out and in, or open a new login shell."
+  # shellcheck disable=SC2016 # printed for the person to run, not expanded here
+  echo 'To use vivibox in this terminal now, run: export PATH="$HOME/.local/bin:$PATH"'
+}
+
 # Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -484,6 +493,5 @@ for action in "${actions[@]}"; do
   "$action"
 done
 echo "Done. Run '$0 --check' to confirm."
-# A fresh ~/.local/bin is on PATH only from the next login (Ubuntu's ~/.profile adds it).
-[[ ":$PATH:" == *":$BIN:"* ]] || echo "$BIN is not on your PATH yet: log out and in, or open a new login shell."
+path_hint
 still_to_fix

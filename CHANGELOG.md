@@ -148,6 +148,8 @@ First public version.
 
 ### Changed
 
+- When `~/.local/bin` is not on PATH yet, `host/setup.sh` also prints the `export PATH=…` line
+  that makes `vivibox` work in the terminal it ran in, besides logging in again.
 - A decision whose pod you stopped (plan, command, work or risky files) says so: `review the work
   · stopped`, marked ‖ in the waiting colour, still among what waits for you.
 - The README introduces the task workflow and CLI planning with fewer words. Its 44-second

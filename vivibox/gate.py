@@ -290,9 +290,11 @@ def _diff_lines(repo_dir: Path, base: str, sign: str):
                     cwd=repo_dir).stdout  # fmt: skip
     path, number = "", 0
     group = 2 if sign == "+" else 1
+    # A removed line's file is the old one: a deleted file's new one is /dev/null.
+    header, prefix = ("+++ ", "+++ b/") if sign == "+" else ("--- ", "--- a/")
     for line in diff.splitlines():
-        if line.startswith("+++ "):
-            path = line[6:] if line.startswith("+++ b/") else ""
+        if line.startswith(header):
+            path = line[6:] if line.startswith(prefix) else ""
         elif line.startswith("@@"):
             number = int(re.match(r"@@ -(\d+)\S* \+(\d+)", line).group(group))
         elif line.startswith(sign) and path and not line.startswith(sign * 3):
@@ -380,11 +382,13 @@ def red_evidence_missing(task: Task, base: str) -> list[str]:
 
 
 def removed_tests(repo_dir: Path, base: str) -> list[str]:
-    """Test definitions removed from test files since base, for you to see at review."""
+    """Test definitions removed from test files since base, for you to see at review. One whose line
+    came back, in its file or another test file, was moved, not removed (go-humanize-5)."""
+    back = {text.strip() for path, _, text in added_lines(repo_dir, base) if is_test_file(path)}
     return [
         f"{path}: {text.strip()[:120]}"
         for path, _, text in removed_lines(repo_dir, base)
-        if is_test_file(path) and TEST_DEFINITION.search(text)
+        if is_test_file(path) and TEST_DEFINITION.search(text) and text.strip() not in back
     ]
 
 

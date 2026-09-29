@@ -34,6 +34,16 @@ def reason(st: TaskState, running: bool) -> str:
     return ""
 
 
+def said(task: Task) -> str:
+    """What vivibox said when the task last changed state: the checkpoint's own words, such as a
+    test removed, which the state alone does not carry."""
+    last = ""
+    for event in task.events():
+        if event["type"] == "state":
+            last = event["data"].get("reason", "")
+    return last
+
+
 def wait(
     tasks: list[Task],
     running: Callable[[Task], bool],

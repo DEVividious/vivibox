@@ -110,6 +110,7 @@ def test_the_command_line_says_what_ended_the_wait(env, capsys, monkeypatch):
             "reason": "waiting",
             "status": shown["tasks"][0]["status"],
             "problem": "",
+            "said": shown["tasks"][0]["said"],
             "next": shown["tasks"][0]["next"],
         }
     ]
@@ -130,3 +131,17 @@ def test_a_timeout_exits_as_timeout_does_and_an_unknown_task_is_an_error(env, ca
     }
     assert main(["wait", "nope-1"]) == 1
     assert "nope-1" in capsys.readouterr().err
+
+
+def test_the_json_says_what_vivibox_said_of_the_task(env, capsys, monkeypatch):
+    """go-humanize-5's checkpoint said "1 test removed", and the CLI, reading only the state, never
+    told the user."""
+    from vivibox.cli import main
+
+    task = make(env)
+    task.transition(State.VERIFY)
+    task.transition(State.CHECKPOINT_FINAL, reason="work ready for your review; 1 test removed")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    assert main(["wait", task.id, "--json"]) == 0
+    [shown] = json.loads(capsys.readouterr().out)["tasks"]
+    assert shown["said"] == "work ready for your review; 1 test removed"

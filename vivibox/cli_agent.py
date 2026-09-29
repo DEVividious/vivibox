@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import about, actions, reviewing, skill, ui
+from . import about, actions, reviewing, skill, ui, waiting
 from .config import load_config
 from .waiting import JSON_VERSION, TIMED_OUT
 
@@ -27,6 +27,7 @@ def cmd_wait(args: argparse.Namespace) -> int:
                 "reason": reason,
                 "status": seen.status,
                 "problem": seen.problem or st.problem,
+                "said": waiting.said(task),
                 "next": list(seen.commands),
             }
         )

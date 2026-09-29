@@ -197,6 +197,11 @@ First public version.
 
 ### Fixed
 
+- A test moved within its file, or to another test file, is no longer reported as removed, and
+  one in a deleted test file now is.
+- `vivibox wait --json` carries `said`, what vivibox said of the task, so a CLI tells the user of
+  removed tests; the skill treats a criterion not proved as blocking and sends open notes back
+  through the gate instead of fixing them itself.
 - A plan's summary longer than a commit subject (72 characters) is refused when the plan is
   brought in or accepted, and the planning prompts give that limit: past it, the proposed commit's
   subject was the agent's last commit, often a review round's small fix.

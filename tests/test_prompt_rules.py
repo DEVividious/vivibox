@@ -203,3 +203,8 @@ def test_the_skill_keeps_its_rules():
     # ADR-0035: the CLI reviews each round of Supervisor ⇄ Worker itself, reading only.
     assert "each round yourself, without asking the user" in plain
     assert "run nothing from the review copy" in plain
+    # go-humanize-5: a criterion ticked and not proved came as not blocking, the checkpoint's "1 test
+    # removed" never reached the user, and the CLI offered to fix the notes on the host itself.
+    assert "When in doubt, it is Blocking" in plain
+    assert "tell the user all of `said`" in plain
+    assert "do not change the code yourself" in plain

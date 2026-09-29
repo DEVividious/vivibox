@@ -78,13 +78,16 @@ The user can also watch the task in `vivibox`, the interactive view.
 
 ## 8. When the wait ends
 
-`reason` says why, and `next` lists the commands that move the task on. Summarise what happened
-and ask the user what to do; after their decision, wait again.
+`reason` says why, `said` is what vivibox said of the task, such as tests removed, and `next`
+lists the commands that move the task on. Summarise what happened, tell the user all of `said`,
+and ask them what to do; after their decision, wait again.
 
 - `reason` `review`: a round of `supervisor_worker` waits for your review. Review each round
   yourself, without asking the user: run `vivibox review <id> --prompt` and follow it. It points
   at the plan, the criteria, the red evidence and the work staged in the review copy; read them,
-  and run nothing from the review copy. Write the review where it says, run
+  and run nothing from the review copy. A criterion the work ticks but does not meet, or whose
+  test does not prove it, is a note under Blocking: the writer fixes Blocking notes, not the
+  others. When in doubt, it is Blocking. Write the review where it says, run
   `vivibox review <id> --import`, fix it if it is refused, and wait again. Tell the user in one
   line what the round's review found.
 
@@ -105,7 +108,8 @@ and ask the user what to do; after their decision, wait again.
   against the plan's criteria, and every round's review with what the writer changed after it. The user accepts (`vivibox accept <id>`: the work lands in
   their checkout uncommitted, with a suggested commit message; commit only when they ask),
   accepts it onto a branch (`vivibox accept <id> --branch`) or sends it back
-  (`vivibox reply <id> "<comment>"`).
+  (`vivibox reply <id> "<comment>"`). Notes still open go back to the writer that way, through
+  the gate; do not change the code yourself unless the user asks you to.
 - `reason` `problem`, `stopped` or `not running`: show `vivibox status <id>`. Start it again with
   `vivibox start <id>` only when the user asks.
 - `reason` `done`: the task is finished.

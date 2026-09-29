@@ -1073,3 +1073,26 @@ def test_the_planning_prompts_give_the_summary_the_subject_s_limit():
 
     for text in (prompts.PLAN_PROMPT, manual.FORMAT):
         assert f"at most {gate.MAX_SUBJECT}" in " ".join(text.split())
+
+
+def test_a_test_moved_within_its_file_is_not_removed_and_one_in_a_deleted_file_is(tmp_path):
+    """go-humanize-5 moved TestSI's table out of it and was told "1 test removed": the definition's
+    line went, and came back. A deleted test file said nothing at all: its path is /dev/null."""
+    from conftest import make_repo
+
+    source = make_repo(tmp_path / "source")
+    rows = "".join(f'\t{{"e{i}", {i}}},\n' for i in range(30))
+    before = f"package h\n\nfunc TestSI(t *testing.T) {{\n\ttests := []x{{\n{rows}\t}}\n\trun(tests)\n}}\n"
+    (source / "si_test.go").write_text(before)
+    (source / "old_test.go").write_text("package h\n\nfunc TestOld(t *testing.T) {}\n")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add tests")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, capture_output=True, text=True).stdout
+    base = base.strip()
+    after = (
+        f"package h\n\nvar siTests = []x{{\n{rows}}}\n\nfunc TestSI(t *testing.T) {{\n\trun(siTests)\n}}\n"
+    )
+    (source / "si_test.go").write_text(after)
+    (source / "old_test.go").unlink()
+    git(source, "commit", "-qam", "Move the table, drop the old tests")
+    assert gate.removed_tests(source, base) == ["old_test.go: func TestOld(t *testing.T) {}"]

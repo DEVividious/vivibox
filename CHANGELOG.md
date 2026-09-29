@@ -8,6 +8,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-29
+
 First public version.
 
 ### Added

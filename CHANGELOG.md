@@ -137,6 +137,9 @@ First public version.
 
 ### Changed
 
+- The vivibox skill recommends Supervisor ⇄ Worker for a task planned in the CLI, and Planner →
+  Executor for a small, routine change: in three comparisons the quality was the same, and the
+  CLI reviewed the work at the end anyway.
 - The flow Planner → Writer → Reviewer is `planner_writer_reviewer`, after its title, in
   config.toml and `--flow`; `planner_maker_checker`, its former name, is read still, and
   config.toml's says so once.

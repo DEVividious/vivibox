@@ -39,10 +39,12 @@ When `project` is `null`:
 ## 3. The flow
 
 Offer only the flows whose `plan_in_cli` is true; the others need an agent planner, and vivibox
-refuses them here. Recommend one by comparing the task with each flow's `best_for`, name the
-`default_flow`, and let the user choose. With `supervisor_worker` you also review each round of
-the work yourself, and blocking notes go back to the writer without the user: say so when you
-offer it. With `planner_writer_reviewer` a reviewer of vivibox's does that instead.
+refuses them here. Planned here, recommend `supervisor_worker` unless the change is small and
+routine, where `planner_executor` is enough: you review each round of the work yourself, and
+blocking notes go back to the writer without the user; say so when you offer it. With
+`planner_writer_reviewer` a reviewer of vivibox's does that on the user's API key, and you read
+the work again at the end: offer it when the user wants you to plan only. Name the
+`default_flow`, and let the user choose.
 
 ## 4. Uncommitted changes
 

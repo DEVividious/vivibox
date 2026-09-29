@@ -210,3 +210,6 @@ def test_the_skill_keeps_its_rules():
     assert "When in doubt, it is Blocking" in plain
     assert "tell the user all of `said`" in plain
     assert "do not change the code yourself" in plain
+    # Three comparisons of the flows planned in the CLI (2026-09-29): same quality, the plan settles
+    # the risk; Supervisor ⇄ Worker cheaper, and the CLI reviews the work in the end anyway.
+    assert "recommend `supervisor_worker` unless" in plain

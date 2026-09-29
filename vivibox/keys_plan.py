@@ -135,5 +135,8 @@ class PlanKeys:
 
         found = actions.project_modules(project.repo)
         self.push_screen(
-            AskVerify(project.name, [command], heading=heading, writer_box=False, modules=found), chosen
+            AskVerify(
+                project.name, [command], heading=heading, writer_box=False, modules=found, repo=project.repo
+            ),
+            chosen,
         )

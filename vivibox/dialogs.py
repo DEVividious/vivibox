@@ -279,7 +279,8 @@ class NewProject(Dialog):
         elif event.button.id == "change":
             name = self.query_one("#name", Input).value.strip() or "this project"
             self.app.push_screen(
-                AskVerify(name, self.verify, self.no_build, modules=self.modules), self.pick_verify
+                AskVerify(name, self.verify, self.no_build, modules=self.modules, repo=self.where),
+                self.pick_verify,
             )
         elif event.button.id == "change-prepare":
             from .settings import Ask  # settings builds on this module

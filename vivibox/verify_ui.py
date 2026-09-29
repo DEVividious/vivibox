@@ -3,6 +3,8 @@ new project (i), and once you have accepted the work of a task whose writer prop
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -31,11 +33,14 @@ class AskVerify(Dialog):
         heading: str = "",
         writer_box: bool = True,
         modules: list[str] | tuple = (),
+        repo: Path | None = None,
     ):
         super().__init__()
         self.project_name, self.verify, self.no_build = name, verify, no_build
         # From two modules the command can build only the ones a task changes (ADR-0033).
         self.modules = list(modules) if len(modules) >= 2 else []
+        # Whose workspaces' scripts say how npm and pnpm narrow a command.
+        self.repo = repo
         # At the command checkpoint the writer has just had its say: the box is not a choice.
         self.writer_box = writer_box
         self.heading = heading or (
@@ -97,7 +102,7 @@ class AskVerify(Dialog):
         field = self.query_one(Input)
         command = field.value.strip()
         if event.value:
-            field.value = init.scoped(command) or command
+            field.value = init.scoped(command, self.repo) or command
         else:
             field.value = proposal.whole(command)
         self.preview()

@@ -147,14 +147,31 @@ def _placed(task: Task, project: Project) -> tuple[list[str], list[str], list[st
     return planned, added, outside
 
 
+def _under(task: Task, chosen: list[str]) -> list[str]:
+    """The build's modules nested under the chosen ones: moshi-adapters/japicmp, the API check of
+    moshi-adapters, is a project of its own that a build of moshi-adapters never runs."""
+    from . import init  # init reads the build files, which this module has no other need of
+
+    inside = tuple(f"{m.rstrip('/')}/" for m in chosen)
+    return [m for m in init.modules(task.repo) if m.startswith(inside) and m not in chosen]
+
+
 def scope(task: Task, project: Project) -> tuple[list[str], list[str]]:
-    """The modules a verification builds, the plan's and the ones the work reached (ADR-0033,
-    change of 2026-09-29), and which of them came from the changes; nothing when the work reached
-    past every module, and the whole project is built."""
+    """The modules a verification builds: the plan's, the ones the work reached, and the modules
+    nested under them (ADR-0033, change of 2026-09-29); and which came from the changes. Nothing
+    when the work reached past every module, and the whole project is built."""
     planned, added, outside = _placed(task, project)
     if outside or not (planned or added):
         return [], []
-    return planned + added, added
+    chosen = planned + added
+    return chosen + _under(task, chosen), added
+
+
+def nested(task: Task, project: Project) -> list[str]:
+    """The modules in scope only because they are nested under one that is."""
+    modules, added = scope(task, project)
+    planned, _, _ = _placed(task, project)
+    return [m for m in modules if m not in planned and m not in added]
 
 
 def outside_modules(task: Task, project: Project) -> list[str]:

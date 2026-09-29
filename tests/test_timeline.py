@@ -117,6 +117,10 @@ def test_a_verification_by_modules_says_which_came_from_the_changes(tmp_path):
     task = create_task(tmp_path, "shop", "Add subtract", "")
     task.event("verify_scope", modules=["core", "app", "extra"], added=["extra"])
     task.event("verify_scope", modules=["core"], added=[])
+    task.event(
+        "verify_scope", modules=["adapters", "adapters/japicmp"], added=[], nested=["adapters/japicmp"]
+    )
     what = [text for _, text in timeline.entries(task)]
+    assert "modules: adapters, adapters/japicmp (+adapters/japicmp under them)" in what
     assert "modules: core, app, extra (+extra from the changes)" in what
     assert "modules: core" in what

@@ -502,10 +502,23 @@ def _declared_workspaces(repo: Path) -> list[str]:
     return found
 
 
+def _maven_modules(repo: Path, folder: str, depth: int = 0) -> list[str]:
+    """A reactor's modules and theirs in turn: a module's own pom.xml may list modules of its own."""
+    found: list[str] = []
+    if depth > 5:
+        return found
+    for name in MODULE_TAG.findall(_read(repo / folder / "pom.xml")):
+        path = f"{folder}/{name.strip('/')}".strip("/")
+        if ".." in path.split("/") or name.endswith(".xml"):
+            continue
+        found += [path, *_maven_modules(repo, path, depth + 1)]
+    return found
+
+
 def modules(repo: Path) -> list[str]:
     """The modules the build names, as folders from the root: Maven's modules, Gradle's included
     projects, npm or pnpm workspaces; [] for a project of one."""
-    if maven := [m.strip("/") for m in MODULE_TAG.findall(_read(repo / "pom.xml"))]:
+    if maven := _maven_modules(repo, ""):
         return maven
     settings = _read(repo / "settings.gradle") or _read(repo / "settings.gradle.kts")
     if gradle := [
@@ -517,16 +530,37 @@ def modules(repo: Path) -> list[str]:
     return _declared_workspaces(repo)
 
 
-def scoped(command: str) -> str | None:
+def _script(command: str) -> str:
+    """The package script an npm or pnpm command runs: "npm test" test, "pnpm run lint" lint."""
+    words = command.split()
+    if len(words) > 2 and words[1] == "run":
+        return words[2]
+    return words[1] if len(words) > 1 else ""
+
+
+def _root_runner(repo: Path | None, script: str) -> bool:
+    """No workspace has the script the command runs: the root's runner tests them all (vuejs/core's
+    vitest), and --filter or --workspace would run nothing."""
+    if repo is None or not (packages := _declared_workspaces(repo)):
+        return False
+    return not any(script in (_scripts(repo / p) or {}) for p in packages)
+
+
+def scoped(command: str, repo: Path | None = None) -> str | None:
     """The command building only the modules a task changes, {modules} where they go; None for a
-    build tool it does not know how to narrow."""
+    build tool it does not know how to narrow. repo: the project, whose workspaces' scripts say
+    whether npm and pnpm run each package's own tests or one runner at the root does."""
     if "{modules}" in command:
         return command
     if m := GRADLE.match(command):
         return _gradle_scoped(m.group(1), command[m.end() :])
     if m := NPM_RUN.match(command):
+        if _root_runner(repo, _script(command)):
+            return f"{command} {{modules:%s}}" if " -- " in command else f"{command} -- {{modules:%s}}"
         return f"{command} {{modules:--workspace=%s}}"
     if m := PNPM.match(command):
+        if _root_runner(repo, _script(command)):
+            return f"{command} {{modules:%s}}"
         return f"{m.group(1)} {{modules:--filter=%s}}{command[m.end() :]}"
     if not (m := MAVEN.match(command)):
         return None

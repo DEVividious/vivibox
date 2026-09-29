@@ -613,7 +613,10 @@ class ProjectSettings(Rows):
 
             found = project_init.modules(project.repo)
             self.app.push_screen(
-                AskVerify(self.project_name, project.verify, project.no_build, modules=found), chosen
+                AskVerify(
+                    self.project_name, project.verify, project.no_build, modules=found, repo=project.repo
+                ),
+                chosen,
             )
         elif key == "demo":
             self.app.push_screen(

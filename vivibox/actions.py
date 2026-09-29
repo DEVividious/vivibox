@@ -105,6 +105,7 @@ from .projects import (  # noqa: F401
 from .proposal import (  # noqa: F401
     missing_command,
     narrowed_proposal,
+    nested,
     outside_modules,
     planned_modules,
     proposed,

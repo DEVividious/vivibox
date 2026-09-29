@@ -101,3 +101,38 @@ def test_init_verifies_a_gradle_build_by_modules_and_leaves_npm_to_the_writer(tm
     assert found.modules == ["p/a", "p/b", "p/c"] and found.verify == [], (
         "its test script is the writer's to find"
     )
+
+
+def test_nested_maven_modules_are_found(tmp_path):
+    write(tmp_path / "pom.xml", "<project><modules><module>model</module></modules></project>")
+    write(
+        tmp_path / "model" / "pom.xml",
+        "<project><modules><module>jpa</module><module>api</module></modules></project>",
+    )
+    write(tmp_path / "model" / "jpa" / "pom.xml", "<project/>")
+    write(tmp_path / "model" / "api" / "pom.xml", "<project/>")
+    assert init.modules(tmp_path) == ["model", "model/jpa", "model/api"]
+
+
+def pnpm_repo(path: Path, package_script: bool) -> Path:
+    write(path / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+    write(path / "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n")
+    scripts = {"test": "vitest run"} if package_script else {}
+    for name in ("a", "b"):
+        write(path / "packages" / name / "package.json", json.dumps({"scripts": scripts}))
+    return path
+
+
+def test_a_runner_at_the_root_gets_the_modules_as_paths(tmp_path):
+    """vuejs/core: the packages have no test script and the root's vitest runs them all; pnpm's
+    --filter would have run nothing. The runner takes the modules' folders instead."""
+    root = pnpm_repo(tmp_path / "root", package_script=False)
+    assert init.scoped("pnpm test", root) == "pnpm test {modules:%s}"
+    assert proposal.for_modules(["pnpm test {modules:%s}"], ["packages/a"]) == ["pnpm test packages/a"]
+    assert proposal.whole("pnpm test {modules:%s}") == "pnpm test"
+    each = pnpm_repo(tmp_path / "each", package_script=True)
+    assert init.scoped("pnpm test", each) == "pnpm {modules:--filter=%s} test", "each package runs its own"
+    npm = tmp_path / "npm"
+    write(npm / "package.json", json.dumps({"workspaces": ["p/*"], "scripts": {"test": "jest"}}))
+    write(npm / "p" / "a" / "package.json", "{}")
+    assert init.scoped("npm test", npm) == "npm test -- {modules:%s}"

@@ -146,3 +146,21 @@ def test_a_task_in_a_scoped_project_gets_the_modules_line_in_its_plan(env):
     plain = env / "config" / "projects" / "demo.toml"
     plain.write_text(plain.read_text().replace(f'verify = ["{SCOPED}"]', 'verify = ["true"]'))
     assert "modules" not in actions.create("demo", "Add multiply").plan_path.read_text()
+
+
+def test_the_modules_under_a_module_in_scope_are_built_with_it(task):
+    """moshi: moshi-adapters/japicmp, the API check of moshi-adapters, is a project of its own, and
+    a verification of moshi-adapters alone never ran it. A module nested under one in scope is in
+    scope too (ADR-0033, change of 2026-09-29)."""
+    write(task.repo / "pom.xml", "<project><modules><module>core</module><module>app</module>"
+          "<module>extra</module></modules></project>")  # fmt: skip
+    write(task.repo / "core" / "pom.xml", "<project><modules><module>api-check</module></modules></project>")
+    write(task.repo / "core" / "api-check" / "pom.xml", "<project/>")
+    git(task.repo, "add", ".")
+    git(task.repo, "commit", "-q", "-m", "Modules in modules")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=task.repo, capture_output=True, text=True).stdout
+    task.set_base_commit(base.strip())
+    change(task, "core/src/Calc.java")
+    assert proposal.scope(task, SHOP) == (["core", "app", "core/api-check"], [])
+    assert proposal.nested(task, SHOP) == ["core/api-check"]
+    assert proposal.verify_commands(task, SHOP) == ["mvn -B -pl core,app,core/api-check -am verify"]

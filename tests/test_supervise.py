@@ -258,7 +258,7 @@ def test_work_past_the_planned_modules_is_verified_whole_and_the_timeline_says_w
     assert ran[-1] == ["mvn -pl core -am verify"]
     assert not [e for e in task.events() if e["type"] == "verify_widened"]
     assert [e["data"] for e in task.events() if e["type"] == "verify_scope"] == [
-        {"modules": ["core"], "added": []}
+        {"modules": ["core"], "added": [], "nested": []}
     ]
     (task.repo / "pom.xml").write_text("<project/>\n")
     git("add", ".")

@@ -167,6 +167,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = "modules: " + ", ".join(data.get("modules") or [])
             if added:
                 text += f" (+{', '.join(added)} from the changes)"
+            if under := data.get("nested") or []:
+                text += f" (+{', '.join(under)} under them)"
         elif kind == "turn_retry":
             text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":

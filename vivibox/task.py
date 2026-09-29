@@ -58,6 +58,9 @@ class TaskState:
     # In REVIEW with the review in an agent's CLI (ADR-0035): the prompt is written, and the task
     # waits for the review the CLI brings in.
     awaiting_review: bool = False
+    # The agent's CLI session a task planned there came from (cli_session.detect): tool, id and
+    # the path of its transcript, where what the session spent on the task is read (ADR-0036).
+    cli_session: dict[str, str] = field(default_factory=dict)
     # Why the task is not moving, when that was not your doing: "<what happened>: <the reason in
     # the failing tool's words>". Kept until the task starts again, so the view can go on saying it.
     problem: str = ""
@@ -166,6 +169,12 @@ class Task:
         st = self.read_state()
         st.plan_in_cli = in_cli
         self._write_state(st)
+
+    def set_cli_session(self, session: dict[str, str]) -> None:
+        st = self.read_state()
+        st.cli_session = dict(session)
+        self._write_state(st)
+        self.event("cli_session", tool=session["tool"], id=session["id"])
 
     def set_awaiting_review(self, waiting: bool) -> None:
         st = self.read_state()

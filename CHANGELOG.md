@@ -12,6 +12,8 @@ First public version.
 
 ### Added
 
+- A task made with `--plan-in-cli` from Claude Code keeps that session's id and the path of its
+  transcript, taken from the environment; `vivibox status <id>` and `vivibox info` name it.
 - Supervisor ⇄ Worker with the plan made in an agent's CLI: the CLI reviews each round, with
   `vivibox review <id> --prompt` and `--import`, and `vivibox wait` returns with the reason
   `review` when a round waits for it; blocking notes go back to the writer as a reviewer's do.

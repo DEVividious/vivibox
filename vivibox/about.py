@@ -4,10 +4,11 @@ each role runs on, and the vivibox version."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
-from . import manual, skill, version
+from . import cli_session, manual, skill, version
 from .config import ORCHESTRATION_MODES, Role, load_config, load_project
 from .orchestration import problem
 from .projects import project_at
@@ -58,6 +59,8 @@ def gather(path: Path) -> dict:
         "flows": flows,
         "roles": {name: {"harness": r.harness, "model": r.model} for name, r in config.roles.items()},
         # The copies of the skill an agent's CLI reads, and whether each is this vivibox's.
+        # The agent's CLI session a task made from here records (ADR-0036); None outside one.
+        "cli_session": cli_session.detect(os.environ, Path.cwd()) or None,
         "skill": [
             {"cli": c.cli, "path": str(c.path), "version": c.version, "current": c.current}
             for c in skill.copies()
@@ -85,5 +88,7 @@ def describe(found: dict) -> str:
     for copy in found["skill"]:
         state = "current" if copy["current"] else "left behind: vivibox skill install updates it"
         lines.append(f"The skill for {copy['cli']}: {copy['path']}, {state}")
+    if found["cli_session"]:
+        lines.append(f"A task planned from here records {cli_session.describe(found['cli_session'])}")
     lines += ["", f"vivibox {found['vivibox']}"]
     return "\n".join(lines) + "\n"

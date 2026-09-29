@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import (
     claudecode,
+    cli_session,
     code,
     context,
     firstrun,
@@ -366,6 +367,8 @@ def create(
         task.set_auto_plan(True)
     if plan_in_cli:
         task.set_plan_in_cli(True)
+        if session := cli_session.detect(os.environ, cwd or Path.cwd()):
+            task.set_cli_session(session)
     # The risky files as they are in your repository are the starting approval.
     Approvals(task.meta, task.repo, project.risky_extra).approve()
     return task

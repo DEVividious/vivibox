@@ -43,6 +43,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))  # keys and history, never yours
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # opencode's configuration, never yours
     monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
+    # A test run from an agent's CLI would record that CLI's session with a task, and look for it.
+    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
+        monkeypatch.delenv(name, raising=False)
     return tmp_path
 
 

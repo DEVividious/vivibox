@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import prepare
+from . import cli_session, prepare
 from .states import State
 from .task import Task, TaskState
 
@@ -434,6 +434,11 @@ def task_detail(
         st.goal,
         "",
         *([] if st.box else [f"{style('Plan', 'bold')}  {task.plan_path}"]),
+        *(
+            [f"{style('CLI', 'bold')}   planned in {cli_session.describe(st.cli_session)}"]
+            if st.cli_session
+            else []
+        ),
     ]
     if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task)):
         lines.append(f"{style('Why', 'bold')}   {why}")

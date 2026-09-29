@@ -31,6 +31,23 @@ def test_gradle_projects_get_a_jdk_their_gradle_runs_on(tmp_path, gradle, source
     assert found.java == java
 
 
+def test_a_maven_whose_jvm_options_need_a_newer_java_gets_it(tmp_path):
+    """OpenFeign: .mvn/jvm.config starts Maven with a flag Java 21 refuses, while its code is for 8."""
+    maven = make_repo(tmp_path / "feign")
+    (maven / "pom.xml").write_text("<maven.compiler.source>1.8</maven.compiler.source>")
+    (maven / ".mvn").mkdir()
+    (maven / ".mvn" / "jvm.config").write_text("--sun-misc-unsafe-memory-access=allow\n-Xmx1g\n")
+    found = init.detect(maven)
+    assert found.java == "25"
+    assert any(".mvn/jvm.config" in note and "Java 23" in note for note in found.notes)
+
+
+def test_maven_toolchains_are_a_note(tmp_path):
+    maven = make_repo(tmp_path / "feign")
+    (maven / "pom.xml").write_text("<artifactId>maven-toolchains-plugin</artifactId>")
+    assert any("toolchains" in note for note in init.detect(maven).notes)
+
+
 def test_maven_and_npm(tmp_path):
     maven = make_repo(tmp_path / "api")
     (maven / "mvnw").write_text("")

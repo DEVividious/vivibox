@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- `vivibox init` gives a Maven project Java 25 when `.mvn/jvm.config` starts Maven with options
+  Java 21 refuses (OpenFeign's), and notes a `pom.xml` that asks for other JDKs through the
+  toolchains plugin.
 - `vivibox init` finds a Maven reactor kept under another name at the root (`build-pom.xml`) and
   verifies it by modules with `-f`, and keeps `--no-daemon --console=plain` in the command it
   writes for a Gradle project of modules.

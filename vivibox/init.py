@@ -76,6 +76,18 @@ def source_level(repo: Path) -> int | None:
     return None
 
 
+# Options in .mvn/jvm.config that the JVM running Maven refuses below a version: Maven stops before
+# it builds anything, whatever Java the code is written for.
+JVM_OPTIONS_SINCE = {"--sun-misc-unsafe-memory-access": 23, "-XX:+UseCompactObjectHeaders": 24}
+NEWER_LTS = (25,)
+
+
+def maven_jvm_needs(repo: Path) -> int | None:
+    """The oldest Java that starts Maven with the options in .mvn/jvm.config; None when any does."""
+    options = _read(repo / ".mvn" / "jvm.config")
+    return max((v for flag, v in JVM_OPTIONS_SINCE.items() if flag in options), default=None)
+
+
 def gradle_version(repo: Path) -> tuple[int, int] | None:
     m = re.search(r"gradle-(\d+)\.(\d+)", _read(repo / "gradle" / "wrapper" / "gradle-wrapper.properties"))
     return (int(m.group(1)), int(m.group(2))) if m else None
@@ -645,6 +657,14 @@ def detect(repo: Path) -> Detected:
         found.notes.append(f"The code targets Java {level}, newer than the build tool supports.")
     # The newest LTS that the build tool runs on and that compiles the code's level.
     jdk = next((v for v in LTS if v <= newest and (level is None or v >= level)), newest)
+    if (needs := maven_jvm_needs(repo)) and jdk < needs:
+        jdk = next(v for v in NEWER_LTS if v >= needs)
+        found.notes.append(f".mvn/jvm.config starts Maven with options that need Java {needs} or newer.")
+    if "maven-toolchains-plugin" in _read(repo / "pom.xml"):
+        found.notes.append(
+            "pom.xml uses maven-toolchains-plugin: the pod has one JDK and no ~/.m2/toolchains.xml, "
+            "so a build that asks for another JDK fails until it is told to skip the toolchains."
+        )
     if jdk != IMAGE_JAVA:
         found.java = str(jdk)
         found.notes.append(f"Java {jdk}" + (f" for code written for Java {level}." if level else "."))

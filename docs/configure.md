@@ -148,7 +148,9 @@ is treated as an environment problem and waits for you.
 Build-file notes also show Maven/Gradle wrappers and Python verification through uv:
 `uv run --frozen pytest` with `uv.lock`, otherwise a temporary environment from the project's
 metadata or requirements. A Maven wrapper without its executable bit is invoked as
-`bash ./mvnw`. Choose a different JDK in the project settings when its build needs one.
+`bash ./mvnw`. `init` picks the JDK from the Java version the code is written for and from
+the options `.mvn/jvm.config` starts Maven with (Java 25 for one that Java 21 refuses); choose
+a different JDK in the project settings when its build needs one.
 
 The pod comes with Node, npm, Python, uv and Java 21 ready to run (uv's downloads are shared
 between tasks, and Python writes no `__pycache__` into the clone), and `mise` installs any other

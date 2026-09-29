@@ -24,7 +24,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
-from . import gate
+from . import cli_usage, gate
 from .harness import Harness, HarnessError, Turn
 from .plan import HEADING, PlanError, _split_header, parse_plan, without_notes
 from .task import Task
@@ -264,5 +264,7 @@ def import_answer(task: Task) -> str:
     if plan.summary:
         task.set_goal(plan.summary)
     task.event("plan_imported", criteria=len(plan.criteria))
+    # Here, not in plan import: the supervisor also brings in a plan the CLI wrote to the file.
+    cli_usage.count(task, "planning")
     task.set_awaiting_plan(False)
     return plan.summary

@@ -646,9 +646,7 @@ def import_plan(task: Task, answer: str | None = None) -> str:
         path.write_text(answer)
     if not path.exists() or not path.read_text().strip():
         raise gate.GateError(f"no plan to bring in; paste your chat's answer into {path}")
-    summary = manual.import_answer(task)
-    cli_usage.count(task, "planning")
-    return summary
+    return manual.import_answer(task)
 
 
 # What a project with nothing to build or test is told, and told about, in one wording.

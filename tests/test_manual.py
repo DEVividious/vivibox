@@ -402,3 +402,34 @@ def test_the_planning_prompts_say_what_a_criterion_is_not(task, tmp_path):
     web, cli = manual.prompts(task, tmp_path, ["npm test"])
     for text in (web, cli):
         assert "never that a build or test command passes" in " ".join(text.split())
+
+
+def test_a_stdin_that_never_ends_is_not_waited_for(manual_env, capsys, monkeypatch):
+    """Claude Code's shell gives a command a socket on its standard input that stays open: read,
+    it hung plan import for good, after the supervisor had brought the plan in already."""
+    import socket
+
+    from vivibox.cli import main
+
+    ours, theirs = socket.socketpair()
+    theirs.settimeout(2)  # read by mistake, the test fails in two seconds instead of hanging
+    monkeypatch.setattr("sys.stdin", theirs.makefile("r"))
+    actions.answer_path(manual_env).write_text(PLAN)
+    try:
+        assert main(["plan", "import", manual_env.id]) == 0
+    finally:
+        ours.close()
+        theirs.close()
+    assert "Add a health endpoint" in capsys.readouterr().out
+
+
+def test_a_plan_the_supervisor_brings_in_counts_the_cli_session_too(manual_env, monkeypatch):
+    """The supervisor takes a plan the CLI wrote to the answer file without plan import: the
+    planning was counted only on the command's way, and a task showed none of it."""
+    from vivibox import cli_usage
+
+    counted = []
+    monkeypatch.setattr(cli_usage, "count", lambda task, stage, **kw: counted.append(stage))
+    actions.answer_path(manual_env).write_text(PLAN)
+    manual.import_answer(manual_env)
+    assert counted == ["planning"]

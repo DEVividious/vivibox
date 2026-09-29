@@ -45,6 +45,10 @@ Keys live in `~/.local/share/vivibox/keys/`, one file per provider, readable onl
 
 ## Notifications
 
+Desktop notifications (`notify-send`) when a task waits for you are off until you turn them on:
+`desktop = true` under `[notifications]`, or Notifications under `k`. Without them the list
+rings the terminal's bell when a task starts to wait.
+
 The messages a task's supervisor prints, on your phone too: `ntfy` under `[notifications]` names
 a topic on [ntfy](https://ntfy.sh), the one the app on your phone subscribes to, and every
 message goes there as well, high priority when the task waits for you or has stopped. Pick a name

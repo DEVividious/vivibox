@@ -145,6 +145,8 @@ First public version.
 
 ### Changed
 
+- Desktop notifications are off until you turn them on (`desktop = true` under
+  `[notifications]`, or under `k`); a `config.toml` that names no value now means off.
 - The vivibox skill recommends Supervisor ⇄ Worker for a task planned in the CLI, and Planner →
   Executor for a small, routine change: in three comparisons the quality was the same, and the
   CLI reviewed the work at the end anyway.

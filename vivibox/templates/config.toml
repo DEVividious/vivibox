@@ -55,9 +55,10 @@ model = ""                           # picked in the view the first time you cre
 # model = "anthropic/claude-sonnet-5"
 
 [notifications]
-# Desktop notifications (notify-send) when a task waits for you. Messages always appear in the
-# task's supervisor window too.
-desktop = true
+# Desktop notifications (notify-send) when a task waits for you: off until you turn them on,
+# here or under k. Messages always appear in the task's supervisor window, and the list rings the
+# terminal's bell when a task starts to wait.
+desktop = false
 # The same messages on your phone, through ntfy: the name of a topic, which the app on your phone
 # subscribes to. Pick one nobody guesses: anyone who knows it reads the messages, which is why
 # they say what happened, never what the agent or the build said. A token, when the topic needs

@@ -22,8 +22,8 @@ build and tests checking their work.
 - **Give each task its own build environment.** An isolated **pod** holds the clone and its own
   Docker daemon for Testcontainers and Compose. Your host's Docker socket is never shared.
 - **Leave tasks running; return for decisions.** One view tracks projects, tasks and reported
-  costs. Background work continues with the view closed; desktop and ntfy notifications call
-  you back. Inspect a review copy, request changes and decide what reaches your checkout.
+  costs. Background work continues with the view closed; ntfy on your phone, or desktop
+  notifications once you turn them on, call you back. Inspect a review copy, request changes and decide what reaches your checkout.
 
 ## How it works
 

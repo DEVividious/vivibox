@@ -2092,7 +2092,8 @@ def test_k_opens_the_settings_and_each_row_writes_its_own_key(env, monkeypatch):
         app.screen.query_one("#rows", OptionList).highlighted = notify
         await pilot.press("enter")
         await pilot.pause()
-        assert "desktop = false" in config.read_text() and "off" in labels(app)[notify]
+        # Off until turned on: Enter turns them on.
+        assert "desktop = true" in config.read_text() and " on" in labels(app)[notify]
         # A limit: one line, checked.
         limit = next(i for i, row in enumerate(labels(app)) if row.strip().startswith("rounds"))
         app.screen.query_one("#rows", OptionList).highlighted = limit

@@ -26,13 +26,20 @@ def test_loads_config_with_defaults(tmp_path):
         config.max_rounds == 3 and config.orchestration == "planner_writer_reviewer" and config.notice == ""
     )
     assert config.roles["writer"].harness == "opencode"
-    assert config.desktop_notifications is True
+    assert config.desktop_notifications is False, "off until you turn them on"
     assert config.whole_build_before_review is False, "the pipeline builds it whole after a push"
 
 
-def test_desktop_notifications_can_be_turned_off(tmp_path):
-    text = 'tasks_dir = "/t"\n[notifications]\ndesktop = false\n' + ROLES
-    assert load_config(write(tmp_path / "config.toml", text)).desktop_notifications is False
+def test_desktop_notifications_can_be_turned_on_and_off(tmp_path):
+    for value, expected in (("true", True), ("false", False)):
+        text = f'tasks_dir = "/t"\n[notifications]\ndesktop = {value}\n' + ROLES
+        assert load_config(write(tmp_path / "config.toml", text)).desktop_notifications is expected
+
+
+def test_a_first_config_has_desktop_notifications_off():
+    from vivibox import firstrun
+
+    assert "\ndesktop = false\n" in firstrun.template()
 
 
 @pytest.mark.parametrize(

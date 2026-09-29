@@ -166,7 +166,8 @@ class Config:
     # comes to you (limits.max_rounds).
     max_rounds: int
     roles: dict[str, Role]
-    desktop_notifications: bool = True
+    # Off until you turn them on: a notification over whatever you are doing is yours to ask for.
+    desktop_notifications: bool = False
     # Command that opens a directory in your IDE ("idea", "code"); offered when work is ready for review.
     ide: str = ""
     # Addresses the task networks are cut from, one /28 per task. The default is TEST-NET-2, which
@@ -332,7 +333,7 @@ def load_config(base: Path | None = None) -> Config:
                 "the model that decides need not be the model that types."
             )
     notifications = data.get("notifications", {})
-    desktop = notifications.get("desktop", True)
+    desktop = notifications.get("desktop", False)
     if not isinstance(desktop, bool):
         raise ConfigError(f"{path}: notifications.desktop must be true or false")
     ntfy = notifications.get("ntfy", "")

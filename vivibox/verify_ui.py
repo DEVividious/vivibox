@@ -9,6 +9,7 @@ from textual.containers import Vertical
 from textual.widgets import Checkbox, Input, Label
 
 from . import init, look, proposal
+from .config import by_modules
 from .widgets import Dialog
 
 WRITER = "let the writer find the command and propose it after the work"
@@ -48,7 +49,7 @@ class AskVerify(Dialog):
             if self.modules:
                 command = " && ".join(self.verify)
                 yield Checkbox(
-                    MODULES.format(count=len(self.modules)), value="{modules}" in command, id="modules"
+                    MODULES.format(count=len(self.modules)), value=by_modules(command), id="modules"
                 )
                 yield Label("", id="modules-preview", classes="files wrap")
             if self.writer_box:
@@ -70,7 +71,7 @@ class AskVerify(Dialog):
             return
         command = self.query_one(Input).value.strip()
         shown = self.query_one("#modules-preview", Label)
-        if "{modules}" in command:
+        if by_modules(command):
             example = proposal.for_modules([command], self.modules[:1])[0]
             shown.update(f"A task changing {self.modules[0]} runs: {example}")
         else:

@@ -10,6 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- Gradle projects and npm or pnpm workspaces can be verified by modules too, with
+  `{modules:FORMAT}` in the command (`./gradlew {modules:%p:check}`); `vivibox init` finds their
+  modules and verifies a Gradle project of three or more that way.
 - The verification dialog (`i`, `e`) offers "build only the modules a task changes" for a project
   of two modules or more, with the command it makes; `vivibox init` verifies a Maven project of
   three modules or more that way, where it took ten.

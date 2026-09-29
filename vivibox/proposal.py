@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from . import repo
-from .config import Project
+from .config import MODULES_TOKEN, Project, by_modules
 from .gate import ACCEPTED_PLAN
 from .gate import narrowed_proposal as narrowed_proposal_in
 from .plan import Plan, PlanError, parse_plan
@@ -58,13 +58,37 @@ def nothing_to_build(task: Task) -> bool:
 CHOOSES = re.compile(r"\s+(?:(?:-pl|--projects)\s+)?\S*\{modules\}\S*|\s+(?:-am|--also-make)(?=\s|$)")
 
 
+# The whole build of a command that names each module its own way: Gradle runs a task without a
+# project path in every project, npm and pnpm run it in every workspace.
+EVERY_MODULE = (("%p:", ""), ("--workspace=%s", "--workspaces"), ("--filter=%s", "-r"))
+
+
+def _every(form: str) -> str:
+    for part, every in EVERY_MODULE:
+        if part in form:
+            return form.replace(part, every)
+    return ""
+
+
 def whole(command: str) -> str:
     """The command with nothing chosen: the whole build, for work that reaches past the modules."""
-    return CHOOSES.sub("", command) if "{modules}" in command else command
+    if not by_modules(command):
+        return command
+    command = MODULES_TOKEN.sub(lambda m: _every(m.group(1)) if m.group(1) else "{modules}", command)
+    return re.sub(r"\s{2,}", " ", CHOOSES.sub("", command)).strip()
+
+
+def _each(form: str, module: str) -> str:
+    return form.replace("%p", ":" + module.replace("/", ":")).replace("%s", module)
 
 
 def for_modules(commands: list[str], modules: list[str]) -> list[str]:
-    return [c.replace("{modules}", ",".join(modules)) for c in commands]
+    def written(m: re.Match) -> str:
+        if not m.group(1):
+            return ",".join(modules)
+        return " ".join(_each(m.group(1), module) for module in modules)
+
+    return [MODULES_TOKEN.sub(written, c) for c in commands]
 
 
 def planned_modules(task: Task, project: Project) -> list[str]:

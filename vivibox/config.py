@@ -234,7 +234,16 @@ class Project:
         """Verified by the modules a task's plan names: {modules} in its command, where they go,
         comma-joined (Maven: "mvn -B -pl {modules} -am verify"); the same command without them is
         the whole build."""
-        return any("{modules}" in command for command in self.verify)
+        return any(by_modules(command) for command in self.verify)
+
+
+# Where a verification command takes a task's modules: {modules}, comma-joined (Maven), or
+# {modules:FORMAT}, each module written by FORMAT and joined by spaces (Gradle, npm, pnpm).
+MODULES_TOKEN = re.compile(r"\{modules(?::([^}]*))?\}")
+
+
+def by_modules(command: str) -> bool:
+    return bool(MODULES_TOKEN.search(command))
 
 
 def config_dir() -> Path:

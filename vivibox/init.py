@@ -454,11 +454,67 @@ MODULE_TAG = re.compile(r"<module>\s*([^<]+?)\s*</module>")
 # The build tool at the start of a command: Maven, or its wrapper run as itself or through bash.
 MAVEN = re.compile(r"^((?:bash\s+)?\S*mvnw?)(?=\s|$)")
 MAVEN_TAKES_A_VALUE = {"-f", "--file", "-s", "--settings", "-P", "--activate-profiles", "-D"}
+GRADLE = re.compile(r"^((?:bash\s+)?\S*gradlew|gradle)(?=\s|$)")
+GRADLE_TAKES_A_VALUE = {"-x", "--exclude-task", "-p", "--project-dir", "-c", "--settings-file"}
+NPM_RUN = re.compile(r"^npm\s+(?:test|run\s+\S+)\b")
+PNPM = re.compile(r"^(pnpm)(?=\s)")
+
+
+def _gradle_scoped(gradle: str, rest: str) -> str:
+    """Each task run in the task's modules: "gradle {modules:%p:test}" is ":core:test :app:test"."""
+    words, out, skip = rest.split(" "), [], False
+    for word in words:
+        if skip or not word or word.startswith("-"):
+            skip = word in GRADLE_TAKES_A_VALUE
+            out.append(word)
+        else:
+            out.append(f"{{modules:%p:{word}}}")
+    return gradle + " ".join(out)
+
+
+GRADLE_INCLUDE = re.compile(r"^\s*include\b(.*)$", re.MULTILINE)
+QUOTED = re.compile(r"""["']([^"']+)["']""")
+YAML_ITEM = re.compile(r"""^\s*-\s*["']?([^"'#\n]+?)["']?\s*$""", re.MULTILINE)
+
+
+def _declared_workspaces(repo: Path) -> list[str]:
+    """npm's workspaces or pnpm's packages as declared, not the usual folders a guess would try:
+    the folders their patterns match that have a package.json of their own."""
+    patterns: list[str] = []
+    try:
+        declared = json.loads(_read(repo / "package.json") or "{}").get("workspaces", [])
+    except (ValueError, AttributeError):
+        declared = []
+    if isinstance(declared, dict):
+        declared = declared.get("packages", [])
+    patterns += [p for p in declared if isinstance(p, str)]
+    pnpm = _read(repo / "pnpm-workspace.yaml")
+    if "packages:" in pnpm:
+        patterns += YAML_ITEM.findall(pnpm.split("packages:", 1)[1])
+    found: list[str] = []
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            continue
+        for folder in sorted(repo.glob(pattern.strip().rstrip("/"))):
+            name = folder.relative_to(repo).as_posix()
+            if (folder / "package.json").is_file() and name not in found:
+                found.append(name)
+    return found
 
 
 def modules(repo: Path) -> list[str]:
-    """The modules the build names, as folders from the root; [] for a project of one."""
-    return [m.strip("/") for m in MODULE_TAG.findall(_read(repo / "pom.xml"))]
+    """The modules the build names, as folders from the root: Maven's modules, Gradle's included
+    projects, npm or pnpm workspaces; [] for a project of one."""
+    if maven := [m.strip("/") for m in MODULE_TAG.findall(_read(repo / "pom.xml"))]:
+        return maven
+    settings = _read(repo / "settings.gradle") or _read(repo / "settings.gradle.kts")
+    if gradle := [
+        name.strip(":").replace(":", "/")
+        for line in GRADLE_INCLUDE.findall(settings)
+        for name in QUOTED.findall(line)
+    ]:
+        return gradle
+    return _declared_workspaces(repo)
 
 
 def scoped(command: str) -> str | None:
@@ -466,6 +522,12 @@ def scoped(command: str) -> str | None:
     build tool it does not know how to narrow."""
     if "{modules}" in command:
         return command
+    if m := GRADLE.match(command):
+        return _gradle_scoped(m.group(1), command[m.end() :])
+    if m := NPM_RUN.match(command):
+        return f"{command} {{modules:--workspace=%s}}"
+    if m := PNPM.match(command):
+        return f"{m.group(1)} {{modules:--filter=%s}}{command[m.end() :]}"
     if not (m := MAVEN.match(command)):
         return None
     # After the options, before the first goal: "mvn -B -pl {modules} -am verify".
@@ -478,12 +540,18 @@ def scoped(command: str) -> str | None:
 
 
 def by_module(repo: Path) -> list[str]:
-    """The verification of a project of many modules, with {modules} where a plan's modules go; []
-    for any other project, whose writer proposes the command it ran."""
+    """The verification of a Maven or Gradle project of many modules, with its modules where a
+    plan's go; [] for any other project, whose writer proposes the command it ran (npm: its test
+    script is the project's own to name)."""
     if len(modules(repo)) < MANY_MODULES:
         return []
-    maven = wrapper(repo, "mvnw") if (repo / "mvnw").exists() else "mvn"
-    return [f"{maven} -B -pl {{modules}} -am verify"]
+    if (repo / "pom.xml").exists():
+        maven = wrapper(repo, "mvnw") if (repo / "mvnw").exists() else "mvn"
+        return [f"{maven} -B -pl {{modules}} -am verify"]
+    if (repo / "settings.gradle").exists() or (repo / "settings.gradle.kts").exists():
+        gradle = wrapper(repo, "gradlew") if (repo / "gradlew").exists() else "gradle"
+        return [f"{gradle} {{modules:%p:check}}"]
+    return []
 
 
 def maven_notes(repo: Path) -> list[str]:
@@ -524,7 +592,7 @@ def detect(repo: Path) -> Detected:
     found.verify = by_module(repo)
     if found.verify:
         found.notes.append(
-            f"{len(found.modules)} Maven modules: verified by the ones a task changes ({{modules}}), "
+            f"{len(found.modules)} modules: verified by the ones a task changes ({{modules}}), "
             "the whole build when its work reaches past every module"
         )
     if level and level > newest:

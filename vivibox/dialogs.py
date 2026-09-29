@@ -27,6 +27,7 @@ from textual.widgets import (
 
 from . import actions, ide, look, version
 from .browse import FOLDER, Browse, shown_path
+from .config import by_modules
 from .verify_ui import AskVerify
 from .widgets import Choose, ContextHelp, Dialog, EdgeTextArea
 
@@ -253,7 +254,7 @@ class NewProject(Dialog):
 
     def show_verify(self) -> None:
         how = escape(" && ".join(self.verify)) if self.verify else actions.WRITER_PROPOSES
-        if any("{modules}" in c for c in self.verify):
+        if any(by_modules(c) for c in self.verify):
             how += " · only the modules a task changes"
         self.query_one("#verify", Label).update(how)
 

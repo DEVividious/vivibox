@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import brief, feedback, gate, manual, orchestration, proposal, transcript, ui
 from . import init as project_init
-from .config import DEFAULT_VERIFY_TIMEOUT, Project
+from .config import DEFAULT_VERIFY_TIMEOUT, Project, by_modules
 from .harness import Harness, HarnessError, Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
 from .prompts import (
@@ -483,7 +483,7 @@ class Supervisor(ReviewRound):
     def by_module(self) -> bool:
         """The project's command has {modules}: a draft names its modules, and the writer's first
         turn is told what verifies it."""
-        return any("{modules}" in command for command in self.project_verify)
+        return any(by_modules(command) for command in self.project_verify)
 
     def _planned_modules(self) -> list[str]:
         if not self.by_module:

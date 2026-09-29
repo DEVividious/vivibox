@@ -180,7 +180,11 @@ prepare = ["./gradlew assemble"]                # optional, once per new task cl
 ## Scoped verification and preparation
 
 `{modules}` in `verify` builds only the modules a task changes, for a project of several:
-`verify = ["./mvnw -B -pl {modules} -am verify"]`. A task's plan names the directories it changes
+`verify = ["./mvnw -B -pl {modules} -am verify"]`. Build tools that name modules their own way take
+`{modules:FORMAT}`, each module written by FORMAT (`%s` its folder, `%p` Gradle's project path)
+and joined by spaces: `./gradlew {modules:%p:check}` runs `:core:check :web:api:check`,
+`npm test {modules:--workspace=%s}` and `pnpm {modules:--filter=%s} test` their workspaces; the
+whole build is `./gradlew check`, `npm test --workspaces`, `pnpm -r test`. A task's plan names the directories it changes
 (`modules = ["core"]` in its header; a plan from a chat or an agent's CLI gives a
 `Modules: core, app` line), you see them when you accept the plan, and each verification runs the
 command with them and with any other module its commits changed, comma-joined. A module is the
@@ -188,7 +192,8 @@ nearest folder above a file with a build file of its own (`pom.xml`, `build.grad
 workspace's `package.json`). Only a change in no module, the root's build file included, runs the
 same command without them (`./mvnw -B verify`), the whole build; the task's timeline says which
 modules came from the changes, or which files took it whole. `vivibox init` writes this command
-for a Maven project of three modules or more, and the verification dialog (`i`, `e`) offers it
+for a Maven or Gradle project of three modules or more (an npm or pnpm one gets its test command
+from the writer, which the box then narrows), and the verification dialog (`i`, `e`) offers it
 as a box, "build only the modules a task changes", from two. The whole build otherwise runs once
 before the work comes to you when `whole_build_before_review` is on (under `k`, "whole build
 before review"; off by default, when the project's pipeline builds it whole after a push).

@@ -6,6 +6,7 @@ commands the verification runs, the risky files' approval and your review."""
 import contextlib
 import json
 import os
+import shlex
 import socket
 import stat
 import subprocess
@@ -878,7 +879,7 @@ def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
     said = approvals.diff(Change("build.gradle", "added"))
     assert "larger than 64 MiB, too large to show here" in said
     assert "vivibox checks whether it changes, not what it says" in said
-    assert f"less {task.meta / 'risky' / 'view' / 'build.gradle'}" in said
+    assert shlex.join(["less", "-L", str(task.meta / "risky" / "view" / "build.gradle")]) in said
     assert "does not read it" not in said
 
 
@@ -1020,7 +1021,7 @@ def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task):
         file.write(b"plugins { id 'java' }\n")
     said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
     view = task.meta / "risky" / "view" / "build.gradle"
-    assert f"less {view}" in said and "not in your IDE" in said
+    assert shlex.join(["less", "-L", str(view)]) in said and "not in your IDE" in said
     assert str(task.repo) not in said
     assert view.is_file() and not view.is_symlink()
     assert risky._digest(task.meta / "risky" / "view", view) == risky._digest(task.repo, big)
@@ -1067,10 +1068,48 @@ def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch
         the_pod.sidecar_command(),
         the_pod.review_command(reviewer[0], {}),
     ]
-    view = t.meta / "risky" / "view" / "build.gradle"
+    view = Approvals(t.meta, t.repo).copy_for_you("build.gradle")  # where _view puts it
     for argv in argvs:
         for bind in (argv[i + 1] for i, a in enumerate(argv) if a == "-v"):
             source, _, rest = bind.partition(":")
             if not source.startswith("/") or rest.endswith(":ro"):
                 continue  # a volume, or read-only
             assert not view.is_relative_to(source), f"{bind} would let a container write {view}"
+
+
+# --- review round 5 ------------------------------------------------------------------------------
+
+
+def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task, tmp_path):
+    """The agent names the folders under buildSrc/: a name is never part of a command you paste."""
+    folder = "$(touch PWNED) it's; x"
+    rel = f"buildSrc/{folder}/x.gradle"
+    sparse(task.repo / rel)
+    said = Approvals(task.meta, task.repo).diff(Change(rel, "added"))
+    command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
+    assert shlex.split(command) == ["less", "-L", str(task.meta / "risky" / "view" / rel)]
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "less").write_text("#!/bin/sh\nexit 0\n")
+    (stub / "less").chmod(0o755)
+    path = f"{stub}:{os.environ['PATH']}"
+    subprocess.run(["bash", "-c", command], cwd=tmp_path, env={**os.environ, "PATH": path}, check=True)
+    assert not (tmp_path / "PWNED").exists()
+
+
+@pytest.mark.parametrize("then", ["a FIFO", "small"])
+def test_a_copy_for_you_never_outlives_the_file_it_was_made_of(task, then):
+    big = sparse(task.repo / "build.gradle")
+    with open(big, "r+b") as file:
+        file.write(b"OLD CONTENT\n")
+    approvals = Approvals(task.meta, task.repo)
+    approvals.diff(Change("build.gradle", "added"))
+    view = task.meta / "risky" / "view" / "build.gradle"
+    assert view.is_file()
+    big.unlink()
+    if then == "a FIFO":
+        os.mkfifo(big)
+    else:
+        big.write_text("plugins { id 'java' }\n")
+    in_time(lambda: approvals.diff(Change("build.gradle", "added")))
+    assert not view.exists(), "no old content shown as the file's"

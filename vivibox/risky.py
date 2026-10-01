@@ -13,6 +13,7 @@ import difflib
 import fnmatch
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -290,6 +291,8 @@ class Approvals:
                 return f"{head}: {why[change.path]}\n"
         if new.is_symlink():
             return f"{head}, symlink to {os.readlink(new)}\n"
+        with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
+            self.copy_for_you(change.path).unlink(missing_ok=True)
         try:
             b = clone_read.read_bytes(self.repo, new).decode().splitlines(keepends=True)
         except clone_read.Refused as e:
@@ -306,18 +309,26 @@ class Approvals:
             return f"{change.path}: {change.kind} (binary)\n"
         return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}"))
 
+    def copy_for_you(self, path: str) -> Path:
+        """Where _view copies a risky file of path: the task's metadata, which no container writes."""
+        return self.dir / "view" / path
+
     def _view(self, path: str) -> str:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
-        task's metadata, where no container writes and no link of the agent's can be, read as text.
-        Opened in your IDE, a build file is imported, which is what approving it is there for."""
-        view = self.dir / "view" / path
+        task's metadata, where no link of the agent's can be, read as text. Opened in your IDE, a
+        build file is imported, which is what approving it is there for. The agent names the
+        folders on the way, so the command is quoted, and less runs no LESSOPEN unpacker (-L)."""
+        view = self.copy_for_you(path)
         said = "vivibox checks whether it changes, not what it says"
         try:
             view.parent.mkdir(parents=True, exist_ok=True)
             clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT)
         except OSError as e:
+            with contextlib.suppress(OSError):
+                view.unlink(missing_ok=True)
             return f"{said}, and could not copy it for you to read: {e}"
-        return f"{said}: read its copy as text, not in your IDE (less {view}), before you approve"
+        command = shlex.join(["less", "-L", str(view)])
+        return f"{said}: read its copy as text, not in your IDE ({command}), before you approve"
 
 
 def scan_one(path: Path) -> str | None:

@@ -1221,8 +1221,10 @@ def test_a_verification_past_the_budget_is_not_passed_and_says_why(task, monkeyp
     assert f"- {unread[0]}" in feedback.feedback(result)
 
 
-def test_risky_files_past_the_budget_wait_for_you_and_cannot_be_approved(task, monkeypatch):
+def test_risky_files_past_the_budget_stop_the_verification_for_you(task, monkeypatch):
+    """Not passed, and no round of the writer's: the files may be yours."""
     from test_gate import tick
+    from test_supervisor import FakeHarness, make
 
     gate.accept_plan(task)
     tick(task, "endpoint returns 200", "error path is tested")
@@ -1231,9 +1233,20 @@ def test_risky_files_past_the_budget_wait_for_you_and_cannot_be_approved(task, m
     git(task.repo, "commit", "-q", "-m", "Add the build's sources")
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert [c.path for c in result.risky] == names
-    assert gate.next_state(result, 1, 3) is State.APPROVAL_RISKY, "never the end of the task"
+    assert not result.passed
+    assert f"{names[3]} was not checked: scan budget exceeded" in result.environment
+    assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
     with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
         Approvals(task.meta, task.repo).approve()
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    rounds = task.read_state().rounds
+    sup, notes = make(task, FakeHarness(task), results=[result])
+    sup.step()  # implement
+    sup.step()  # verify
+    st = task.read_state()
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, rounds), "no round spent"
+    assert "scan budget exceeded" in notes[-1]
 
 
 def test_the_view_hashes_each_risky_file_once_for_the_listing_and_the_diffs(task, monkeypatch):

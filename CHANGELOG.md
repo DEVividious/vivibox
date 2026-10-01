@@ -67,7 +67,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   one view of the details and one approval each read no more than 1 GiB of all their files
   together, so many large files cannot keep a verification or the view busy for minutes; the view
   and `p` hash each risky file once. A file past that is not checked, and says so: such a risky
-  file stays changed and cannot be approved, and an untracked one fails the verification. A file
+  file stays changed and cannot be approved, and the verification stops for you with why, with no
+  round of the writer's spent; an untracked one fails the verification. A file
   vivibox did not read counts against the check, never for it: the verification lists it as not
   checked, and a risky file too large to verify, or a risky link out of the repository that your
   checkout's base commit of the task does not have with that target, stays changed and cannot be

@@ -453,6 +453,7 @@ class GateResult:
             and not self.uncommitted
             and not self.no_red_evidence
             and not self.narrowed
+            and not self.environment
         )
 
     def summary(self) -> dict:
@@ -645,7 +646,8 @@ def run_gate(
     if accepted and (refused := handoff.refused(task.meta / "handoff", CRITERIA_FILE, "red.md")):
         result.environment = f"{result.environment}; {refused}" if result.environment else refused
     result.removed_tests = removed_tests(task.repo, st.base_commit)
-    result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
+    result.risky, unread = Approvals(task.meta, task.repo, risky_extra).verified()
+    result.environment = "; ".join(filter(None, [result.environment, unread]))  # past the scan's budget
     built = {"commit": head, "commands": commands, "toolchain": toolchain} if not result.build_skipped else {}
     reused = {"reused": result.log.name} if result.unchanged else {}
     took = {"seconds": round(time.monotonic() - began, 1)}

@@ -314,6 +314,16 @@ class Approvals:
         self.approve(now, budget)
         return changes
 
+    def verified(self) -> tuple[list[Change], str]:
+        """The verification's risky check: the changes, and why the verification could not run
+        when the scan had no budget left for a file, or "". Yours to decide, never a round of the
+        writer's: the files it could not check may be yours."""
+        now = scan(self.repo, self.extra)
+        unread = {p: d for p, d in now.items() if d.startswith(UNCHECKED)}
+        why = next(iter(self.unapprovable(unread).values()), "")
+        more = f"; the same for {len(unread) - 1} more risky files" if len(unread) > 1 else ""
+        return self.changes(now), f"{why}{more}"
+
     def diffs(self) -> list[str]:
         """A view: every change and its diff from one scan, all of it read in one budget."""
         budget = clone_read.Budget()

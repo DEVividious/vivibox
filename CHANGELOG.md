@@ -45,6 +45,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing
   one of `-pl "$(…)"`.
 
+### Internal
+
+- The pod's container recipes, its demo commands and its network rules moved from `pod.py` to
+  modules of their own (`podspec.py`, `pod_demo.py`, `pod_egress.py`); nothing changes for a person.
+
 ## [0.1.0] - 2026-09-29
 
 First public version.

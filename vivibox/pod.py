@@ -10,10 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
-import shlex
 import shutil
-import socket
 import subprocess
 import threading
 import time
@@ -21,81 +18,58 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import podspec
 from .config import DEFAULT_NETWORK_POOL, HostService
+from .pod_demo import PREPARE_PID, PodDemo
+from .pod_egress import ETHERNET_MTU, FIREWALL, LINK, PodEgress, uplink_mtu
 from .pod_network import PodError, PodNetwork
-from .probe import (
-    DEMO_ALIVE,
-    DEMO_KILL,
-    DEMO_LOG,
-    DEMO_PID,
-    LEFTOVERS,
-    MAX_COMMAND,
-    PROBE,
-    DemoState,
-    Leftover,
-    Listener,
-    PodProbe,
-    parse_listening,
+from .podspec import (
+    AGENT_MAVEN_OPTS,
+    CA_LABEL,
+    CACHES,
+    DIND_IMAGE,
+    HOST_GATEWAY,
+    INSTALLED,
+    RYUK_IMAGE,
+    SOCKET,
+    SOCKET_DIR,
+    TMP_SIZE,
+    Mount,
+    Runner,
+    binds,
+    run,
 )
 
-DIND_IMAGE = "docker:29.8.1-dind"
-# The Ryuk Testcontainers runs in the pod, over the one a project's library would pick. Ryuk before
-# 0.10 prunes images when it cleans up after a test, and the daemon in the sidecar (Docker 29,
-# containerd image store) then loses the image another test is still pulling: "failed to extract
-# layer", at random, on the work laptop's case (moby/moby#53321). This one removes what it made, by ID.
-RYUK_IMAGE = "testcontainers/ryuk:0.12.0"
-SOCKET_DIR = "/run/vivibox-docker"
-SOCKET = f"{SOCKET_DIR}/docker.sock"
-FIREWALL = "/usr/local/libexec/vivibox-netns"
-ETHERNET_MTU = 1500
-# Shared between tasks (N2): the dependency caches are safe to share, the task's Docker data is not.
-CACHES = {
-    "m2": "/cache/m2",
-    "gradle": "/cache/gradle",
-    "npm": "/cache/npm",
-    "yarn": "/cache/yarn",
-    "mise": "/cache/mise",
-    "corepack": "/cache/corepack",
-    "uv": "/cache/uv",
-    "go": "/cache/go",
-    "cargo": "/cache/cargo",
-    "rustup": "/cache/rustup",
-    # Maven's build cache extension puts its cache beside the local repository, /cache/m2.
-    "build-cache": "/cache/build-cache",
-}
-# Where Maven's split local repository puts what a build installs: a volume per task, over the
-# shared /cache/m2, so one task's unfinished modules never reach another's build.
-INSTALLED = "/cache/m2/installed"
-# The agent's Maven: the image's options, and no build cache. A hit there restores a module up to
-# the phase an earlier command reached (the agent builds with `test`, `package`, `-DskipTests` by
-# turns) and runs only the later phases, without `initialize`: what that phase sets for the tests
-# (Mockito's agent path from dependency:properties, jacoco's argLine) is missing, and the forked
-# JVM dies. The gate keeps its cache: it holds whole verifications only (ADR-0023). Every Maven a
-# wrapper may fetch reads MAVEN_OPTS, and the extension reads system properties.
-AGENT_MAVEN_OPTS = "-Dmaven.repo.local=/cache/m2 -Dmaven.build.cache.enabled=false"
-# The most a scratch tmpfs (/tmp, and the gate's and reviewer's fresh home) may take of the host's
-# memory. Without a size it grows to half of it: an agent that cloned the project twice into /tmp
-# to try an install held 5 GB. Real work lives in the clone and the caches, which are on disk.
-TMP_SIZE = "4g"
-# The preparation's process, in the agent's /tmp: gone with the container, as the process is.
-PREPARE_PID = "/tmp/vivibox-prepare.pid"
-HOST_GATEWAY = "host.docker.internal"
+# Where each of these lives now; they stay importable from here.
+__all__ = [
+    "AGENT_MAVEN_OPTS",
+    "CACHES",
+    "CA_LABEL",
+    "DIND_IMAGE",
+    "ETHERNET_MTU",
+    "FIREWALL",
+    "HOST_GATEWAY",
+    "INSTALLED",
+    "LINK",
+    "PREPARE_PID",
+    "RYUK_IMAGE",
+    "SOCKET",
+    "SOCKET_DIR",
+    "TMP_SIZE",
+    "Mount",
+    "PodError",
+    "Runner",
+    "binds",
+    "run",
+    "uplink_mtu",
+]
+
+
 # The host's trust store, shared with the pod: a registry or a proxy the host trusts through an
 # authority of its own (corporate TLS inspection) is trusted in the pod the same way. The daemon
 # (Go), OpenSSL and the system's tools read this file; tools with a store of their own do not.
 HOST_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
-# The sidecar carries the digest of the bundle it started with: its daemon reads the authorities
-# once, at its start, so a bundle changed since (a VPN client installing a new one) is not seen
-# until the sidecar is made again.
-CA_LABEL = "vivibox.ca"
-# Running the project for you to look at: its process group, its output, both inside the pod.
-Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
-
-
-def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:
-    """timeout: seconds, after which subprocess.TimeoutExpired is raised with the output so far."""
-    return subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
 
 
 def addresses(sidecars: Sequence[str], runner: Runner = run) -> dict[str, str]:
@@ -112,45 +86,6 @@ def addresses(sidecars: Sequence[str], runner: Runner = run) -> dict[str, str]:
     return out
 
 
-@dataclass(frozen=True)
-class Mount:
-    source: str
-    target: str
-    read_only: bool = False
-
-    def arg(self) -> str:
-        return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
-
-
-LINK = re.compile(r"^\d+: ([^:@]+)(?:@\S+)?: <([^>]*)> mtu (\d+) .*?\blink/(\w+)")
-
-
-def uplink_mtu(runner: Runner = run) -> int:
-    """The MTU the host's traffic to the internet is bound by. A VPN tunnel has less than
-    Ethernet's 1500 (Cloudflare WARP: 1280), and a pod, whose own interfaces have 1500, cannot
-    tell: its large downloads through the tunnel stall. The route's interface counts, and so
-    does every tunnel that is up: WARP steers traffic through rules and a table of its own, and
-    `ip route get` still names the Wi-Fi. 1500 when there is no way to know."""
-    links = {}
-    p = runner(["ip", "-o", "link"])
-    for line in p.stdout.splitlines() if p.returncode == 0 else []:
-        if m := LINK.match(line):
-            links[m.group(1)] = (set(m.group(2).split(",")), int(m.group(3)), m.group(4))
-    mtus = [
-        mtu for flags, mtu, kind in links.values() if kind in ("none", "ppp") and {"UP", "LOWER_UP"} <= flags
-    ]
-    p = runner(["ip", "-o", "route", "get", "1.1.1.1"])
-    words = p.stdout.split()
-    if p.returncode == 0 and "dev" in words[:-1] and words[words.index("dev") + 1] in links:
-        mtus.append(links[words[words.index("dev") + 1]][1])
-    return min(mtus, default=ETHERNET_MTU)
-
-
-def binds(command: list[str]) -> list[str]:
-    """The -v arguments of a docker run command, as Docker keeps them in HostConfig.Binds."""
-    return [command[i + 1] for i, arg in enumerate(command) if arg == "-v"]
-
-
 def ca_mounts() -> list[Mount]:
     """The host's CA bundle over the container's own, when the host has one."""
     return [Mount(str(HOST_CA_BUNDLE), CA_BUNDLE, read_only=True)] if HOST_CA_BUNDLE.exists() else []
@@ -165,7 +100,7 @@ def ca_digest() -> str:
 
 
 @dataclass
-class Pod(PodNetwork):
+class Pod(PodNetwork, PodDemo, PodEgress):
     task_id: str
     repo: Path
     image: str
@@ -250,246 +185,20 @@ class Pod(PodNetwork):
         found = self._run("docker", "inspect", "-f", template, self.sidecar, check=False)
         return found.stdout.strip() if found.returncode == 0 else ""
 
-    def listening(self) -> list[Listener]:
-        """What is listening in the pod, read from the kernel so no tool has to be in the image.
-        Ephemeral ports are left out: they belong to the pod's own Docker daemon."""
-        found = self._run(
-            "docker", "exec", self.sidecar, "sh", "-c",
-            "cat /proc/sys/net/ipv4/ip_local_port_range; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null",
-            check=False,
-        )  # fmt: skip
-        if found.returncode != 0:
-            return []
-        return parse_listening(found.stdout, from_table=True)
-
-    def demo_running(self) -> bool:
-        return self.demo_state().running
-
-    def probe(self) -> PodProbe:
-        """One question of the pod instead of two, so a list of tasks stays cheap to keep current."""
-        found = self._run("docker", "exec", self.agent, "sh", "-c", PROBE, check=False)
-        if found.returncode != 0:
-            return PodProbe()
-        head, _, log = found.stdout.partition("\n--\n")
-        state, _, rows = head.partition("\n")
-        return PodProbe(parse_listening(rows), state.strip() == "RUNNING", log.strip())
-
-    def demo_state(self) -> DemoState:
-        """Whether what you started is still alive, and its last output, in one question: a crash
-        is only useful if it comes with the reason, and the reason is in the log."""
-        script = f"({DEMO_ALIVE}) && echo RUNNING || echo STOPPED; tail -n 25 {DEMO_LOG} 2>/dev/null"
-        found = self._run("docker", "exec", self.agent, "sh", "-c", script, check=False)
-        if found.returncode != 0:
-            return DemoState(False, "")
-        first, _, rest = found.stdout.partition("\n")
-        return DemoState(first.strip() == "RUNNING", rest.strip())
-
-    def leftovers(self) -> list[Leftover]:
-        """What the agent's container has listening, one entry per process. opencode's own server
-        is left out: it is the agent, behind the window you watch it in."""
-        found = self._run("docker", "exec", self.agent, "sh", "-c", LEFTOVERS, check=False)
-        if found.returncode != 0:
-            return []
-        seen: dict[int, Leftover] = {}
-        for line in found.stdout.splitlines():
-            pid, _, rest = line.partition("\t")
-            port, _, command = rest.partition("\t")
-            try:
-                pid, port = int(pid), int(port, 16)
-            except ValueError:
-                continue
-            command = " ".join(command.split())
-            if "opencode serve" in command or pid in seen:
-                continue
-            seen[pid] = Leftover(pid, port, command[:MAX_COMMAND])
-        return list(seen.values())
-
-    def stop_leftovers(self) -> list[str]:
-        """Stops what the agent left listening in its container and says what went. The app is
-        run once the agent rests, so a server still up in there is a leftover of its turn, and
-        one that holds the port the app wants makes the app die on it."""
-        left = self.leftovers()
-        for process in left:
-            self._run(
-                "docker", "exec", self.agent, "sh", "-c", f"kill -TERM {process.pid} 2>/dev/null", check=False
-            )
-        return [str(process) for process in left]
-
-    def demo_stop(self) -> None:
-        """Kills the whole process group: a build tool starting a server leaves children behind."""
-        self._run("docker", "exec", self.agent, "sh", "-c", DEMO_KILL, check=False)
-
-    def prepare_start(self, commands: Sequence[str], log: str, exit_file: str) -> None:
-        """Runs a project's preparation in the clone, in the background like the app: it outlives
-        the exec that started it, and says how it ended in exit_file, which goes first."""
-        script = f"({' && '.join(commands)}); echo $? > {exit_file}"
-        started = (
-            f"rm -f {exit_file}; setsid sh -c {shlex.quote(script)} > {log} 2>&1 < /dev/null &"
-            f" echo $! > {PREPARE_PID}"
-        )
-        self._run("docker", "exec", "-d", "-w", str(self.repo), self.agent, "sh", "-c", started)
-
-    def prepare_running(self) -> bool:
-        alive = f'test -f {PREPARE_PID} && kill -0 "$(cat {PREPARE_PID})" 2>/dev/null'
-        return self._run("docker", "exec", self.agent, "sh", "-c", alive, check=False).returncode == 0
-
-    def demo_log(self, lines: int = 20) -> str:
-        found = self._run("docker", "exec", self.agent, "tail", "-n", str(lines), DEMO_LOG, check=False)
-        return found.stdout.strip() if found.returncode == 0 else ""
-
-    def demo_start(self, commands: Sequence[str], workdir: str = "", wait: float = 40) -> list[Listener]:
-        """Runs the project the way the project is run, in the agent's container, and waits for it
-        to listen. Returns the ports that were not there before; empty means nothing came up.
-
-        setsid: the commands outlive the exec that started them, so the app stays up while you look
-        at it, and its whole process group can be stopped later in one go.
-        """
-        self.demo_stop()
-        # A port the last run held is not free the moment its process is killed, and starting again
-        # on the same port would then look like nothing came up. Wait for the picture to settle.
-        before = {listener.port for listener in self.listening()}
-        settle = time.monotonic() + 10
-        while time.monotonic() < settle:
-            time.sleep(0.5)
-            now_ports = {listener.port for listener in self.listening()}
-            if now_ports == before:
-                break
-            before = now_ports
-        script = " && ".join(commands)
-        started = f"setsid sh -c {shlex.quote(script)} > {DEMO_LOG} 2>&1 < /dev/null & echo $! > {DEMO_PID}"
-        self._run("docker", "exec", "-d", "-w", workdir or str(self.repo), self.agent, "sh", "-c", started)
-        deadline = time.monotonic() + wait
-        while time.monotonic() < deadline:
-            fresh = [listener for listener in self.listening() if listener.port not in before]
-            if fresh:
-                return fresh
-            if not self.demo_running():
-                return []  # it exited; the log says why
-            time.sleep(0.5)
-        return []
-
     def sidecar_command(self, address: str = "") -> list[str]:
-        # The daemon listens only on the unix socket. 666: the socket is owned by root of the
-        # Sysbox user namespace, the agent runs as your UID, and only this pair mounts the volume.
-        # The socket left by the last run goes first: the wait would find it at once, chmod it, and
-        # the daemon would then replace it with one the agent cannot use ("permission denied").
-        # The trap passes docker stop on to the daemon, which then shuts down cleanly.
-        # Docker 29 refuses API versions below 1.40, and Testcontainers before 1.21 speaks 1.32: it
-        # would find no Docker at all while `docker version` works. 1.24 is the oldest it still knows.
-        mirror = f"--registry-mirror={self.hub_mirror} " if self.hub_mirror else ""
-        daemon = (
-            f"rm -f {SOCKET}; DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} "
-            f"{mirror}>/var/log/dockerd.log 2>&1 & "
-            'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
-            f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
-        )
-        # Read-only for Docker in the pod: compose and Testcontainers bind-mount files of the build.
-        shared = [Mount(str(d), str(d), read_only=True) for d in (self.repo, self.gate_dir) if d]
-        shared += ca_mounts()
-        digest = ca_digest()
-        return [
-            "docker", "run", "-d", "--name", self.sidecar, "--runtime=sysbox-runc",
-            "--label", f"vivibox.task={self.task_id}",
-            *(("--label", f"{CA_LABEL}={digest}") if digest else ()),
-            "--network", self.network, *(("--ip", address) if address else ()),
-            "--add-host", f"{HOST_GATEWAY}:host-gateway",
-            "-e", "DOCKER_TLS_CERTDIR=",
-            "-v", f"{self.volumes['docker']}:/var/lib/docker",
-            "-v", f"{self.volumes['socket']}:{SOCKET_DIR}",
-            *(arg for m in shared for arg in ("-v", m.arg())),
-            "--entrypoint", "sh", DIND_IMAGE, "-c", daemon,
-        ]  # fmt: skip
+        return podspec.sidecar_command(self, ca_mounts(), ca_digest(), address)
 
     def docker_env(self) -> list[str]:
-        """How the agent and the gate reach the sidecar's daemon, and what Testcontainers runs on
-        it. A project that passes a variable of these itself (`pass_env`) keeps its own value."""
-        fixed = {
-            "DOCKER_HOST": f"unix://{SOCKET}",
-            "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE": SOCKET,
-            "TESTCONTAINERS_HOST_OVERRIDE": "localhost",
-            "TESTCONTAINERS_RYUK_CONTAINER_IMAGE": RYUK_IMAGE,
-        }
-        return [arg for k, v in fixed.items() if k not in self.passed_env for arg in ("-e", f"{k}={v}")]
+        return podspec.docker_env(self)
 
     def agent_command(self) -> list[str]:
-        mounts = [
-            Mount(self.volumes["socket"], SOCKET_DIR),
-            Mount(str(self.repo), str(self.repo)),
-            Mount(f"vivibox-{self.task_id}-config", "/config"),
-            *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
-            Mount(self.volumes["installed"], INSTALLED),
-            *ca_mounts(),
-            *self.agent_mounts,
-        ]
-        return [
-            "docker", "run", "-d", "--name", self.agent,
-            "--label", f"vivibox.task={self.task_id}",
-            "--network", f"container:{self.sidecar}",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
-            *self.docker_env(),
-            # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
-            "-e", "HUSKY=0",
-            "-e", f"MAVEN_OPTS={AGENT_MAVEN_OPTS}",
-            *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
-            *(arg for name in self.passed_env for arg in ("-e", name)),
-            *(arg for m in mounts for arg in ("-v", m.arg())),
-            "-w", str(self.repo),
-            self.image, "sleep", "infinity",
-        ]  # fmt: skip
+        return podspec.agent_command(self, ca_mounts())
 
     def gate_command(self) -> list[str]:
-        """Like the agent container, but without anything the agent could have left behind: its
-        working tree and build outputs, its home directory, its background processes."""
-        mounts = [
-            Mount(self.volumes["socket"], SOCKET_DIR),
-            Mount(str(self.repo), str(self.repo), read_only=True),
-            Mount(str(self.gate_dir), str(self.gate_dir)),
-            # Not the build cache the writer fills: a hit there would skip a module's build and
-            # tests on the writer's word.
-            *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items() if name != "build-cache"),
-            Mount(self.volumes["gate-build-cache"], CACHES["build-cache"]),
-            Mount(self.volumes["gate-installed"], INSTALLED),
-            *ca_mounts(),
-        ]
-        return [
-            "docker", "run", "-d", "--name", self.gate,
-            "--label", f"vivibox.task={self.task_id}",
-            "--network", f"container:{self.sidecar}",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
-            "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
-            *self.docker_env(),
-            "-e", "HUSKY=0",
-            *(arg for k, v in self.agent_env.items() for arg in ("-e", f"{k}={v}")),
-            *(arg for name in self.passed_env for arg in ("-e", name)),
-            *(arg for m in mounts for arg in ("-v", m.arg())),
-            "-w", str(self.gate_dir),
-            self.image, "sleep", "infinity",
-        ]  # fmt: skip
+        return podspec.gate_command(self, ca_mounts())
 
     def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
-        """The reviewer's container: a fresh clone like the gate's, with the writer's tree read-only
-        and without the build's means, since it reads and runs nothing: no Docker socket, no build
-        caches, no variables of the build. Its own secrets and harness files come as mounts."""
-        all_mounts = [
-            Mount(str(self.repo), str(self.repo), read_only=True),
-            Mount(str(self.review_dir), str(self.review_dir)),
-            *ca_mounts(),
-            *mounts,
-        ]
-        return [
-            "docker", "run", "-d", "--name", self.review,
-            "--label", f"vivibox.task={self.task_id}",
-            "--network", f"container:{self.sidecar}",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
-            "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
-            *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
-            *(arg for m in all_mounts for arg in ("-v", m.arg())),
-            "-w", self.review_src,
-            self.image, "sleep", "infinity",
-        ]  # fmt: skip
+        return podspec.review_command(self, mounts, env, ca_mounts())
 
     def passed_values(self) -> list[str]:
         """The values of the passed variables, for keeping them out of logs."""
@@ -691,43 +400,6 @@ class Pod(PodNetwork):
         return self.popen(
             ["docker", "exec", self.agent, *cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
-
-    # --- network ----------------------------------------------------------------------------
-
-    def gateway(self) -> str:
-        hosts = self._run("docker", "exec", self.sidecar, "cat", "/etc/hosts").stdout
-        for line in hosts.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and HOST_GATEWAY in parts[1:]:
-                return parts[0]
-        raise PodError(f"{HOST_GATEWAY} missing in {self.sidecar}")
-
-    def firewall_targets(self) -> list[str]:
-        """Every address a name answers with, not just the first: a service behind a load balancer
-        or round-robin DNS reaches you on several, and allowing one of them fails at random."""
-        targets: list[str] = []
-        for s in self.host_services:
-            if s.host == HOST_GATEWAY:
-                found = [self.gateway()]
-            else:
-                try:
-                    where = socket.getaddrinfo(s.host, s.port, socket.AF_INET, socket.SOCK_STREAM)
-                except OSError as e:
-                    raise PodError(f"cannot resolve host service {s.host}: {e}") from None
-                found = sorted({r[4][0] for r in where})
-            targets += [f"{ip}:{s.port}" for ip in found if f"{ip}:{s.port}" not in targets]
-        return targets
-
-    def apply_firewall(self) -> None:
-        # The pool is not a private range, so the helper has to be told to reject it by name:
-        # without that, one task could reach another task's ports. Applied on every start, so the
-        # MSS clamp follows the uplink of the moment: a VPN on or off since the last start.
-        mtu = uplink_mtu(self.runner)
-        self._run(
-            "sudo", "-n", FIREWALL, "apply", self.sidecar,
-            "--pool", self.network_pool, *(("--mtu", str(mtu)) if mtu < ETHERNET_MTU else ()),
-            *self.firewall_targets(),
-        )  # fmt: skip
 
 
 @dataclass

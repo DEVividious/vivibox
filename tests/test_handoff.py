@@ -482,8 +482,9 @@ def test_a_refused_question_stops_the_task_and_says_why(tmp_path):
     assert said and "handoff/question.md" in said and "HOST-SECRET" not in said, said
 
 
+@pytest.mark.parametrize("kind", ["link", "fifo"])
 @pytest.mark.parametrize("where", ["planner asks", "blocked", "manual plan"])
-def test_the_details_say_why_a_linked_question_or_report_is_not_shown(tmp_path, where):
+def test_the_details_say_why_a_linked_question_or_report_is_not_shown(tmp_path, where, kind):
     from vivibox import manual, panel
 
     task = planning(tmp_path)
@@ -497,8 +498,11 @@ def test_the_details_say_why_a_linked_question_or_report_is_not_shown(tmp_path, 
     elif where == "manual plan":
         task.set_awaiting_plan(True)
         name = manual.CONTEXT
-    linked(task.meta / "handoff" / name).write_text("HOST-SECRET\n")
-    shown = panel.detail(task, task.read_state(), 3, running=False, pod=panel.PodView())
+    if kind == "link":
+        linked(task.meta / "handoff" / name).write_text("HOST-SECRET\n")
+    else:
+        special(task.meta / "handoff" / name, "fifo")
+    shown = in_time(lambda: panel.detail(task, task.read_state(), 3, running=False, pod=panel.PodView()))
     assert "HOST-SECRET" not in shown
     assert f"handoff/{name}" in shown, shown
 
@@ -525,7 +529,7 @@ def test_l_names_a_refused_review_and_offers_no_pager_on_it(tmp_path):
     assert "a link or not a plain file" in entry.said and entry.command == []
 
 
-@pytest.mark.parametrize("draft", ["a plan", "a plan acceptance refuses"])
+@pytest.mark.parametrize("draft", ["a plan", "a plan acceptance refuses", "a FIFO"])
 def test_a_linked_plan_draft_never_becomes_the_plan(tmp_path, draft):
     """A link to a file of yours that reads as a plan would be copied into plan.md, which the agent
     reads: nothing of it gets there, and you are told why."""
@@ -537,29 +541,34 @@ def test_a_linked_plan_draft_never_becomes_the_plan(tmp_path, draft):
         text = text.replace("- [ ] HOST-SECRET", f"- [ ] {gate.PLACEHOLDER}\n\nHOST-SECRET")
 
     def link(t):
-        linked(t.meta / "handoff" / "plan-draft.md").write_text(text)
+        if draft == "a FIFO":
+            special(t.meta / "handoff" / "plan-draft.md", "fifo")
+        else:
+            linked(t.meta / "handoff" / "plan-draft.md").write_text(text)
 
     sup, notes = make(task, FakeHarness(task, [link]))
-    sup.step()
+    in_time(sup.step)
     assert task.read_state().state is State.CHECKPOINT_PLAN
     assert "HOST-SECRET" not in task.plan_path.read_text()
     assert "handoff/plan-draft.md" in notes[-1], notes
 
 
-@pytest.mark.parametrize("linked_part", ["review.md", "the out folder"])
+@pytest.mark.parametrize("linked_part", ["review.md", "the out folder", "a FIFO"])
 def test_a_linked_review_is_never_kept_for_the_writer(task_with_review, linked_part):
     from test_supervisor import BLOCKING
 
     sup, notes, out = task_with_review
     if linked_part == "review.md":
         linked(out / "review.md").write_text(BLOCKING.replace("asserts True", "HOST-SECRET"))
+    elif linked_part == "a FIFO":
+        special(out / "review.md", "fifo")
     else:
         elsewhere = out.parent / "elsewhere"
         out.rename(elsewhere)
         out.symlink_to(elsewhere)
         (elsewhere / "review.md").write_text(BLOCKING.replace("asserts True", "HOST-SECRET"))
     for _ in range(3):  # implement, verify, review
-        sup.step()
+        in_time(sup.step)
     kept = (sup.task.meta / "handoff" / "review-1.md").read_text()
     assert "HOST-SECRET" not in kept
     assert sup.task.read_state().state is State.CHECKPOINT_FINAL, "as with no review: to you"
@@ -622,6 +631,19 @@ def test_no_line_of_a_linked_checklist_is_quoted_back_to_the_agent(tmp_path):
     criterion = "clicking the button resets the camera"
     assert gate.missing_criteria(task) == [criterion]
     assert gate.reworded_criteria(task, [criterion]) == {}
+
+
+def test_the_gate_does_not_wait_on_a_special_checklist_or_red_evidence(tmp_path):
+    task = gated(tmp_path)
+    folder = task.meta / "handoff"
+    special(folder / gate.CRITERIA_FILE, "fifo")
+    special(folder / "red.md", "fifo")
+    criterion = "clicking the button resets the camera"
+    assert in_time(lambda: gate.missing_criteria(task)) == [criterion]
+    assert in_time(lambda: gate.reworded_criteria(task, [criterion])) == {}
+    assert in_time(lambda: gate.red_evidence_missing(task, task.read_state().base_commit)) == [
+        "tests/test_view.py"
+    ]
 
 
 def test_accepting_does_not_wait_on_a_special_file_and_keeps_nothing_through_a_link(env):

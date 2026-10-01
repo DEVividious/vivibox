@@ -741,16 +741,13 @@ def risky_target(task: Task) -> State:
 
 
 def risky_diffs(task: Task, project: Project) -> list[str]:
-    approvals = Approvals(task.meta, task.repo, project.risky_extra)
-    return [approvals.diff(change) for change in approvals.changes()]
+    return Approvals(task.meta, task.repo, project.risky_extra).diffs()
 
 
 def approve_risky(task: Task, project: Project) -> tuple[int, Path | None]:
     """Approves the risky files as they are now. Returns how many changed, and the review copy when
     the approval was all the finished work was waiting for."""
-    approvals = Approvals(task.meta, task.repo, project.risky_extra)
-    changes = approvals.changes()
-    approvals.approve()
+    changes = Approvals(task.meta, task.repo, project.risky_extra).approve_changes()
     task.event("risky_approved", paths=[c.path for c in changes])
     if task.read_state().state is State.APPROVAL_RISKY:
         target = risky_target(task)

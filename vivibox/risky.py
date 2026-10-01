@@ -86,23 +86,27 @@ def matches(path: str, pattern: str) -> bool:
 
 
 # Digests of what vivibox does not read, and so cannot check: a link that leads out of the
-# repository (by the targets on the way out), and a file past clone_read.HASH_LIMIT.
-OUT_LINK, TOO_LARGE = "symlink out of the repository:", "too large to check:"
+# repository (by the targets on the way out), a file past clone_read.HASH_LIMIT, and one past what
+# the scan had left of its budget (clone_read.Budget).
+OUT_LINK, TOO_LARGE, UNCHECKED = "symlink out of the repository:", "too large to check:", "not checked: "
 
 
 class Unapprovable(Exception):
     """Risky files no approval can take, with why and what fixes it."""
 
 
-def _digest(repo: Path, path: Path) -> str:
+def _digest(repo: Path, path: Path, budget: clone_read.Budget | None = None) -> str:
     """A plain file's content. A link's target and, while it stays in the repository, what it
     points to: a link to another file there changes when that file does. A link out of it, by its
     targets alone: what it points at is never read (Approvals.unapprovable). Anything else (a FIFO,
-    a device) by its kind, never opened: it is never the same as a file you approved."""
+    a device) by its kind, never opened: it is never the same as a file you approved. Past what is
+    left of budget, a file or a link is not checked, and says so."""
     target = clone_read.link(repo, path)
     try:
-        content = clone_read.sha256(repo, path, clone_read.HASH_LIMIT)
+        content = clone_read.sha256(repo, path, clone_read.HASH_LIMIT, budget)
     except clone_read.Refused as e:
+        if e.kind == clone_read.OVER_BUDGET:
+            return UNCHECKED + e.kind
         if e.kind == clone_read.OUT:
             return OUT_LINK + " -> ".join(e.links)
         if e.kind == clone_read.too_large(clone_read.HASH_LIMIT):
@@ -117,15 +121,38 @@ def _digest(repo: Path, path: Path) -> str:
     return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
 
 
-def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str) -> str:
+def _spent() -> str:
+    """Why a pass read no more of the clone, and what undoes it without touching your files."""
+    return (
+        f"the risky files together are more than vivibox reads at a time "
+        f"({clone_read.size_of(clone_read.SCAN_BUDGET)}); reply, and the writer restores the large risky "
+        "files it changed as they were when the task started, and removes the ones it added"
+    )
+
+
+def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False) -> str:
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
-    link it had is tolerated by its target alone: never followed, never read."""
+    link it had is tolerated by its target alone: never followed, never read. A file the scan had
+    no budget left for: heavy, when your risky files were past the budget at the base commit."""
     unknown = (
         f"; vivibox could not tell whether it was in your repository when the task started: {base.problem}"
         if base.problem
         else ""
     )
+    if digest.startswith(UNCHECKED) and heavy:
+        return (
+            f"{path} was not checked: {digest.removeprefix(UNCHECKED)}. Your repository's risky files "
+            "together were more than vivibox reads at a time "
+            f"({clone_read.size_of(clone_read.SCAN_BUDGET)}) when the task started, so vivibox cannot "
+            "tell whether the task changed them, and no task of this project can be approved while they "
+            f"are that large: delete this task (vivibox delete {task_id})"
+        )
+    if digest.startswith(UNCHECKED):
+        return (
+            f"{path} was not checked: {digest.removeprefix(UNCHECKED)}, so vivibox cannot tell whether "
+            f"the task changed it, and it cannot be approved: {_spent()}{unknown}"
+        )
     if digest.startswith(TOO_LARGE):
         if base.sizes.get(path, 0) > clone_read.HASH_LIMIT:  # yours: nothing for the writer to do
             return (
@@ -183,9 +210,13 @@ def _under(path: str, left_out: set[str]) -> bool:
     return path in left_out or any("/".join(parts[:i]) + "/" in left_out for i in range(1, len(parts)))
 
 
-def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
+def scan(
+    repo: Path, extra: tuple[str, ...] | list[str] = (), budget: clone_read.Budget | None = None
+) -> dict[str, str]:
     """Risky files in the working tree, with a digest of each; nested git repositories too. What
-    git ignores and does not track is left out: it never reaches your checkout."""
+    git ignores and does not track is left out: it never reaches your checkout. One pass: its
+    reads come from budget, a scan's own when none is given."""
+    budget = clone_read.Budget() if budget is None else budget
     patterns = (*DEFAULT_PATTERNS, *extra)
     found: dict[str, str] = {}
     left_out = ignored(repo)
@@ -212,7 +243,7 @@ def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
             # A symlinked directory is risky if a directory of that name would be (.idea -> elsewhere).
             probe = f"{rel}/x" if is_link_dir else rel
             if name != ".git" and rel not in left_out and any(matches(probe, p) for p in patterns):
-                found[rel] = _digest(repo, here / name)
+                found[rel] = _digest(repo, here / name, budget)
     return found
 
 
@@ -240,15 +271,21 @@ class Approvals:
     def unapprovable(self, now: dict[str, str]) -> dict[str, str]:
         """The risky files of now that no approval takes, each with why, against your repository
         at the task's base commit (baseline), read only when there is something to ask it."""
-        if not any(d.startswith((OUT_LINK, TOO_LARGE)) for d in now.values()):
+        if not any(d.startswith((OUT_LINK, TOO_LARGE, UNCHECKED)) for d in now.values()):
             return {}
         base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
-        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id))}
+        # Your risky files at the start, as last approved, by their size at the base commit.
+        heavy = sum(base.sizes.get(p, 0) for p in self.approved()) > clone_read.SCAN_BUDGET
+        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id, heavy))}
 
-    def approve(self) -> dict[str, str]:
-        """Takes the current state as approved (at task start: the state of your repository).
-        After that, refused with nothing taken while a file is unapprovable."""
-        current = scan(self.repo, self.extra)
+    def approve(
+        self, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
+    ) -> dict[str, str]:
+        """Takes the current state as approved (at task start: the state of your repository), or now,
+        a scan's of this pass, whose budget the copies for later diffs draw from too. After the
+        start, refused with nothing taken while a file is unapprovable."""
+        budget = clone_read.Budget() if budget is None else budget
+        current = scan(self.repo, self.extra, budget) if now is None else now
         first = not self.record.exists()
         if not first and (refused := self.unapprovable(current)):
             raise Unapprovable("; ".join(refused.values()))
@@ -257,17 +294,35 @@ class Approvals:
             shutil.rmtree(files)
         shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
         for rel, digest in current.items():
-            if digest != NESTED_GIT and not digest.startswith(("symlink", "not a plain file", TOO_LARGE)):
+            if digest != NESTED_GIT and not digest.startswith(
+                ("symlink", "not a plain file", TOO_LARGE, UNCHECKED)
+            ):
                 (files / rel).parent.mkdir(parents=True, exist_ok=True)
                 # Where the agent reads (/task): never a file of yours, swapped in since the scan.
                 with contextlib.suppress(clone_read.Refused):
-                    clone_read.copy(self.repo, self.repo / rel, files / rel)
+                    clone_read.copy(self.repo, self.repo / rel, files / rel, budget=budget)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
         return current
 
-    def changes(self) -> list[Change]:
-        before, now = self.approved(), scan(self.repo, self.extra)
+    def approve_changes(self) -> list[Change]:
+        """p: the changes since the last approval and their approval, from one scan in one budget,
+        so what is counted is what is approved, and a file it could not check is not."""
+        budget = clone_read.Budget()
+        now = scan(self.repo, self.extra, budget)
+        changes = self.changes(now)
+        self.approve(now, budget)
+        return changes
+
+    def diffs(self) -> list[str]:
+        """A view: every change and its diff from one scan, all of it read in one budget."""
+        budget = clone_read.Budget()
+        now = scan(self.repo, self.extra, budget)
+        return [self.diff(change, now, budget) for change in self.changes(now)]
+
+    def changes(self, now: dict[str, str] | None = None) -> list[Change]:
+        """Since the last approval, by now: a scan's of this pass, or a scan of its own."""
+        before, now = self.approved(), scan(self.repo, self.extra) if now is None else now
         # Approved before git ignored it (a build's output, approved before those were left out):
         # still there, and out of the scan now, so not a removal to approve.
         left_out = ignored(self.repo)
@@ -280,25 +335,33 @@ class Approvals:
         result += [Change(p, "changed") for p in stuck if p in before and now[p] == before[p]]
         return sorted(result, key=lambda c: c.path)
 
-    def diff(self, change: Change) -> str:
+    def diff(
+        self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
+    ) -> str:
+        """change, as now (the view's scan) has it, read in budget (the view's); hashed again only
+        without now, in a budget of its own."""
+        budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
         head = f"{change.path}: {change.kind}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n"
         with contextlib.suppress(OSError):  # gone since: the rest says so
-            if why := self.unapprovable({change.path: _digest(self.repo, new)}):
+            digest = _digest(self.repo, new, budget) if now is None else now.get(change.path, "")
+            if why := self.unapprovable({change.path: digest}):
                 return f"{head}: {why[change.path]}\n"
         if new.is_symlink():
             return f"{head}, symlink to {os.readlink(new)}\n"
         with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
             self.copy_for_you(change.path).unlink(missing_ok=True)
         try:
-            b = clone_read.read_bytes(self.repo, new).decode().splitlines(keepends=True)
+            b = clone_read.read_bytes(self.repo, new, budget=budget).decode().splitlines(keepends=True)
         except clone_read.Refused as e:
+            if e.kind == clone_read.OVER_BUDGET:
+                return f"{head}: checked, but not shown: {e.kind}, as {_spent()}\n"
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
                 return f"{head} ({e})\n"
-            return f"{head}: {e.kind}, too large to show here; {self._view(change.path)}\n"
+            return f"{head}: {e.kind}, too large to show here; {self._view(change.path, budget)}\n"
         except OSError:  # gone, or a folder
             b = []
         except UnicodeDecodeError:
@@ -313,7 +376,7 @@ class Approvals:
         """Where _view copies a risky file of path: the task's metadata, which no container writes."""
         return self.dir / "view" / path
 
-    def _view(self, path: str) -> str:
+    def _view(self, path: str, budget: clone_read.Budget | None = None) -> str:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
         task's metadata, where no link of the agent's can be, read as text. Opened in your IDE, a
         build file is imported, which is what approving it is there for. The agent names the
@@ -322,10 +385,12 @@ class Approvals:
         said = "vivibox checks whether it changes, not what it says"
         try:
             view.parent.mkdir(parents=True, exist_ok=True)
-            clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT)
+            clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget)
         except OSError as e:
             with contextlib.suppress(OSError):
                 view.unlink(missing_ok=True)
+            if getattr(e, "kind", "") == clone_read.OVER_BUDGET:
+                return f"{said}, and could not copy it for you to read: {e.kind}, as {_spent()}"
             return f"{said}, and could not copy it for you to read: {e}"
         command = shlex.join(["less", "-L", str(view)])
         return f"{said}: read its copy as text, not in your IDE ({command}), before you approve"

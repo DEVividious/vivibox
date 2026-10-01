@@ -1113,3 +1113,197 @@ def test_a_copy_for_you_never_outlives_the_file_it_was_made_of(task, then):
         big.write_text("plugins { id 'java' }\n")
     in_time(lambda: approvals.diff(Change("build.gradle", "added")))
     assert not view.exists(), "no old content shown as the file's"
+
+
+# --- the scan's budget ---------------------------------------------------------------------------
+
+MiB = 1 << 20
+FIVE = [f"buildSrc/f{i}.gradle" for i in range(5)]
+
+
+def five_of_a_mib(root: Path, monkeypatch, names=FIVE) -> list[str]:
+    """Five files of 1 MiB, each far under its limits, and a budget of 3 MiB for one pass."""
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * MiB, raising=False)
+    for name in names:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(b"x" * MiB)
+    return list(names)
+
+
+def read_per_file(monkeypatch, root: Path) -> dict[str, int]:
+    """What each file of root gave of its content, to a hash, a read or a copy."""
+    read: dict[str, int] = {}
+    real = clone_read._chunks
+
+    def counting(top, path, *args, **kwargs):
+        rel = Path(os.path.abspath(path)).relative_to(root).as_posix()
+        for chunk in real(top, path, *args, **kwargs):
+            read[rel] = read.get(rel, 0) + len(chunk)
+            yield chunk
+
+    monkeypatch.setattr(clone_read, "_chunks", counting)
+    return read
+
+
+def hashed_per_file(monkeypatch, root: Path) -> dict[str, int]:
+    """How many times each file of root was hashed."""
+    hashed: dict[str, int] = {}
+    real = clone_read.sha256
+
+    def counting(top, path, *args, **kwargs):
+        rel = Path(os.path.abspath(path)).relative_to(root).as_posix()
+        hashed[rel] = hashed.get(rel, 0) + 1
+        return real(top, path, *args, **kwargs)
+
+    monkeypatch.setattr(clone_read, "sha256", counting)
+    return hashed
+
+
+def test_files_each_under_their_limits_together_past_the_budget_are_not_checked(task, monkeypatch):
+    names = five_of_a_mib(task.repo, monkeypatch)
+    now = risky.scan(task.repo)
+    assert [now[n] for n in names[3:]] == [f"{risky.UNCHECKED}{clone_read.OVER_BUDGET}"] * 2
+    assert not any(now[n].startswith(risky.UNCHECKED) for n in names[:3])
+    approvals = Approvals(task.meta, task.repo)
+    before = approvals.approved()
+    assert approvals.changes() == [Change(n, "added") for n in names]
+    with pytest.raises(risky.Unapprovable) as refused:
+        approvals.approve()
+    said = str(refused.value)
+    assert f"{names[3]} was not checked: scan budget exceeded" in said and names[4] in said
+    assert names[0] not in said
+    assert approvals.approved() == before, "nothing taken"
+
+
+def test_a_file_past_the_budget_stays_a_change_though_it_was_approved(task, monkeypatch):
+    names = five_of_a_mib(task.repo, monkeypatch)
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 8 * MiB)
+    approvals = Approvals(task.meta, task.repo)
+    approvals.approve()
+    assert approvals.changes() == []
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * MiB)
+    assert approvals.changes() == [Change(n, "changed") for n in names[3:]], "never taken as checked"
+
+
+def test_once_the_budget_is_spent_no_further_risky_file_is_read_or_hashed(task, monkeypatch):
+    names = five_of_a_mib(task.repo, monkeypatch)
+    read = read_per_file(monkeypatch, task.repo)
+    risky.scan(task.repo)
+    assert [n for n in names if read.get(n)] == names[:3]
+    assert sum(read.values()) <= 3 * MiB
+
+
+def test_once_the_budget_is_spent_no_further_untracked_file_is_read(task, monkeypatch):
+    names = five_of_a_mib(task.repo, monkeypatch, [f"notes{i}.txt" for i in range(5)])
+    read = read_per_file(monkeypatch, task.repo)
+    found = gate.hidden_characters(task.repo, task.read_state().base_commit)
+    assert [n for n in names if read.get(n)] == names[:3]
+    assert found == [
+        f"{n}: vivibox does not read it (scan budget exceeded), so it was not checked" for n in names[3:]
+    ]
+
+
+def test_a_verification_past_the_budget_is_not_passed_and_says_why(task, monkeypatch, capsys):
+    from test_gate import tick
+
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    names = five_of_a_mib(task.repo, monkeypatch, [f"notes{i}.txt" for i in range(5)])
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert not result.passed
+    unread = [
+        f"{n}: vivibox does not read it (scan budget exceeded), so it was not checked" for n in names[3:]
+    ]
+    assert clone_read.split_checked(result.hidden_characters)[1] == unread
+    assert "2 files not checked" in gate.why_red(result)
+    from vivibox import feedback
+
+    assert f"- {unread[0]}" in feedback.feedback(result)
+
+
+def test_risky_files_past_the_budget_wait_for_you_and_cannot_be_approved(task, monkeypatch):
+    from test_gate import tick
+
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    names = five_of_a_mib(task.repo, monkeypatch)
+    git(task.repo, "add", "buildSrc")
+    git(task.repo, "commit", "-q", "-m", "Add the build's sources")
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert [c.path for c in result.risky] == names
+    assert gate.next_state(result, 1, 3) is State.APPROVAL_RISKY, "never the end of the task"
+    with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
+        Approvals(task.meta, task.repo).approve()
+
+
+def test_the_view_hashes_each_risky_file_once_for_the_listing_and_the_diffs(task, monkeypatch):
+    from vivibox import actions
+
+    names = [f"buildSrc/big{i}.gradle" for i in range(3)]
+    for name in names:
+        sparse(task.repo / name, 70 << 20)
+    hashed = hashed_per_file(monkeypatch, task.repo)
+    diffs = actions.risky_diffs(task, SimpleNamespace(risky_extra=[]))
+    assert hashed == dict.fromkeys(names, 1)
+    assert len(diffs) == 3 and all("too large to show here" in d and "less -L" in d for d in diffs)
+
+
+def test_p_after_a_view_with_files_not_checked_approves_none_of_them(task, monkeypatch):
+    from vivibox import actions
+
+    names = five_of_a_mib(task.repo, monkeypatch)
+    project = SimpleNamespace(risky_extra=[])
+    diffs = actions.risky_diffs(task, project)
+    assert [("was not checked" in d, "not shown" in d) for d in diffs] == [(False, True)] * 3 + [
+        (True, False)
+    ] * 2
+    assert all("scan budget exceeded" in d for d in diffs)
+    before = Approvals(task.meta, task.repo).approved()
+    hashed = hashed_per_file(monkeypatch, task.repo)
+    with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
+        actions.approve_risky(task, project)
+    assert Approvals(task.meta, task.repo).approved() == before
+    assert hashed == dict.fromkeys(names, 1), "one scan: what p counts is what it approves"
+
+
+def test_a_task_past_the_budget_is_the_writers_to_undo(env, monkeypatch):
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(env / "repo", t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    names = five_of_a_mib(t.repo, monkeypatch)
+    said = approvals.diffs()[3]  # as the view shows it: from one scan
+    assert f"{names[3]} was not checked: scan budget exceeded" in said
+    assert "more than vivibox reads at a time (3 MiB)" in said
+    assert "reply, and the writer restores the large risky files it changed as they were when the" in said
+    assert "removes the ones it added" in said and "could not tell" not in said
+
+
+def test_your_own_risky_files_past_the_budget_are_flagged_for_you_not_the_writer(env, monkeypatch):
+    source = env / "repo"
+    names = five_of_a_mib(source, monkeypatch)
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build's sources")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()  # the task's start: your repository as it is
+    assert approvals.changes() == [Change(n, "changed") for n in names[3:]], "never taken as checked"
+    said = approvals.diffs()[0]
+    assert "Your repository's risky files together were more than vivibox reads at a time" in said
+    assert "no task of this project can be approved while they are that large" in said
+    assert f"vivibox delete {t.id}" in said and "writer" not in said
+
+
+def test_a_copy_for_you_past_the_budget_says_so(task, monkeypatch):
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 100 << 20, raising=False)
+    sparse(task.repo / "build.gradle", 70 << 20)
+    said = "\n".join(actions_diffs(task))
+    assert "could not copy it for you to read: scan budget exceeded" in said
+    assert not (task.meta / "risky" / "view" / "build.gradle").exists()
+
+
+def actions_diffs(task) -> list[str]:
+    from vivibox import actions
+
+    return actions.risky_diffs(task, SimpleNamespace(risky_extra=[]))

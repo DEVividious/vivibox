@@ -309,13 +309,13 @@ def _diff_lines(repo_dir: Path, base: str, sign: str):
 
 def hidden_characters(repo_dir: Path, base: str) -> list[str]:
     """Invisible characters in lines added since base, committed or not, and in new untracked files."""
-    found = []
+    found, budget = [], clone_read.Budget()  # one pass of its own: the risky check has another
     for path, number, text in added_lines(repo_dir, base):
         found += _hidden_in(path, number, text)
     untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
     for rel in filter(None, untracked.split("\0")):
         try:  # a link as git commits it: its target, never a file of yours it points at
-            text = clone_read.as_committed(repo_dir, repo_dir / rel)
+            text = clone_read.as_committed(repo_dir, repo_dir / rel, budget)
         except clone_read.Refused as e:  # never read, so never passed
             found.append(clone_read.not_checked(rel, e.kind))
             continue

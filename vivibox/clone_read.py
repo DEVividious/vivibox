@@ -10,7 +10,10 @@ project is detected alike in both.
 
 What is read is bounded too: a file costs the agent nothing on the disk when it is sparse, and
 reading it whole could take the host's memory. A file past its limit is refused, by the size its
-descriptor says and by what was read, never more than the limit and one byte."""
+descriptor says and by what was read, never more than the limit and one byte. One pass (a check, a
+view, an approval) reads its files from one Budget: many files, each under its limit, could
+otherwise take minutes of every check. Once one does not fit, nothing more is read in that pass,
+and every file after it is refused as OVER_BUDGET, never skipped."""
 
 from __future__ import annotations
 
@@ -31,6 +34,11 @@ CONFIG_LIMIT = 1 << 20
 CHECK_LIMIT = 64 << 20
 HASH_LIMIT = 1 << 30
 CHUNK = 1 << 20
+# What one pass reads of a clone, its files together: a protection of the host's time against many
+# files each under its limit, not a limit of what a repository may hold. A parameter, which a pass
+# may lower; a file still has its own limit above.
+SCAN_BUDGET = 1 << 30
+OVER_BUDGET = "scan budget exceeded"
 KINDS = {
     stat.S_IFIFO: "a FIFO", stat.S_IFSOCK: "a socket", stat.S_IFCHR: "a device", stat.S_IFBLK: "a device",
 }  # fmt: skip
@@ -50,8 +58,34 @@ class Refused(OSError):
         self.kind, self.links = kind, links or []
 
 
+def size_of(limit: int) -> str:
+    return f"{limit >> 30} GiB" if limit >= 1 << 30 else f"{limit >> 20} MiB"
+
+
 def too_large(limit: int) -> str:
-    return f"larger than {limit >> 30} GiB" if limit >= 1 << 30 else f"larger than {limit >> 20} MiB"
+    return f"larger than {size_of(limit)}"
+
+
+class Budget:
+    """What one pass may still read of a clone, its files together, in logical bytes: a sparse
+    file's zeros count as read. A file that does not fit spends it, so nothing after it is read."""
+
+    def __init__(self, size: int | None = None):
+        self.left = SCAN_BUDGET if size is None else size
+        self.spent = False
+
+    def fits(self, path: Path | str, size: int) -> None:
+        """Refused, before anything of it is read, when a file of size does not fit."""
+        if self.spent or size > self.left:
+            self.spent = True
+            raise Refused(str(path), OVER_BUDGET)
+
+    def take(self, path: Path | str, read: int) -> None:
+        """Counts what was read; refused past the budget, for a file that grew since its size."""
+        self.left -= read
+        if self.left < 0:
+            self.spent = True
+            raise Refused(str(path), OVER_BUDGET)
 
 
 def not_checked(path: str, kind: str) -> str:
@@ -123,33 +157,38 @@ def _open(name: str, flags: int, folder: int, rel: Path) -> int:
         raise
 
 
-def _chunks(root: Path, path: Path | str, limit: int, follow: bool = True):
+def _chunks(root: Path, path: Path | str, limit: int, follow: bool = True, budget: Budget | None = None):
     """The file's content a chunk at a time, refused past limit: by the size its descriptor says
-    before anything is read, and by what was read, for a file that grows meanwhile. Without
-    follow, a link is refused."""
+    before anything is read, and by what was read, for a file that grows meanwhile. The same past
+    what is left of budget, when there is one. Without follow, a link is refused."""
     fd = _reach(root, path, follow)
     if isinstance(fd, str):
         raise Refused(str(path), "a link")
     with os.fdopen(fd, "rb") as file:
-        if os.fstat(file.fileno()).st_size > limit:
+        size = os.fstat(file.fileno()).st_size
+        if size > limit:
             raise Refused(str(path), too_large(limit))
+        if budget is not None:
+            budget.fits(path, size)
         left = limit + 1
-        while chunk := file.read(min(CHUNK, left)):
+        while chunk := file.read(min(CHUNK, left, budget.left + 1 if budget is not None else left)):
             left -= len(chunk)
             if left == 0:
                 raise Refused(str(path), too_large(limit))
+            if budget is not None:
+                budget.take(path, len(chunk))
             yield chunk
 
 
-def read_bytes(root: Path, path: Path | str, limit: int = CHECK_LIMIT) -> bytes:
+def read_bytes(root: Path, path: Path | str, limit: int = CHECK_LIMIT, budget: Budget | None = None) -> bytes:
     """The file's content; Refused, or another OSError, when vivibox does not read it."""
-    return b"".join(_chunks(root, path, limit))
+    return b"".join(_chunks(root, path, limit, budget=budget))
 
 
-def sha256(root: Path, path: Path | str, limit: int) -> str:
+def sha256(root: Path, path: Path | str, limit: int, budget: Budget | None = None) -> str:
     """The file's digest, read a chunk at a time in constant memory; refused past limit."""
     digest = hashlib.sha256()
-    for chunk in _chunks(root, path, limit):
+    for chunk in _chunks(root, path, limit, budget=budget):
         digest.update(chunk)
     return digest.hexdigest()
 
@@ -184,17 +223,19 @@ def link(root: Path, path: Path | str) -> str | None:
     return reached
 
 
-def as_committed(root: Path, path: Path | str) -> str:
+def as_committed(root: Path, path: Path | str, budget: Budget | None = None) -> str:
     """What git would commit of an untracked path, as text: a link's target, a plain file's
     content. Refused for anything else; UnicodeDecodeError for a binary file."""
     target = link(root, path)
-    return target if target is not None else read_bytes(root, path).decode("utf-8")
+    return target if target is not None else read_bytes(root, path, budget=budget).decode("utf-8")
 
 
-def copy(root: Path, path: Path | str, target: Path, limit: int = CHECK_LIMIT) -> None:
+def copy(
+    root: Path, path: Path | str, target: Path, limit: int = CHECK_LIMIT, budget: Budget | None = None
+) -> None:
     """A plain file of the repository, copied to a place of the host's own; never a link's file,
     nor one past limit. What is zeros stays a hole, so a sparse file costs no more disk here."""
-    chunks = _chunks(root, path, limit, follow=False)
+    chunks = _chunks(root, path, limit, follow=False, budget=budget)
     first = next(chunks, b"")  # refused before anything is written
     try:
         with open(target, "wb") as file:

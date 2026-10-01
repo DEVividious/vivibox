@@ -21,10 +21,9 @@ def feedback(result: GateResult) -> str:
     """What the agent reads in handoff/ before the next iteration: each failure with the lines
     that say why, so the log is there to consult, not to read through."""
     parts = ["# Verification failed\n"]
-    if result.environment:
+    if said := "; ".join(filter(None, [risky.stop_for_the_writer(result.risky_stopped), result.environment])):
         parts.append(
-            f"- Verification could not run: {risky.for_the_writer(result.environment)}. That is outside"
-            " the code; the user"
+            f"- Verification could not run: {said}. That is outside the code; the user"
             " has been told and will run the verification again. Do not change code for it."
         )
     if result.build_skipped:

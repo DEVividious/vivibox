@@ -91,23 +91,44 @@ def matches(path: str, pattern: str) -> bool:
 OUT_LINK, TOO_LARGE, UNCHECKED = "symlink out of the repository:", "too large to check:", "not checked: "
 
 
-# What the verification says when its risky check had no budget left for a file (verified): one
-# short sentence, whole in a notification, which vivibox finds again in the verification's problem.
-STOPPED = "not checked, scan budget exceeded"
+# Whose the files are that a verification's risky check had no budget left for (Approvals.verified,
+# GateResult.risky_stopped: each such path, and whose); anything else is why vivibox cannot tell.
+WRITERS, YOURS = "the writer's", "yours"
 
 
-def stopped(environment: str) -> str:
-    """The part of a verification's problem that says its risky check ran out of budget, or ""."""
-    return next((part for part in environment.split("; ") if STOPPED in part), "")
-
-
-def for_the_writer(environment: str) -> str:
-    """A verification's problem as the writer reads it: where the risky check ran out of budget,
-    what happened and that you decide, never what you are told to do."""
-    return "; ".join(
-        f"{part.split(': ', 1)[0]}: the user decides what happens to them" if STOPPED in part else part
-        for part in environment.split("; ")
+def _stopped(stop: dict[str, str]) -> str:
+    return (
+        f"{len(stop)} risky file{'s' if len(stop) > 1 else ''} not checked, scan budget exceeded "
+        f"({clone_read.size_of(clone_read.SCAN_BUDGET)})"
     )
+
+
+def stop_said(stop: dict[str, str], task_id: str) -> str:
+    """What vivibox tells you when the verification's risky check had no budget left for a file,
+    from verified's own record of it, never from what a build printed: the count and whose, never
+    the agent's names. "" when it had budget enough. One sentence, whole in a notification."""
+    if not stop:
+        return ""
+    whose = next(iter(stop.values()))
+    if whose == YOURS:
+        return (
+            f"{_stopped(stop)}: your own risky files are that large, so no task of this project can be "
+            f"approved: vivibox delete {task_id}"
+        )
+    if whose == WRITERS:
+        return (
+            f"{_stopped(stop)}: reply, and the writer undoes its large risky changes "
+            f"(vivibox risky {task_id} lists them)"
+        )
+    return f"{_stopped(stop)}: vivibox could not tell whose they are: {whose}"
+
+
+def stop_for_the_writer(stop: dict[str, str]) -> str:
+    """The same for the writer: which files, and that you decide, never what you are told to do."""
+    if not stop:
+        return ""
+    named = ", ".join(sorted(stop)[:5]) + (f" and {len(stop) - 5} more" if len(stop) > 5 else "")
+    return f"{_stopped(stop)} ({named}): the user decides what happens to them"
 
 
 class Unapprovable(Exception):
@@ -149,16 +170,28 @@ def _spent() -> str:
     )
 
 
+def _unknown(base: baseline.Baseline) -> str:
+    return (
+        f"; vivibox could not tell whether it was in your repository when the task started: {base.problem}"
+        if base.problem
+        else ""
+    )
+
+
+def _undo(path: str, base: baseline.Baseline) -> str:
+    """What the writer does to take its change to path back: never anything to a file of yours."""
+    if base.problem:
+        return "restores it as it was when the task started, or removes it if the task added it"
+    there = path in base.sizes or path in base.links  # a file or a link of yours
+    return "restores it as it was when the task started" if there else "removes it"
+
+
 def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False) -> str:
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
     link it had is tolerated by its target alone: never followed, never read. A file the scan had
     no budget left for: heavy, when your risky files were past the budget at the base commit."""
-    unknown = (
-        f"; vivibox could not tell whether it was in your repository when the task started: {base.problem}"
-        if base.problem
-        else ""
-    )
+    unknown = _unknown(base)
     if digest.startswith(UNCHECKED) and heavy:
         return (
             f"{path} was not checked: {digest.removeprefix(UNCHECKED)}. Your repository's risky files "
@@ -180,14 +213,9 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
                 "whether the task changed it, and no task of this project can be approved while it is "
                 f"that large: delete this task (vivibox delete {task_id})"
             )
-        if base.problem:
-            undo = "restores it as it was when the task started, or removes it if the task added it"
-        else:
-            there = path in base.sizes or path in base.links  # a file or a link of yours
-            undo = "restores it as it was when the task started" if there else "removes it"
         return (
             f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
-            f"task's change to it cannot be approved: reply, and the writer {undo}{unknown}"
+            f"task's change to it cannot be approved: reply, and the writer {_undo(path, base)}{unknown}"
         )
     if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
@@ -330,38 +358,37 @@ class Approvals:
 
     def approve_changes(self) -> list[Change]:
         """p: the changes since the last approval and their approval, from one scan in one budget,
-        so what is counted is what is approved, and a file it could not check is not."""
+        so what is counted is what is approved, and a file it could not check is not. Nor is a
+        change it could not have shown you: p shows each, in this pass, as the view does."""
         budget = clone_read.Budget()
         now = scan(self.repo, self.extra, budget)
         changes = self.changes(now)
+        if self.record.exists():
+            refused = list(self.unapprovable(now).values())
+            refused += [
+                said.strip() for said, seen in (self._show(c, now, budget) for c in changes) if not seen
+            ]
+            if refused:
+                raise Unapprovable("; ".join(refused))
         self.approve(now, budget)
         return changes
 
-    def verified(self) -> tuple[list[Change], str]:
-        """The verification's risky check: the changes, and why the verification could not run
-        when the scan had no budget left for a file, or "". Yours to decide, never a round of the
-        writer's: the files it could not check may be yours."""
-        now = scan(self.repo, self.extra)
-        unread, task_id = sum(d.startswith(UNCHECKED) for d in now.values()), self.dir.parent.parent.name
-        if not unread:
-            return self.changes(now), ""
-        said = f"{unread} risky file{'s' if unread > 1 else ''} {STOPPED} "
-        said += f"({clone_read.size_of(clone_read.SCAN_BUDGET)})"
-        if self._heavy(baseline.of_task(self.dir.parent)):
-            return self.changes(now), (
-                f"{said}: your own risky files are that large, so no task of this project can be "
-                f"approved: vivibox delete {task_id}"
-            )
-        return self.changes(now), (
-            f"{said}: reply, and the writer undoes its large risky changes "
-            f"(vivibox risky {task_id} lists them)"
-        )
+    def verified(self, budget: clone_read.Budget | None = None) -> tuple[list[Change], dict[str, str]]:
+        """The verification's risky check, its reads from budget: the changes, and each file the scan
+        had no budget left for, with whose they are (stop_said); {} when there was budget enough.
+        Yours to decide, never a round of the writer's: the files it could not check may be yours."""
+        now = scan(self.repo, self.extra, budget)
+        if not (unread := [p for p, d in now.items() if d.startswith(UNCHECKED)]):
+            return self.changes(now), {}
+        base = baseline.of_task(self.dir.parent)
+        whose = base.problem or (YOURS if self._heavy(base) else WRITERS)
+        return self.changes(now), dict.fromkeys(unread, whose)
 
     def diffs(self) -> list[str]:
         """A view: every change and its diff from one scan, all of it read in one budget."""
         budget = clone_read.Budget()
         now = scan(self.repo, self.extra, budget)
-        return [self.diff(change, now, budget) for change in self.changes(now)]
+        return [self._show(change, now, budget)[0] for change in self.changes(now)]
 
     def changes(self, now: dict[str, str] | None = None) -> list[Change]:
         """Since the last approval, by now: a scan's of this pass, or a scan of its own."""
@@ -383,49 +410,64 @@ class Approvals:
     ) -> str:
         """change, as now (the view's scan) has it, read in budget (the view's); hashed again only
         without now, in a budget of its own."""
+        return self._show(change, now, budget)[0]
+
+    def _show(
+        self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
+    ) -> tuple[str, bool]:
+        """change's diff, and whether you could read what it is: a new or changed file is shown, or
+        copied for you whole; one that could not be, for its size or the budget, is no approval's."""
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
         head = f"{change.path}: {change.kind}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
-            return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n"
+            return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         with contextlib.suppress(OSError):  # gone since: the rest says so
             digest = _digest(self.repo, new, budget) if now is None else now.get(change.path, "")
             if why := self.unapprovable({change.path: digest}):
-                return f"{head}: {why[change.path]}\n"
+                return f"{head}: {why[change.path]}\n", True  # refused for that already
         if new.is_symlink():
-            return f"{head}, symlink to {os.readlink(new)}\n"
+            return f"{head}, symlink to {os.readlink(new)}\n", True
         with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
             self.copy_for_you(change.path).unlink(missing_ok=True)
         try:
             b = clone_read.read_bytes(self.repo, new, budget=budget).decode().splitlines(keepends=True)
         except clone_read.Refused as e:
             if e.kind == clone_read.OVER_BUDGET:
-                return (
-                    f"{head}: checked, but not shown: {e.kind}, as the risky files together are more than "
-                    f"vivibox reads at a time ({clone_read.size_of(clone_read.SCAN_BUDGET)}): if the task "
-                    "made them large, reply, and the writer restores the ones it changed as they were when "
-                    "the task started and removes the ones it added; if they are your own, approving it "
-                    "takes it as checked, without your seeing it\n"
-                )
+                return f"{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
-                return f"{head} ({e})\n"
-            return f"{head}: {e.kind}, too large to show here; {self._view(change.path, budget)}\n"
+                return f"{head} ({e})\n", True
+            view, seen = self._view(change.path, budget)
+            return f"{head}: {e.kind}, too large to show here; {view}\n", seen
         except OSError:  # gone, or a folder
             b = []
         except UnicodeDecodeError:
-            return f"{change.path}: {change.kind} (binary)\n"
+            return f"{change.path}: {change.kind} (binary)\n", True
         try:
             a = old.read_text().splitlines(keepends=True) if old.exists() else []
         except UnicodeDecodeError:
-            return f"{change.path}: {change.kind} (binary)\n"
-        return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}"))
+            return f"{change.path}: {change.kind} (binary)\n", True
+        return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}")), True
+
+    def _unseen(self, path: str, why: str = "") -> str:
+        """Why the task's change to path cannot be approved when you could not read it, and what
+        the writer does: takes its change back, never anything to a file of yours."""
+        base = baseline.of_task(self.dir.parent)
+        why = why or (
+            "the risky files together are more than vivibox reads at a time "
+            f"({clone_read.size_of(clone_read.SCAN_BUDGET)})"
+        )
+        return (
+            f"{why}, so the task's change to it cannot be approved: reply, and the writer "
+            f"{_undo(path, base)}{_unknown(base)}"
+        )
 
     def copy_for_you(self, path: str) -> Path:
         """Where _view copies a risky file of path: the task's metadata, which no container writes."""
         return self.dir / "view" / path
 
-    def _view(self, path: str, budget: clone_read.Budget | None = None) -> str:
+    def _view(self, path: str, budget: clone_read.Budget | None = None) -> tuple[str, bool]:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
         task's metadata, where no link of the agent's can be, read as text. Opened in your IDE, a
         build file is imported, which is what approving it is there for. The agent names the
@@ -438,11 +480,14 @@ class Approvals:
         except OSError as e:
             with contextlib.suppress(OSError):
                 view.unlink(missing_ok=True)
-            if getattr(e, "kind", "") == clone_read.OVER_BUDGET:
-                return f"{said}, and could not copy it for you to read: {e.kind}, as {_spent()}"
-            return f"{said}, and could not copy it for you to read: {e}"
+            over = getattr(e, "kind", "") == clone_read.OVER_BUDGET
+            why = self._unseen(path) if over else self._unseen(path, str(e))
+            return (
+                f"{said}, and could not copy it for you to read: {e.kind + ', as ' if over else ''}{why}",
+                False,
+            )
         command = shlex.join(["less", "-L", str(view)])
-        return f"{said}: read its copy as text, not in your IDE ({command}), before you approve"
+        return f"{said}: read its copy as text, not in your IDE ({command}), before you approve", True
 
 
 def scan_one(path: Path) -> str | None:

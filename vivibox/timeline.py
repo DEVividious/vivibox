@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import ui
 from .gate import proposal_fault
+from .risky import stop_said
 from .states import State
 from .task import Task
 
@@ -36,12 +37,14 @@ def _took(start: str | None, end: str) -> str:
     return f"{seconds / 60:.0f} min"
 
 
-def _gate(data: dict) -> str:
+def _gate(data: dict, task_id: str) -> str:
     n = data.get("iteration")
     text = f"verification{f' {n}' if n else ''}: " + ("passed" if data.get("passed") else "failed")
     if failed := data.get("failed_commands"):
         text += ", " + ", ".join(f"`{c}`" for c in failed)
-    if why := data.get("environment"):
+    if why := "; ".join(
+        filter(None, [stop_said(data.get("risky_stopped") or {}, task_id), data.get("environment")])
+    ):
         text += f"; outside the code: {why}"
     if skipped := data.get("build_skipped"):
         text += f"; build not run: {skipped}"
@@ -148,7 +151,7 @@ def entries(task: Task) -> list[tuple[str, str]]:
             if data.get("ok") is False:
                 text += f"; failed: {data.get('error', '')}"
         elif kind == "gate":
-            text = _gate(data)
+            text = _gate(data, task.id)
         elif kind == "orchestration":
             text = f"orchestration {data.get('mode', '?')}, {data.get('max_rounds', '?')} rounds"
             if data.get("notice"):

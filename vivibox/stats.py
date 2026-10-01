@@ -24,6 +24,7 @@ REASONS = (
     ("no_red_evidence", "tests without red evidence"),
     ("hidden_characters", "hidden characters"),
     ("environment", "outside the code"),
+    ("risky_stopped", "scan budget exceeded"),
     ("build_skipped", "build not run"),
 )
 

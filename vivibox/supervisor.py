@@ -33,7 +33,7 @@ from .prompts import (
     SELF_REVIEW_PROMPT,
 )
 from .review_round import ReviewRound
-from .risky import Change, stopped
+from .risky import Change, stop_said
 from .states import State, waits_for_user
 from .task import Task, TaskState
 
@@ -642,16 +642,18 @@ class Supervisor(ReviewRound):
             self.task.set_verified_commit(result.commit)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
             feedback.write_feedback(self.task, result)
-        if result.environment:
+        if (could_not := self._could_not_run(result))[0]:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
             # Blocked whatever the target was: a feedback file vivibox did not write is found late,
             # after the gate's event, so the state's event carries why for the view.
-            self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=result.environment)
-            # The risky check out of budget: its own sentence, whose way out is not g, which would
-            # scan the same files again.
-            again = f"; fix it, then press g (vivibox verify-again {self.task.id})"
-            said = stopped(result.environment) or self._briefly(result.environment) + again
-            self.ports.notify(self.task.id, f"verification could not run: {said}")
+            self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=could_not[0])
+            # The risky check out of budget has its own way out: g would scan the same files again.
+            again = (
+                ""
+                if result.risky_stopped
+                else f"; fix it, then press g (vivibox verify-again {self.task.id})"
+            )
+            self.ports.notify(self.task.id, f"verification could not run: {could_not[1]}{again}")
         elif not result.passed and (kept := held_question(self.task)):
             # You pressed g on the agent's question and the build failed again: the question is
             # still unanswered, so it comes back to you; a feedback turn would have the agent work
@@ -686,6 +688,17 @@ class Supervisor(ReviewRound):
             self._go(target, "verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
 
+    def _could_not_run(self, result: gate.GateResult) -> tuple[str, str]:
+        """Why a verification could not run, whole for the view and briefly for a notification; ""
+        twice when it ran. The risky check's stop is said from its own record, whole, never found
+        in what a build printed; another problem besides is pointed to, not left out."""
+        stop = stop_said(result.risky_stopped, self.task.id)
+        whole = "; ".join(filter(None, [stop, result.environment]))
+        if not stop:
+            return whole, self._briefly(result.environment)
+        more = f"; and more, see vivibox status {self.task.id}" if result.environment else ""
+        return whole, stop + more
+
     def _briefly(self, environment: str) -> str:
         """For a notification: the task's own files by their place in it, so the sentence fits;
         vivibox status gives the whole path."""
@@ -700,12 +713,9 @@ class Supervisor(ReviewRound):
         feedback.write_feedback(self.task, result)
         target = gate.next_state(result, st.rounds, self.max_rounds)
         why = gate.why_red(result)
-        if result.environment:
-            self._go(
-                State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=result.environment
-            )
-            said = stopped(result.environment) or self._briefly(result.environment)
-            self.ports.notify(self.task.id, f"the whole build could not run: {said}")
+        if (could_not := self._could_not_run(result))[0]:
+            self._go(State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=could_not[0])
+            self.ports.notify(self.task.id, f"the whole build could not run: {could_not[1]}")
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)
             self._go(target, f"the whole build failed: {why}", why=why)

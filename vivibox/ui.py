@@ -300,7 +300,13 @@ def environment_problem(task: Task) -> str:
     it too when the supervisor found it after the gate's (a feedback file it would not write)."""
     for event in reversed(task.events()):
         if event["type"] == "gate" or (event["type"] == "state" and event["data"].get("environment")):
-            return event["data"].get("environment", "")
+            from .risky import stop_said  # the risky check's own record of a stop, never a build's words
+
+            said = [
+                stop_said(event["data"].get("risky_stopped") or {}, task.id),
+                event["data"].get("environment"),
+            ]
+            return "; ".join(filter(None, said))
     return ""
 
 

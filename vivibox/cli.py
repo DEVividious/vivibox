@@ -369,8 +369,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     )  # fmt: skip
     for command, source in result.build_files:
         print(f"NOTE  {source} names `{command}`, and the project runs nothing yet: set verify in its file")
-    if result.environment:
-        print(f"ENV   verification could not run: {result.environment}")
+    if said := "; ".join(filter(None, [risky.stop_said(result.risky_stopped, task.id), result.environment])):
+        print(f"ENV   verification could not run: {said}")
     if result.build_skipped:
         print(f"SKIP  the build was not run: {result.build_skipped}")
     if result.unchanged:

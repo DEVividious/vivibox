@@ -63,12 +63,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   of yours never names a command to the writer. They read no more than a limit either (1 MiB of a
   build file, 64 MiB of a file checked whole, 1 GiB of a risky file hashed in small chunks), so a
   huge or sparse file costs no memory; a risky file past 64 MiB is still checked, and its diff
-  says it is too large to show and where to read a copy of it as text, not in your IDE. One check,
-  one view of the details and one approval each read no more than 1 GiB of all their files
-  together, so many large files cannot keep a verification or the view busy for minutes; the view
-  and `p` hash each risky file once. A file past that is not checked, and says so: such a risky
-  file stays changed and cannot be approved, and the verification stops for you with why, with no
-  round of the writer's spent; an untracked one fails the verification. A file
+  says it is too large to show and where to read a copy of it as text, not in your IDE. A new or
+  changed risky file that vivibox could neither show nor copy for you whole cannot be approved.
+  One verification (its risky and untracked files together), one view of the details and one
+  approval each read no more than 1 GiB of all their files, so many large files cannot keep a
+  verification or the view busy for minutes; the view and `p` hash each risky file once. A file
+  past that is not checked, and says so: such a risky file stays changed and cannot be approved,
+  and the verification stops for you with why, with no round of the writer's spent; an untracked
+  one fails the verification. A file
   vivibox did not read counts against the check, never for it: the verification lists it as not
   checked, and a risky file too large to verify, or a risky link out of the repository that your
   checkout's base commit of the task does not have with that target, stays changed and cannot be
@@ -77,8 +79,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   it left unread for its size. A review in your agent's CLI reads vivibox's own copies of the
   checklist, the red evidence and the writer's reply, and its prompt says which one was left out
   and why.
-- A verification that could not run (a program missing, Docker down, a file vivibox does not
-  write through) no longer counts as passed: the whole build before your review no longer sends
+- A verification that could not run (a program missing, no command to run, a handoff file vivibox
+  does not read through) no longer counts as passed: the whole build before your review no longer sends
   the work to you as ready when it never ran, no commit is taken as verified by it, and
   `vivibox verify` exits 1.
 

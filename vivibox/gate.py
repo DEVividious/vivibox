@@ -307,9 +307,9 @@ def _diff_lines(repo_dir: Path, base: str, sign: str):
             number += 1
 
 
-def hidden_characters(repo_dir: Path, base: str) -> list[str]:
+def hidden_characters(repo_dir: Path, base: str, budget: clone_read.Budget | None = None) -> list[str]:
     """Invisible characters in lines added since base, committed or not, and in new untracked files."""
-    found, budget = [], clone_read.Budget()  # one pass of its own: the risky check has another
+    found, budget = [], clone_read.Budget() if budget is None else budget  # the verification's
     for path, number, text in added_lines(repo_dir, base):
         found += _hidden_in(path, number, text)
     untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
@@ -420,6 +420,7 @@ class GateResult:
     switched_off: list[str] = field(default_factory=list)
     uncommitted: list[str] = field(default_factory=list)
     risky: list[Change] = field(default_factory=list)
+    risky_stopped: dict[str, str] = field(default_factory=dict)  # by Approvals.verified alone
     # Required criterion -> the line in criteria.md that looks like it reworded.
     reworded: dict[str, str] = field(default_factory=dict)
     # Why the build was not run, when it was not: what made it meaningless.
@@ -453,7 +454,7 @@ class GateResult:
             and not self.uncommitted
             and not self.no_red_evidence
             and not self.narrowed
-            and not self.environment
+            and not (self.environment or self.risky_stopped)
         )
 
     def summary(self) -> dict:
@@ -469,6 +470,7 @@ class GateResult:
             "log": self.log.name,
             "build_skipped": self.build_skipped,
             "environment": self.environment,
+            "risky_stopped": self.risky_stopped,
             "narrowed": self.narrowed,
             "no_red_evidence": len(self.no_red_evidence),
             "removed_tests": len(self.removed_tests),
@@ -641,13 +643,13 @@ def run_gate(
     result.missing_criteria = missing_criteria(task) if accepted else ["(the plan is not accepted yet)"]
     result.reworded = reworded_criteria(task, result.missing_criteria) if accepted else {}
     result.commit_problems = commit_problems(task.repo, st.base_commit)
-    result.hidden_characters = hidden_characters(task.repo, st.base_commit)
+    budget = clone_read.Budget()  # one for the verification: its risky files, then untracked ones
+    result.risky, result.risky_stopped = Approvals(task.meta, task.repo, risky_extra).verified(budget)
+    result.hidden_characters = hidden_characters(task.repo, st.base_commit, budget)
     result.no_red_evidence = red_evidence_missing(task, st.base_commit) if accepted else []
     if accepted and (refused := handoff.refused(task.meta / "handoff", CRITERIA_FILE, "red.md")):
         result.environment = f"{result.environment}; {refused}" if result.environment else refused
     result.removed_tests = removed_tests(task.repo, st.base_commit)
-    result.risky, unread = Approvals(task.meta, task.repo, risky_extra).verified()
-    result.environment = "; ".join(filter(None, [result.environment, unread]))  # past the scan's budget
     built = {"commit": head, "commands": commands, "toolchain": toolchain} if not result.build_skipped else {}
     reused = {"reused": result.log.name} if result.unchanged else {}
     took = {"seconds": round(time.monotonic() - began, 1)}
@@ -785,7 +787,7 @@ def why_red(result: GateResult) -> str:
 
 def next_state(result: GateResult, rounds: int, max_rounds: int) -> State:
     """rounds: the fix turns the writer has had; another only while they are under the limit."""
-    if result.environment:
+    if result.environment or result.risky_stopped:
         # Nothing the agent could commit would change it: for you, and no round is spent.
         return State.CHECKPOINT_BLOCKED
     if not result.passed:

@@ -45,6 +45,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   verification with no word: git there gets a minute, and then the task waits for you with
   "verification could not run", the file named and no round spent. Bringing the work back, and
   closing a box, stop with the same reason instead of hanging.
+- The verification's and the reviewer's own clones of the task's clone, and the verification's
+  fetch of its submodules, no longer wait forever on such a file: past ten minutes their
+  container goes down, and the verification waits for you, or the review stops on an error that
+  names the file.
 - A plan brought in twice, by the supervisor from the file your CLI wrote and then by
   `vivibox plan import`, counts once: one goal, one planning in the CLI usage.
 - `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing

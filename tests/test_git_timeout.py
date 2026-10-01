@@ -301,3 +301,97 @@ def test_what_the_verification_asks_the_clone_before_it_runs_ends_it_the_same_wa
     result = in_time(lambda: sup.ports.run_gate(t))
     assert isinstance(result, gate.GateResult), f"the verification raised instead: {result!r}"
     assert not result.passed and "did not answer" in result.environment and built == []
+
+
+class BlockingDocker:
+    """docker as the pod runs it, where git in a container that copies the clone waits on it until
+    the container is removed, as git on a FIFO does. The FIFO is made as git starts there: by a
+    process the agent left in its pod, after every check the host made."""
+
+    def __init__(self, clone: Path, waits_on: str):
+        self.clone, self.waits_on = clone, waits_on
+        self.calls: list[list[str]] = []
+        self.waiting: dict[str, threading.Event] = {}
+
+    def __call__(self, cmd, timeout=None):
+        cmd = list(cmd)
+        self.calls.append(cmd)
+        if cmd[:3] == ["docker", "rm", "-f"]:
+            for name in cmd[3:]:
+                self.waiting.pop(name, threading.Event()).set()
+        elif cmd[:2] == ["docker", "exec"] and "git" in cmd and cmd[cmd.index("git") + 1] == self.waits_on:
+            fifo(self.clone, ".git/packed-refs")
+            removed = self.waiting[cmd[4]] = threading.Event()  # docker exec -w DIR CONTAINER git …
+            removed.wait(timeout=60)
+            return subprocess.CompletedProcess(cmd, 137, "", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def removed_after(self, container: str, step: str) -> bool:
+        started = next(i for i, c in enumerate(self.calls) if step in c)
+        return ["docker", "rm", "-f", container] in self.calls[started:]
+
+
+def a_pod(task, docker, tmp_path):
+    from vivibox.pod import Pod
+
+    return Pod(
+        task.id, task.repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
+    )
+
+
+@pytest.mark.parametrize("step", ["clone", "submodule"])
+def test_git_in_the_gate_container_that_does_not_answer_ends_the_verification(
+    task, tmp_path, monkeypatch, step
+):
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
+    if step == "submodule":
+        (task.repo / ".gitmodules").write_text('[submodule "lib"]\n\tpath = lib\n\turl = https://x/y.git\n')
+        subprocess.run(["git", "add", ".gitmodules"], cwd=task.repo, check=True)
+        subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "Add lib"],
+                       cwd=task.repo, check=True)  # fmt: skip
+    docker = BlockingDocker(task.repo, step)
+    pod = a_pod(task, docker, tmp_path)
+    result = in_time(lambda: gate.run_gate(task, pod, ["make test"], []))
+    assert isinstance(result, gate.GateResult), f"the verification raised instead: {result!r}"
+    assert not result.passed and gate.next_state(result, 0, 3) is State.CHECKPOINT_BLOCKED
+    assert result.environment.startswith(f"git {step} did not answer in {LIMIT} s: ")
+    assert ".git/packed-refs is a named pipe (FIFO)" in result.environment
+    assert docker.removed_after(pod.gate, step), "the gate container, and git in it, went down"
+    assert not [c for c in docker.calls if "make test" in " ".join(c)], "nothing built"
+
+
+def test_the_reviewers_clone_of_a_clone_that_does_not_answer_stops_the_round_for_you(
+    task, tmp_path, monkeypatch
+):
+    from test_supervisor import BLOCKING, reviewed
+
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
+    sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING])
+    docker = BlockingDocker(task.repo, "clone")
+    pod = a_pod(task, docker, tmp_path)
+
+    def review_up():
+        pod.review_fresh()
+        pod.review_start([], {})
+        return tmp_path / "review-out"
+
+    sup.ports.review_up = review_up
+    sup.step()  # implement
+    sup.step()  # verify: passes, so the reviewer is next
+    assert task.read_state().state is State.REVIEW
+
+    class Stopped(Exception):
+        pass
+
+    def stop_once_paused(st):
+        if st.paused:
+            raise Stopped
+
+    ended = in_time(lambda: sup.run(poll=0, on_step=stop_once_paused))
+    assert isinstance(ended, Stopped), f"the round did not stop for you: {ended!r}"
+    st = task.read_state()
+    assert st.state is State.REVIEW and st.reviews == 0, "no review taken, empty or passing"
+    assert "git clone did not answer" in st.problem and ".git/packed-refs" in st.problem
+    assert "git clone did not answer" in notes[-1]
+    assert reviewer.prompts == [] and not (task.meta / "handoff" / "review-1.md").exists()
+    assert docker.removed_after(pod.review, "clone"), "the review container, and git in it, went down"

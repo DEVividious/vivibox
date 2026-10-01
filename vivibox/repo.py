@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .pod import Mount
+from .podspec import Mount
 
 # Settings a fresh clone needs; everything else in the source repo's local config is dropped.
 CONFIG_ALLOWLIST = (
@@ -51,6 +51,10 @@ class GitTimeout(RepoError):
 # there answers in well under a second on an ordinary repository and in seconds on a large one;
 # a named pipe where git reads its settings or refs makes git wait forever.
 CLONE_TIMEOUT = 60.0
+# Seconds git in a container may take to copy the clone (the gate's and the reviewer's clone of it,
+# the submodules): it copies every object without hard links and checks the tree out, and fetches
+# submodules over the network, which on a repository of gigabytes takes a minute or more.
+COPY_TIMEOUT = 600.0
 
 
 def git(
@@ -128,6 +132,11 @@ def special_files(clone: Path) -> list[tuple[str, str]]:
         if seen > LOOKED_AT:
             break
     return found
+
+
+def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path) -> GitTimeout:
+    """The error for git, run with args, that did not answer in seconds on the clone."""
+    return GitTimeout(_unanswered(list(args), seconds, clone))
 
 
 def _unanswered(args: list[str], seconds: float, clone: Path) -> str:

@@ -418,3 +418,38 @@ def test_a_project_jdk_still_beats_the_image_default(env):
         assert "17." in got, f"the project JDK has to come first on PATH: {got}"
     finally:
         pod.remove()
+
+
+def test_a_fifo_in_the_clone_ends_the_gates_clone_in_time_and_takes_the_gate_down(env, monkeypatch):
+    """A process the agent left running makes .git/packed-refs a named pipe after the host's
+    checks: the gate's clone of the clone waits on it, and past its limit goes down with the gate."""
+    from vivibox import repo
+
+    pod, packed = env["pod"], env["repo"] / ".git" / "packed-refs"
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", 5, raising=False)  # the red run has none
+    kept = packed.read_bytes() if packed.exists() else None
+    packed.unlink(missing_ok=True)
+    os.mkfifo(packed)
+    done = []
+
+    def up():
+        try:
+            pod.gate_up()
+            done.append(None)
+        except Exception as e:
+            done.append(e)
+
+    try:
+        worker = threading.Thread(target=up, daemon=True)
+        worker.start()
+        worker.join(timeout=60)
+        assert done, "the gate's clone hung on the named pipe"
+        assert isinstance(done[0], repo.GitTimeout), f"not a timeout: {done[0]!r}"
+        assert str(done[0]).startswith("git clone did not answer in 5 s: ")
+        assert ".git/packed-refs is a named pipe (FIFO)" in str(done[0])
+        assert pod._state(pod.gate) is None, "the gate, and the git waiting in it, are gone"
+    finally:
+        packed.unlink()
+        if kept is not None:
+            packed.write_bytes(kept)
+        pod.gate_down()

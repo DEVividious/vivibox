@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import podspec
+from . import podspec, repo
 from .config import DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
@@ -148,6 +148,32 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     ) -> subprocess.CompletedProcess:
         # The keyword only when there is one: runners that know no time limit (tests) keep working.
         p = self.runner(cmd, timeout=timeout) if timeout else self.runner(cmd)
+        if check and p.returncode != 0:
+            raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
+        return p
+
+    def _copying_clone(
+        self, down: Callable[[], None], *cmd: str, check: bool = True
+    ) -> subprocess.CompletedProcess:
+        """A docker exec of git that reads the task's clone, which the agent writes (a named pipe
+        there makes git wait forever): past repo.COPY_TIMEOUT the container is taken down, and
+        git in it with it, and GitTimeout says why. Any runner: nothing waits on its time limit."""
+        expired = threading.Event()
+
+        def expire() -> None:
+            expired.set()
+            down()
+
+        timer = threading.Timer(repo.COPY_TIMEOUT, expire)
+        timer.daemon = True
+        timer.start()
+        try:
+            p = self._run(*cmd, check=False)
+        finally:
+            timer.cancel()
+            timer.join()  # a container being taken down is gone before anyone is told
+        if expired.is_set():  # even had git just finished: the container is gone
+            raise repo.timed_out(cmd[cmd.index("git") + 1 :], repo.COPY_TIMEOUT, self.repo)
         if check and p.returncode != 0:
             raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
         return p
@@ -297,10 +323,13 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     def gate_exec(
         self, *cmd: str, check: bool = True, workdir: str = "", timeout: float | None = None
     ) -> subprocess.CompletedProcess:
-        """timeout: raises subprocess.TimeoutExpired; the command inside goes down with the container."""
-        return self._run(
-            "docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd, check=check, timeout=timeout
-        )
+        """timeout: raises subprocess.TimeoutExpired; the command inside goes down with the container.
+        git, which here reads the task's clone (the clone of it, its submodules), is bounded
+        without one: past repo.COPY_TIMEOUT the gate goes down and GitTimeout says why."""
+        exec_ = ("docker", "exec", "-w", workdir or self.gate_src, self.gate, *cmd)
+        if timeout is None and cmd[:1] == ("git",):
+            return self._copying_clone(self.gate_down, *exec_, check=check)
+        return self._run(*exec_, check=check, timeout=timeout)
 
     def gate_stream(
         self, *cmd: str, sink: Callable[[str], None], workdir: str = "", timeout: float | None = None
@@ -341,8 +370,9 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     def review_start(self, mounts: list[Mount], env: dict[str, str]) -> None:
         """The reviewer's container, with a fresh clone of the task branch in it."""
         self._run(*self.review_command(mounts, env))
-        self._run("docker", "exec", "-w", str(self.review_dir), self.review, "git", "clone", "--quiet",
-                  "--no-hardlinks", str(self.repo), self.review_src)  # fmt: skip
+        where = ("docker", "exec", "-w", str(self.review_dir), self.review)
+        clone = ("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.review_src)
+        self._copying_clone(self.review_down, *where, *clone)
 
     def review_down(self) -> None:
         self._run("docker", "rm", "-f", self.review, check=False)

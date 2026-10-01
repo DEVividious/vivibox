@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from . import gate, orchestration, reviewing, ui
+from . import gate, handoff, orchestration, reviewing, ui
 from .config import ConfigError, load_config
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -79,9 +79,12 @@ def reviewers_notes(task: Task) -> list[str]:
     path = reviewing.latest(task)
     if path is None:
         return []
-    text = path.read_text()
-    review = reviewing.parse_review(text)
     n = reviewing.NUMBERED.match(path.name).group(1)
+    try:
+        text = handoff.read_text(path)
+    except handoff.HandoffError as e:  # read as no notes, it would look like a clean review
+        return ["", f"#### Review {n}: not read", "", str(e)]
+    review = reviewing.parse_review(text)
     # Its title is the section's; its own headings go under it.
     kept = "\n".join(
         line for line in text.rstrip().splitlines() if not re.fullmatch(r"#+\s*Review\s+\d+\s*", line)

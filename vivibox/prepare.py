@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from . import handoff
 from .config import Project
 from .task import Task
 
@@ -25,9 +26,10 @@ class Preparing(Protocol):
 
 
 def ending(task: Task) -> int | None:
-    """The exit code the commands ended with; None while they have not ended."""
+    """The exit code the commands ended with; None while they have not ended, and for a link or a
+    special file in its place, which is never read."""
     try:
-        return int((task.meta / "handoff" / EXIT).read_text().strip())
+        return int(handoff.read_text(task.meta / "handoff" / EXIT).strip())
     except (OSError, ValueError):
         return None
 

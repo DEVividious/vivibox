@@ -51,6 +51,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the details never show what such a file points to or wait on it. Run app reads its instruction
   and its conversation the same way, so a link's file never reaches the pod, and `v` says why
   instead of closing the view.
+- vivibox reads the files an agent or the reviewer hands over (its question, plan draft, review,
+  checklist, red evidence, proposed command, report for your chat, the preparation's log) without
+  following a link or waiting on a FIFO or a device: such a file counts as missing, never as
+  something more, and the details, `l` or the verification say which file it is and why. A
+  link in place of the reviewer's folder is refused too, and accepting a task leaves such a file
+  out of the history, where the timeline names it.
 
 ### Internal
 

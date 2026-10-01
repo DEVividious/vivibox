@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, feedback, gate, manual, orchestration, proposal, transcript, ui
+from . import brief, feedback, gate, handoff, manual, orchestration, proposal, transcript, ui
 from . import init as project_init
 from .config import DEFAULT_VERIFY_TIMEOUT, Project, by_modules
 from .harness import Harness, HarnessError, Turn
@@ -114,20 +114,15 @@ def accept_command(task: Task, command: str, reason: str) -> None:
     task.transition(State.VERIFY, reason=reason, command=command)
 
 
-def _read(path: Path) -> str:
-    try:
-        return path.read_text()
-    except OSError:
-        return ""
-
-
 def _notes(n: int) -> str:
     return ui.count(n, "blocking note")
 
 
 def question(task: Task) -> str | None:
+    """The agent's question; for a link or a special file in its place, why vivibox did not read
+    it, which stops the task for you as a question does."""
     path = task.meta / "handoff" / QUESTION
-    text = path.read_text().strip() if path.exists() else ""
+    text = handoff.for_you(path) if path.exists() else ""
     return text or None
 
 
@@ -416,7 +411,7 @@ class Supervisor(ReviewRound):
         if q := question(self.task):
             self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
             return
-        plan, problem = self._read_draft()
+        text, plan, problem = self._read_draft()
         if problem:
             # One turn to fix what acceptance would refuse anyway (the placeholder left in, no
             # criteria, no verify command): cheaper than your reply, and once, not a loop. What
@@ -427,23 +422,21 @@ class Supervisor(ReviewRound):
             if q := question(self.task):
                 self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
                 return
-            plan, problem = self._read_draft()
+            text, plan, problem = self._read_draft()
         if problem:
             # The planner's draft, when it is a plan at all, is what you fix under e: one line short
             # of acceptable is not a reason to start again from the template.
-            draft = self.task.meta / "handoff" / "plan-draft.md"
             try:
-                parse_plan(draft.read_text())
-                self.task.plan_path.write_text(without_notes(draft.read_text()))
+                parse_plan(text)
+                self.task.plan_path.write_text(without_notes(text))
             except (OSError, PlanError):
                 pass
             self._checkpoint(
                 State.CHECKPOINT_PLAN, f"no valid plan draft ({problem}); edit the plan yourself or reply"
             )
             return
-        draft = self.task.meta / "handoff" / "plan-draft.md"
         # Without the template's notes: from here the plan is yours to read, not a form to fill.
-        self.task.plan_path.write_text(without_notes(draft.read_text()))
+        self.task.plan_path.write_text(without_notes(text))
         self._plan_ready(st, plan)
 
     def _your_plan(self, st: TaskState) -> Plan | None:
@@ -494,17 +487,19 @@ class Supervisor(ReviewRound):
             return []
 
     def _read_draft(self):
-        """The draft as a plan, or what keeps it from being one: unreadable, or one acceptance
-        would refuse."""
-        draft = self.task.meta / "handoff" / "plan-draft.md"
+        """The draft's text, read once, and the draft as a plan, or what keeps it from being one:
+        unreadable (a link or a special file is not read: its text is ""), or one acceptance would
+        refuse."""
+        text = ""
         try:
-            plan = parse_plan(draft.read_text())
+            text = handoff.read_file(self.task.meta / "handoff" / "plan-draft.md")
+            plan = parse_plan(text)
             gate.check_plan(plan)
         except (OSError, PlanError, gate.GateError) as e:
-            return None, str(e)
+            return text, None, str(e)
         if problem := proposal.modules_missing(plan, self.by_module):
-            return None, problem
-        return plan, ""
+            return text, None, problem
+        return text, plan, ""
 
     def _plan_manually(self, st: TaskState) -> None:
         """You plan in your own chat. A chat in a browser cannot see the repository, so the writer
@@ -601,10 +596,9 @@ class Supervisor(ReviewRound):
             accept_command(self.task, command, "command kept automatically")
             return
         if not command:
-            reason = (
-                f"no command came from the writer: it wrote none to /task/handoff/{proposal.PROPOSAL};"
-                " type one, or send it back"
-            )
+            none = f"it wrote none to /task/handoff/{proposal.PROPOSAL}"
+            why = handoff.refused(self.task.meta / "handoff", proposal.PROPOSAL) or none
+            reason = f"no command came from the writer: {why}; type one, or send it back"
         elif selection:
             reason = (
                 f"command proposed: `{command}`, {gate.proposal_fault(selection)}; change it, or send it back"

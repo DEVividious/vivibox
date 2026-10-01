@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from . import gate, reviewing, ui
+from . import gate, handoff, reviewing, ui
 from . import supervisor as _sup
 from .prompts import REVIEW_AGAIN_PREFIX, REVIEW_FIX_PROMPT, REVIEW_PROMPT, REVIEW_REPAIR_PROMPT
 from .states import State
@@ -29,17 +29,17 @@ class ReviewRound:
             out = self.task.meta / "review"
             out.mkdir(exist_ok=True)
             (out / "review.md").unlink(missing_ok=True)  # the last round's, or the supervisor reads it
-            text = self._review_turns(st, n, out)
+            said = self._review_turns(st, n, out)
         else:
             out = self.ports.review_up()
             try:
                 self.task.set_session("reviewer", "")  # the last round's server is gone with its container
-                text = self._review_turns(st, n, out)
+                said = self._review_turns(st, n, out)
             finally:
                 self.ports.review_down()
-        if text is None:
+        if said is None:
             return
-        self._decide(st, n, text)
+        self._decide(st, n, *said)
 
     def _reviews_in_cli(self) -> bool:
         """The supervisor is you in an agent's CLI, planned there (ADR-0035): no model to run."""
@@ -72,11 +72,13 @@ class ReviewRound:
         self._decide(self.task.read_state(), st.reviews + 1, text)
         return True
 
-    def _decide(self, st: TaskState, n: int, text: str) -> None:
-        """What a round's review decides: back to the writer while there are rounds, else to you."""
-        reviewing.keep(self.task, n, text)
+    def _decide(self, st: TaskState, n: int, text: str, refused: str = "") -> None:
+        """What a round's review decides: back to the writer while there are rounds, else to you.
+        refused: why the reviewer's file was not read, which makes it a review that is not one, and
+        is what the round keeps for you to read instead."""
+        reviewing.keep(self.task, n, text or refused)
         self.task.set_reviews(n)
-        problem = reviewing.problem(text)
+        problem = refused or reviewing.problem(text)
         review = reviewing.parse_review(text) if not problem else reviewing.Review()
         blocking, others = len(review.blocking), len(review.not_blocking)
         self.task.event("review", round=n, blocking=blocking, not_blocking=others, problem=problem)
@@ -97,21 +99,22 @@ class ReviewRound:
             State.CHECKPOINT_FINAL, f"{self._review_message(self.last_gate)}; {said}", kind="review"
         )
 
-    def _review_turns(self, st: TaskState, n: int, out: Path) -> str | None:
-        """The reviewer's turn, and one more when what it wrote is not a review; None when a turn
-        failed and the task stopped."""
+    def _review_turns(self, st: TaskState, n: int, out: Path) -> tuple[str, str] | None:
+        """The reviewer's turn, and one more when what it wrote is not a review: its text, and why
+        it was not read when it is a link or a special file. None when a turn failed and the task
+        stopped."""
         st = self.task.read_state()
         prompt = REVIEW_PROMPT.format(base=st.base_commit)
         if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
             prompt = REVIEW_AGAIN_PREFIX + prompt
         if self._turn(st, prompt, role="reviewer") is None:
             return None
-        text = _sup._read(out / "review.md")
-        if problem := reviewing.problem(text):
+        text, refused = _written(out)
+        if problem := refused or reviewing.problem(text):
             if self._turn(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
                 return None
-            text = _sup._read(out / "review.md")
-        return text
+            text, refused = _written(out)
+        return text, refused
 
     def _review_message(self, result: gate.GateResult | None = None) -> str:
         # Tests that went missing are said here, not to the agent, which would put them back.
@@ -126,3 +129,12 @@ class ReviewRound:
         if path is None:
             return f"work ready for your review{gone}: vivibox review {self.task.id}"
         return f"work ready for your review in {path}{gone}"
+
+
+def _written(out: Path) -> tuple[str, str]:
+    """The reviewer's review.md and "", or "" and why it was not read. The reviewer can put a link
+    in place of out itself, so the walk starts at the folder out is in, which it cannot replace."""
+    try:
+        return handoff.read_text(out / "review.md", root=out.parent), ""
+    except OSError as e:
+        return "", str(e)

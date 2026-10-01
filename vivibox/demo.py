@@ -55,13 +55,6 @@ alone. I will answer and you can carry on. End the turn when demo.md is written,
 question is."""
 
 
-def _read(path: Path) -> str:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return ""
-
-
 @dataclass
 class Demo:
     """What happened when the project was started for you to look at."""
@@ -163,7 +156,10 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
             f"the agent wrote {len(text)} characters of instruction; that is documentation, not a "
             f"note on how to start the project. Ask it again, or write {DEMO_FILE} yourself"
         )
-    return text, _read(folder / DEMO_QUESTION)
+    try:  # a FIFO would hold run app; a link's file would read as the agent's question to you
+        return text, handoff.read_text(folder / DEMO_QUESTION).strip()
+    except handoff.HandoffError as e:
+        raise PodError(str(e)) from e
 
 
 def demo_allowed(st: TaskState) -> bool:

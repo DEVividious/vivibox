@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from . import look, prepare, reviewing, timeline, transcript
+from . import handoff, look, prepare, reviewing, timeline, transcript
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
@@ -24,6 +24,9 @@ VERIFICATION_OVER = (
 )
 EXIT = re.compile(r"^\[exit (-?\d+)( after ([^\]]+))?\]$", re.MULTILINE)
 ITERATION = re.compile(r"^verify-(\d+)-")
+# What l says of a file the agent left in handoff/ that vivibox does not read: the dialog's line is
+# too short for the whole path in front of it.
+NOT_READ = "not read: a link or not a plain file; delete it"
 
 
 @dataclass(frozen=True)
@@ -76,17 +79,26 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
     for i, log in enumerate(logs):
         follow = verifying and i == 0
         found.append(Entry(log.name, describe(log), pager_command(log, follow=follow, at_end=not follow)))
-    handoff = task.meta / "handoff"
-    reviews = [
-        (m.group(1), p) for p in handoff.glob("review-*.md") if (m := reviewing.NUMBERED.match(p.name))
-    ]
+    folder = task.meta / "handoff"
+    reviews = [(m.group(1), p) for p in folder.glob("review-*.md") if (m := reviewing.NUMBERED.match(p.name))]
     for n, path in sorted(reviews, key=lambda r: int(r[0]), reverse=True):
-        review = reviewing.parse_review(path.read_text())
+        try:
+            review = reviewing.parse_review(handoff.read_text(path))
+        except handoff.HandoffError:  # said, and no pager on it: a FIFO would hold it
+            found.append(Entry(path.name, NOT_READ, []))
+            continue
         said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
         found.append(Entry(path.name, said, pager_command(path)))
-    prepared = handoff / prepare.LOG
+    prepared = folder / prepare.LOG
     preparing = prepare.underway(task)
-    if prepared.exists():
+    try:
+        lines = handoff.read_file(prepared, errors="replace").count("\n")
+    except FileNotFoundError:
+        lines = None
+    except handoff.HandoffError:
+        found.append(Entry(prepare.LOG, NOT_READ, []))
+        lines = None
+    if lines is not None:
         code = prepare.ending(task)
         how = (
             "running"
@@ -97,7 +109,6 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
             if code == 0
             else f"failed, exit {code}"
         )
-        lines = prepared.read_text(errors="replace").count("\n")
         said = f"the project's preparation · {how} · {lines} lines"
         found.append(
             Entry(prepare.LOG, said, pager_command(prepared, follow=preparing, at_end=not preparing))

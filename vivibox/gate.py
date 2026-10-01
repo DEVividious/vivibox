@@ -172,10 +172,10 @@ def missing_criteria(task: Task) -> list[str]:
     if not accepted.exists():
         raise GateError("the plan has not been accepted yet")
     required = [c.text for c in parse_plan(accepted.read_text()).criteria]
-    reported = task.meta / "handoff" / CRITERIA_FILE
-    ticked = set()
-    if reported.exists():
-        ticked = {c.text for c in checkboxes(reported.read_text()) if c.done}
+    # A link or a special file in its place ticks nothing; run_gate says why.
+    ticked = {
+        c.text for c in checkboxes(handoff.read_or_nothing(task.meta / "handoff" / CRITERIA_FILE)) if c.done
+    }
     return [c for c in required if c not in ticked]
 
 
@@ -183,10 +183,7 @@ def reworded_criteria(task: Task, missing: list[str]) -> dict[str, str]:
     """Missing criteria that the agent's checklist carries in other words. An agent that reworded
     an item and ticked it would otherwise be told only that it is not ticked, and tick the same
     reworded line again."""
-    reported = task.meta / "handoff" / CRITERIA_FILE
-    if not reported.exists():
-        return {}
-    lines = [c.text for c in checkboxes(reported.read_text())]
+    lines = [c.text for c in checkboxes(handoff.read_or_nothing(task.meta / "handoff" / CRITERIA_FILE))]
     found = {}
     for required in missing:
         close = difflib.get_close_matches(required, lines, n=1, cutoff=0.8)
@@ -380,8 +377,7 @@ def changed_test_files(repo_dir: Path, base: str) -> list[str]:
 def red_evidence_missing(task: Task, base: str) -> list[str]:
     """Changed test files that red.md does not name, by path or by file name. The gate holds the
     writer to naming each file; whether the evidence is real is yours to read."""
-    red = task.meta / "handoff" / "red.md"
-    text = red.read_text() if red.exists() else ""
+    text = handoff.read_or_nothing(task.meta / "handoff" / "red.md")  # refused: names no file
     return [
         path
         for path in changed_test_files(task.repo, base)
@@ -643,6 +639,8 @@ def run_gate(
     result.commit_problems = commit_problems(task.repo, st.base_commit)
     result.hidden_characters = hidden_characters(task.repo, st.base_commit)
     result.no_red_evidence = red_evidence_missing(task, st.base_commit) if accepted else []
+    if accepted and (refused := handoff.refused(task.meta / "handoff", CRITERIA_FILE, "red.md")):
+        result.environment = f"{result.environment}; {refused}" if result.environment else refused
     result.removed_tests = removed_tests(task.repo, st.base_commit)
     result.risky = Approvals(task.meta, task.repo, risky_extra).changes()
     built = {"commit": head, "commands": commands, "toolchain": toolchain} if not result.build_skipped else {}

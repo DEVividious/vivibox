@@ -198,6 +198,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = f"you: {len(data.get('criteria') or [])} criteria added"
         elif kind == "plan_imported":
             text = "you: plan brought in"
+        elif kind == "not_kept":
+            text = f"{data.get('file')} not kept in the history: a link or not a plain file"
         elif kind == "auto_plan":
             text = "auto: the plan is accepted without you" if data.get("enabled") else "auto off"
         else:

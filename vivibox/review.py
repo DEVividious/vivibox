@@ -19,6 +19,7 @@ from . import (
     actions,
     cli_usage,
     gate,
+    handoff,
     ide,
     repo,
     timeline,
@@ -139,17 +140,30 @@ def archive(task: Task) -> Path:
     kept = archive_path(task.id)
     kept.mkdir(parents=True, exist_ok=True)
     for name in ARCHIVED:
-        source = task.meta / name
-        if source.is_file():
-            shutil.copy2(source, kept / source.name)
+        _keep(task, task.meta / name, kept / Path(name).name)
     for pattern in ARCHIVED_GLOBS:
         for source in task.meta.glob(pattern):
             target = kept / ("log" if pattern.startswith("log/") else "") / source.name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            _keep(task, source, target)
     with contextlib.suppress(OSError, ValueError):
         (kept / "timeline.txt").write_text(timeline.render(task))
     return kept
+
+
+def _keep(task: Task, source: Path, target: Path) -> None:
+    """One of the task's files, kept. One the agent names in handoff/ is never copied through a
+    link or waited on: a link or a special file is left out, and the timeline says so."""
+    if source.parent.name != "handoff":
+        if source.is_file():
+            shutil.copy2(source, target)
+        return
+    try:
+        handoff.copy_out(source, target)
+    except FileNotFoundError:
+        pass
+    except handoff.HandoffError:
+        task.event("not_kept", file=f"handoff/{source.name}")
 
 
 def accepted_criteria(task: Task) -> list[str]:

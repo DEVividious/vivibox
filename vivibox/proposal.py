@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import repo
+from . import handoff, repo
 from .config import MODULES_TOKEN, Project, by_modules
 from .gate import ACCEPTED_PLAN
 from .gate import narrowed_proposal as narrowed_proposal_in
@@ -26,9 +26,10 @@ INLINE = re.compile(r"`([^`]+)`")
 def proposed(task: Task) -> str:
     """The command the writer wrote, its first line, without what a model puts around it in a
     Markdown file: a heading, a fenced block and its language, a comment in it, a list marker, a
-    sentence around a command in backticks, the prompt sign; "" for none."""
+    sentence around a command in backticks, the prompt sign; "" for none, and for a link or a
+    special file in its place, which is never read: its first line would run in the gate."""
     try:
-        text = (task.meta / "handoff" / PROPOSAL).read_text()
+        text = handoff.read_text(task.meta / "handoff" / PROPOSAL)
     except OSError:
         return ""
     for line in text.splitlines():

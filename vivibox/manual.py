@@ -24,7 +24,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
-from . import cli_usage, gate
+from . import cli_usage, gate, handoff
 from .harness import Harness, HarnessError, Turn
 from .plan import HEADING, PlanError, _split_header, parse_plan, without_notes
 from .task import Task
@@ -129,8 +129,8 @@ def _attachments(task: Task) -> list[Path]:
 
 def prompts(task: Task, source: Path, project_verify: list[str] | tuple = ()) -> tuple[str, str]:
     """The prompt for a browser chat and the one for a CLI in your checkout at source."""
-    context = task.meta / "handoff" / CONTEXT
-    found = context.read_text().strip() if context.exists() else ""
+    # A link or a special file in its place is no report: never read, and the details say why.
+    found = handoff.read_or_nothing(task.meta / "handoff" / CONTEXT).strip()
     attached = _attachments(task)
 
     web = [

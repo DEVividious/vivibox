@@ -30,6 +30,7 @@ from . import (
 from . import pod as pod_module
 from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
+from .handoff import for_you, refused
 from .handoff import read_text as read_handoff
 from .plan import body as plan_body
 from .plan import parse_plan
@@ -181,8 +182,12 @@ def command_to_review(task: Task) -> list[str]:
     about it, and that keeping it settles the project's verification."""
     command = proposal.proposed(task)
     if not command:
+        why = (
+            refused(task.meta / "handoff", proposal.PROPOSAL)
+            or f"it wrote none to `/task/handoff/{proposal.PROPOSAL}`"
+        )
         return [
-            f"**No command came from the writer:** it wrote none to `/task/handoff/{proposal.PROPOSAL}`.",
+            f"**No command came from the writer:** {why}.",
             "Type the one that builds the project and runs its tests, or ask the writer for one.",
             "",
         ]
@@ -659,14 +664,14 @@ def detail(
             # before it goes to another provider. The CLI prompt carries none of it.
             "#### What the browser prompt tells the chat about the repository",
             "",
-            read(handoff / manual.CONTEXT) or "Nothing: this is a new project.",
+            for_you(handoff / manual.CONTEXT) or "Nothing: this is a new project.",
             "",
             "#### The plan to fill in",
             "",
             plan_text(read(task.plan_path)),
         ]
     elif ui.planner_asks(task, st):
-        body = ["**The agent asks, instead of a plan:**", "", read(handoff / supervisor.QUESTION)]
+        body = ["**The agent asks, instead of a plan:**", "", for_you(handoff / supervisor.QUESTION)]
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
         body = [*plans_verify(task, st), plan_text(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_COMMAND:
@@ -698,7 +703,7 @@ def detail(
             *(f"```diff\n{d.rstrip()}\n```" for d in diffs),
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
-        question = read(handoff / supervisor.QUESTION)
+        question = for_you(handoff / supervisor.QUESTION)
         broken = ui.environment_problem(task)
         body = (
             ["**The agent asks:**", "", question]

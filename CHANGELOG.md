@@ -64,7 +64,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   build file, 64 MiB of a file checked whole, 1 GiB of a risky file hashed in small chunks), so a
   huge or sparse file costs no memory; a risky file past 64 MiB is still checked, and its diff
   says it is too large to show and where to read a copy of it as text, not in your IDE. A new or
-  changed risky file that vivibox could neither show nor copy for you whole cannot be approved.
+  changed risky file, or what a risky link inside the repository points to, can be approved only
+  when vivibox showed it to you or copied it for you whole, the very content it approves.
   One verification (its risky and untracked files together), one view of the details and one
   approval each read no more than 1 GiB of all their files, so many large files cannot keep a
   verification or the view busy for minutes; the view and `p` hash each risky file once. A file

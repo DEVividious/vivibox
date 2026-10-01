@@ -231,15 +231,23 @@ def as_committed(root: Path, path: Path | str, budget: Budget | None = None) -> 
 
 
 def copy(
-    root: Path, path: Path | str, target: Path, limit: int = CHECK_LIMIT, budget: Budget | None = None
-) -> None:
-    """A plain file of the repository, copied to a place of the host's own; never a link's file,
-    nor one past limit. What is zeros stays a hole, so a sparse file costs no more disk here."""
-    chunks = _chunks(root, path, limit, follow=False, budget=budget)
+    root: Path,
+    path: Path | str,
+    target: Path,
+    limit: int = CHECK_LIMIT,
+    budget: Budget | None = None,
+    follow: bool = False,
+) -> str:
+    """A plain file of the repository, copied to a place of the host's own; a link's file only
+    with follow, and only while the link stays inside the repository; never one past limit. What
+    is zeros stays a hole, so a sparse file costs no more disk here. The digest of what it wrote."""
+    chunks = _chunks(root, path, limit, follow=follow, budget=budget)
     first = next(chunks, b"")  # refused before anything is written
+    digest = hashlib.sha256()
     try:
         with open(target, "wb") as file:
             for chunk in itertools.chain([first], chunks):
+                digest.update(chunk)
                 if chunk.count(0) == len(chunk):
                     file.seek(len(chunk), os.SEEK_CUR)
                 else:
@@ -248,3 +256,4 @@ def copy(
     except Refused:  # grew past limit while it was copied
         target.unlink(missing_ok=True)
         raise
+    return digest.hexdigest()

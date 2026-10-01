@@ -1546,3 +1546,96 @@ def test_your_unchanged_file_past_the_limits_is_not_held_to_being_shown(env, mon
     Approvals(t.meta, t.repo).approve()
     (t.repo / "pom.xml").write_text("<project/>\n")
     assert actions.approve_risky(t, SimpleNamespace(risky_extra=[]))[0] == 1
+
+
+# --- review round 9: what you approve is what vivibox showed you -----------------------------------
+
+P = SimpleNamespace(risky_extra=[])
+
+
+def approved_gradle(task) -> Path:
+    (task.repo / "build.gradle").write_text("plugins {}\n")
+    Approvals(task.meta, task.repo).approve()
+    return task.repo / "build.gradle"
+
+
+def test_a_risky_link_to_a_large_file_in_the_repository_is_held_like_that_file(task, monkeypatch):
+    from vivibox import actions
+
+    gradle = approved_gradle(task)
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 100 << 20)  # its hash fits, a copy does not
+    with open(sparse(task.repo / "data" / "blob.txt", 70 << 20), "r+b") as file:
+        file.write(b"plugins { id 'evil' }\n")
+    gradle.unlink()
+    gradle.symlink_to("data/blob.txt")
+    said = "\n".join(actions.risky_diffs(task, P))
+    assert "could not copy it for you to read: scan budget exceeded" in said
+    before = Approvals(task.meta, task.repo).approved()
+    with pytest.raises(risky.Unapprovable, match="build.gradle"):
+        actions.approve_risky(task, P)
+    assert Approvals(task.meta, task.repo).approved() == before
+
+
+def test_a_risky_link_to_a_small_file_in_the_repository_shows_what_it_points_to(task):
+    from vivibox import actions
+
+    gradle = approved_gradle(task)
+    (task.repo / "data").mkdir()
+    (task.repo / "data" / "real.txt").write_text("plugins { id 'java' }\n")
+    gradle.unlink()
+    gradle.symlink_to("data/real.txt")
+    said = actions.risky_diffs(task, P)[0]
+    assert "symlink to data/real.txt" in said and "+plugins { id 'java' }" in said
+    assert actions.approve_risky(task, P)[0] == 1
+
+
+@pytest.mark.parametrize("swap", ["a FIFO", "a link", "binary", "another large file"])
+def test_a_file_swapped_after_p_hashed_it_is_not_approved_unseen(task, monkeypatch, swap):
+    """The agent swaps the file between p's hash and p's showing it, then puts it back: what p
+    would record is what it hashed, which it never showed you."""
+    from vivibox import actions
+
+    gradle = approved_gradle(task)
+    with open(sparse(gradle, 70 << 20), "r+b") as file:
+        file.write(b"plugins { id 'evil' }\n")
+    (task.repo / "data").mkdir()
+    (task.repo / "data" / "small.txt").write_text("plugins {}\n")
+    hidden, real_scan = task.root / "hidden", risky.scan
+
+    def scan_then_swap(*args, **kwargs):
+        now = real_scan(*args, **kwargs)
+        if not hidden.exists():
+            gradle.rename(hidden)  # after its hash closed the file
+            if swap == "a FIFO":
+                os.mkfifo(gradle)
+            elif swap == "a link":
+                gradle.symlink_to("data/small.txt")
+            elif swap == "another large file":  # copied for you whole, but not what was hashed
+                with open(sparse(gradle, 70 << 20), "r+b") as file:
+                    file.write(b"plugins { id 'other' }\n")
+            else:
+                gradle.write_bytes(b"\xff\xfe\x00 not text\n")
+        return now
+
+    before = Approvals(task.meta, task.repo).approved()
+    monkeypatch.setattr(risky, "scan", scan_then_swap)
+    with pytest.raises(risky.Unapprovable, match="build.gradle"):
+        actions.approve_risky(task, P)
+    monkeypatch.setattr(risky, "scan", real_scan)
+    gradle.unlink()
+    hidden.rename(gradle)  # back as it was
+    approvals = Approvals(task.meta, task.repo)
+    assert approvals.approved() == before
+    assert approvals.changes() == [Change("build.gradle", "changed")]
+
+
+def test_the_first_approval_takes_your_repository_as_it_is(tmp_path, monkeypatch):
+    """No approval yet: the task's start, your repository, which nothing holds to being shown."""
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(tmp_path / "config"))  # never your projects
+    source = make_repo(tmp_path / "source")
+    t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    names = five_of_a_mib(t.repo, monkeypatch)
+    approvals = Approvals(t.meta, t.repo)
+    assert approvals.approve_changes() == [Change(n, "added") for n in names]
+    assert sorted(approvals.approved()) == names

@@ -11,8 +11,10 @@ from __future__ import annotations
 import contextlib
 import difflib
 import fnmatch
+import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -129,6 +131,21 @@ def stop_for_the_writer(stop: dict[str, str]) -> str:
         return ""
     named = ", ".join(sorted(stop)[:5]) + (f" and {len(stop) - 5} more" if len(stop) > 5 else "")
     return f"{_stopped(stop)} ({named}): the user decides what happens to them"
+
+
+SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _content(digest: str) -> str | None:
+    """The digest of the bytes an approval of digest takes: a plain file's, or what a link inside
+    the repository points to; None when it takes none (a link to a folder or to nothing, a link
+    out of the repository, a FIFO, a removal)."""
+    if SHA256.fullmatch(digest):
+        return digest
+    tail = digest[-65:]
+    return (
+        tail[1:] if digest.startswith("symlink:") and tail[:1] == ":" and SHA256.fullmatch(tail[1:]) else None
+    )
 
 
 class Unapprovable(Exception):
@@ -415,40 +432,50 @@ class Approvals:
     def _show(
         self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
     ) -> tuple[str, bool]:
-        """change's diff, and whether you could read what it is: a new or changed file is shown, or
-        copied for you whole; one that could not be, for its size or the budget, is no approval's."""
+        """change's diff, and whether you could read what it is: a new or changed file, or what a
+        link inside the repository points to, is shown, or copied for you whole, and what was
+        shown or copied is what the digest an approval records says; one that could not be, for
+        its size or the budget, or that changed meanwhile, is no approval's."""
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
         head = f"{change.path}: {change.kind}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
+        digest = "" if now is None else now.get(change.path, "")
         with contextlib.suppress(OSError):  # gone since: the rest says so
-            digest = _digest(self.repo, new, budget) if now is None else now.get(change.path, "")
+            digest = _digest(self.repo, new, budget) if now is None else digest
             if why := self.unapprovable({change.path: digest}):
                 return f"{head}: {why[change.path]}\n", True  # refused for that already
-        if new.is_symlink():
-            return f"{head}, symlink to {os.readlink(new)}\n", True
+        want, target = _content(digest), clone_read.link(self.repo, new)
+        linked = f"{head}, symlink to {target}\n" if target is not None else ""
+        if target is not None and want is None:  # by its target alone: nothing of it is read
+            return linked, True
         with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
             self.copy_for_you(change.path).unlink(missing_ok=True)
-        try:
-            b = clone_read.read_bytes(self.repo, new, budget=budget).decode().splitlines(keepends=True)
+        changed = "it changed while vivibox read it"
+        try:  # through a link only while it stays inside the repository
+            raw = clone_read.read_bytes(self.repo, new, budget=budget)
         except clone_read.Refused as e:
             if e.kind == clone_read.OVER_BUDGET:
-                return f"{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
+                return f"{linked}{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
-                return f"{head} ({e})\n", True
-            view, seen = self._view(change.path, budget)
-            return f"{head}: {e.kind}, too large to show here; {view}\n", seen
+                return f"{linked}{head} ({e})\n", want is None
+            view, seen = self._view(change.path, budget, want)
+            return f"{linked}{head}: {e.kind}, too large to show here; {view}\n", seen
         except OSError:  # gone, or a folder
-            b = []
-        except UnicodeDecodeError:
-            return f"{change.path}: {change.kind} (binary)\n", True
+            if want is not None:
+                return f"{linked}{head}: not shown: {self._unseen(change.path, changed)}\n", False
+            raw = b""
+        if want is not None and hashlib.sha256(raw).hexdigest() != want:
+            return f"{linked}{head}: not shown: {self._unseen(change.path, changed)}\n", False
         try:
+            b = raw.decode().splitlines(keepends=True)
             a = old.read_text().splitlines(keepends=True) if old.exists() else []
         except UnicodeDecodeError:
-            return f"{change.path}: {change.kind} (binary)\n", True
-        return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}")), True
+            return f"{linked}{change.path}: {change.kind} (binary)\n", True
+        diff = difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}")
+        return linked + "".join(diff), True
 
     def _unseen(self, path: str, why: str = "") -> str:
         """Why the task's change to path cannot be approved when you could not read it, and what
@@ -467,7 +494,9 @@ class Approvals:
         """Where _view copies a risky file of path: the task's metadata, which no container writes."""
         return self.dir / "view" / path
 
-    def _view(self, path: str, budget: clone_read.Budget | None = None) -> tuple[str, bool]:
+    def _view(
+        self, path: str, budget: clone_read.Budget | None = None, want: str | None = None
+    ) -> tuple[str, bool]:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
         task's metadata, where no link of the agent's can be, read as text. Opened in your IDE, a
         build file is imported, which is what approving it is there for. The agent names the
@@ -476,7 +505,9 @@ class Approvals:
         said = "vivibox checks whether it changes, not what it says"
         try:
             view.parent.mkdir(parents=True, exist_ok=True)
-            clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget)
+            copied = clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget, True)
+            if want is not None and copied != want:  # not what an approval would take
+                raise OSError("it changed while vivibox copied it")
         except OSError as e:
             with contextlib.suppress(OSError):
                 view.unlink(missing_ok=True)

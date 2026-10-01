@@ -878,7 +878,7 @@ def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
     said = approvals.diff(Change("build.gradle", "added"))
     assert "larger than 64 MiB, too large to show here" in said
     assert "vivibox checks whether it changes, not what it says" in said
-    assert f"read it at {task.repo / 'build.gradle'} before you approve" in said
+    assert f"less {task.meta / 'risky' / 'view' / 'build.gradle'}" in said
     assert "does not read it" not in said
 
 
@@ -973,3 +973,104 @@ def test_a_project_file_renamed_or_unreadable_is_a_reason_with_the_right_next_st
     approvals = Approvals(t.meta, t.repo)
     assert approvals.changes() == [Change("build.gradle", "changed")], "a reason, not an exception"
     assert "Permission denied" in approvals.diff(Change("build.gradle", "changed"))
+
+
+# --- review round 4 ------------------------------------------------------------------------------
+
+
+def your_linked_gradle(env, monkeypatch) -> tuple:
+    """Your build.gradle and settings.gradle are links to gradle/main.gradle at the base commit."""
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20)
+    source = env / "repo"
+    (source / "gradle").mkdir()
+    (source / "gradle" / "main.gradle").write_text("apply plugin: 'java'\n")
+    for name in ("build.gradle", "settings.gradle"):
+        (source / name).symlink_to("gradle/main.gradle")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Share the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    return t, approvals
+
+
+def test_your_link_whose_file_the_task_made_too_large_is_restored_not_removed(env, monkeypatch):
+    t, approvals = your_linked_gradle(env, monkeypatch)
+    (t.repo / "gradle" / "main.gradle").write_bytes(b"x" * (2 << 20))
+    for name in ("build.gradle", "settings.gradle", "gradle/main.gradle"):
+        said = approvals.diff(Change(name, "changed"))
+        assert "the writer restores it as it was when the task started" in said, name
+        assert "removes it" not in said, name
+
+
+def test_your_link_the_task_replaced_with_a_large_file_is_restored_not_removed(env, monkeypatch):
+    t, approvals = your_linked_gradle(env, monkeypatch)
+    (t.repo / "settings.gradle").unlink()
+    (t.repo / "settings.gradle").write_bytes(b"x" * (2 << 20))
+    said = approvals.diff(Change("settings.gradle", "changed"))
+    assert "the writer restores it as it was when the task started" in said and "removes it" not in said
+
+
+def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task):
+    """Read where the agent cannot change it or put a link in its place, and as text: a build
+    file opened in your IDE is what the approval is there to prevent."""
+    big = sparse(task.repo / "build.gradle")
+    with open(big, "r+b") as file:
+        file.write(b"plugins { id 'java' }\n")
+    said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
+    view = task.meta / "risky" / "view" / "build.gradle"
+    assert f"less {view}" in said and "not in your IDE" in said
+    assert str(task.repo) not in said
+    assert view.is_file() and not view.is_symlink()
+    assert risky._digest(task.meta / "risky" / "view", view) == risky._digest(task.repo, big)
+
+
+def test_a_risky_file_swapped_for_a_link_before_its_copy_is_not_copied(task, outside, monkeypatch):
+    big = sparse(task.repo / "build.gradle")
+    real_read = clone_read.read_bytes
+
+    def read_then_swap(root, path, *args, **kwargs):
+        try:
+            return real_read(root, path, *args, **kwargs)
+        finally:
+            if Path(path) == big and not big.is_symlink():
+                big.unlink()
+                big.symlink_to(outside / "secret.txt")
+
+    monkeypatch.setattr(clone_read, "read_bytes", read_then_swap)
+    said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
+    view = task.meta / "risky" / "view" / "build.gradle"
+    assert "could not copy it for you to read" in said and "less " not in said
+    assert not view.is_symlink() and not (view.exists() and SECRET in view.read_text())
+
+
+def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch):
+    """The agent, the verification, the sidecar and the reviewer: none of them can write there."""
+    from vivibox import actions, opencode, providers, secrets
+    from vivibox.config import load_config
+
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(env / "repo", t.repo, t.id, t.meta))
+    the_pod = actions.task_pod(t.id)
+    reviewer = []
+    monkeypatch.setattr(secrets, "prepare", lambda *a, **k: env / "runtime")
+    monkeypatch.setattr(providers, "mcp_secrets", lambda: [])
+    monkeypatch.setattr(opencode, "provider_of", lambda model: "ollama")
+    monkeypatch.setattr(providers, "keyless", lambda provider: True)
+    monkeypatch.setattr(the_pod, "review_fresh", lambda: the_pod.review_dir.mkdir(parents=True))
+    monkeypatch.setattr(the_pod, "review_start", lambda mounts, env_: reviewer.append(mounts))
+    reviewing.up(t, the_pod, load_config())
+    argvs = [
+        the_pod.agent_command(),
+        the_pod.gate_command(),
+        the_pod.sidecar_command(),
+        the_pod.review_command(reviewer[0], {}),
+    ]
+    view = t.meta / "risky" / "view" / "build.gradle"
+    for argv in argvs:
+        for bind in (argv[i + 1] for i, a in enumerate(argv) if a == "-v"):
+            source, _, rest = bind.partition(":")
+            if not source.startswith("/") or rest.endswith(":ro"):
+                continue  # a volume, or read-only
+            assert not view.is_relative_to(source), f"{bind} would let a container write {view}"

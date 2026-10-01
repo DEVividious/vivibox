@@ -136,7 +136,8 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str) -> st
         if base.problem:
             undo = "restores it as it was when the task started, or removes it if the task added it"
         else:
-            undo = "restores it as it was when the task started" if path in base.sizes else "removes it"
+            there = path in base.sizes or path in base.links  # a file or a link of yours
+            undo = "restores it as it was when the task started" if there else "removes it"
         return (
             f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
             f"task's change to it cannot be approved: reply, and the writer {undo}{unknown}"
@@ -253,6 +254,7 @@ class Approvals:
         files = self.dir / "files"
         if files.exists():
             shutil.rmtree(files)
+        shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
         for rel, digest in current.items():
             if digest != NESTED_GIT and not digest.startswith(("symlink", "not a plain file", TOO_LARGE)):
                 (files / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -293,10 +295,7 @@ class Approvals:
         except clone_read.Refused as e:
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
                 return f"{head} ({e})\n"
-            return (  # hashed and watched (_digest), but more than the panel shows
-                f"{head}: {e.kind}, too large to show here; vivibox checks whether it changes, not what "
-                f"it says: read it at {new} before you approve\n"
-            )
+            return f"{head}: {e.kind}, too large to show here; {self._view(change.path)}\n"
         except OSError:  # gone, or a folder
             b = []
         except UnicodeDecodeError:
@@ -306,6 +305,19 @@ class Approvals:
         except UnicodeDecodeError:
             return f"{change.path}: {change.kind} (binary)\n"
         return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}"))
+
+    def _view(self, path: str) -> str:
+        """Where to read a risky file too large for the panel, before you approve it: a copy in the
+        task's metadata, where no container writes and no link of the agent's can be, read as text.
+        Opened in your IDE, a build file is imported, which is what approving it is there for."""
+        view = self.dir / "view" / path
+        said = "vivibox checks whether it changes, not what it says"
+        try:
+            view.parent.mkdir(parents=True, exist_ok=True)
+            clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT)
+        except OSError as e:
+            return f"{said}, and could not copy it for you to read: {e}"
+        return f"{said}: read its copy as text, not in your IDE (less {view}), before you approve"
 
 
 def scan_one(path: Path) -> str | None:

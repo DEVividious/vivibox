@@ -15,6 +15,7 @@ descriptor says and by what was read, never more than the limit and one byte."""
 from __future__ import annotations
 
 import hashlib
+import itertools
 import os
 import stat
 from pathlib import Path
@@ -192,14 +193,17 @@ def as_committed(root: Path, path: Path | str) -> str:
 
 def copy(root: Path, path: Path | str, target: Path, limit: int = CHECK_LIMIT) -> None:
     """A plain file of the repository, copied to a place of the host's own; never a link's file,
-    nor one past limit."""
+    nor one past limit. What is zeros stays a hole, so a sparse file costs no more disk here."""
     chunks = _chunks(root, path, limit, follow=False)
     first = next(chunks, b"")  # refused before anything is written
     try:
         with open(target, "wb") as file:
-            file.write(first)
-            for chunk in chunks:
-                file.write(chunk)
+            for chunk in itertools.chain([first], chunks):
+                if chunk.count(0) == len(chunk):
+                    file.seek(len(chunk), os.SEEK_CUR)
+                else:
+                    file.write(chunk)
+            file.truncate()
     except Refused:  # grew past limit while it was copied
         target.unlink(missing_ok=True)
         raise

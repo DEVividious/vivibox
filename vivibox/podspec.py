@@ -1,6 +1,7 @@
 """What a pod's containers are made of: the images, the mounts, the caches, and the commands that
 start the sidecar, the agent, the gate and the reviewer. Plain functions of the pod they are for;
-the host's CA bundle comes in as an argument, read by pod.py."""
+the host's CA bundle comes in as an argument, read by pod.py. `run` and `Runner`, which run a process
+on the host, are here because pod_egress and pod both need them and pod imports pod_egress."""
 
 from __future__ import annotations
 
@@ -54,7 +55,6 @@ HOST_GATEWAY = "host.docker.internal"
 # once, at its start, so a bundle changed since (a VPN client installing a new one) is not seen
 # until the sidecar is made again.
 CA_LABEL = "vivibox.ca"
-# Running the project for you to look at: its process group, its output, both inside the pod.
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
 

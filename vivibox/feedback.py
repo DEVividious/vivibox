@@ -5,8 +5,7 @@ feedback is written; tests/test_prompt_rules.py holds every failure the gate rec
 
 from __future__ import annotations
 
-import shutil
-
+from . import handoff
 from .gate import DEBUG_OUTPUT, MAX_LISTED, SELECTS_TESTS, GateResult
 from .task import Task
 
@@ -82,6 +81,11 @@ def feedback(result: GateResult) -> str:
 
 
 def write_feedback(task: Task, result: GateResult) -> None:
-    handoff = task.meta / "handoff"
-    (handoff / "verify-feedback.md").write_text(feedback(result))
-    shutil.copyfile(result.log, handoff / "verify.log")
+    """A file there vivibox does not write through is a problem outside the code: the agent could
+    not read its feedback, so the task stops for you and no round is spent."""
+    folder = task.meta / "handoff"
+    try:
+        handoff.write_text(folder / "verify-feedback.md", feedback(result))
+        handoff.copy_file(result.log, folder / "verify.log")
+    except handoff.HandoffError as e:
+        result.environment = f"{result.environment}; {e}" if result.environment else str(e)

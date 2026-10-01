@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import init, repo, toolchain
+from . import handoff, init, repo, toolchain
 from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
@@ -104,11 +104,16 @@ def accept_plan(task: Task) -> Plan:
     text = task.plan_path.read_text()
     plan = parse_plan(text)
     check_plan(plan)
-    (task.meta / ACCEPTED_PLAN).write_text(text)
     checklist = "".join(f"- [ ] {c.text}\n" for c in plan.criteria)
-    (task.meta / "handoff" / CRITERIA_FILE).write_text(
-        "# Acceptance criteria\n\nTick an item only when it is met and verified.\n\n" + checklist
-    )
+    # The agent's file first: refused, it leaves the plan not accepted rather than half accepted.
+    try:
+        handoff.write_text(
+            task.meta / "handoff" / CRITERIA_FILE,
+            "# Acceptance criteria\n\nTick an item only when it is met and verified.\n\n" + checklist,
+        )
+    except handoff.HandoffError as e:
+        raise GateError(str(e)) from e
+    (task.meta / ACCEPTED_PLAN).write_text(text)
     return plan
 
 
@@ -148,12 +153,15 @@ def add_criteria(task: Task, items: list[str]) -> list[str]:
         new.append(text)
     if not new:
         return []
+    checklist = task.meta / "handoff" / CRITERIA_FILE
+    try:  # the agent's file first, as at acceptance: refused, nothing is half added
+        current = handoff.read_text(checklist)
+        handoff.write_text(checklist, current.rstrip("\n") + "\n" + "".join(f"- [ ] {t}\n" for t in new))
+    except handoff.HandoffError as e:
+        raise GateError(str(e)) from e
     accepted.write_text(_with_criteria(accepted.read_text(), new))
     if task.plan_path.exists():
         task.plan_path.write_text(_with_criteria(task.plan_path.read_text(), new))
-    checklist = task.meta / "handoff" / CRITERIA_FILE
-    current = checklist.read_text() if checklist.exists() else ""
-    checklist.write_text(current.rstrip("\n") + "\n" + "".join(f"- [ ] {t}\n" for t in new))
     # The record that the checklist grew after you accepted it, and by what.
     task.event("criteria_added", criteria=new)
     return new

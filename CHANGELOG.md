@@ -44,6 +44,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `vivibox plan import`, counts once: one goal, one planning in the CLI usage.
 - `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing
   one of `-pl "$(…)"`.
+- vivibox no longer writes through a link or a special file an agent puts in the task's handoff
+  folder in place of its feedback, checklist, review or your comments: it leaves the file alone
+  and stops the task or refuses the step, saying which file and why.
 
 ### Internal
 

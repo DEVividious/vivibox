@@ -630,7 +630,8 @@ class Supervisor(ReviewRound):
             feedback.write_feedback(self.task, result)
         if result.environment:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
-            self._go(target, "verification could not run")
+            # Blocked whatever the target was: a feedback file vivibox did not write is found late.
+            self._go(State.CHECKPOINT_BLOCKED, "verification could not run")
             self.ports.notify(
                 self.task.id,
                 f"verification could not run: {result.environment[:150]}; fix it, then press g"

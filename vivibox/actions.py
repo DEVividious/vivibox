@@ -25,6 +25,7 @@ from . import (
     context,
     firstrun,
     gate,
+    handoff,
     ide,
     image,
     manual,
@@ -679,7 +680,6 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         raise gate.GateError(
             "criteria are added when the work comes back to you; before that, they belong in the plan"
         )
-    handoff = task.meta / "handoff"
     targets = {
         State.CHECKPOINT_PLAN: State.PLAN,
         State.CHECKPOINT_COMMAND: State.IMPLEMENT,
@@ -704,8 +704,13 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         listed = "\n".join(f"- {c}" for c in added)
         note = f"New acceptance criteria, added to criteria.md unticked; meet and tick them:\n\n{listed}"
         comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
-    with (handoff / "comments.md").open("a") as f:
-        f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
+    try:
+        handoff.append_text(
+            task.meta / "handoff" / "comments.md",
+            f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n",
+        )
+    except handoff.HandoffError as e:
+        raise gate.GateError(str(e)) from e
     supervisor.put_question_away(task)
     prompt = prompts.PLAN_COMMENT_PROMPT if target is State.PLAN else prompts.COMMENT_PROMPT
     supervisor.set_next_prompt(task, prompt)

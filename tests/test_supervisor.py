@@ -559,6 +559,24 @@ def test_a_broken_environment_stops_the_task_without_using_an_attempt(task):
     assert "Verification could not run" in (task.meta / "handoff" / "verify-feedback.md").read_text()
 
 
+def test_feedback_the_host_cannot_write_stops_the_task_without_using_a_round(task):
+    """A link in place of verify-feedback.md: a feedback turn would send the writer to a file
+    nobody wrote, so the task stops for you as on a problem outside the code."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    outside = task.root / "outside.txt"
+    outside.write_text("the host's own file\n")
+    (task.meta / "handoff" / "verify-feedback.md").symlink_to(outside)
+    sup, notes = make(task, FakeHarness(task), results=[gate_result(passed=False)])
+    sup.step()  # implement
+    sup.step()  # verify
+    st = task.read_state()
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0), "no round spent"
+    assert "could not run" in notes[-1] and "handoff/verify-feedback.md" in notes[-1]
+    assert not (task.meta / supervisor.NEXT_PROMPT).exists(), "no feedback turn"
+    assert outside.read_text() == "the host's own file\n"
+
+
 def test_a_planner_and_a_writer_on_one_harness_have_a_conversation_each(task):
     class Named(FakeHarness):
         def __init__(self, task, actions=(), session="ses_x"):

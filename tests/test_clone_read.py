@@ -472,3 +472,20 @@ def test_the_cli_review_copies_the_writers_answer_to_the_last_round(at_review):
     asked = asked_of(task)
     assert str(copies(task) / "review-1-reply.md") in asked and "handoff" not in asked
     assert (copies(task) / "review-1-reply.md").read_text() == "It does prove it.\n"
+
+
+def test_a_copy_for_the_approval_is_never_a_links_file_or_a_special_one(
+    clone, outside, monkeypatch, tmp_path
+):
+    """The approval keeps its copies in /task, where the agent reads: a link swapped in after the
+    scan, inside the clone or out of it, is refused, and so is a FIFO."""
+    (clone / "pom.xml").write_text("<project/>\n")
+    (clone / "inside.xml").symlink_to("pom.xml")
+    (clone / "outside.xml").symlink_to(outside / "secret.txt")
+    odd(clone / "Makefile", "fifo", monkeypatch)
+    for name in ("inside.xml", "outside.xml", "Makefile"):
+        refused = in_time(lambda name=name: clone_read.copy(clone, name, tmp_path / "copy"))
+        assert isinstance(refused, clone_read.Refused), name
+        assert not (tmp_path / "copy").exists(), name
+    clone_read.copy(clone, "pom.xml", tmp_path / "copy")
+    assert (tmp_path / "copy").read_text() == "<project/>\n"

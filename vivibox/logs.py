@@ -88,6 +88,9 @@ def entries(task: Task, st: TaskState, running: bool) -> tuple[list[Entry], int]
             found.append(Entry(path.name, NOT_READ, []))
             continue
         said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
+        if problem := reviewing.unreadable(task, int(n)):  # no counts: they would read as a clean review
+            # A file's name, not its whole path, fits the line.
+            said = f"review {n} · unreadable: {problem.rsplit('/', 1)[-1] if problem[:1] == '/' else problem}"
         found.append(Entry(path.name, said, pager_command(path)))
     prepared = folder / prepare.LOG
     preparing = prepare.underway(task)

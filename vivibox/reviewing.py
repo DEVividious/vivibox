@@ -158,6 +158,13 @@ def keep(task: Task, n: int, text: str) -> Path:
     return path
 
 
+def unreadable(task: Task, n: int) -> str:
+    """Why the supervisor could not read round n's review, "" when it could: its own record, since
+    what it keeps for such a round is no review, and counted as one it would read as a clean one."""
+    said = [e["data"] for e in task.events() if e["type"] == "review" and e["data"].get("round") == n]
+    return said[-1].get("problem", "") if said else ""
+
+
 def latest(task: Task) -> Path | None:
     handoff = task.meta / "handoff"
     found = [(int(m.group(1)), p) for p in handoff.glob("review-*.md") if (m := NUMBERED.match(p.name))]

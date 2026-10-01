@@ -89,6 +89,9 @@ def reviewers_notes(task: Task) -> list[str]:
     kept = "\n".join(
         line for line in text.rstrip().splitlines() if not re.fullmatch(r"#+\s*Review\s+\d+\s*", line)
     )
+    if problem := reviewing.unreadable(task, int(n)):  # no counts: they would read as a clean review
+        rest = [] if kept.strip() == problem else ["", demoted(kept.strip())]
+        return ["", f"#### Review {n}: unreadable", "", problem, *rest]
     return [
         "",
         f"#### Review {n}: {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",

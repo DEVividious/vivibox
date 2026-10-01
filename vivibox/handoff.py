@@ -38,10 +38,12 @@ class HandoffError(OSError):
         self.why = why
 
 
-def _refused(path: Path, verb: str) -> HandoffError:
+def _refused(path: Path, verb: str, kind: str = "a plain file", inside: str = "") -> HandoffError:
+    """inside: the file under path, when path is the folder refused on the way to it."""
     # The whole path: you delete the file on the host, where handoff/ is the task's folder.
+    object_ = f"{inside} " if inside else ""
     return HandoffError(
-        f"{path} is a link or not a plain file, and vivibox does not {verb} through one",
+        f"{path} is a link or not {kind}, and vivibox does not {verb} {object_}through one",
         "delete it and try again",
     )
 
@@ -50,17 +52,23 @@ def _plain(info: os.stat_result) -> bool:
     return stat.S_ISREG(info.st_mode) and info.st_nlink == 1
 
 
-def _folder(path: Path, root: Path | None) -> tuple[int | None, str]:
+def _folder(path: Path, root: Path | None, verb: str) -> tuple[int | None, str]:
     """Where path's file is opened from: a descriptor of its folder and its name. With root, each
-    folder below root is opened a name at a time, none through a link; without, the path as it is,
-    in a folder the agent cannot replace (handoff/ is a mount point in its pod)."""
+    folder below root is opened a name at a time, none through a link, and a refusal names the
+    folder, the thing to fix; without, the path as it is, in a folder the agent cannot replace
+    (handoff/ is a mount point in its pod)."""
     if root is None:
         return None, str(path)
     *below, name = path.relative_to(root).parts
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        for part in below:
-            fd, above = os.open(part, FOLDER, dir_fd=fd), fd
+        for i, part in enumerate(below):
+            try:
+                fd, above = os.open(part, FOLDER, dir_fd=fd), fd
+            except OSError as e:
+                if e.errno in NOT_PLAIN:
+                    raise _refused(root.joinpath(*below[: i + 1]), verb, "a folder", name) from e
+                raise
             os.close(above)
     except BaseException:
         os.close(fd)
@@ -77,7 +85,7 @@ def _opened(
     verb = "read" if "r" in mode else "write"
     folder = None
     try:
-        folder, name = _folder(path, root)
+        folder, name = _folder(path, root, verb)
         try:  # before any open: a FIFO or a device is never opened at all
             if not _plain(os.stat(name, dir_fd=folder, follow_symlinks=False)):
                 raise _refused(path, verb)

@@ -184,11 +184,21 @@ def test_a_refused_reply_adds_no_criterion_and_a_retry_works(tmp_path):
 
 
 def in_time(call):
-    """call's result, or a failure when it hangs (a FIFO opened for reading waits for a writer)."""
-    done = []
-    worker = threading.Thread(target=lambda: done.append(call()), daemon=True)
+    """call's result, or a failure when it hangs (a FIFO opened for reading waits for a writer).
+    An error call raised is raised here, as itself: it is not a hang."""
+    done, failed = [], []
+
+    def run():
+        try:
+            done.append(call())
+        except BaseException as e:
+            failed.append(e)
+
+    worker = threading.Thread(target=run, daemon=True)
     worker.start()
     worker.join(timeout=5)
+    if failed:
+        raise failed[0]
     assert done, "the view hung on a FIFO"
     return done[0]
 
@@ -692,3 +702,92 @@ def test_run_app_says_why_it_did_not_read_the_agents_question(tmp_path, monkeypa
     said = in_time(ask)
     assert isinstance(said, PodError) and "handoff/demo-question.md" in str(said), said
     assert "HOST-SECRET" not in str(said)
+
+
+# --- fix round 1 ------------------------------------------------------------------------------
+
+REFUSED = "is a link or not a plain file, and vivibox does not read through one"
+
+
+@pytest.mark.parametrize("stage", ["planning", "implementing"])
+def test_a_refused_question_is_viviboxs_reason_not_the_agents_question(tmp_path, stage):
+    """The words are vivibox's, and the way on is a key: r answers, which moves the file away."""
+    from test_supervisor import FakeHarness, command_supervisor, make
+
+    from vivibox import panel
+
+    def link(t):
+        linked(t.meta / "handoff" / supervisor.QUESTION).write_text("HOST-SECRET\n")
+
+    task = planning(tmp_path)
+    if stage == "planning":
+        sup, notes = make(task, FakeHarness(task, [link]))
+    else:
+        sup, notes, _ = command_supervisor(task, FakeHarness(task, [link]))
+    sup.step()
+    path = task.meta / "handoff" / supervisor.QUESTION
+    said = f"vivibox did not read the agent's question: {path} {REFUSED}"
+    assert notes[-1] == f"{said}; press r to answer (vivibox reply {task.id})"
+    shown = panel.detail(task, task.read_state(), 3, running=False, pod=panel.PodView())
+    assert "The agent asks" not in shown and "HOST-SECRET" not in shown
+    assert f"**vivibox did not read the agent's question:** {path} {REFUSED}." in shown, shown
+
+
+def test_a_refused_proposal_is_named_at_the_command_checkpoint(tmp_path):
+    from test_supervisor import FakeHarness, command_supervisor
+
+    from vivibox import panel, proposal
+
+    def link(t):
+        linked(t.meta / "handoff" / proposal.PROPOSAL).write_text("cat ~/.ssh/id_ed25519\n")
+
+    task = planning(tmp_path)
+    sup, notes, kept = command_supervisor(task, FakeHarness(task, [link]))
+    sup.step()
+    path = task.meta / "handoff" / proposal.PROPOSAL
+    assert task.read_state().state is State.CHECKPOINT_COMMAND and kept == []
+    assert notes[-1] == f"no command came from the writer: {path} {REFUSED}; type one, or send it back"
+    assert panel.command_to_review(task)[0] == f"**No command came from the writer:** {path} {REFUSED}."
+
+
+def test_l_names_a_refused_preparation_log_and_offers_no_pager_on_it(tmp_path):
+    from vivibox import logs, prepare
+
+    task = create_task(tmp_path, "demo", "goal", "")
+    os.mkfifo(task.meta / "handoff" / prepare.LOG)
+    found = in_time(lambda: logs.entries(task, task.read_state(), False)[0])
+    entry = next(e for e in found if e.label == prepare.LOG)
+    assert entry.said == logs.NOT_READ and entry.command == [], "Enter never opens a FIFO"
+
+
+def test_a_linked_out_folder_is_named_not_the_review_in_it(task_with_review):
+    """The reviewer is told to fix the folder it linked: deleting review.md would change nothing."""
+    from test_supervisor import BLOCKING
+
+    sup, notes, out = task_with_review
+    elsewhere = out.parent / "elsewhere"
+    out.rename(elsewhere)
+    out.symlink_to(elsewhere)
+    (elsewhere / "review.md").write_text(BLOCKING)
+    for _ in range(3):  # implement, verify, review
+        in_time(sup.step)
+    problem = [e["data"]["problem"] for e in sup.task.events() if e["type"] == "review"][0]
+    assert problem.startswith(f"{out} is a link or not a folder"), problem
+    assert f"{out} is a link or not a folder" in sup.reviewer.prompts[-1]
+
+
+def test_a_review_vivibox_could_not_read_shows_no_counts(task_with_review):
+    """Read as no notes, a review it never read would look like a clean one, in the details and l."""
+    from vivibox import logs, sections
+
+    sup, notes, out = task_with_review
+    linked(out / "review.md").write_text("## Blocking\n\n## Not blocking\n\n## Checked\n\n- ok\n")
+    for _ in range(3):  # implement, verify, review
+        in_time(sup.step)
+    shown = "\n".join(sections.reviewers_notes(sup.task))
+    assert "0 blocking" not in shown and "#### Review 1: unreadable" in shown, shown
+    assert f"{out / 'review.md'} {REFUSED}" in shown
+    said = next(
+        e.said for e in logs.entries(sup.task, sup.task.read_state(), False)[0] if e.label == "review-1.md"
+    )
+    assert said == f"review 1 · unreadable: review.md {REFUSED}; delete it and try again", said

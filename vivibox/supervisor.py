@@ -39,6 +39,8 @@ from .task import Task, TaskState
 
 NEXT_PROMPT = "next-prompt.md"
 QUESTION = "question.md"
+# The words are vivibox's when it did not read the file: never shown as the agent's question.
+QUESTION_NOT_READ = "vivibox did not read the agent's question"
 
 
 @dataclass(frozen=True)
@@ -118,12 +120,22 @@ def _notes(n: int) -> str:
     return ui.count(n, "blocking note")
 
 
-def question(task: Task) -> str | None:
-    """The agent's question; for a link or a special file in its place, why vivibox did not read
-    it, which stops the task for you as a question does."""
+def read_question(task: Task) -> tuple[str, str]:
+    """The agent's question and "", or "" and why vivibox did not read question.md: a link or a
+    special file in its place, which stops the task for you as a question does."""
     path = task.meta / "handoff" / QUESTION
-    text = handoff.for_you(path) if path.exists() else ""
-    return text or None
+    if not path.exists():
+        return "", ""
+    try:
+        return handoff.read_text(path).strip(), ""
+    except handoff.HandoffError as e:
+        return "", e.why
+
+
+def question(task: Task) -> str | None:
+    """The agent's question; for a question.md vivibox did not read, why."""
+    text, why = read_question(task)
+    return text or (f"{QUESTION_NOT_READ}: {why}" if why else None)
 
 
 def put_question_away(task: Task) -> Path | None:
@@ -408,8 +420,8 @@ class Supervisor(ReviewRound):
             return
         if self._turn(st, next_prompt(self.task, PLAN_PROMPT)) is None:
             return
-        if q := question(self.task):
-            self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
+        if q := self._asks():
+            self._checkpoint(State.CHECKPOINT_PLAN, q)
             return
         text, plan, problem = self._read_draft()
         if problem:
@@ -419,8 +431,8 @@ class Supervisor(ReviewRound):
             repair = f"plan repair: {problem[:120]}"
             if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem), kind=repair) is None:
                 return
-            if q := question(self.task):
-                self._checkpoint(State.CHECKPOINT_PLAN, f"question from the agent: {q[:200]}")
+            if q := self._asks():
+                self._checkpoint(State.CHECKPOINT_PLAN, q)
                 return
             text, plan, problem = self._read_draft()
         if problem:
@@ -438,6 +450,14 @@ class Supervisor(ReviewRound):
         # Without the template's notes: from here the plan is yours to read, not a form to fill.
         self.task.plan_path.write_text(without_notes(text))
         self._plan_ready(st, plan)
+
+    def _asks(self) -> str:
+        """Why the task stops for the agent's question, "" when it asked none: the question, or
+        vivibox's own reason for a question.md it did not read, with the key that moves it away."""
+        text, why = read_question(self.task)
+        if why:
+            return f"{QUESTION_NOT_READ}: {why}; press r to answer (vivibox reply {self.task.id})"
+        return f"question from the agent: {text[:200]}" if text else ""
 
     def _your_plan(self, st: TaskState) -> Plan | None:
         """The plan as you left it, when it is finished (--draft, then e) and this is the task's first
@@ -565,8 +585,8 @@ class Supervisor(ReviewRound):
         resumed = prompt == self._self_review_prompt(st)
         if self._turn(st, prompt, kind="self-review" if resumed else "") is None:
             return
-        if q := question(self.task):
-            self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
+        if q := self._asks():
+            self._checkpoint(State.CHECKPOINT_BLOCKED, q)
             return
         if self.mode.self_review and not resumed:
             # The writer reads its own work before the gate does, in the same conversation. The
@@ -574,8 +594,8 @@ class Supervisor(ReviewRound):
             set_next_prompt(self.task, self._self_review_prompt(st))
             if self._turn(st, self._self_review_prompt(st), kind="self-review") is None:
                 return
-            if q := question(self.task):
-                self._checkpoint(State.CHECKPOINT_BLOCKED, f"question from the agent: {q[:200]}")
+            if q := self._asks():
+                self._checkpoint(State.CHECKPOINT_BLOCKED, q)
                 return
         if self._asks_for_command():
             self._command_checkpoint(st)

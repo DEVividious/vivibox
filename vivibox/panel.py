@@ -425,6 +425,15 @@ def read(path) -> str:
         return ""
 
 
+def agents_question(task: Task, heading: str) -> list[str]:
+    """The agent's question under heading; for a question.md vivibox did not read, its own words
+    instead, never under the agent's heading. [] when there is none."""
+    text, why = supervisor.read_question(task)
+    if why:
+        return [f"**{supervisor.QUESTION_NOT_READ}:** {why}.", "", "Answering moves the file out of the way."]
+    return [heading, "", text] if text else []
+
+
 def handed(path: Path) -> str:
     """A file the agent names in handoff/: never read through a link or waited on (a FIFO)."""
     try:
@@ -671,7 +680,7 @@ def detail(
             plan_text(read(task.plan_path)),
         ]
     elif ui.planner_asks(task, st):
-        body = ["**The agent asks, instead of a plan:**", "", for_you(handoff / supervisor.QUESTION)]
+        body = agents_question(task, "**The agent asks, instead of a plan:**")
     elif st.state in (State.PLAN, State.CHECKPOINT_PLAN):
         body = [*plans_verify(task, st), plan_text(read(task.plan_path))]
     elif st.state is State.CHECKPOINT_COMMAND:
@@ -703,10 +712,10 @@ def detail(
             *(f"```diff\n{d.rstrip()}\n```" for d in diffs),
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
-        question = for_you(handoff / supervisor.QUESTION)
+        question = agents_question(task, "**The agent asks:**")
         broken = ui.environment_problem(task)
         body = (
-            ["**The agent asks:**", "", question]
+            question
             if question
             else [
                 f"**Verification could not run:** {broken}" if broken else "**Verification keeps failing.**",

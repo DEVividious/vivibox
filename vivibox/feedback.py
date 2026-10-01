@@ -5,7 +5,7 @@ feedback is written; tests/test_prompt_rules.py holds every failure the gate rec
 
 from __future__ import annotations
 
-from . import clone_read, handoff
+from . import clone_read, handoff, risky
 from .gate import DEBUG_OUTPUT, MAX_LISTED, SELECTS_TESTS, GateResult
 from .task import Task
 
@@ -23,7 +23,8 @@ def feedback(result: GateResult) -> str:
     parts = ["# Verification failed\n"]
     if result.environment:
         parts.append(
-            f"- Verification could not run: {result.environment}. That is outside the code; the user"
+            f"- Verification could not run: {risky.for_the_writer(result.environment)}. That is outside"
+            " the code; the user"
             " has been told and will run the verification again. Do not change code for it."
         )
     if result.build_skipped:

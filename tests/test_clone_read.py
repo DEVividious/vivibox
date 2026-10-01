@@ -203,7 +203,8 @@ def test_a_name_swapped_for_a_link_after_it_was_looked_at_is_not_opened(clone, o
 
 
 @pytest.fixture
-def task(tmp_path):
+def task(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(tmp_path / "config"))  # never your projects
     source = make_repo(tmp_path / "source")
     t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
@@ -1234,7 +1235,7 @@ def test_risky_files_past_the_budget_stop_the_verification_for_you(task, monkeyp
     result = gate.run_gate(task, FakePod(), ["true"], [])
     assert [c.path for c in result.risky] == names
     assert not result.passed
-    assert f"{names[3]} was not checked: scan budget exceeded" in result.environment
+    assert "2 risky files not checked, scan budget exceeded (3 MiB)" in result.environment
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_BLOCKED
     with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
         Approvals(task.meta, task.repo).approve()
@@ -1320,3 +1321,88 @@ def actions_diffs(task) -> list[str]:
     from vivibox import actions
 
     return actions.risky_diffs(task, SimpleNamespace(risky_extra=[]))
+
+
+# --- review round 7 ------------------------------------------------------------------------------
+
+
+def test_the_budget_notification_is_one_whole_sentence_with_a_way_out(task, monkeypatch):
+    from test_gate import tick
+    from test_supervisor import FakeHarness, make
+
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    five_of_a_mib(task.repo, monkeypatch)
+    git(task.repo, "add", "buildSrc")
+    git(task.repo, "commit", "-q", "-m", "Add the build's sources")
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    sup, notes = make(task, FakeHarness(task), results=[gate.run_gate(task, FakePod(), ["true"], [])])
+    sup.step()  # implement
+    sup.step()  # verify
+    assert notes[-1] == (
+        "verification could not run: 2 risky files not checked, scan budget exceeded (3 MiB): reply, and "
+        f"the writer undoes its large risky changes (vivibox risky {task.id} lists them)"
+    )
+
+
+def test_your_own_risky_files_past_the_budget_say_delete_in_one_sentence(env, monkeypatch):
+    source = env / "repo"
+    five_of_a_mib(source, monkeypatch)
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build's sources")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    assert approvals.verified()[1] == (
+        "2 risky files not checked, scan budget exceeded (3 MiB): your own risky files are that large, "
+        f"so no task of this project can be approved: vivibox delete {t.id}"
+    )
+
+
+def test_the_writer_is_told_of_the_budget_as_the_writers_concern(tmp_path):
+    from vivibox import feedback
+
+    stopped = "2 risky files not checked, scan budget exceeded (3 MiB): reply, and the writer undoes it"
+    result = gate.GateResult(tmp_path / "verify-1.log", environment=stopped)
+    said = feedback.feedback(result)
+    assert "reply" not in said and "the writer" not in said
+    assert "2 risky files not checked, scan budget exceeded (3 MiB)" in said
+    assert "the user decides what happens to them" in said
+
+
+def test_a_file_that_fits_after_one_that_did_not_is_not_read_either(task, monkeypatch):
+    """Once a file does not fit, the pass reads nothing more, however small: the same files are
+    checked in every pass, whatever their order of sizes."""
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * MiB)
+    for name, size in (("a", 2 * MiB), ("b", 2 * MiB), ("c", MiB // 2)):
+        path = task.repo / "buildSrc" / f"{name}.gradle"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * size)
+    read = read_per_file(monkeypatch, task.repo)
+    now = risky.scan(task.repo)
+    assert list(read) == ["buildSrc/a.gradle"]
+    assert now["buildSrc/c.gradle"] == f"{risky.UNCHECKED}{clone_read.OVER_BUDGET}"
+
+
+def test_a_change_not_shown_for_the_budget_names_a_way_out_for_your_own_files_too(task, monkeypatch):
+    names = five_of_a_mib(task.repo, monkeypatch)
+    said = Approvals(task.meta, task.repo).diffs()[0]
+    assert said.startswith(f"{names[0]}: added: checked, but not shown: scan budget exceeded")
+    assert "if the task made them large, reply, and the writer" in said
+    assert "if they are your own, approving it takes it as checked, without your seeing it" in said
+
+
+def test_verify_exits_one_when_the_verification_could_not_run(tmp_path, monkeypatch, capsys):
+    from vivibox import actions, cli
+
+    result = gate.GateResult(tmp_path / "verify-1.log", environment="`mvn` is not installed")
+    project = SimpleNamespace(risky_extra=[], java="", verify_timeout=0, no_build=False, tools=[])
+    monkeypatch.setattr(actions, "load", lambda _id: (SimpleNamespace(id="demo-1"), project))
+    monkeypatch.setattr(actions, "task_pod", lambda _id: SimpleNamespace(up=lambda: None))
+    monkeypatch.setattr(actions, "verify_commands", lambda task, project: [])
+    monkeypatch.setattr(actions, "missing_command", lambda task, project: "")
+    monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace(verify_timeout=0))
+    monkeypatch.setattr(gate, "run_gate", lambda *a, **k: result)
+    assert cli.cmd_verify(SimpleNamespace(task="demo-1")) == 1

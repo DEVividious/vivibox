@@ -33,7 +33,7 @@ from .prompts import (
     SELF_REVIEW_PROMPT,
 )
 from .review_round import ReviewRound
-from .risky import Change
+from .risky import Change, stopped
 from .states import State, waits_for_user
 from .task import Task, TaskState
 
@@ -647,11 +647,11 @@ class Supervisor(ReviewRound):
             # Blocked whatever the target was: a feedback file vivibox did not write is found late,
             # after the gate's event, so the state's event carries why for the view.
             self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=result.environment)
-            self.ports.notify(
-                self.task.id,
-                f"verification could not run: {self._briefly(result.environment)}; fix it, then press g"
-                f" (vivibox verify-again {self.task.id})",
-            )
+            # The risky check out of budget: its own sentence, whose way out is not g, which would
+            # scan the same files again.
+            again = f"; fix it, then press g (vivibox verify-again {self.task.id})"
+            said = stopped(result.environment) or self._briefly(result.environment) + again
+            self.ports.notify(self.task.id, f"verification could not run: {said}")
         elif not result.passed and (kept := held_question(self.task)):
             # You pressed g on the agent's question and the build failed again: the question is
             # still unanswered, so it comes back to you; a feedback turn would have the agent work
@@ -704,9 +704,8 @@ class Supervisor(ReviewRound):
             self._go(
                 State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=result.environment
             )
-            self.ports.notify(
-                self.task.id, f"the whole build could not run: {self._briefly(result.environment)}"
-            )
+            said = stopped(result.environment) or self._briefly(result.environment)
+            self.ports.notify(self.task.id, f"the whole build could not run: {said}")
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)
             self._go(target, f"the whole build failed: {why}", why=why)

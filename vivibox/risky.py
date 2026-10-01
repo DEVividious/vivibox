@@ -91,6 +91,25 @@ def matches(path: str, pattern: str) -> bool:
 OUT_LINK, TOO_LARGE, UNCHECKED = "symlink out of the repository:", "too large to check:", "not checked: "
 
 
+# What the verification says when its risky check had no budget left for a file (verified): one
+# short sentence, whole in a notification, which vivibox finds again in the verification's problem.
+STOPPED = "not checked, scan budget exceeded"
+
+
+def stopped(environment: str) -> str:
+    """The part of a verification's problem that says its risky check ran out of budget, or ""."""
+    return next((part for part in environment.split("; ") if STOPPED in part), "")
+
+
+def for_the_writer(environment: str) -> str:
+    """A verification's problem as the writer reads it: where the risky check ran out of budget,
+    what happened and that you decide, never what you are told to do."""
+    return "; ".join(
+        f"{part.split(': ', 1)[0]}: the user decides what happens to them" if STOPPED in part else part
+        for part in environment.split("; ")
+    )
+
+
 class Unapprovable(Exception):
     """Risky files no approval can take, with why and what fixes it."""
 
@@ -274,9 +293,13 @@ class Approvals:
         if not any(d.startswith((OUT_LINK, TOO_LARGE, UNCHECKED)) for d in now.values()):
             return {}
         base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
-        # Your risky files at the start, as last approved, by their size at the base commit.
-        heavy = sum(base.sizes.get(p, 0) for p in self.approved()) > clone_read.SCAN_BUDGET
+        heavy = self._heavy(base)
         return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id, heavy))}
+
+    def _heavy(self, base: baseline.Baseline) -> bool:
+        """Whether your risky files at the start, as last approved, were past the budget together,
+        by their size at the base commit."""
+        return sum(base.sizes.get(p, 0) for p in self.approved()) > clone_read.SCAN_BUDGET
 
     def approve(
         self, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
@@ -319,10 +342,20 @@ class Approvals:
         when the scan had no budget left for a file, or "". Yours to decide, never a round of the
         writer's: the files it could not check may be yours."""
         now = scan(self.repo, self.extra)
-        unread = {p: d for p, d in now.items() if d.startswith(UNCHECKED)}
-        why = next(iter(self.unapprovable(unread).values()), "")
-        more = f"; the same for {len(unread) - 1} more risky files" if len(unread) > 1 else ""
-        return self.changes(now), f"{why}{more}"
+        unread, task_id = sum(d.startswith(UNCHECKED) for d in now.values()), self.dir.parent.parent.name
+        if not unread:
+            return self.changes(now), ""
+        said = f"{unread} risky file{'s' if unread > 1 else ''} {STOPPED} "
+        said += f"({clone_read.size_of(clone_read.SCAN_BUDGET)})"
+        if self._heavy(baseline.of_task(self.dir.parent)):
+            return self.changes(now), (
+                f"{said}: your own risky files are that large, so no task of this project can be "
+                f"approved: vivibox delete {task_id}"
+            )
+        return self.changes(now), (
+            f"{said}: reply, and the writer undoes its large risky changes "
+            f"(vivibox risky {task_id} lists them)"
+        )
 
     def diffs(self) -> list[str]:
         """A view: every change and its diff from one scan, all of it read in one budget."""
@@ -368,7 +401,13 @@ class Approvals:
             b = clone_read.read_bytes(self.repo, new, budget=budget).decode().splitlines(keepends=True)
         except clone_read.Refused as e:
             if e.kind == clone_read.OVER_BUDGET:
-                return f"{head}: checked, but not shown: {e.kind}, as {_spent()}\n"
+                return (
+                    f"{head}: checked, but not shown: {e.kind}, as the risky files together are more than "
+                    f"vivibox reads at a time ({clone_read.size_of(clone_read.SCAN_BUDGET)}): if the task "
+                    "made them large, reply, and the writer restores the ones it changed as they were when "
+                    "the task started and removes the ones it added; if they are your own, approving it "
+                    "takes it as checked, without your seeing it\n"
+                )
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
                 return f"{head} ({e})\n"
             return f"{head}: {e.kind}, too large to show here; {self._view(change.path, budget)}\n"

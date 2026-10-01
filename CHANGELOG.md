@@ -77,6 +77,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   it left unread for its size. A review in your agent's CLI reads vivibox's own copies of the
   checklist, the red evidence and the writer's reply, and its prompt says which one was left out
   and why.
+- A verification that could not run (a program missing, Docker down, a file vivibox does not
+  write through) no longer counts as passed: the whole build before your review no longer sends
+  the work to you as ready when it never ran, no commit is taken as verified by it, and
+  `vivibox verify` exits 1.
 
 ### Internal
 

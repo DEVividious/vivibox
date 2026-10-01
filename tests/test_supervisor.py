@@ -1575,3 +1575,27 @@ def test_a_draft_still_refused_after_its_repair_is_the_plan_you_edit(task):
     assert st.state is State.CHECKPOINT_PLAN and "no valid plan draft" in task.events()[-1]["data"]["reason"]
     plan = task.plan_path.read_text()
     assert "health endpoint returns 200" in plan and gate.PLACEHOLDER in plan
+
+
+def test_a_whole_build_that_could_not_run_never_sends_the_work_to_you(task):
+    """Not run is not green: the task waits for you, with why, and no round is spent."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    sup, notes = make(task, FakeHarness(task), results=[gate_result(True)])
+    broken = gate_result(True)
+    broken.environment = "`mvn` is not installed in the pod"
+    sup.ports.run_whole_gate = lambda t: broken
+    sup.step()
+    st = task.read_state()
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0)
+    assert notes[-1] == "the whole build could not run: `mvn` is not installed in the pod"
+
+
+def test_a_verification_that_could_not_run_verifies_no_commit(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    broken = gate_result(True)
+    broken.commit, broken.environment = "c9", "`mvn` is not installed in the pod"
+    sup, _ = make(task, FakeHarness(task), results=[broken])
+    sup.step()
+    assert task.read_state().verified_commit != "c9"

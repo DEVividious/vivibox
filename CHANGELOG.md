@@ -60,8 +60,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - The verification, the risky files' approval and the project's detection no longer wait on a
   FIFO, a socket or a device in a task's repository, or read a file outside it through a link:
   a link is followed only while it stays inside the repository, so one to a pipeline or build
-  file of yours never names a command to the writer. A file vivibox could not read counts against
-  the check (an invisible character not looked for, a risky file changed), never for it. A review
+  file of yours never names a command to the writer. They read no more than a limit either
+  (1 MiB of a build file, 64 MiB of a checked one), so a huge or sparse file costs no memory.
+  A file vivibox did not read counts against the check, never for it: the verification lists it
+  as not checked, and a risky file too large to check, or a risky link out of the repository that
+  your repository did not have when the task started, stays changed and cannot be approved until
+  the writer removes it. Detection's notes name a build file it left unread for its size. A review
   in your agent's CLI reads vivibox's own copies of the checklist, the red evidence and the
   writer's reply, and its prompt says which one was left out and why.
 

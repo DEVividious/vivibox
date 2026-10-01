@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import difflib
 import fnmatch
-import hashlib
 import json
 import os
 import shutil
@@ -85,21 +84,53 @@ def matches(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(path, pattern)
 
 
+# Digests of what vivibox does not read, and so cannot check: a link that leads out of the
+# repository (by the targets on the way out), and a file past clone_read's limit.
+OUT_LINK, TOO_LARGE = "symlink out of the repository:", "too large to check:"
+
+
+class Unapprovable(Exception):
+    """Risky files no approval can take, with why and what fixes it."""
+
+
 def _digest(repo: Path, path: Path) -> str:
     """A plain file's content. A link's target and, while it stays in the repository, what it
-    points to: a link to another file there changes when that file does; a file of yours it points
-    at is not the agent's work. Anything else (a FIFO, a device) by its kind, never opened: it is
-    never the same as a file you approved."""
+    points to: a link to another file there changes when that file does. A link out of it, by its
+    targets alone: what it points at is never read (Approvals.unapprovable). Anything else (a FIFO,
+    a device) by its kind, never opened: it is never the same as a file you approved."""
+    target = clone_read.link(repo, path)
     try:
-        target = clone_read.link(repo, path)
-        if target is None:
-            return hashlib.sha256(clone_read.read_bytes(repo, path)).hexdigest()
+        content = clone_read.sha256(repo, path)
     except clone_read.Refused as e:
-        return f"not a plain file: {e.kind}"
-    digest = "symlink:" + target
-    with contextlib.suppress(OSError):
-        digest += ":" + hashlib.sha256(clone_read.read_bytes(repo, path)).hexdigest()
-    return digest
+        if e.kind == clone_read.OUT:
+            return OUT_LINK + " -> ".join(e.links)
+        if e.kind == clone_read.too_large(clone_read.CHECK_LIMIT):
+            return TOO_LARGE + e.kind
+        if target is None:
+            return f"not a plain file: {e.kind}"
+        content = ""  # a link to a FIFO, or round a loop: its target alone
+    except OSError:
+        if target is None:
+            raise
+        content = ""  # a link to a folder, or to nothing
+    return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
+
+
+def _cannot(path: str, digest: str, base: dict[str, str]) -> str:
+    """Why no approval takes path as it is, or "": a file too large to check, or a link out of the
+    repository that was not there, as it is, in your repository when the task started."""
+    if digest.startswith(TOO_LARGE):
+        return (
+            f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to check, so it cannot "
+            "be approved: reply, and the writer makes it smaller or removes it"
+        )
+    if digest.startswith(OUT_LINK) and base.get(path) != digest:
+        return (
+            f"{path} is a link that leads out of the repository ({digest.removeprefix(OUT_LINK)}), and "
+            "vivibox cannot check what it points to, so it cannot be approved: reply, and the writer "
+            "removes the link or makes it a file in the repository"
+        )
+    return ""
 
 
 def untracked(repo: Path, folder: Path) -> bool:
@@ -187,20 +218,34 @@ class Approvals:
     def approved(self) -> dict[str, str]:
         return json.loads(self.record.read_text()) if self.record.exists() else {}
 
+    def unapprovable(self, now: dict[str, str]) -> dict[str, str]:
+        """The risky files of now that no approval takes, each with why. The base is the state of
+        your repository the first approval took, at the task's start; a task from before it was
+        kept has none, and no link out of it is yours."""
+        base = self.dir / "base.json"
+        base = json.loads(base.read_text()) if base.exists() else {}
+        return {p: why for p, d in now.items() if (why := _cannot(p, d, base))}
+
     def approve(self) -> dict[str, str]:
-        """Takes the current state as approved (at task start: the state of your repository)."""
+        """Takes the current state as approved (at task start: the state of your repository, kept
+        as the base). Refused, with nothing taken, while a file is unapprovable."""
         current = scan(self.repo, self.extra)
+        first = not self.record.exists()
+        if not first and (refused := self.unapprovable(current)):
+            raise Unapprovable("; ".join(refused.values()))
         files = self.dir / "files"
         if files.exists():
             shutil.rmtree(files)
         for rel, digest in current.items():
-            if digest != NESTED_GIT and not digest.startswith(("symlink:", "not a plain file")):
+            if digest != NESTED_GIT and not digest.startswith(("symlink", "not a plain file", TOO_LARGE)):
                 (files / rel).parent.mkdir(parents=True, exist_ok=True)
                 # Where the agent reads (/task): never a file of yours, swapped in since the scan.
                 with contextlib.suppress(clone_read.Refused):
-                    clone_read.copy(self.repo, rel, files / rel)
+                    clone_read.copy(self.repo, self.repo / rel, files / rel)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
+        if first:
+            (self.dir / "base.json").write_text(self.record.read_text())
         return current
 
     def changes(self) -> list[Change]:
@@ -212,6 +257,9 @@ class Approvals:
         result = [Change(p, "added") for p in now if p not in before]
         result += [Change(p, "changed") for p in now if p in before and now[p] != before[p]]
         result += [Change(p, "removed") for p in before if p not in now]
+        # Never taken as checked, whatever the record says: for you, on every check.
+        stuck = self.unapprovable(now)
+        result += [Change(p, "changed") for p in stuck if p in before and now[p] == before[p]]
         return sorted(result, key=lambda c: c.path)
 
     def diff(self, change: Change) -> str:
@@ -220,6 +268,9 @@ class Approvals:
         head = f"{change.path}: {change.kind}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n"
+        with contextlib.suppress(OSError):  # gone since: the rest says so
+            if why := self.unapprovable({change.path: _digest(self.repo, new)}):
+                return f"{head}: {why[change.path]}\n"
         if new.is_symlink():
             return f"{head}, symlink to {os.readlink(new)}\n"
         try:

@@ -315,9 +315,9 @@ def hidden_characters(repo_dir: Path, base: str) -> list[str]:
     untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
     for rel in filter(None, untracked.split("\0")):
         try:  # a link as git commits it: its target, never a file of yours it points at
-            text = clone_read.as_committed(repo_dir, rel)
+            text = clone_read.as_committed(repo_dir, repo_dir / rel)
         except clone_read.Refused as e:  # never read, so never passed
-            found.append(str(e))
+            found.append(clone_read.not_checked(rel, e.kind))
             continue
         except (UnicodeDecodeError, OSError):
             continue
@@ -762,7 +762,7 @@ def _stream(pod: Pod, command: str, out, values: list[str], timeout: float) -> t
 def why_red(result: GateResult) -> str:
     """Why the verification failed, in a few words for the task's row and the supervisor's log:
     the first two of what went wrong, counted. "" for a result that passed."""
-    said = []
+    said, (hidden, unread) = [], clone_read.split_checked(result.hidden_characters)
     if failed := [c.command for c in result.commands if not c.ok]:
         said.append(f"`{failed[0]}` failed" if len(failed) == 1 else f"{len(failed)} commands failed")
     for items, one, many in (
@@ -771,7 +771,8 @@ def why_red(result: GateResult) -> str:
         (result.uncommitted, "uncommitted file", "uncommitted files"),
         (result.switched_off, "test switched off", "tests switched off"),
         (result.no_red_evidence, "test without red evidence", "tests without red evidence"),
-        (result.hidden_characters, "invisible character", "invisible characters"),
+        (hidden, "invisible character", "invisible characters"),
+        (unread, "file not checked", "files not checked"),
     ):
         if items:
             said.append(f"{len(items)} {one if len(items) == 1 else many}")

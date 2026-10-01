@@ -6,9 +6,11 @@ Nothing happens behind your back: init shows the project file it would write and
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tomllib
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -53,10 +55,25 @@ def wrapper(repo: Path, name: str) -> str:
     return f"./{name}" if listed.stdout.startswith("100755") else f"bash ./{name}"
 
 
+# The files detection left unread for their size, while detect runs: its notes say so.
+TOO_LARGE: ContextVar[list[str] | None] = ContextVar("too_large", default=None)
+
+
 def _read(repo: Path, path: Path) -> str:
     """A file of the repository, "" when it is none to read: in a task's clone the agent names
-    every file, and a link out of it or a FIFO is taken as missing (clone_read)."""
-    return clone_read.read_text(repo, path)
+    every file, and a link out of it, a FIFO or a file past clone_read.CONFIG_LIMIT is taken as
+    missing."""
+    try:
+        return clone_read.read_bytes(repo, path, clone_read.CONFIG_LIMIT).decode("utf-8", errors="replace")
+    except clone_read.Refused as e:
+        if (
+            e.kind == clone_read.too_large(clone_read.CONFIG_LIMIT)
+            and (unread := TOO_LARGE.get()) is not None
+        ):
+            unread.append(os.path.relpath(path, repo))
+        return ""
+    except OSError:
+        return ""
 
 
 def source_level(repo: Path) -> int | None:
@@ -630,6 +647,20 @@ def maven_notes(repo: Path) -> list[str]:
 
 
 def detect(repo: Path) -> Detected:
+    token = TOO_LARGE.set(unread := [])
+    try:
+        found = _detected(repo)
+    finally:
+        TOO_LARGE.reset(token)
+    limit = clone_read.too_large(clone_read.CONFIG_LIMIT)
+    found.notes += [
+        f"{name} is {limit}: vivibox did not read it, and nothing was detected from it"
+        for name in dict.fromkeys(unread)
+    ]
+    return found
+
+
+def _detected(repo: Path) -> Detected:
     found = Detected(project_name(repo), repo, [])
     found.demo = detect_demo(repo)
     found.prepare = prepare_suggestion(repo)

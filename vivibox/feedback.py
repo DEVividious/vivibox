@@ -5,7 +5,7 @@ feedback is written; tests/test_prompt_rules.py holds every failure the gate rec
 
 from __future__ import annotations
 
-from . import handoff
+from . import clone_read, handoff
 from .gate import DEBUG_OUTPUT, MAX_LISTED, SELECTS_TESTS, GateResult
 from .task import Task
 
@@ -62,7 +62,9 @@ def feedback(result: GateResult) -> str:
         )
     parts += [f"- Criterion not ticked: {c}" for c in result.missing_criteria if c not in result.reworded]
     parts += [f"- Commit rule: {p}" for p in result.commit_problems]
-    parts += _listed(result.hidden_characters, "- Invisible character, remove it: {}")
+    hidden, unread = clone_read.split_checked(result.hidden_characters)
+    parts += _listed(hidden, "- Invisible character, remove it: {}")
+    parts += _listed(unread, "- {}")
     parts += [f"- Test switched off, switch it on again: {t}" for t in result.switched_off]
     if result.switched_off:
         parts.append(

@@ -12,6 +12,7 @@ from . import (
     actions,
     answers,
     cli_agent,
+    clone_read,
     context,
     gate,
     harness,
@@ -20,6 +21,7 @@ from . import (
     manual,
     providers,
     repo,
+    risky,
     timeline,
     ui,
     version,
@@ -380,7 +382,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     for p in result.commit_problems:
         print(f"FAIL  commit {p}")
     for h in result.hidden_characters:
-        print(f"FAIL  invisible character at {h}")
+        print(f"FAIL  {h}" if h.endswith(clone_read.NOT_CHECKED) else f"FAIL  invisible character at {h}")
     for f in result.uncommitted:
         print(f"FAIL  not committed: {f}")
     for f in result.no_red_evidence:
@@ -733,6 +735,7 @@ def main(argv: list[str] | None = None) -> int:
         PlanError,
         PodError,
         repo.RepoError,
+        risky.Unapprovable,
         gate.GateError,
         keys.KeyStoreError,
         context.ContextError,

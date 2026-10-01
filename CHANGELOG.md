@@ -45,8 +45,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing
   one of `-pl "$(…)"`.
 - vivibox no longer writes through a link or a special file an agent puts in the task's handoff
-  folder in place of its feedback, checklist, review or your comments: it leaves the file alone
-  and stops the task or refuses the step, saying which file and why.
+  folder in place of its feedback, checklist, review, your comments or how to run the app: it
+  leaves the file alone and stops the task or refuses the step, saying which file and why. The
+  list, `vivibox status` and the details say "verification could not run" with that reason, and
+  the details never show what such a file points to or wait on it.
 
 ### Internal
 

@@ -630,8 +630,9 @@ class Supervisor(ReviewRound):
             feedback.write_feedback(self.task, result)
         if result.environment:
             # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
-            # Blocked whatever the target was: a feedback file vivibox did not write is found late.
-            self._go(State.CHECKPOINT_BLOCKED, "verification could not run")
+            # Blocked whatever the target was: a feedback file vivibox did not write is found late,
+            # after the gate's event, so the state's event carries why for the view.
+            self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=result.environment)
             self.ports.notify(
                 self.task.id,
                 f"verification could not run: {result.environment[:150]}; fix it, then press g"
@@ -681,7 +682,9 @@ class Supervisor(ReviewRound):
         target = gate.next_state(result, st.rounds, self.max_rounds)
         why = gate.why_red(result)
         if result.environment:
-            self._go(State.CHECKPOINT_BLOCKED, "the whole build could not run")
+            self._go(
+                State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=result.environment
+            )
             self.ports.notify(self.task.id, f"the whole build could not run: {result.environment[:150]}")
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)

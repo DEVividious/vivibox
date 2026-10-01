@@ -699,16 +699,15 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         target = targets[st.state]
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; replies are for checkpoints")
-    added = gate.add_criteria(task, criteria) if criteria else []
-    if added:
-        listed = "\n".join(f"- {c}" for c in added)
-        note = f"New acceptance criteria, added to criteria.md unticked; meet and tick them:\n\n{listed}"
-        comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
+    comments = task.meta / "handoff" / "comments.md"
     try:
-        handoff.append_text(
-            task.meta / "handoff" / "comments.md",
-            f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n",
-        )
+        handoff.check(comments)  # refused before any criterion is added, not after
+        added = gate.add_criteria(task, criteria) if criteria else []
+        if added:
+            listed = "\n".join(f"- {c}" for c in added)
+            note = f"New acceptance criteria, added to criteria.md unticked; meet and tick them:\n\n{listed}"
+            comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
+        handoff.append_text(comments, f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
     except handoff.HandoffError as e:
         raise gate.GateError(str(e)) from e
     supervisor.put_question_away(task)

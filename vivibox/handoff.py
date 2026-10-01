@@ -22,13 +22,19 @@ NOT_PLAIN = {errno.ELOOP, errno.EMLINK, errno.ENXIO, errno.EISDIR}
 
 
 class HandoffError(OSError):
-    """A file in handoff/ that vivibox did not write or read, and why, in a sentence for you."""
+    """A file in handoff/ that vivibox did not write or read. why says what happened and why, for a
+    message that adds its own thing to do; the error's text adds the one that fits a refused step."""
+
+    def __init__(self, why: str, then: str = ""):
+        super().__init__(f"{why}; {then}" if then else why)
+        self.why = why
 
 
 def _refused(path: Path, verb: str) -> HandoffError:
+    # The whole path: you delete the file on the host, where handoff/ is the task's folder.
     return HandoffError(
-        f"handoff/{path.name} is a link or not a plain file, and vivibox does not {verb} through"
-        " one; delete it and try again"
+        f"{path} is a link or not a plain file, and vivibox does not {verb} through one",
+        "delete it and try again",
     )
 
 
@@ -41,12 +47,12 @@ def _opened(path: Path, flags: int, mode: str, empty: bool = False) -> Iterator[
         fd = os.open(path, flags | FLAGS, 0o644)
     except FileNotFoundError:
         if flags & os.O_CREAT:
-            raise HandoffError(f"vivibox could not write handoff/{path.name}: its folder is gone") from None
+            raise HandoffError(f"vivibox could not write {path}: its folder is gone") from None
         raise
     except OSError as e:
         if e.errno in NOT_PLAIN:
             raise _refused(path, verb) from e
-        raise HandoffError(f"vivibox could not {verb} handoff/{path.name}: {e.strerror}") from e
+        raise HandoffError(f"vivibox could not {verb} {path}: {e.strerror}") from e
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -70,6 +76,16 @@ def write_text(path: Path, text: str) -> None:
 def append_text(path: Path, text: str) -> None:
     with _opened(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, "a") as file:
         file.write(text)
+
+
+def check(path: Path) -> None:
+    """Refused as a write to path would be, with nothing written: before a step that must not
+    happen in half, such as criteria added for a comment that then could not be written."""
+    try:
+        with _opened(path, os.O_WRONLY | os.O_APPEND, "a"):
+            pass
+    except FileNotFoundError:
+        return
 
 
 def copy_file(src: Path, path: Path) -> None:

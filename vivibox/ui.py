@@ -296,9 +296,10 @@ def when_deleted(state: str) -> str:
 
 
 def environment_problem(task: Task) -> str:
-    """What outside the code stopped the last verification, or "" when it ran."""
+    """What outside the code stopped the last verification, or "" when it ran. The state's event says
+    it too when the supervisor found it after the gate's (a feedback file it would not write)."""
     for event in reversed(task.events()):
-        if event["type"] == "gate":
+        if event["type"] == "gate" or (event["type"] == "state" and event["data"].get("environment")):
             return event["data"].get("environment", "")
     return ""
 
@@ -307,7 +308,11 @@ def why_blocked(task: Task) -> Path | None:
     """The file that says why a blocked task needs you: the agent's question, or what the last
     verification found."""
     handoff = task.meta / "handoff"
-    return next((p for p in (handoff / "question.md", handoff / "verify-feedback.md") if p.exists()), None)
+    if (question := handoff / "question.md").exists():
+        return question
+    # Not a link or a special file the agent put there: environment_problem says why then.
+    feedback = handoff / "verify-feedback.md"
+    return feedback if feedback.is_file() and not feedback.is_symlink() else None
 
 
 # At these checkpoints stopping the pod leaves the person's review decision in place.
@@ -562,7 +567,7 @@ def task_detail(
             else []
         ),
     ]
-    if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task)):
+    if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task) or environment_problem(task)):
         lines.append(f"{style('Why', 'bold')}   {why}")
     if shown.problem:
         lines.append(f"{style('Why', 'bold')}   {style(shown.problem, 'red')}")

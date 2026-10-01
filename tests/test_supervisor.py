@@ -559,22 +559,71 @@ def test_a_broken_environment_stops_the_task_without_using_an_attempt(task):
     assert "Verification could not run" in (task.meta / "handoff" / "verify-feedback.md").read_text()
 
 
+def recording(*results):
+    """A gate that records its event as gate.run_gate does: before the supervisor writes the
+    feedback, so whatever the writing finds is not in it."""
+    results = list(results)
+
+    def run(t):
+        result = results.pop(0)
+        t.event("gate", iteration=t.read_state().iteration, **result.summary())
+        return result
+
+    return run
+
+
+def linked_feedback(task):
+    outside = task.root / "outside.txt"
+    outside.write_text("the host's own file\n")
+    (task.meta / "handoff" / "verify-feedback.md").symlink_to(outside)
+    return outside
+
+
+def says_it_could_not_run(task, outside):
+    """The list, vivibox status and the panel say verification could not run, and why; never what
+    the link points to."""
+    from vivibox import panel
+
+    st = task.read_state()
+    assert ui.view(task, st, True, 1).status == "verification could not run"
+    status = ui.task_detail(task, lambda t: "0/1", 1, 5, ui.Style(False), running=True)
+    why = [line for line in status.splitlines() if line.startswith("Why")]
+    shown = panel.detail(task, st, 1, running=True, pod=panel.PodView())
+    for said in ("\n".join(why), shown):
+        assert "handoff/verify-feedback.md is a link" in said
+        assert "the host's own file" not in said
+    assert outside.read_text() == "the host's own file\n"
+
+
 def test_feedback_the_host_cannot_write_stops_the_task_without_using_a_round(task):
     """A link in place of verify-feedback.md: a feedback turn would send the writer to a file
     nobody wrote, so the task stops for you as on a problem outside the code."""
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         task.transition(s)
-    outside = task.root / "outside.txt"
-    outside.write_text("the host's own file\n")
-    (task.meta / "handoff" / "verify-feedback.md").symlink_to(outside)
-    sup, notes = make(task, FakeHarness(task), results=[gate_result(passed=False)])
+    outside = linked_feedback(task)
+    sup, notes = make(task, FakeHarness(task))
+    sup.ports.run_gate = recording(gate_result(passed=False))
     sup.step()  # implement
     sup.step()  # verify
     st = task.read_state()
     assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0), "no round spent"
     assert "could not run" in notes[-1] and "handoff/verify-feedback.md" in notes[-1]
+    assert notes[-1].count("try again") + notes[-1].count("press g") == 1, "one thing to do"
     assert not (task.meta / supervisor.NEXT_PROMPT).exists(), "no feedback turn"
-    assert outside.read_text() == "the host's own file\n"
+    says_it_could_not_run(task, outside)
+
+
+def test_whole_build_feedback_the_host_cannot_write_stops_the_task_too(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    outside = linked_feedback(task)
+    sup, _ = make(task, FakeHarness(task))
+    sup.ports.run_gate = recording(gate_result(True))
+    sup.ports.run_whole_gate = recording(gate_result(False))
+    sup.step()
+    st = task.read_state()
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0), "no round spent"
+    says_it_could_not_run(task, outside)
 
 
 def test_a_planner_and_a_writer_on_one_harness_have_a_conversation_each(task):

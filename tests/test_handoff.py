@@ -163,3 +163,89 @@ def test_a_reply_is_not_appended_through_a_link(tmp_path):
         actions.reply(task, "The button does nothing on a fresh page.")
     assert outside.read_text() == OUTSIDE
     assert task.read_state().state is State.CHECKPOINT_FINAL, "the task stays with you"
+
+
+def test_a_refused_reply_adds_no_criterion_and_a_retry_works(tmp_path):
+    task = at_review(tmp_path)
+    kept = {p: p.read_text() for p in (task.meta / gate.ACCEPTED_PLAN, task.plan_path)}
+    checklist = (task.meta / "handoff" / gate.CRITERIA_FILE).read_text()
+    outside = linked(task.meta / "handoff" / "comments.md")
+    with pytest.raises(gate.GateError, match="handoff/comments.md"):
+        actions.reply(task, "It fails offline.", ["works offline"])
+    assert outside.read_text() == OUTSIDE
+    assert {p: p.read_text() for p in kept} == kept, "no criterion half added"
+    assert (task.meta / "handoff" / gate.CRITERIA_FILE).read_text() == checklist
+    assert not [e for e in task.events() if e["type"] == "criteria_added"]
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+    (task.meta / "handoff" / "comments.md").unlink()
+    assert actions.reply(task, "It fails offline.", ["works offline"]) is State.IMPLEMENT
+    assert "works offline" in (task.meta / "handoff" / "comments.md").read_text()
+
+
+def in_time(call):
+    """call's result, or a failure when it hangs (a FIFO opened for reading waits for a writer)."""
+    done = []
+    worker = threading.Thread(target=lambda: done.append(call()), daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert done, "the view hung on a FIFO"
+    return done[0]
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_the_panel_does_not_hang_on_a_fifo_for_feedback(tmp_path, blocked):
+    from vivibox import panel
+
+    task = at_review(tmp_path)
+    task.event("gate", passed=False, missing_criteria=1)
+    task.transition(State.IMPLEMENT)
+    if blocked:
+        task.transition(State.VERIFY)
+        task.transition(State.CHECKPOINT_BLOCKED)
+    for name in ("verify-feedback.md", "verify.log"):
+        os.mkfifo(task.meta / "handoff" / name)
+    in_time(lambda: panel.detail(task, task.read_state(), 3, running=False, pod=panel.PodView()))
+
+
+def test_how_to_run_the_app_is_not_written_through_a_link(tmp_path):
+    from vivibox.pod import PodError
+
+    task = create_task(tmp_path, "demo", "goal", "")
+    outside = linked(task.meta / "handoff" / actions.DEMO_FILE)
+    with pytest.raises(PodError, match="handoff/demo.md"):
+        actions.write_instruction(task, "```bash\nnpm start\n```\n")
+    assert outside.read_text() == OUTSIDE
+
+
+def test_the_demo_session_is_not_written_through_a_link(tmp_path, monkeypatch):
+    from vivibox import harness, opencode
+    from vivibox.pod import PodError
+
+    task = create_task(tmp_path, "demo", "goal", "")
+    outside = linked(task.meta / "handoff" / actions.DEMO_SESSION)
+    monkeypatch.setattr(
+        opencode.OpenCode, "turn", lambda *a, **k: harness.Turn("ses_demo", True, 0.01, 10, "done")
+    )
+    with pytest.raises(PodError, match="handoff/demo-session"):
+        actions.ask_agent_how_to_run(task, object())
+    assert outside.read_text() == OUTSIDE
+
+
+def test_a_refused_checklist_at_plan_review_names_no_key_that_cannot_help(env):
+    from test_tui import at_plan_checkpoint, new_task, run
+
+    task = new_task()
+    at_plan_checkpoint(task)
+    outside = linked(task.meta / "handoff" / gate.CRITERIA_FILE)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("a")
+        await pilot.pause()
+        said = [str(n.message) for n in app._notifications]
+        assert task.read_state().state is State.CHECKPOINT_PLAN
+        assert any("handoff/criteria.md" in m and "delete it" in m for m in said), said
+        assert not any("press e to edit" in m for m in said), said
+
+    run(scenario, notifications=True)
+    assert outside.read_text() == OUTSIDE

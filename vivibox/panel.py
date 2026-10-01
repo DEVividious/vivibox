@@ -30,6 +30,7 @@ from . import (
 from . import pod as pod_module
 from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
+from .handoff import read_text as read_handoff
 from .plan import body as plan_body
 from .plan import parse_plan
 from .sections import (  # noqa: F401 (criteria and checklist: the list reads them from here)
@@ -209,7 +210,7 @@ def command_to_review(task: Task) -> list[str]:
 def build_said(log: Path, feedback: str = "") -> list[str]:
     """The lines of the last verification's log that say what failed, and where the rest is. The
     feedback the gate writes now quotes them itself; then only the log's place is added."""
-    text = read(log)
+    text = handed(log)
     if not text:
         return []
     if "```" in feedback:
@@ -415,6 +416,14 @@ def projects() -> list[str]:
 def read(path) -> str:
     try:
         return path.read_text().strip()
+    except OSError:
+        return ""
+
+
+def handed(path: Path) -> str:
+    """A file the agent names in handoff/: never read through a link or waited on (a FIFO)."""
+    try:
+        return read_handoff(path).strip()
     except OSError:
         return ""
 
@@ -697,9 +706,9 @@ def detail(
             else [
                 f"**Verification could not run:** {broken}" if broken else "**Verification keeps failing.**",
                 "",
-                read(handoff / "verify-feedback.md"),
+                handed(handoff / "verify-feedback.md"),
                 "",
-                *build_said(handoff / "verify.log", read(handoff / "verify-feedback.md")),
+                *build_said(handoff / "verify.log", handed(handoff / "verify-feedback.md")),
             ]  # fmt: skip
         )
     elif st.state is State.VERIFY and seen.group == "Working":
@@ -712,7 +721,7 @@ def detail(
         if left := build_files_left(task):
             body += ["", *left]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
-            feedback = read(handoff / "verify-feedback.md")
+            feedback = handed(handoff / "verify-feedback.md")
             body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]
         if st.state is State.IMPLEMENT:
             # A long turn is a still row; what happened lately says it is a turn, not a hang.

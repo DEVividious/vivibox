@@ -11,6 +11,7 @@ from pathlib import Path
 from . import (
     actions,
     gate,
+    handoff,
     opencode,
     probe,
 )
@@ -101,7 +102,10 @@ def demo_instruction(task: Task) -> str:
 
 def write_instruction(task: Task, text: str) -> Path:
     path = task.meta / "handoff" / DEMO_FILE
-    path.write_text(text.rstrip() + "\n")
+    try:
+        handoff.write_text(path, text.rstrip() + "\n")
+    except handoff.HandoffError as e:
+        raise PodError(str(e)) from e
     return path
 
 
@@ -127,9 +131,9 @@ def demo_commands(project: Project, task: Task) -> tuple[list[str], str]:
 def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, str]:
     """A conversation of its own, in a session of its own, so that neither its questions nor its
     failures can touch the task's state. Returns the instruction it wrote and anything it asks."""
-    handoff = task.meta / "handoff"
-    (handoff / DEMO_QUESTION).unlink(missing_ok=True)
-    kept = handoff / DEMO_SESSION
+    folder = task.meta / "handoff"
+    (folder / DEMO_QUESTION).unlink(missing_ok=True)
+    kept = folder / DEMO_SESSION
     session = _read(kept) if reply else ""
     try:
         turn = opencode.OpenCode(pod).turn(
@@ -137,9 +141,12 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
         )
     finally:
         task.clear_live_turn()
+    task.event("turn", cost=turn.cost, tokens=turn.tokens, kind="demo")  # spent, whatever follows
     if turn.session:
-        kept.write_text(turn.session)
-    task.event("turn", cost=turn.cost, tokens=turn.tokens, kind="demo")
+        try:
+            handoff.write_text(kept, turn.session)
+        except handoff.HandoffError as e:
+            raise PodError(str(e)) from e
     if not turn.ok:
         raise PodError(f"the agent could not work out how to run this: {turn.error or turn.text}")
     text = demo_instruction(task)
@@ -148,7 +155,7 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
             f"the agent wrote {len(text)} characters of instruction; that is documentation, not a "
             f"note on how to start the project. Ask it again, or write {DEMO_FILE} yourself"
         )
-    return text, _read(handoff / DEMO_QUESTION)
+    return text, _read(folder / DEMO_QUESTION)
 
 
 def demo_allowed(st: TaskState) -> bool:

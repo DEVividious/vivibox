@@ -88,4 +88,5 @@ def write_feedback(task: Task, result: GateResult) -> None:
         handoff.write_text(folder / "verify-feedback.md", feedback(result))
         handoff.copy_file(result.log, folder / "verify.log")
     except handoff.HandoffError as e:
-        result.environment = f"{result.environment}; {e}" if result.environment else str(e)
+        # What happened and why only: the notification and the panel say what to do (press g).
+        result.environment = f"{result.environment}; {e.why}" if result.environment else e.why

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from . import brief, cli_usage, gate, handoff, opencode, providers, repo, roles,
 from .config import Config
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
-from .prompts import CLI_REVIEW_REPLY
+from .prompts import CLI_REVIEW_LEFT_OUT, CLI_REVIEW_NOT_WRITTEN, CLI_REVIEW_REPLY
 from .states import State
 from .task import Task
 
@@ -39,6 +40,9 @@ FILE = "review-{n}.md"
 # it writes, and the review it brought in, which the supervisor takes as a reviewer's turn.
 CLI_PROMPT, CLI_ANSWER, CLI_REVIEW = "review-prompt-cli.md", "review-answer.md", "review-cli.md"
 NUMBERED = re.compile(r"^review-(\d+)\.md$")
+# The writer's files that review reads, copied each round into a folder of the task's that only the
+# host writes (/task is read-only in the pod): your CLI follows a link the agent put in handoff/.
+CLI_INPUT = "review-input"
 
 
 @dataclass
@@ -90,19 +94,41 @@ class ReviewError(Exception):
     pass
 
 
+def _copied(task: Task, names: list[str], reply: str) -> tuple[list[Path], str]:
+    """The host's copies of the writer's files, and why each one not copied was left out; a reply
+    the writer did not write is said nothing of, as no reply to the last round."""
+    source, folder = task.meta / "handoff", task.meta / CLI_INPUT
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir()
+    copies, said = [], ""
+    for name in [*names, reply] if reply else names:
+        try:
+            handoff.copy_out(source / name, folder / name)
+            copies.append(folder / name)
+        except FileNotFoundError:
+            said += "" if name == reply else CLI_REVIEW_NOT_WRITTEN.format(name=name)
+        except handoff.HandoffError:
+            refused = handoff.refused(source, name)
+            why = "it is a link or not a plain file, and vivibox does not read through one"
+            said += CLI_REVIEW_LEFT_OUT.format(name=name, why=why if refused else "vivibox could not read it")
+    return copies, said
+
+
 def ask_cli(task: Task, n: int, copy: Path | None) -> None:
     """The prompt for round n of a review in the agent's CLI, which then waits for it."""
-    meta, handoff = task.meta, task.meta / "handoff"
-    reply = handoff / f"review-{n - 1}-reply.md"
+    meta = task.meta
+    reply = f"review-{n - 1}-reply.md" if n > 1 else ""
+    copies, left_out = _copied(task, ["criteria.md", "red.md"], reply)
+    read = [meta / gate.ACCEPTED_PLAN, *(c for c in copies if c.name != reply)]
+    replied = [c for c in copies if reply and c.name == reply]
     text = CLI_REVIEW_TEXT.format(
         task=task.id,
         n=n,
-        plan=meta / gate.ACCEPTED_PLAN,
-        criteria=handoff / "criteria.md",
-        red=handoff / "red.md",
-        reply=CLI_REVIEW_REPLY.format(path=reply) if n > 1 and reply.exists() else "",
+        files=" and ".join(filter(None, [", ".join(map(str, read[:-1])), str(read[-1])])),
+        reply=CLI_REVIEW_REPLY.format(path=replied[0]) if replied else "",
         copy=copy or f"(prepare it: vivibox review {task.id})",
         answer=meta / CLI_ANSWER,
+        left_out=left_out,
     )
     (meta / CLI_ANSWER).unlink(missing_ok=True)
     (meta / CLI_REVIEW).unlink(missing_ok=True)

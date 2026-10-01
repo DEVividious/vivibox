@@ -8,6 +8,7 @@ The working tree is compared, not commits: IntelliJ reads whatever is on disk.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fnmatch
 import hashlib
@@ -17,6 +18,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from . import clone_read
 
 # Pattern forms: "name" matches a file name at any depth, "dir/**" everything under a directory with
 # that name at any depth, anything else the whole path relative to the repo root.
@@ -82,16 +85,20 @@ def matches(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(path, pattern)
 
 
-def _digest(path: Path) -> str:
-    if not path.is_symlink():
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    # The link and what it points to: a link to another file in the repo changes when that file does.
-    digest = "symlink:" + os.readlink(path)
+def _digest(repo: Path, path: Path) -> str:
+    """A plain file's content. A link's target and, while it stays in the repository, what it
+    points to: a link to another file there changes when that file does; a file of yours it points
+    at is not the agent's work. Anything else (a FIFO, a device) by its kind, never opened: it is
+    never the same as a file you approved."""
     try:
-        if path.is_file():
-            digest += ":" + hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        pass
+        target = clone_read.link(repo, path)
+        if target is None:
+            return hashlib.sha256(clone_read.read_bytes(repo, path)).hexdigest()
+    except clone_read.Refused as e:
+        return f"not a plain file: {e.kind}"
+    digest = "symlink:" + target
+    with contextlib.suppress(OSError):
+        digest += ":" + hashlib.sha256(clone_read.read_bytes(repo, path)).hexdigest()
     return digest
 
 
@@ -155,7 +162,7 @@ def scan(repo: Path, extra: tuple[str, ...] | list[str] = ()) -> dict[str, str]:
             # A symlinked directory is risky if a directory of that name would be (.idea -> elsewhere).
             probe = f"{rel}/x" if is_link_dir else rel
             if name != ".git" and rel not in left_out and any(matches(probe, p) for p in patterns):
-                found[rel] = _digest(here / name)
+                found[rel] = _digest(repo, here / name)
     return found
 
 
@@ -187,10 +194,11 @@ class Approvals:
         if files.exists():
             shutil.rmtree(files)
         for rel, digest in current.items():
-            src = self.repo / rel
-            if digest != NESTED_GIT and not src.is_symlink():
+            if digest != NESTED_GIT and not digest.startswith(("symlink:", "not a plain file")):
                 (files / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src, files / rel)
+                # Where the agent reads (/task): never a file of yours, swapped in since the scan.
+                with contextlib.suppress(clone_read.Refused):
+                    clone_read.copy(self.repo, rel, files / rel)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
         return current
@@ -215,8 +223,15 @@ class Approvals:
         if new.is_symlink():
             return f"{head}, symlink to {os.readlink(new)}\n"
         try:
+            b = clone_read.read_bytes(self.repo, new).decode().splitlines(keepends=True)
+        except clone_read.Refused as e:
+            return f"{head} ({e})\n"
+        except OSError:  # gone, or a folder
+            b = []
+        except UnicodeDecodeError:
+            return f"{change.path}: {change.kind} (binary)\n"
+        try:
             a = old.read_text().splitlines(keepends=True) if old.exists() else []
-            b = new.read_text().splitlines(keepends=True) if new.exists() and new.is_file() else []
         except UnicodeDecodeError:
             return f"{change.path}: {change.kind} (binary)\n"
         return "".join(difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}"))

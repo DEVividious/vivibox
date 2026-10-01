@@ -12,6 +12,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import clone_read
 from .config import PROJECT_NAME
 
 IMAGE_JAVA = 21
@@ -52,16 +53,15 @@ def wrapper(repo: Path, name: str) -> str:
     return f"./{name}" if listed.stdout.startswith("100755") else f"bash ./{name}"
 
 
-def _read(path: Path) -> str:
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return ""
+def _read(repo: Path, path: Path) -> str:
+    """A file of the repository, "" when it is none to read: in a task's clone the agent names
+    every file, and a link out of it or a FIFO is taken as missing (clone_read)."""
+    return clone_read.read_text(repo, path)
 
 
 def source_level(repo: Path) -> int | None:
     """The Java version the code is written for, from Gradle or Maven build files."""
-    text = "".join(_read(repo / f) for f in ("build.gradle", "build.gradle.kts", "pom.xml"))
+    text = "".join(_read(repo, repo / f) for f in ("build.gradle", "build.gradle.kts", "pom.xml"))
     patterns = (
         r"languageVersion\s*(?:=|\.set\()\s*JavaLanguageVersion\.of\((\d+)\)",
         r"(?:source|target)Compatibility\s*=\s*['\"]?(?:JavaVersion\.VERSION_)?(?:1[._])?(\d+)",
@@ -84,12 +84,13 @@ NEWER_LTS = (25,)
 
 def maven_jvm_needs(repo: Path) -> int | None:
     """The oldest Java that starts Maven with the options in .mvn/jvm.config; None when any does."""
-    options = _read(repo / ".mvn" / "jvm.config")
+    options = _read(repo, repo / ".mvn" / "jvm.config")
     return max((v for flag, v in JVM_OPTIONS_SINCE.items() if flag in options), default=None)
 
 
 def gradle_version(repo: Path) -> tuple[int, int] | None:
-    m = re.search(r"gradle-(\d+)\.(\d+)", _read(repo / "gradle" / "wrapper" / "gradle-wrapper.properties"))
+    properties = _read(repo, repo / "gradle" / "wrapper" / "gradle-wrapper.properties")
+    m = re.search(r"gradle-(\d+)\.(\d+)", properties)
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
@@ -149,7 +150,7 @@ def with_dependencies(repo: Path, commands: list[str]) -> list[str]:
     where = repo / folder.group(1) if folder else repo
     if not (where / "package.json").exists() or not has_lockfile(where):
         return commands
-    install = NODE_INSTALL[package_manager(where)]
+    install = NODE_INSTALL[package_manager(repo, where)]
     return [f"cd {folder.group(1)} && {install}" if folder else install, *commands]
 
 
@@ -157,10 +158,10 @@ def has_lockfile(folder: Path) -> bool:
     return any((folder / name).exists() for name in LOCKFILES)
 
 
-def _scripts(folder: Path) -> dict | None:
+def _scripts(repo: Path, folder: Path) -> dict | None:
     """The scripts of a package.json, None when it has none at all (nothing said)."""
     try:
-        return json.loads(_read(folder / "package.json")).get("scripts")
+        return json.loads(_read(repo, folder / "package.json")).get("scripts")
     except (ValueError, AttributeError):
         return None
 
@@ -169,7 +170,7 @@ def _workspaces(repo: Path) -> list[Path]:
     """The packages of a monorepo, each with a package.json: the globs `workspaces` names in the
     root package.json, else the usual folders."""
     try:
-        named = json.loads(_read(repo / "package.json")).get("workspaces")
+        named = json.loads(_read(repo, repo / "package.json")).get("workspaces")
     except (ValueError, AttributeError):
         named = None
     if isinstance(named, dict):
@@ -177,29 +178,32 @@ def _workspaces(repo: Path) -> list[Path]:
     globs = named if isinstance(named, list) else USUAL_WORKSPACES
     found = []
     for pattern in globs:
-        found += sorted(p for p in repo.glob(str(pattern)) if (p / "package.json").is_file())
+        found += sorted(p for p in repo.glob(str(pattern)) if clone_read.is_file(repo, p / "package.json"))
     return found
 
 
 def node_candidates(repo: Path) -> list[tuple[str, str]]:
     """One per package of a monorepo with a test script, run from its folder; the root's own
     command when it has a test script, or when it says nothing and has no such packages."""
-    packages = [p for p in _workspaces(repo) if "test" in (_scripts(p) or {})]
-    scripts = _scripts(repo)
+    packages = [p for p in _workspaces(repo) if "test" in (_scripts(repo, p) or {})]
+    scripts = _scripts(repo, repo)
     found = []
     if (scripts is None and not packages) or "test" in (scripts or {}):
         found.append((NODE_VERIFY[package_manager(repo)], "package.json"))
     for package in packages:
         folder = package.relative_to(repo).as_posix()
-        found.append((f"cd {folder} && {NODE_VERIFY[package_manager(package)]}", f"{folder}/package.json"))
+        command = NODE_VERIFY[package_manager(repo, package)]
+        found.append((f"cd {folder} && {command}", f"{folder}/package.json"))
     return found[:MAX_CI]
 
 
-def package_manager(repo: Path) -> str:
+def package_manager(repo: Path, folder: Path | None = None) -> str:
     """The one the project itself names in package.json, then the one its lockfile belongs to;
-    npm last. Yarn 1 is told apart: it knows --frozen-lockfile, not --immutable."""
+    npm last. Yarn 1 is told apart: it knows --frozen-lockfile, not --immutable. folder: a
+    package of the repository's, when not its root."""
+    here = folder or repo
     try:
-        named = json.loads(_read(repo / "package.json")).get("packageManager", "")
+        named = json.loads(_read(repo, here / "package.json")).get("packageManager", "")
     except (ValueError, AttributeError):
         named = ""
     name, _, version = str(named).partition("@")
@@ -207,12 +211,12 @@ def package_manager(repo: Path) -> str:
         return "yarn-classic" if version.startswith("1.") else "yarn"
     if name in NODE_VERIFY:
         return name
-    if (repo / "pnpm-lock.yaml").exists():
+    if (here / "pnpm-lock.yaml").exists():
         return "pnpm"
-    if (repo / "bun.lock").exists() or (repo / "bun.lockb").exists():
+    if (here / "bun.lock").exists() or (here / "bun.lockb").exists():
         return "bun"
-    if (repo / "yarn.lock").exists():
-        return "yarn" if (repo / ".yarnrc.yml").exists() else "yarn-classic"
+    if (here / "yarn.lock").exists():
+        return "yarn" if (here / ".yarnrc.yml").exists() else "yarn-classic"
     return "npm"
 
 
@@ -255,7 +259,7 @@ def python_candidates(repo: Path) -> list[tuple[str, str]]:
     project or its requirements, with the group or extra that has pytest. Nothing it writes
     shows in the clone (.venv ignores itself), so neither the writer's clone nor the gate's
     gains an uncommitted file."""
-    pyproject = _read(repo / "pyproject.toml")
+    pyproject = _read(repo, repo / "pyproject.toml")
     kind, name = pytest_source(pyproject) if pyproject else ("", "")
     if (repo / "uv.lock").exists():
         with_ = {"dev": "", "group": f" --group {name}", "extra": f" --extra {name}"}.get(
@@ -286,19 +290,19 @@ def tools_for(repo: Path) -> list[str]:
     rust-toolchain file, else stable. The bun package.json names, else the latest."""
     found = []
     if (repo / "go.mod").exists():
-        text = _read(repo / "go.mod")
+        text = _read(repo, repo / "go.mod")
         version = GO_TOOLCHAIN.search(text) or GO_VERSION.search(text)
         named = version.group(1) if version else ""
         enforced = named and tuple(int(n) for n in named.split(".")[:2]) >= (1, 21)
         found.append(f"go@{named if enforced else 'latest'}")
     if (repo / "Cargo.toml").exists():
-        channel = RUST_CHANNEL.search(_read(repo / "rust-toolchain.toml"))
-        legacy = _read(repo / "rust-toolchain").strip()
+        channel = RUST_CHANNEL.search(_read(repo, repo / "rust-toolchain.toml"))
+        legacy = _read(repo, repo / "rust-toolchain").strip()
         name = channel.group(1) if channel else legacy if re.fullmatch(r"[\w.+-]+", legacy) else "stable"
         found.append(f"rust@{name}")
     if (repo / "package.json").exists() and package_manager(repo) == "bun":
         try:
-            named = str(json.loads(_read(repo / "package.json")).get("packageManager", ""))
+            named = str(json.loads(_read(repo, repo / "package.json")).get("packageManager", ""))
         except (ValueError, AttributeError):
             named = ""
         version = named.partition("@")[2].partition("+")[0] if named.startswith("bun@") else ""
@@ -448,7 +452,7 @@ def ci_commands(repo: Path) -> list[tuple[str, str]]:
     sources += [repo / name for name in CI_FILES if (repo / name).is_file()]
     found: list[tuple[str, str]] = []
     for path in sources:
-        text = _read(path)
+        text = _read(repo, path)
         if path.name == "Jenkinsfile":
             steps = [next(filter(None, groups)).splitlines() for groups in SH_STEP.findall(text)]
         else:
@@ -496,13 +500,13 @@ def _declared_workspaces(repo: Path) -> list[str]:
     the folders their patterns match that have a package.json of their own."""
     patterns: list[str] = []
     try:
-        declared = json.loads(_read(repo / "package.json") or "{}").get("workspaces", [])
+        declared = json.loads(_read(repo, repo / "package.json") or "{}").get("workspaces", [])
     except (ValueError, AttributeError):
         declared = []
     if isinstance(declared, dict):
         declared = declared.get("packages", [])
     patterns += [p for p in declared if isinstance(p, str)]
-    pnpm = _read(repo / "pnpm-workspace.yaml")
+    pnpm = _read(repo, repo / "pnpm-workspace.yaml")
     if "packages:" in pnpm:
         patterns += YAML_ITEM.findall(pnpm.split("packages:", 1)[1])
     found: list[str] = []
@@ -511,7 +515,7 @@ def _declared_workspaces(repo: Path) -> list[str]:
             continue
         for folder in sorted(repo.glob(pattern.strip().rstrip("/"))):
             name = folder.relative_to(repo).as_posix()
-            if (folder / "package.json").is_file() and name not in found:
+            if clone_read.is_file(repo, folder / "package.json") and name not in found:
                 found.append(name)
     return found
 
@@ -522,7 +526,7 @@ def maven_reactor(repo: Path) -> str:
     if (repo / "pom.xml").exists():
         return "pom.xml"
     for path in sorted(repo.glob("*pom*.xml")):
-        if MODULE_TAG.search(_read(path)):
+        if MODULE_TAG.search(_read(repo, path)):
             return path.name
     return ""
 
@@ -532,7 +536,7 @@ def _maven_modules(repo: Path, folder: str, depth: int = 0, pom: str = "pom.xml"
     found: list[str] = []
     if depth > 5:
         return found
-    for name in MODULE_TAG.findall(_read(repo / folder / pom)):
+    for name in MODULE_TAG.findall(_read(repo, repo / folder / pom)):
         path = f"{folder}/{name.strip('/')}".strip("/")
         if ".." in path.split("/") or name.endswith(".xml"):
             continue
@@ -545,7 +549,7 @@ def modules(repo: Path) -> list[str]:
     projects, npm or pnpm workspaces; [] for a project of one."""
     if (reactor := maven_reactor(repo)) and (maven := _maven_modules(repo, "", pom=reactor)):
         return maven
-    settings = _read(repo / "settings.gradle") or _read(repo / "settings.gradle.kts")
+    settings = _read(repo, repo / "settings.gradle") or _read(repo, repo / "settings.gradle.kts")
     if gradle := [
         name.strip(":").replace(":", "/")
         for line in GRADLE_INCLUDE.findall(settings)
@@ -568,7 +572,7 @@ def _root_runner(repo: Path | None, script: str) -> bool:
     vitest), and --filter or --workspace would run nothing."""
     if repo is None or not (packages := _declared_workspaces(repo)):
         return False
-    return not any(script in (_scripts(repo / p) or {}) for p in packages)
+    return not any(script in (_scripts(repo, repo / p) or {}) for p in packages)
 
 
 def scoped(command: str, repo: Path | None = None) -> str | None:
@@ -618,9 +622,9 @@ def maven_notes(repo: Path) -> list[str]:
     """What Maven adds to every run by itself, from .mvn, where nobody looks while typing the
     command: its own -f or -pl, and the build cache."""
     notes = []
-    if config := _read(repo / ".mvn" / "maven.config").split():
+    if config := _read(repo, repo / ".mvn" / "maven.config").split():
         notes.append(f".mvn/maven.config adds to every mvn run: {' '.join(config)}")
-    if "maven-build-cache-extension" in _read(repo / ".mvn" / "extensions.xml"):
+    if "maven-build-cache-extension" in _read(repo, repo / ".mvn" / "extensions.xml"):
         notes.append(".mvn/extensions.xml turns the Maven Build Cache on")
     return notes
 
@@ -662,7 +666,7 @@ def detect(repo: Path) -> Detected:
     if (needs := maven_jvm_needs(repo)) and jdk < needs:
         jdk = next(v for v in NEWER_LTS if v >= needs)
         found.notes.append(f".mvn/jvm.config starts Maven with options that need Java {needs} or newer.")
-    if "maven-toolchains-plugin" in _read(repo / "pom.xml"):
+    if "maven-toolchains-plugin" in _read(repo, repo / "pom.xml"):
         found.notes.append(
             "pom.xml uses maven-toolchains-plugin: the pod has one JDK and no ~/.m2/toolchains.xml, "
             "so a build that asks for another JDK fails until it is told to skip the toolchains."

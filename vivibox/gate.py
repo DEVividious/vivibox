@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import handoff, init, repo, toolchain
+from . import clone_read, handoff, init, repo, toolchain
 from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
@@ -314,8 +314,11 @@ def hidden_characters(repo_dir: Path, base: str) -> list[str]:
         found += _hidden_in(path, number, text)
     untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
     for rel in filter(None, untracked.split("\0")):
-        try:
-            text = (repo_dir / rel).read_text()
+        try:  # a link as git commits it: its target, never a file of yours it points at
+            text = clone_read.as_committed(repo_dir, rel)
+        except clone_read.Refused as e:  # never read, so never passed
+            found.append(str(e))
+            continue
         except (UnicodeDecodeError, OSError):
             continue
         for number, line in enumerate(text.splitlines(), start=1):

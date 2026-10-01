@@ -57,6 +57,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   something more, and the details, `l` or the verification say which file it is and why. A
   link in place of the reviewer's folder is refused too, and accepting a task leaves such a file
   out of the history, where the timeline names it.
+- The verification, the risky files' approval and the project's detection no longer wait on a
+  FIFO, a socket or a device in a task's repository, or read a file outside it through a link:
+  a link is followed only while it stays inside the repository, so one to a pipeline or build
+  file of yours never names a command to the writer. A file vivibox could not read counts against
+  the check (an invisible character not looked for, a risky file changed), never for it. A review
+  in your agent's CLI reads vivibox's own copies of the checklist, the red evidence and the
+  writer's reply, and its prompt says which one was left out and why.
 
 ### Internal
 

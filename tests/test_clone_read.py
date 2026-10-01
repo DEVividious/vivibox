@@ -603,13 +603,14 @@ def test_a_sparse_risky_file_is_read_no_further_than_the_limit_and_is_a_change(t
     approvals = Approvals(task.meta, task.repo)
     before = bytes_read()
     assert in_time(approvals.changes, 30) == [Change("Makefile", "added")]
-    assert bytes_read() - before < clone_read.HASH_LIMIT + (8 << 20), "read no further than the limit"
+    assert bytes_read() - before < 8 << 20, "refused by its size before anything is read"
     with pytest.raises(Exception, match="too large for vivibox to verify safely"):
         approvals.approve()
 
 
-def test_a_risky_file_that_grew_past_the_limit_is_a_change_whatever_it_holds(task):
-    """Too large to check is never the same as checked: it stays for you, and cannot pass."""
+def test_a_risky_file_that_grew_past_the_read_limit_is_still_a_change(task):
+    """Past what is read whole, it is still hashed: a change to it is a change, and its diff says
+    it is too large to show."""
     (task.repo / "Makefile").write_text("test:\n\ttrue\n")
     approvals = Approvals(task.meta, task.repo)
     approvals.approve()
@@ -847,3 +848,128 @@ def test_your_own_file_too_large_to_hash_is_flagged_for_you_not_the_writer(env, 
     assert "too large for vivibox to verify safely" in said
     assert "was that large in your repository when the task started" in said
     assert "writer" not in said
+
+
+# --- review round 3 ------------------------------------------------------------------------------
+
+
+def test_a_file_that_grows_while_it_is_hashed_is_read_no_further_than_the_limit(clone, monkeypatch):
+    """Its size, as fstat said it, was small; what is read is counted all the same."""
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20)
+    (clone / "Makefile").write_bytes(b"x" * (3 << 20))
+    real_fstat = os.fstat
+
+    def small(fd):
+        fields = list(real_fstat(fd))
+        fields[6] = 10  # st_size, as if it grew after the look
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(os, "fstat", small)
+    before = bytes_read()
+    digest = risky._digest(clone, clone / "Makefile")
+    assert bytes_read() - before < (1 << 20) + (256 << 10), "the limit and one byte, at most"
+    assert digest == f"{risky.TOO_LARGE}larger than 1 MiB"
+
+
+def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
+    """Hashed and watched, but not shown: you are told so, and where to read it before p."""
+    sparse(task.repo / "build.gradle")
+    approvals = Approvals(task.meta, task.repo)
+    said = approvals.diff(Change("build.gradle", "added"))
+    assert "larger than 64 MiB, too large to show here" in said
+    assert "vivibox checks whether it changes, not what it says" in said
+    assert f"read it at {task.repo / 'build.gradle'} before you approve" in said
+    assert "does not read it" not in said
+
+
+def your_huge_makefile(env, monkeypatch) -> tuple:
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20)
+    source = env / "repo"
+    (source / "Makefile").write_bytes(b"x" * (2 << 20))
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    return t, approvals
+
+
+def test_your_own_file_too_large_to_hash_says_what_can_be_done(env, monkeypatch):
+    t, approvals = your_huge_makefile(env, monkeypatch)
+    said = approvals.diff(Change("Makefile", "changed"))
+    assert "no task of this project can be approved while it is that large" in said
+    assert f"vivibox delete {t.id}" in said and "writer" not in said
+
+
+def test_a_file_the_task_added_too_large_is_the_writers_to_remove(env, monkeypatch):
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20)
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(env / "repo", t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    (t.repo / "Makefile").write_bytes(b"x" * (2 << 20))
+    said = approvals.diff(Change("Makefile", "added"))
+    assert "reply, and the writer removes it" in said and "restores" not in said
+
+
+def test_a_file_the_task_made_too_large_is_the_writers_to_restore(env, monkeypatch):
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20)
+    source = env / "repo"
+    (source / "Makefile").write_text("test:\n\ttrue\n")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()
+    (t.repo / "Makefile").write_bytes(b"x" * (2 << 20))
+    said = approvals.diff(Change("Makefile", "changed"))
+    assert "reply, and the writer restores it as it was when the task started" in said
+    assert "removes it" not in said
+
+
+@pytest.mark.parametrize(
+    "fails, words",
+    [
+        ("dubious", "fatal: detected dubious ownership in repository at"),
+        ("missing", "git could not run"),
+    ],
+)
+def test_a_git_failure_in_your_checkout_is_said_in_its_own_words(env, outside, monkeypatch, fails, words):
+    from vivibox import baseline
+
+    t, _ = linked_at_base(env, outside)
+    real_run = subprocess.run
+
+    def run(args, *a, **k):
+        if "ls-tree" not in args:
+            return real_run(args, *a, **k)
+        if fails == "missing":
+            raise FileNotFoundError(2, "No such file or directory", "git")
+        said = b"fatal: detected dubious ownership in repository at '/x'\nTo add an exception: ...\n"
+        return subprocess.CompletedProcess(args, 128, b"", said)
+
+    monkeypatch.setattr(baseline.subprocess, "run", run)
+    said = Approvals(t.meta, t.repo).diff(Change("build.gradle", "changed"))
+    assert words in said and "To add an exception" not in said, "its first line"
+
+
+def test_a_project_file_renamed_or_unreadable_is_a_reason_with_the_right_next_step(env, outside, monkeypatch):
+    from vivibox import config
+
+    t, _ = linked_at_base(env, outside)
+    projects = Path(os.environ["VIVIBOX_CONFIG_DIR"]) / "projects"
+    (projects / "demo.toml").rename(projects / "renamed.toml")
+    said = Approvals(t.meta, t.repo).diff(Change("build.gradle", "changed"))
+    assert f"the project file {projects / 'demo.toml'} is gone" in said
+    assert "give it its name back" in said and "run vivibox to set it up" not in said
+    (projects / "renamed.toml").rename(projects / "demo.toml")
+
+    def unreadable(name, base=None):
+        raise PermissionError(13, "Permission denied", str(projects / "demo.toml"))
+
+    monkeypatch.setattr(config, "load_project", unreadable)
+    approvals = Approvals(t.meta, t.repo)
+    assert approvals.changes() == [Change("build.gradle", "changed")], "a reason, not an exception"
+    assert "Permission denied" in approvals.diff(Change("build.gradle", "changed"))

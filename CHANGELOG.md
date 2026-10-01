@@ -58,18 +58,19 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   link in place of the reviewer's folder is refused too, and accepting a task leaves such a file
   out of the history, where the timeline names it.
 - The verification, the risky files' approval and the project's detection no longer wait on a
-  FIFO, a socket or a device in a task's repository, or read a file outside it through a link:
-  a link is followed only while it stays inside the repository, so one to a pipeline or build
-  file of yours never names a command to the writer. They read no more than a limit either
-  (1 MiB of a build file, 64 MiB of a file checked whole, 1 GiB of a risky file hashed in small
-  chunks), so a huge or sparse file costs no memory. A file vivibox did not read counts against
-  the check, never for it: the verification lists it as not checked, and a risky file too large
-  to verify, or a risky link out of the repository that your checkout's base commit of the task
-  does not have with that target, stays changed and cannot be approved; the approval says why,
-  and whether it is the writer's to undo. A link out that was yours is tolerated by its target
-  alone and never followed. Detection's notes name a build file it left unread for its size. A review
-  in your agent's CLI reads vivibox's own copies of the checklist, the red evidence and the
-  writer's reply, and its prompt says which one was left out and why.
+  FIFO, a socket or a device in a task's repository, or read a file outside it through a link: a
+  link is followed only while it stays inside the repository, so one to a pipeline or build file
+  of yours never names a command to the writer. They read no more than a limit either (1 MiB of a
+  build file, 64 MiB of a file checked whole, 1 GiB of a risky file hashed in small chunks), so a
+  huge or sparse file costs no memory; a risky file past 64 MiB is still checked, and its diff
+  says it is too large to show and where to read it. A file vivibox did not read counts against
+  the check, never for it: the verification lists it as not checked, and a risky file too large to
+  verify, or a risky link out of the repository that your checkout's base commit of the task does
+  not have with that target, stays changed and cannot be approved; the approval says why, and
+  whether it is the writer's to undo. A link out that was yours is tolerated by its target alone
+  and never followed. Detection's notes name a build file it left unread for its size. A review in
+  your agent's CLI reads vivibox's own copies of the checklist, the red evidence and the writer's
+  reply, and its prompt says which one was left out and why.
 
 ### Internal
 

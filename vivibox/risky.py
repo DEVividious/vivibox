@@ -116,7 +116,7 @@ def _digest(repo: Path, path: Path) -> str:
     return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
 
 
-def _cannot(path: str, digest: str, base: baseline.Baseline) -> str:
+def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str) -> str:
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
     link it had is tolerated by its target alone: never followed, never read."""
@@ -130,12 +130,16 @@ def _cannot(path: str, digest: str, base: baseline.Baseline) -> str:
             return (
                 f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely. It "
                 "was that large in your repository when the task started, so vivibox cannot tell "
-                "whether the task changed it, and cannot approve it"
+                "whether the task changed it, and no task of this project can be approved while it is "
+                f"that large: delete this task (vivibox delete {task_id})"
             )
+        if base.problem:
+            undo = "restores it as it was when the task started, or removes it if the task added it"
+        else:
+            undo = "restores it as it was when the task started" if path in base.sizes else "removes it"
         return (
             f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
-            "task's change to it cannot be approved: reply, and the writer restores it as it was when "
-            f"the task started{unknown}"
+            f"task's change to it cannot be approved: reply, and the writer {undo}{unknown}"
         )
     if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
@@ -236,8 +240,8 @@ class Approvals:
         at the task's base commit (baseline), read only when there is something to ask it."""
         if not any(d.startswith((OUT_LINK, TOO_LARGE)) for d in now.values()):
             return {}
-        base = baseline.of_task(self.dir.parent)
-        return {p: why for p, d in now.items() if (why := _cannot(p, d, base))}
+        base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
+        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id))}
 
     def approve(self) -> dict[str, str]:
         """Takes the current state as approved (at task start: the state of your repository).
@@ -287,7 +291,12 @@ class Approvals:
         try:
             b = clone_read.read_bytes(self.repo, new).decode().splitlines(keepends=True)
         except clone_read.Refused as e:
-            return f"{head} ({e})\n"
+            if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
+                return f"{head} ({e})\n"
+            return (  # hashed and watched (_digest), but more than the panel shows
+                f"{head}: {e.kind}, too large to show here; vivibox checks whether it changes, not what "
+                f"it says: read it at {new} before you approve\n"
+            )
         except OSError:  # gone, or a folder
             b = []
         except UnicodeDecodeError:

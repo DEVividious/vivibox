@@ -27,7 +27,7 @@ class Baseline:
 
 def of_task(meta: Path) -> Baseline:
     """The base of the task whose metadata folder is meta."""
-    from .config import ConfigError, load_project  # what vivibox knows of your projects
+    from .config import ConfigError, config_dir, load_project  # what vivibox knows of your projects
     from .task import Task
 
     try:
@@ -38,8 +38,13 @@ def of_task(meta: Path) -> Baseline:
         return Baseline(problem="the task has no base commit on record")
     try:
         source = load_project(st.project).repo
-    except ConfigError as e:
-        return Baseline(problem=f"its project could not be read ({e})")
+    except (ConfigError, OSError) as e:
+        path = config_dir() / "projects" / f"{st.project}.toml"
+        if not path.exists():
+            return Baseline(
+                problem=f"the project file {path} is gone; if you renamed it, give it its name back"
+            )
+        return Baseline(problem=f"the project file {path} could not be read: {e}")
     return read(source, st.base_commit)
 
 
@@ -50,11 +55,11 @@ def read(source: Path, commit: str) -> Baseline:
         return Baseline(
             problem=f"{source} is gone; if your repository moved, set its new path as the project's repo"
         )
-    listed = _git(source, "ls-tree", "-r", "-l", "-z", "--full-tree", commit)
+    listed, why = _git(source, "ls-tree", "-r", "-l", "-z", "--full-tree", commit)
     if listed is None:
         return Baseline(
-            problem=f"{source} does not have the task's base commit {commit[:12]} (gone from its history, "
-            "or another repository)"
+            problem=f"{source} does not have the task's base commit {commit[:12]}, or git could not read "
+            f"it: {why}"
         )
     found, oids = Baseline(), {}
     for entry in filter(None, listed.split(b"\0")):
@@ -66,9 +71,12 @@ def read(source: Path, commit: str) -> Baseline:
             found.sizes[os.fsdecode(name)] = int(size)
     if any(not COMMIT.fullmatch(oid) for oid in oids.values()):
         return Baseline(problem=f"{source} listed something other than an object id")
-    targets = _git(source, "cat-file", "--batch", input="".join(f"{oid}\n" for oid in oids.values()).encode())
+    asked = "".join(f"{oid}\n" for oid in oids.values()).encode()
+    targets, why = _git(source, "cat-file", "--batch", input=asked)
     if targets is None:
-        return Baseline(problem=f"{source} could not show the links of the task's base commit {commit[:12]}")
+        return Baseline(
+            problem=f"git could not show the links of the task's base commit {commit[:12]}: {why}"
+        )
     try:
         for name in oids:  # in the order asked: "<oid> blob <size>\n<target>\n" each
             header, _, targets = targets.partition(b"\n")
@@ -79,12 +87,16 @@ def read(source: Path, commit: str) -> Baseline:
     return found
 
 
-def _git(source: Path, *args: str, input: bytes = b"") -> bytes | None:
-    """git's output in your checkout, None when it failed; an argument list, never a shell."""
+def _git(source: Path, *args: str, input: bytes = b"") -> tuple[bytes | None, str]:
+    """git's output in your checkout, or None and the first line git said of why; an argument
+    list, never a shell."""
     try:
         done = subprocess.run(
             ["git", "-C", str(source), *args], input=input, capture_output=True, check=False
         )
-    except OSError:
-        return None
-    return done.stdout if done.returncode == 0 else None
+    except OSError as e:
+        return None, f"git could not run: {e.strerror}"
+    if done.returncode == 0:
+        return done.stdout, ""
+    said = done.stderr.decode(errors="replace").splitlines()
+    return None, next((line for line in said if line.strip()), f"git exited with {done.returncode}")

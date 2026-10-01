@@ -130,7 +130,7 @@ def close_box(task: Task, project: Project) -> Path | None:
     if not st.box or st.state is not State.IMPLEMENT:
         raise gate.GateError(f"{task.id} is not an open box")
     commit_in_box(task)
-    head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    head = repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
     if head == st.base_commit:
         raise gate.GateError(f"nothing changed in {task.id}; there is nothing to bring back")
     task.transition(State.VERIFY, reason="box closed")

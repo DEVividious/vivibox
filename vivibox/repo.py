@@ -8,8 +8,12 @@ Those files are written here, from an allowlist, and mounted read-only into the 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
+import signal
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,14 +42,110 @@ class RepoError(Exception):
     pass
 
 
-def git(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+class GitTimeout(RepoError):
+    """git did not answer in time in the task's clone: what asked stops there, and never goes on as
+    if git had answered."""
+
+
+# Seconds git on the host may take in the task's clone, which the agent writes. What vivibox asks
+# there answers in well under a second on an ordinary repository and in seconds on a large one;
+# a named pipe where git reads its settings or refs makes git wait forever.
+CLONE_TIMEOUT = 60.0
+
+
+def git(
+    *args: str, cwd: Path | None = None, check: bool = True, timeout: float | None = None,
+    clone: Path | None = None,
+) -> subprocess.CompletedProcess:  # fmt: skip
+    """timeout: seconds git may take, or no limit; past it, GitTimeout says what git was waiting on
+    in clone (cwd when not given)."""
     if cwd is not None and not Path(cwd).is_dir():
         # A folder that was moved or deleted since it was configured; say so instead of a stack trace.
         raise RepoError(f"{cwd} does not exist")
-    p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if timeout is None:
+        p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    else:
+        p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."))
     if check and p.returncode != 0:
         raise RepoError(f"git {' '.join(args[:3])}…: {p.stderr.strip()}")
     return p
+
+
+def in_clone(
+    clone: Path, *args: str, check: bool = True, cwd: Path | None = None
+) -> subprocess.CompletedProcess:
+    """git on the task's clone, or reading it from cwd, within CLONE_TIMEOUT."""
+    return git(*args, cwd=cwd or clone, check=check, timeout=CLONE_TIMEOUT, clone=clone)
+
+
+def _bounded(
+    command: list[str], cwd: Path | None, timeout: float, clone: Path
+) -> subprocess.CompletedProcess:
+    """git in a session of its own, so that on a timeout it goes down with every process it started."""
+    p = subprocess.Popen(
+        command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True,
+    )  # fmt: skip
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except BaseException as e:  # the timeout, or an interrupt: no git is left waiting
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        p.stdout.close()
+        p.stderr.close()
+        if isinstance(e, subprocess.TimeoutExpired):
+            raise GitTimeout(_unanswered(command[1:], timeout, clone)) from None
+        raise
+    return subprocess.CompletedProcess(command, p.returncode, out, err)
+
+
+# What git reads in a working tree, and every file of its own under .git.
+GIT_READS = (".gitignore", ".gitattributes")
+SPECIAL = {stat.S_IFIFO: "a named pipe (FIFO)", stat.S_IFSOCK: "a socket", stat.S_IFCHR: "a device",
+           stat.S_IFBLK: "a device"}  # fmt: skip
+# Entries looked at for the cause: a timeout's message never waits on a walk of a huge clone.
+LOOKED_AT = 100_000
+
+
+def special_files(clone: Path) -> list[tuple[str, str]]:
+    """Files git reads in the clone that are no plain file, as (path from its root, what it is):
+    git opens such a file and waits on it."""
+    found, seen = [], 0
+    for root, dirs, files in os.walk(clone):
+        here = Path(root)
+        inside_git = ".git" in here.relative_to(clone).parts
+        for name in files:
+            if not (inside_git or name in GIT_READS):
+                continue
+            try:  # the file a link leads to, as git opens it; stat never waits on a pipe
+                kind = SPECIAL.get(stat.S_IFMT(os.stat(here / name).st_mode))
+            except OSError:
+                continue
+            if kind:
+                found.append(((here / name).relative_to(clone).as_posix(), kind))
+        seen += len(dirs) + len(files)
+        if seen > LOOKED_AT:
+            break
+    return found
+
+
+def _unanswered(args: list[str], seconds: float, clone: Path) -> str:
+    """What timed out, why it likely did, and what to do, in a sentence."""
+    i = 0
+    while i < len(args) - 1 and args[i].startswith("-"):
+        i += 2 if args[i] in ("-c", "-C") else 1
+    what = f"git {args[i] if args else ''} did not answer in {seconds:g} s"
+    found = special_files(clone)[:3]
+    if not found:
+        return (
+            f"{what} in {clone}; a named pipe (FIFO) where git reads its settings or refs (.gitignore, "
+            ".gitattributes, .git/info/exclude, .git/packed-refs) makes git wait like this"
+        )
+    # The path first: a notification cut short loses the explanation, not the file.
+    named = ", ".join(f"{clone / path} is {kind}" for path, kind in found)
+    it = "it" if len(found) == 1 else "them"
+    return f"{what}: {named}, which git waits on forever; delete {it}"
 
 
 def branch_name(task_id: str) -> str:
@@ -255,7 +355,8 @@ def fetch_to(source: Path, repo: Path, meta: Path, task_id: str) -> str:
     """Brings the task's commits into your repository under refs/vivibox/<id>. Returns the commit."""
     check_protection(repo, meta)
     refspec = f"+refs/heads/{branch_name(task_id)}:{review_ref(task_id)}"
-    git("fetch", "--quiet", "--no-tags", str(repo), refspec, cwd=source)
+    # Run in your checkout, but upload-pack reads the clone: its refs may be a pipe the agent made.
+    in_clone(repo, "fetch", "--quiet", "--no-tags", str(repo), refspec, cwd=source)
     return git("rev-parse", review_ref(task_id), cwd=source).stdout.strip()
 
 

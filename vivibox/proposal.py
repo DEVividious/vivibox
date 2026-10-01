@@ -127,7 +127,7 @@ def module_of(root: Path, path: str) -> str | None:
 
 def _changed(task: Task) -> list[str]:
     base = task.read_state().base_commit
-    return repo.git("diff", "--name-only", f"{base}..HEAD", cwd=task.repo).stdout.split()
+    return repo.in_clone(task.repo, "diff", "--name-only", f"{base}..HEAD").stdout.split()
 
 
 def _placed(task: Task, project: Project) -> tuple[list[str], list[str], list[str]]:

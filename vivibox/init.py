@@ -8,13 +8,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import tomllib
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import clone_read
+from . import repo as git_repo
 from .config import PROJECT_NAME
 
 IMAGE_JAVA = 21
@@ -51,7 +51,7 @@ def wrapper(repo: Path, name: str) -> str:
     """How to run a build tool's wrapper: as itself when git has it executable, as the gate's fresh
     clone gets it; through bash when it was committed without its executable bit. Always by its
     path: a wrapper finds the project by ${0%/*}, which of a bare "mvnw" is the file itself."""
-    listed = subprocess.run(["git", "ls-files", "-s", "--", name], cwd=repo, capture_output=True, text=True)
+    listed = git_repo.in_clone(repo, "ls-files", "-s", "--", name, check=False)  # the task's clone, too
     return f"./{name}" if listed.stdout.startswith("100755") else f"bash ./{name}"
 
 

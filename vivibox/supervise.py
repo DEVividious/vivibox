@@ -18,6 +18,7 @@ from . import (
     repo,
     reviewing,
     supervisor,
+    unanswered,
     version,
 )
 from .config import Config, ConfigError, Project, load_config, load_project
@@ -142,6 +143,8 @@ def make_supervisor(
         seen = current
         return current
 
+    # What it asks the clone before the gate runs (the files a change reached) ends it the same way.
+    @unanswered.ends_verification(gate.GateResult)
     def run_gate(t: Task) -> gate.GateResult:
         p = now()
         if outside := actions.outside_modules(t, p):
@@ -162,6 +165,7 @@ def make_supervisor(
             tools=p.tools,
         )
 
+    @unanswered.ends_verification(gate.GateResult)
     def run_whole_gate(t: Task) -> gate.GateResult | None:
         """The whole build before the work comes to you, when you asked for it under k and the task
         was verified by its modules only."""
@@ -191,7 +195,7 @@ def make_supervisor(
         review_up=lambda: reviewing.up(task, pod, config),
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
-        head=lambda: repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip(),
+        head=lambda: repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip(),
     )
     return supervisor.Supervisor(
         task,

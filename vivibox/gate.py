@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import clone_read, handoff, init, repo, toolchain
+from . import clone_read, handoff, init, repo, toolchain, unanswered
 from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
@@ -257,7 +257,7 @@ def log_excerpt(text: str, limit: int = 30) -> str:
 
 
 def commit_problems(repo_dir: Path, base: str) -> list[str]:
-    log = repo.git("log", "--format=%h%x1f%B%x1e", f"{base}..HEAD", cwd=repo_dir).stdout
+    log = repo.in_clone(repo_dir, "log", "--format=%h%x1f%B%x1e", f"{base}..HEAD").stdout
     problems = []
     for entry in filter(None, (e.strip("\n") for e in log.split("\x1e"))):
         sha, _, message = entry.partition("\x1f")
@@ -291,8 +291,8 @@ def removed_lines(repo_dir: Path, base: str):
 
 
 def _diff_lines(repo_dir: Path, base: str, sign: str):
-    diff = repo.git("-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", base,
-                    cwd=repo_dir).stdout  # fmt: skip
+    diff = repo.in_clone(repo_dir, "-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff",
+                         "--unified=0", base).stdout  # fmt: skip
     path, number = "", 0
     group = 2 if sign == "+" else 1
     # A removed line's file is the old one: a deleted file's new one is /dev/null.
@@ -312,7 +312,7 @@ def hidden_characters(repo_dir: Path, base: str, budget: clone_read.Budget | Non
     found, budget = [], clone_read.Budget() if budget is None else budget  # the verification's
     for path, number, text in added_lines(repo_dir, base):
         found += _hidden_in(path, number, text)
-    untracked = repo.git("ls-files", "-z", "--others", "--exclude-standard", cwd=repo_dir).stdout
+    untracked = repo.in_clone(repo_dir, "ls-files", "-z", "--others", "--exclude-standard").stdout
     for rel in filter(None, untracked.split("\0")):
         try:  # a link as git commits it: its target, never a file of yours it points at
             text = clone_read.as_committed(repo_dir, repo_dir / rel, budget)
@@ -373,7 +373,7 @@ def is_test_file(path: str) -> bool:
 
 def changed_test_files(repo_dir: Path, base: str) -> list[str]:
     """Test files added or changed in the commits since base."""
-    names = repo.git("diff", "--name-only", "--diff-filter=AM", base, "HEAD", cwd=repo_dir).stdout
+    names = repo.in_clone(repo_dir, "diff", "--name-only", "--diff-filter=AM", base, "HEAD").stdout
     return [path for path in names.splitlines() if path and is_test_file(path)]
 
 
@@ -480,7 +480,7 @@ class GateResult:
 
 
 def uncommitted(repo_dir: Path) -> list[str]:
-    status = repo.git("status", "--porcelain", "--untracked-files=all", cwd=repo_dir).stdout
+    status = repo.in_clone(repo_dir, "status", "--porcelain", "--untracked-files=all").stdout
     return [line[3:] for line in status.splitlines()]
 
 
@@ -571,7 +571,7 @@ def missing_program(repo_dir: Path, commands: list[str]) -> str:
             path = os.path.normpath(os.path.join(cwd, program))
             if path.startswith(".."):
                 continue
-            if repo.git("cat-file", "-e", f"HEAD:{path}", cwd=repo_dir, check=False).returncode != 0:
+            if repo.in_clone(repo_dir, "cat-file", "-e", f"HEAD:{path}", check=False).returncode != 0:
                 return (
                     f"`{command}` runs {path}, which the repository does not have in its commits; "
                     "change the command under e on the project"
@@ -579,6 +579,7 @@ def missing_program(repo_dir: Path, commands: list[str]) -> str:
     return ""
 
 
+@unanswered.ends_verification(GateResult)  # git that did not answer in the clone: for you, no round
 def run_gate(
     task: Task,
     pod: Pod,
@@ -600,7 +601,7 @@ def run_gate(
     repo.check_protection(task.repo, task.meta)
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
-    head = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    head = repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
     result = GateResult(log, commit=head)
     commands = init.with_dependencies(task.repo, commands)
     # What the commands run on besides the image: another toolchain can build the same commit.

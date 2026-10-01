@@ -23,10 +23,12 @@ from .handoff import FLAGS, NOT_PLAIN
 
 MAX_LINKS = 40
 # What detection and the configuration it gives read (a package.json, a pipeline): far above any
-# real build file. What the checks read (a risky file's digest, an untracked file for invisible
-# characters): far above a lockfile; past it a check counts the file against the work.
+# real build file. What the checks read whole (an untracked file for invisible characters, a risky
+# file's diff): far above a lockfile. What a risky file's digest hashes, a chunk at a time in the
+# same little memory: past it the file cannot be verified, and a check counts it against the work.
 CONFIG_LIMIT = 1 << 20
 CHECK_LIMIT = 64 << 20
+HASH_LIMIT = 1 << 30
 CHUNK = 1 << 20
 KINDS = {
     stat.S_IFIFO: "a FIFO", stat.S_IFSOCK: "a socket", stat.S_IFCHR: "a device", stat.S_IFBLK: "a device",
@@ -48,7 +50,7 @@ class Refused(OSError):
 
 
 def too_large(limit: int) -> str:
-    return f"larger than {limit >> 20} MiB"
+    return f"larger than {limit >> 30} GiB" if limit >= 1 << 30 else f"larger than {limit >> 20} MiB"
 
 
 def not_checked(path: str, kind: str) -> str:
@@ -143,8 +145,8 @@ def read_bytes(root: Path, path: Path | str, limit: int = CHECK_LIMIT) -> bytes:
     return b"".join(_chunks(root, path, limit))
 
 
-def sha256(root: Path, path: Path | str, limit: int = CHECK_LIMIT) -> str:
-    """The file's digest, read a chunk at a time; refused as read_bytes refuses."""
+def sha256(root: Path, path: Path | str, limit: int) -> str:
+    """The file's digest, read a chunk at a time in constant memory; refused past limit."""
     digest = hashlib.sha256()
     for chunk in _chunks(root, path, limit):
         digest.update(chunk)

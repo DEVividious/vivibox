@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import clone_read
+from . import baseline, clone_read
 
 # Pattern forms: "name" matches a file name at any depth, "dir/**" everything under a directory with
 # that name at any depth, anything else the whole path relative to the repo root.
@@ -85,7 +85,7 @@ def matches(path: str, pattern: str) -> bool:
 
 
 # Digests of what vivibox does not read, and so cannot check: a link that leads out of the
-# repository (by the targets on the way out), and a file past clone_read's limit.
+# repository (by the targets on the way out), and a file past clone_read.HASH_LIMIT.
 OUT_LINK, TOO_LARGE = "symlink out of the repository:", "too large to check:"
 
 
@@ -100,11 +100,11 @@ def _digest(repo: Path, path: Path) -> str:
     a device) by its kind, never opened: it is never the same as a file you approved."""
     target = clone_read.link(repo, path)
     try:
-        content = clone_read.sha256(repo, path)
+        content = clone_read.sha256(repo, path, clone_read.HASH_LIMIT)
     except clone_read.Refused as e:
         if e.kind == clone_read.OUT:
             return OUT_LINK + " -> ".join(e.links)
-        if e.kind == clone_read.too_large(clone_read.CHECK_LIMIT):
+        if e.kind == clone_read.too_large(clone_read.HASH_LIMIT):
             return TOO_LARGE + e.kind
         if target is None:
             return f"not a plain file: {e.kind}"
@@ -116,19 +116,32 @@ def _digest(repo: Path, path: Path) -> str:
     return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
 
 
-def _cannot(path: str, digest: str, base: dict[str, str]) -> str:
-    """Why no approval takes path as it is, or "": a file too large to check, or a link out of the
-    repository that was not there, as it is, in your repository when the task started."""
+def _cannot(path: str, digest: str, base: baseline.Baseline) -> str:
+    """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
+    repository that your repository did not have, with that target, at the task's base commit. A
+    link it had is tolerated by its target alone: never followed, never read."""
+    unknown = (
+        f"; vivibox could not tell whether it was in your repository when the task started: {base.problem}"
+        if base.problem
+        else ""
+    )
     if digest.startswith(TOO_LARGE):
+        if base.sizes.get(path, 0) > clone_read.HASH_LIMIT:  # yours: nothing for the writer to do
+            return (
+                f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely. It "
+                "was that large in your repository when the task started, so vivibox cannot tell "
+                "whether the task changed it, and cannot approve it"
+            )
         return (
-            f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to check, so it cannot "
-            "be approved: reply, and the writer makes it smaller or removes it"
+            f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
+            "task's change to it cannot be approved: reply, and the writer restores it as it was when "
+            f"the task started{unknown}"
         )
-    if digest.startswith(OUT_LINK) and base.get(path) != digest:
+    if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
             f"{path} is a link that leads out of the repository ({digest.removeprefix(OUT_LINK)}), and "
             "vivibox cannot check what it points to, so it cannot be approved: reply, and the writer "
-            "removes the link or makes it a file in the repository"
+            f"removes the link or makes it a file in the repository{unknown}"
         )
     return ""
 
@@ -219,16 +232,16 @@ class Approvals:
         return json.loads(self.record.read_text()) if self.record.exists() else {}
 
     def unapprovable(self, now: dict[str, str]) -> dict[str, str]:
-        """The risky files of now that no approval takes, each with why. The base is the state of
-        your repository the first approval took, at the task's start; a task from before it was
-        kept has none, and no link out of it is yours."""
-        base = self.dir / "base.json"
-        base = json.loads(base.read_text()) if base.exists() else {}
+        """The risky files of now that no approval takes, each with why, against your repository
+        at the task's base commit (baseline), read only when there is something to ask it."""
+        if not any(d.startswith((OUT_LINK, TOO_LARGE)) for d in now.values()):
+            return {}
+        base = baseline.of_task(self.dir.parent)
         return {p: why for p, d in now.items() if (why := _cannot(p, d, base))}
 
     def approve(self) -> dict[str, str]:
-        """Takes the current state as approved (at task start: the state of your repository, kept
-        as the base). Refused, with nothing taken, while a file is unapprovable."""
+        """Takes the current state as approved (at task start: the state of your repository).
+        After that, refused with nothing taken while a file is unapprovable."""
         current = scan(self.repo, self.extra)
         first = not self.record.exists()
         if not first and (refused := self.unapprovable(current)):
@@ -244,8 +257,6 @@ class Approvals:
                     clone_read.copy(self.repo, self.repo / rel, files / rel)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
-        if first:
-            (self.dir / "base.json").write_text(self.record.read_text())
         return current
 
     def changes(self) -> list[Change]:

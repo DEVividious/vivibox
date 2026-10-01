@@ -4,6 +4,7 @@ of a file is never read, nor waited on. What the host reads there reaches the ag
 commands the verification runs, the risky files' approval and your review."""
 
 import contextlib
+import json
 import os
 import socket
 import stat
@@ -35,7 +36,7 @@ SECRET = "-PsecretFlag=HOSTVALUE"
 OUTSIDE = f"the host's own file {SECRET}\n"
 
 
-def in_time(call):
+def in_time(call, seconds: float = 5):
     """call's result, or the error it raised; a failure when it hangs (a FIFO opened for reading
     waits for a writer)."""
     done = []
@@ -48,7 +49,7 @@ def in_time(call):
 
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
-    worker.join(timeout=5)
+    worker.join(timeout=seconds)
     assert done, "the host hung on a special file"
     return done[0]
 
@@ -548,10 +549,10 @@ def test_once_the_writer_removes_the_link_the_approval_goes_through_once(task):
     assert approvals.changes() == []
 
 
-def test_a_link_out_of_the_repository_that_was_yours_at_the_start_is_not_a_change(tmp_path, outside):
+def test_a_link_out_of_the_repository_that_was_yours_at_the_start_is_not_a_change(env, tmp_path, outside):
     """Your own repository's link out (a shared IDE setting, a CI template): there at the base
     commit, with the same target, it is yours, as it was; a link the agent points elsewhere is not."""
-    source = make_repo(tmp_path / "source")
+    source = tmp_path / "repo"  # the project's checkout (env)
     (outside / "shared.gradle").write_text("apply plugin: 'java'\n")
     (source / "build.gradle").symlink_to(outside / "shared.gradle")
     git(source, "add", ".")
@@ -586,7 +587,8 @@ def bytes_read() -> int:
     return int(next(line for line in io.splitlines() if line.startswith("rchar:")).split()[1])
 
 
-SPARSE = 200 << 20  # past every limit, and nothing on the disk
+SPARSE = 200 << 20  # past every limit on what is read whole, and nothing on the disk
+HUGE = (1 << 30) + (1 << 20)  # past the limit on what is hashed
 
 
 def sparse(path: Path, size: int = SPARSE) -> Path:
@@ -597,12 +599,12 @@ def sparse(path: Path, size: int = SPARSE) -> Path:
 
 
 def test_a_sparse_risky_file_is_read_no_further_than_the_limit_and_is_a_change(task):
-    sparse(task.repo / "Makefile")
+    sparse(task.repo / "Makefile", HUGE)
     approvals = Approvals(task.meta, task.repo)
     before = bytes_read()
-    assert in_time(approvals.changes) == [Change("Makefile", "added")]
-    assert bytes_read() - before < SPARSE // 2, "read no further than the limit"
-    with pytest.raises(Exception, match="larger than 64 MiB"):
+    assert in_time(approvals.changes, 30) == [Change("Makefile", "added")]
+    assert bytes_read() - before < clone_read.HASH_LIMIT + (8 << 20), "read no further than the limit"
+    with pytest.raises(Exception, match="too large for vivibox to verify safely"):
         approvals.approve()
 
 
@@ -697,11 +699,11 @@ def test_a_loop_of_links_is_named_as_one(clone):
 
 
 def test_a_baseline_link_out_is_tolerated_by_its_target_alone_and_never_followed(
-    tmp_path, outside, monkeypatch
+    env, tmp_path, outside, monkeypatch
 ):
     """Your link out, as it was at the start, passes the risky files' diff and approval by its
     target string; neither they nor detection open what it points at."""
-    source = make_repo(tmp_path / "source")
+    source = tmp_path / "repo"  # the project's checkout (env)
     (outside / "settings.gradle").write_text("include 'HOSTVALUE'\n")
     (source / "settings.gradle").symlink_to(outside / "settings.gradle")
     git(source, "add", ".")
@@ -718,3 +720,130 @@ def test_a_baseline_link_out_is_tolerated_by_its_target_alone_and_never_followed
     approvals.approve()
     assert "HOSTVALUE" not in str(init.detect(t.repo)) and init.modules(t.repo) == []
     assert not [p for p in opened if p.endswith("settings.gradle")], "never opened, by name or path"
+
+
+# --- review round 2: the base commit in your checkout, and the hashing limit ---------------------
+
+
+def linked_at_base(env, outside, name: str = "build.gradle") -> tuple:
+    """A task of the env's project, whose checkout has your own link out at the base commit."""
+    source = env / "repo"
+    (outside / "shared.gradle").write_text("apply plugin: 'java'\n")
+    (source / name).symlink_to(outside / "shared.gradle")
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Share the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    Approvals(t.meta, t.repo).approve()
+    return t, source
+
+
+def test_a_task_from_before_the_base_record_takes_your_links_from_its_base_commit(env, outside, monkeypatch):
+    """A task made before vivibox kept anything of its start has its base commit: your checkout's
+    git says which links were yours, and the clone's own .git, the agent's, is never asked."""
+    t, source = linked_at_base(env, outside)
+    (t.meta / "risky" / "base.json").unlink(missing_ok=True)
+    ran = []
+    real_run = subprocess.run
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, *a, **k: ran.append(list(args)) or real_run(args, *a, **k)
+    )
+    approvals = Approvals(t.meta, t.repo)
+    assert approvals.changes() == []
+    approvals.approve()
+    asked = [args for args in ran if "ls-tree" in args or "cat-file" in args]
+    assert asked and all(str(source) in args and str(t.repo) not in " ".join(args) for args in asked)
+    assert not (t.meta / "risky" / "base.json").exists(), "the base commit is the record"
+
+
+def set_base(task, commit: str) -> None:
+    state = json.loads((task.meta / "state.json").read_text())
+    state["base_commit"] = commit
+    (task.meta / "state.json").write_text(json.dumps(state))
+
+
+@pytest.mark.parametrize("lost", ["the commit", "the checkout"])
+def test_a_base_commit_your_checkout_no_longer_has_fails_closed_and_says_why(env, outside, lost):
+    t, source = linked_at_base(env, outside)
+    if lost == "the commit":
+        set_base(t, "0" * 40)
+        why = f"{source} does not have the task's base commit 000000000000"
+    else:
+        source.rename(env / "moved")
+        why = f"{source} is gone"
+    approvals = Approvals(t.meta, t.repo)
+    assert approvals.changes() == [Change("build.gradle", "changed")]
+    with pytest.raises(Exception) as refused:
+        approvals.approve()
+    said = str(refused.value)
+    assert "build.gradle is a link that leads out of the repository" in said
+    assert "vivibox could not tell whether it was in your repository when the task started" in said
+    assert why in said
+    assert why in approvals.diff(Change("build.gradle", "changed"))
+
+
+def test_a_base_commit_on_record_that_is_no_commit_id_never_reaches_git(env, outside, monkeypatch):
+    t, _ = linked_at_base(env, outside)
+    set_base(t, "--output=/tmp/vivibox-x")
+    ran = []
+    real_run = subprocess.run
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, *a, **k: ran.append(list(args)) or real_run(args, *a, **k)
+    )
+    approvals = Approvals(t.meta, t.repo)
+    assert approvals.changes() == [Change("build.gradle", "changed")]
+    assert "is not a commit id" in approvals.diff(Change("build.gradle", "changed"))
+    assert not [args for args in ran if any("--output" in a for a in args)]
+
+
+def test_a_risky_file_between_the_read_and_hash_limits_is_checked_with_flat_memory(task):
+    """Past what is read whole, a risky file is still hashed, a chunk at a time: checked as any
+    other, with no more memory for 200 MiB than for one."""
+    import tracemalloc
+
+    big = sparse(task.repo / "Makefile")
+    approvals = Approvals(task.meta, task.repo)
+    tracemalloc.start()
+    try:
+        assert in_time(approvals.changes, 30) == [Change("Makefile", "added")]
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 16 << 20, f"{peak} bytes at the peak"
+    approvals.approve()
+    assert approvals.changes() == []
+    with open(big, "r+b") as file:
+        file.seek(SPARSE - 1)
+        file.write(b"x")
+    assert approvals.changes() == [Change("Makefile", "changed")]
+
+
+def test_a_file_the_task_made_too_large_to_hash_is_the_writers_to_restore(task, monkeypatch):
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20, raising=False)
+    (task.repo / "Makefile").write_bytes(b"x" * (2 << 20))
+    approvals = Approvals(task.meta, task.repo)
+    assert approvals.changes() == [Change("Makefile", "added")], "never skipped"
+    with pytest.raises(Exception) as refused:
+        approvals.approve()
+    said = str(refused.value)
+    assert "Makefile is larger than 1 MiB, too large for vivibox to verify safely" in said
+    assert "the writer restores it as it was when the task started" in said
+
+
+def test_your_own_file_too_large_to_hash_is_flagged_for_you_not_the_writer(env, monkeypatch):
+    """There at the start, it is yours: vivibox says it cannot verify it, and asks the writer for
+    nothing it should not touch."""
+    monkeypatch.setattr(clone_read, "HASH_LIMIT", 1 << 20, raising=False)
+    source = env / "repo"
+    (source / "Makefile").write_bytes(b"x" * (2 << 20))
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the build")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    approvals = Approvals(t.meta, t.repo)
+    approvals.approve()  # the task's start: your repository as it is
+    assert approvals.changes() == [Change("Makefile", "changed")], "never taken as checked"
+    said = approvals.diff(Change("Makefile", "changed"))
+    assert "too large for vivibox to verify safely" in said
+    assert "was that large in your repository when the task started" in said
+    assert "writer" not in said

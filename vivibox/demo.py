@@ -97,7 +97,12 @@ def instruction_commands(text: str) -> list[str]:
 
 
 def demo_instruction(task: Task) -> str:
-    return _read(task.meta / "handoff" / DEMO_FILE)
+    """Never through a link or a special file: a file of yours with shell blocks in it would be run
+    in the pod, where the agent sees it. Refused, nothing is run and you are told why."""
+    try:
+        return handoff.read_text(task.meta / "handoff" / DEMO_FILE).strip()
+    except handoff.HandoffError as e:
+        raise PodError(str(e)) from e
 
 
 def write_instruction(task: Task, text: str) -> Path:

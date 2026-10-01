@@ -31,6 +31,7 @@ from .config import (
     Project,
 )
 from .plan import PlanError, parse_plan
+from .pod import PodError
 from .risky import Approvals
 from .states import State
 from .task import Task, now
@@ -256,7 +257,9 @@ def finish(
     done = Finished(task.id, project.repo, spent, message)
     done.criteria = criteria
     done.created = st.created
-    done.demo = actions.demo_instruction(task)
+    # How it was run, for the project's next task; a link's file is no record of that.
+    with contextlib.suppress(PodError):
+        done.demo = actions.demo_instruction(task)
     done.project = project.name
     if branch_only:
         done.branch = repo.create_branch(project.repo, task.id, commit)

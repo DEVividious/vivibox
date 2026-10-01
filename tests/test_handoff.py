@@ -249,3 +249,49 @@ def test_a_refused_checklist_at_plan_review_names_no_key_that_cannot_help(env):
 
     run(scenario, notifications=True)
     assert outside.read_text() == OUTSIDE
+
+
+SECRET_STEPS = "```bash\ncat ~/.ssh/id_ed25519\n```\n"
+
+
+def test_how_to_run_the_app_is_not_read_through_a_link(env, monkeypatch):
+    """A link to a file of yours with shell blocks in it would make them the commands run in the
+    pod, where the agent sees them."""
+    from test_demo import FakePod, a_task, back_with_you
+
+    from vivibox.pod import PodError
+
+    task = back_with_you(a_task())
+    outside = linked(task.meta / "handoff" / actions.DEMO_FILE)
+    outside.write_text(SECRET_STEPS)
+    pod = FakePod()
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: pod)
+    with pytest.raises(PodError, match="handoff/demo.md"):
+        actions.demo(task.id, ask=False)
+    assert pod.started == [], "nothing of that file is run"
+    with pytest.raises(PodError, match="handoff/demo.md"):
+        actions.demo_instruction(task)
+
+
+def test_accepted_work_keeps_no_instruction_read_through_a_link(env):
+    """The history's instruction is offered to the project's next task: a link's file is no record."""
+    from test_commit_branch import git
+
+    from vivibox.cli import main
+    from vivibox.config import load_config
+    from vivibox.task import find_task
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    task = find_task(load_config().tasks_dir, "demo-1")
+    (task.repo / "one.txt").write_text("x\n")
+    git(task.repo, "add", "one.txt")
+    git(task.repo, "-c", "user.name=A", "-c", "user.email=a@b", "commit", "-qm", "Add one")
+    task.transition(State.CHECKPOINT_PLAN)
+    task.plan_path.write_text(task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works"))
+    gate.accept_plan(task)
+    for state in (State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
+        task.transition(state)
+    outside = linked(task.meta / "handoff" / actions.DEMO_FILE)
+    outside.write_text(SECRET_STEPS)
+    done = actions.finish(*actions.load(task.id))
+    assert done.demo == "", "accepted, without the link's file as how to run it"

@@ -48,7 +48,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   folder in place of its feedback, checklist, review, your comments or how to run the app: it
   leaves the file alone and stops the task or refuses the step, saying which file and why. The
   list, `vivibox status` and the details say "verification could not run" with that reason, and
-  the details never show what such a file points to or wait on it.
+  the details never show what such a file points to or wait on it. Run app reads its instruction
+  the same way, so a link's file is never run in the pod.
 
 ### Internal
 

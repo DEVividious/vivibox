@@ -8,6 +8,7 @@ from textual import work
 
 from . import actions
 from .dialogs import Reply
+from .pod import PodError
 from .widgets import Confirm
 
 
@@ -32,7 +33,12 @@ class DemoKeys:
         answer you could give. An instruction an earlier task left behind is a real choice, though,
         because it may be stale, so that one is still yours to confirm."""
         task, project = actions.load(self.selected()[1].id)
-        if actions.demo_commands(project, task)[0]:
+        try:
+            found = actions.demo_commands(project, task)[0]
+        except PodError as e:  # its instruction is a link or not a plain file: said, nothing run
+            self.fail(e)
+            return
+        if found:
             self.run_demo(task.id)
             return
         if earlier := actions.demo_from_history(project.name):

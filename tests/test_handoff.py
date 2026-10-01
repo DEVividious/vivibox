@@ -295,3 +295,57 @@ def test_accepted_work_keeps_no_instruction_read_through_a_link(env):
     outside.write_text(SECRET_STEPS)
     done = actions.finish(*actions.load(task.id))
     assert done.demo == "", "accepted, without the link's file as how to run it"
+
+
+def test_run_app_in_the_view_says_why_a_linked_instruction_is_refused(env, monkeypatch):
+    from test_demo import back_with_you
+    from test_tui import new_task, run
+
+    from vivibox import tui
+
+    task = back_with_you(new_task("Runnable"))
+    outside = linked(task.meta / "handoff" / actions.DEMO_FILE)
+    outside.write_text(SECRET_STEPS)
+    called = []
+    monkeypatch.setattr(tui.Vivibox, "run_demo", lambda self, task_id, **kw: called.append(kw))
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.action_demo()
+        await pilot.pause()
+        said = [str(n.message) for n in app._notifications]
+        assert any("handoff/demo.md" in m for m in said), said
+        assert called == [], "nothing run"
+        assert app.is_running
+
+    run(scenario, notifications=True)
+
+
+def test_a_linked_demo_session_never_reaches_the_pod(tmp_path, monkeypatch):
+    """The session goes to the pod as an argument the agent can read: a link's file must not."""
+    from vivibox import harness, opencode
+    from vivibox.pod import PodError
+
+    task = create_task(tmp_path, "demo", "goal", "")
+    outside = linked(task.meta / "handoff" / actions.DEMO_SESSION)
+    outside.write_text("HOST-SECRET-TOKEN")
+    sessions = []
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        sessions.append(session)
+        return harness.Turn("ses_demo", True, 0.01, 10, "done")
+
+    monkeypatch.setattr(opencode.OpenCode, "turn", turn)
+    with pytest.raises(PodError, match="handoff/demo-session"):
+        actions.ask_agent_how_to_run(task, object(), reply="the local profile")
+    assert sessions == [], "no turn with what the link points to"
+    (task.meta / "handoff" / actions.DEMO_SESSION).unlink()
+    os.mkfifo(task.meta / "handoff" / actions.DEMO_SESSION)
+
+    def ask():
+        try:
+            actions.ask_agent_how_to_run(task, object(), reply="the local profile")
+        except PodError as e:
+            return e
+
+    assert isinstance(in_time(ask), PodError) and sessions == []

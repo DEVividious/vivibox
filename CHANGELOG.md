@@ -49,7 +49,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   leaves the file alone and stops the task or refuses the step, saying which file and why. The
   list, `vivibox status` and the details say "verification could not run" with that reason, and
   the details never show what such a file points to or wait on it. Run app reads its instruction
-  the same way, so a link's file is never run in the pod.
+  and its conversation the same way, so a link's file never reaches the pod, and `v` says why
+  instead of closing the view.
 
 ### Internal
 

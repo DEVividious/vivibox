@@ -635,7 +635,7 @@ class Supervisor(ReviewRound):
             self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=result.environment)
             self.ports.notify(
                 self.task.id,
-                f"verification could not run: {result.environment[:150]}; fix it, then press g"
+                f"verification could not run: {self._briefly(result.environment)}; fix it, then press g"
                 f" (vivibox verify-again {self.task.id})",
             )
         elif not result.passed and (kept := held_question(self.task)):
@@ -672,6 +672,11 @@ class Supervisor(ReviewRound):
             self._go(target, "verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
 
+    def _briefly(self, environment: str) -> str:
+        """For a notification: the task's own files by their place in it, so the sentence fits;
+        vivibox status gives the whole path."""
+        return environment.replace(f"{self.task.meta}/", "")[:150]
+
     def _whole_build_holds(self, st: TaskState) -> bool:
         """The whole build, when the work is about to come to you and it was verified by its modules
         only; red, it goes back to the writer like any failed verification. True to go on."""
@@ -685,7 +690,9 @@ class Supervisor(ReviewRound):
             self._go(
                 State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=result.environment
             )
-            self.ports.notify(self.task.id, f"the whole build could not run: {result.environment[:150]}")
+            self.ports.notify(
+                self.task.id, f"the whole build could not run: {self._briefly(result.environment)}"
+            )
         elif target is State.IMPLEMENT:
             set_next_prompt(self.task, FEEDBACK_PROMPT)
             self._go(target, f"the whole build failed: {why}", why=why)

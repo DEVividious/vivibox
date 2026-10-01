@@ -567,7 +567,10 @@ def task_detail(
             else []
         ),
     ]
-    if st.state is State.CHECKPOINT_BLOCKED and (why := why_blocked(task) or environment_problem(task)):
+    asks = (task.meta / "handoff" / "question.md").exists()  # first, as in the status it has
+    if st.state is State.CHECKPOINT_BLOCKED and (
+        why := why_blocked(task) if asks else environment_problem(task) or why_blocked(task)
+    ):
         lines.append(f"{style('Why', 'bold')}   {why}")
     if shown.problem:
         lines.append(f"{style('Why', 'bold')}   {style(shown.problem, 'red')}")

@@ -139,7 +139,10 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
     folder = task.meta / "handoff"
     (folder / DEMO_QUESTION).unlink(missing_ok=True)
     kept = folder / DEMO_SESSION
-    session = _read(kept) if reply else ""
+    try:  # it goes to the pod as an argument the agent can read: never a link's file
+        session = handoff.read_text(kept).strip() if reply else ""
+    except handoff.HandoffError as e:
+        raise PodError(str(e)) from e
     try:
         turn = opencode.OpenCode(pod).turn(
             reply or DEMO_ASK, session=session, title=f"{task.id}-demo", on_step=task.set_live_turn

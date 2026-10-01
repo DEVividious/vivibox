@@ -626,6 +626,42 @@ def test_whole_build_feedback_the_host_cannot_write_stops_the_task_too(task):
     says_it_could_not_run(task, outside)
 
 
+def status_why(task):
+    status = ui.task_detail(task, lambda t: "0/1", 1, 5, ui.Style(False), running=True)
+    return "\n".join(line for line in status.splitlines() if line.startswith("Why"))
+
+
+def test_the_notification_keeps_its_whole_sentence_and_status_the_whole_path(task):
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    linked_feedback(task)
+    sup, notes = make(task, FakeHarness(task))
+    sup.ports.run_gate = recording(gate_result(passed=False))
+    sup.step()  # implement
+    sup.step()  # verify
+    sentence = (
+        "handoff/verify-feedback.md is a link or not a plain file, and vivibox does not write through one"
+    )
+    assert sentence in notes[-1] and str(task.meta) not in notes[-1], notes[-1]
+    assert str(task.meta / "handoff" / "verify-feedback.md") in status_why(task), "where to delete it"
+
+
+def test_a_refused_log_alone_is_the_why_of_status_too(task):
+    """The feedback written, its log refused: status names the refusal, not the feedback."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    outside = task.root / "outside.txt"
+    outside.write_text("the host's own file\n")
+    (task.meta / "handoff" / "verify.log").symlink_to(outside)
+    sup, _ = make(task, FakeHarness(task))
+    sup.ports.run_gate = recording(gate_result(passed=False))
+    sup.step()  # implement
+    sup.step()  # verify
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    assert "handoff/verify.log is a link" in status_why(task)
+    assert outside.read_text() == "the host's own file\n"
+
+
 def test_a_planner_and_a_writer_on_one_harness_have_a_conversation_each(task):
     class Named(FakeHarness):
         def __init__(self, task, actions=(), session="ses_x"):

@@ -40,8 +40,10 @@ project that needs another Ryuk passes the variable in `pass_env`.
 Rules on your host, keyed by the bridge of the task's network and loaded before the pod's first
 packet, refuse your host, every private network, other tasks' ranges, IPv6 and UDP other than DNS,
 except the services you list per project; the internet is open. Root in the pod cannot remove them:
-they are not in its network namespace. Every DNS query in the pod goes to a forwarder on your host,
-which passes it to your host's resolver; while it is down, the pod resolves nothing. When the host
+they are not in its network namespace. Every DNS query to port 53, UDP or TCP, whatever server it
+names, goes to a forwarder on your host, which passes it to your host's resolver; while it is down,
+the pod resolves nothing that way. DNS over TLS (port 853) is refused. DNS over HTTPS is HTTPS to
+the rules, and is not prevented until names are allowed by policy. When the host
 reaches the internet through a tunnel smaller than Ethernet (a VPN such as Cloudflare WARP), the
 rules clamp TCP MSS to fit it, so large downloads do not stall. The pod trusts the certificate
 authorities your host trusts: the host's CA bundle is mounted read-only over the sidecar's, the

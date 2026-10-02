@@ -248,9 +248,10 @@ cannot remove them. A project's `host_services` are the exceptions: `host.docker
 is your machine, on the gateway of the task's network, so a service listening on all addresses
 answers there; a name resolves on your machine when the task starts.
 
-Every DNS query a pod makes, whatever server it names, goes to a forwarder on your machine,
-`vivibox hostd`, which passes it to your machine's resolver: names resolve in the pod as they do
-on your machine, through your VPN too. The first task's start starts it, on port 5053 of
+A pod's DNS queries to port 53, UDP or TCP, whatever server they name, go to a forwarder on your
+machine, `vivibox hostd`, which passes them to your machine's resolver: names resolve in the pod
+as they do on your machine, through your VPN too. DNS over TLS (port 853) is refused; DNS over
+HTTPS looks like any other HTTPS, and nothing stops it yet. The first task's start starts it, on port 5053 of
 `network.host_address`. A pod does not start while it is down, and a running one resolves no
 names: the view's header says so, with `vivibox hostd start`. `vivibox hostd` says whether it
 runs; `vivibox hostd stop` stops it.

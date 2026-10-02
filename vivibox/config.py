@@ -130,6 +130,8 @@ ROUNDS_HELP = (
 NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task needs one address, for its sidecar; the agent and the gate share that container's network.
 TASK_NETWORK_BITS = 28
+# The widest pool there may be; host/vivibox-host refuses a wider one too (POOL_SHORTEST there).
+POOL_SHORTEST = 8
 JAVA = re.compile(r"^([a-z]+-)?[0-9][0-9.]*$|^$")
 # A toolchain as mise names it, <tool>@<version>: "go@1.25.3", "rust@stable".
 TOOL = re.compile(r"^[a-z][a-z0-9-]*@[A-Za-z0-9][A-Za-z0-9.+_-]*$")
@@ -378,6 +380,8 @@ def load_config(base: Path | None = None) -> Config:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
         )
+    if parsed.prefixlen < POOL_SHORTEST:
+        raise ConfigError(f"{path}: network.pool {pool} is wider than /{POOL_SHORTEST}, the most it may be")
     host_address = _host_address(
         data.get("network", {}).get("host_address", DEFAULT_HOST_ADDRESS), parsed, path
     )

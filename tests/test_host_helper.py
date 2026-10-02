@@ -5,6 +5,7 @@ helper is loaded as a module with a fake runner, or run with --dry-run, which pr
 would load and touches nothing."""
 
 import copy
+import ipaddress
 import json
 import random
 import subprocess
@@ -168,6 +169,9 @@ def test_the_base_chains_come_before_dockers_and_refuse_a_bridge_without_a_polic
     assert rules(text, "input") == [
         "iifname vmap @host_by_bridge",
         'iifname "vbx*" reject with icmpx admin-prohibited',
+        # Only the pods and the host itself reach its address for the pods: not a LAN host that
+        # routes it here. Every task bridge is decided above, so only lo is left to let through.
+        'ip daddr 203.0.113.1 iifname != "lo" drop',
     ]
     assert 'add element inet vivibox out_by_bridge { "vbx-shop-1-w" : jump out_vbx_shop_1_w }' in text
 
@@ -499,3 +503,50 @@ def test_prepare_engine_dry_run_prints_what_it_would_do():
     assert done.returncode in (0, 1), done.stderr
     if done.returncode == 0:
         assert "add chain inet vivibox forward" in done.stdout
+
+
+def test_the_engine_alone_keeps_the_lan_off_the_hosts_address():
+    """The same base from prepare-engine, before any task: the forwarder and the mirror listen
+    there from the first pod's start."""
+    code, host = call("prepare-engine", "host", json.dumps(ENGINE))
+    assert code == 0
+    assert rules(host.inputs[-1], "input")[-1] == 'ip daddr 203.0.113.1 iifname != "lo" drop'
+
+
+def test_dns_over_tls_is_refused_and_the_host_services_still_pass():
+    """Port 53 goes to the forwarder; DNS over TLS (853, TCP and UDP) would go past it."""
+    out = rules(
+        helper.policy_file("shop-1", helper.parse_policy("shop-1", json.dumps(POLICY))), "out_vbx_shop_1_w"
+    )
+    tcp, udp = (
+        out.index("tcp dport 853 reject with tcp reset"),
+        out.index("udp dport 853 reject with icmpx admin-prohibited"),
+    )
+    assert out.index("ip daddr 192.168.1.50 tcp dport 8080 accept") < tcp < out.index("accept")
+    assert udp < out.index("accept")
+
+
+@pytest.mark.parametrize("bits", range(0, 33))
+def test_the_pool_vivibox_takes_is_the_pool_the_helper_takes(tmp_path, bits):
+    """config.toml and the helper agree on network.pool: a pool vivibox accepts never fails at
+    every pod's start, and one it refuses is refused where you wrote it."""
+    from vivibox.config import ConfigError, load_config
+
+    pool = str(ipaddress.IPv4Network(f"10.0.0.0/{bits}", strict=False))
+    (tmp_path / "config.toml").write_text(
+        f'tasks_dir = "/t"\n[network]\npool = "{pool}"\nhost_address = "203.0.113.1"\n'
+        '[roles.planner]\nharness = "opencode"\nmodel = "m"\n'
+        '[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
+    )
+    try:
+        load_config(tmp_path)
+        vivibox_takes = True
+    except ConfigError as e:
+        assert "network.pool" in str(e) or "network.host_address" in str(e)
+        vivibox_takes = "network.pool" not in str(e)
+    try:
+        helper.network(pool, "network.pool", helper.POOL_SHORTEST, helper.POOL_LONGEST)
+        helper_takes = True
+    except helper.Refused:
+        helper_takes = False
+    assert vivibox_takes is helper_takes, pool

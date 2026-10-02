@@ -10,8 +10,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
-- Every DNS query a pod makes, to whatever server it names, goes to a forwarder on your machine,
-  which passes it to your machine's resolver unchanged, over UDP and TCP. `vivibox hostd` runs
+- A pod's DNS queries to port 53, UDP or TCP, whatever server they name, go to a forwarder on your
+  machine, which passes them to your machine's resolver unchanged; DNS over TLS (port 853) is
+  refused. DNS over HTTPS looks like any HTTPS and is not stopped yet. `vivibox hostd` runs
   it, on `[network] host_address` (default `203.0.113.1/32`, an interface of its own,
   `vivibox0`) at port 5053, and the first task's start starts it; `vivibox hostd` says whether
   it runs, `start` and `stop` start and stop it. A pod does not start while it is down, a running
@@ -66,7 +67,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - Root in a pod can no longer remove its egress rules: they are on your machine, keyed by the
   bridge of the task's network, loaded before the pod's first packet and replaced in one step.
   Private ranges, your LAN, your machine but for the project's host services, other tasks' ranges,
-  IPv6 and UDP other than DNS are refused; the internet stays open.
+  IPv6, UDP other than DNS and DNS over TLS are refused; the internet stays open. Nothing on
+  your LAN reaches the host's address for the pods, where the forwarder and the mirror listen.
 - The agent can no longer change your replies. vivibox keeps them in the task's own folder,
   where no agent writes, and the agents and the reviewer read them read-only where they always
   did. A link, a folder or a file the agent leaves where they are read is never followed: a
@@ -179,7 +181,7 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
-- `host/vivibox-host`, the root helper that will replace `vivibox-netns`: a closed list of
+- `host/vivibox-host`, the root helper in place of `vivibox-netns`: a closed list of
   operations (`prepare-engine host`, `apply-policy`), every value of its JSON checked before
   anything runs as root, and the host's nft rules written by itself; `--dry-run` prints them.
   `names.bridge` names a task network's bridge, which those rules are keyed by.

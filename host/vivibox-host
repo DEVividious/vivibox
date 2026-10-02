@@ -45,6 +45,8 @@ BRIDGE = re.compile(r"vbx(-[a-z0-9-]+|[0-9a-f]{10})-[wrp]")
 IFNAME_MAX = 15
 HASH_LENGTH = 10
 MAX_JSON = 16384
+# The task pool's widest and narrowest: vivibox/config.py takes the same (a test holds them equal).
+POOL_SHORTEST, POOL_LONGEST = 8, 28
 MAX_HOSTSVC = 64
 TEXT = re.compile(r"[\x21-\x7e]+")
 # Never reached from a pod but through a host service: this network, private ranges, loopback,
@@ -195,7 +197,7 @@ def parse_policy(task_id, raw):
     policy = {"state": data["state"], "networks": nets}
     if not present:
         return policy
-    pool = network(data["pool"], "pool", 8, 28)
+    pool = network(data["pool"], "pool", POOL_SHORTEST, POOL_LONGEST)
     for i, n in enumerate(nets):
         if not n["subnet"].subnet_of(pool):
             raise Refused(f"networks[{i}].subnet {n['subnet']} is outside the pool {pool}")
@@ -242,7 +244,7 @@ def parse_engine(raw):
     ip = address(str(found.ip), "network.host_address")
     if ip.is_loopback:
         raise Refused(f"network.host_address {ip} is a loopback address")
-    pool = network(data["pool"], "network.pool", 8, 28)
+    pool = network(data["pool"], "network.pool", POOL_SHORTEST, POOL_LONGEST)
     if ip in pool:
         raise Refused(
             f"network.host_address {ip} is in network.pool {pool}; set either in config.toml "
@@ -264,10 +266,12 @@ def declarations():
     ]
 
 
-def base():
+def base(host_ip):
     """The table's own chains: before Docker's filter (priority 0) and its DNAT (-100), each
     handing a packet to the chain of the bridge it comes in on, and refusing one from a task
-    bridge that has none. Written whole every time, in the same transaction as a task's rules."""
+    bridge that has none. host_ip, the host's address for the pods (the forwarder and the mirror
+    listen there), is reached from the pods and the host itself only, not from a LAN host that
+    routes it here. Written whole every time, in the same transaction as a task's rules."""
     t = f"inet {TABLE}"
     return [
         *declarations(),
@@ -282,6 +286,9 @@ def base():
         f'add rule {t} forward iifname "{BRIDGE_PREFIX}*" {REJECT}',
         f"add rule {t} input iifname vmap @host_by_bridge",
         f'add rule {t} input iifname "{BRIDGE_PREFIX}*" {REJECT}',
+        # Every task bridge is decided above (its chain ends in a verdict, or the catch-all): of
+        # the rest, only lo, the host itself, reaches host_ip.
+        f'add rule {t} input ip daddr {host_ip} iifname != "lo" drop',
         f"add rule {t} prerouting iifname vmap @dns_by_bridge",
     ]
 
@@ -317,6 +324,9 @@ def network_rules(net, policy):
             f"meta nfproto ipv6 {REJECT}",
             f"ip saddr != {subnet} {REJECT}",
             *services,
+            # Port 53 goes to the forwarder through the DNAT; DNS over TLS would go past it.
+            "tcp dport 853 reject with tcp reset",
+            f"udp dport 853 {REJECT}",
             *(r for other in others for r in (f"ip daddr {other} {TCP_RESET}", f"ip daddr {other} {REJECT}")),
             f"ip daddr {{ {refused_ranges(policy['pool'])} }} {TCP_RESET}",
             f"ip daddr {{ {refused_ranges(policy['pool'])} }} {REJECT}",
@@ -366,12 +376,15 @@ def policy_file(task_id, policy):
     if policy["state"] == "absent":
         body = declarations() + [line for net in policy["networks"] for line in removal(net)]
     else:
-        body = base() + [line for net in policy["networks"] for line in network_rules(net, policy)]
+        # dns is the host's address for the pods: the forwarder listens there (prepare-engine's).
+        body = base(policy["dns"]) + [
+            line for net in policy["networks"] for line in network_rules(net, policy)
+        ]
     return "\n".join(head + body) + "\n"
 
 
-def engine_file():
-    return "\n".join(["# vivibox-host prepare-engine host", *base()]) + "\n"
+def engine_file(host_ip):
+    return "\n".join(["# vivibox-host prepare-engine host", *base(host_ip)]) + "\n"
 
 
 # --- the machine ---------------------------------------------------------------------------------
@@ -445,11 +458,11 @@ def prepare_engine(spec, runner, dry):
         steps.append(["ip", "link", "set", DUMMY, "up"])
     if dry:
         print("\n".join(f"# would run: {' '.join(step)}" for step in steps))
-        print(engine_file(), end="")
+        print(engine_file(ip), end="")
         return
     for step in steps:
         must(runner, step)
-    must(runner, ["nft", "-f", "-"], engine_file())
+    must(runner, ["nft", "-f", "-"], engine_file(ip))
 
 
 def must(runner, cmd, input=None):

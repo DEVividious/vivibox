@@ -40,11 +40,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
-- The agent's container no longer holds the reviewer's provider key, nor the reviewer's the
-  writer's or the planner's, unless both use the same provider; the reviewer's gets only the
-  MCP secrets its servers read, and a key nobody in a container needs any more, such as one
-  of a provider you moved a role off, is removed when that container next starts.
-
+- The agent's container no longer holds the reviewer's key, nor the reviewer's container the
+  planner's or the writer's, unless they share a provider. A key a container no longer needs,
+  such as one for a provider you moved a role off, is removed when that container next starts.
 - An agent can no longer make git on your machine run a program, or read objects from elsewhere,
   through what git follows from the task's clone besides its config and hooks: `commondir`,
   `gitdir`, alternates, `config.worktree`, `HEAD` as a link, a submodule's `.git`, a repository

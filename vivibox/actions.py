@@ -472,6 +472,8 @@ def _start(
         why := model_missing(config, task, available_models(refresh=True))
     ):
         raise PodError(why)
+    if mode_of(task, config).separate_reviewer and "reviewer" in config.roles:
+        provider_keys(config, task, ("reviewer",))  # its key is for its own container; its model is due now
     # The keys of the roles that run in the pod, the reviewer's not among them, and the secrets of
     # the MCP servers there; at every start, so a key nobody here needs any more is gone.
     secrets.prepare(task.id, provider_keys(config, task, AGENT_ROLES) + providers.mcp_secrets())

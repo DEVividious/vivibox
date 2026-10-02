@@ -267,3 +267,18 @@ def test_every_mode_puts_each_roles_key_where_the_role_runs(
         assert held("demo-1-review") == reviewers
     else:
         assert not secrets.runtime_dir("demo-1-review").exists(), "no reviewer's container in this mode"
+
+
+@pytest.mark.real_start
+def test_a_reviewer_without_a_model_still_stops_the_start(env, monkeypatch):
+    """Its key no longer goes to the pod, but a task whose reviewer cannot run is said at the start,
+    not after the whole plan and work, when the review round finds no model."""
+    from vivibox import actions
+    from vivibox.config import ConfigError
+
+    roles = {"planner": ("opencode", "deepseek/plan"), "writer": ("opencode", "deepseek/write")}
+    use(env, reviewer=("opencode", "anthropic/read"), **roles)
+    actions.create("demo", "Goal")
+    use(env, reviewer=("opencode", ""), **roles)  # config.toml's reviewer emptied since
+    with pytest.raises(ConfigError, match="the reviewer has no model yet"):
+        start(env, monkeypatch)

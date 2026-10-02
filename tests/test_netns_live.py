@@ -120,6 +120,12 @@ def test_the_internet_is_open(pod):
     assert inside("wget -q -T 10 -O /dev/null https://repo.maven.apache.org/maven2/").returncode == 0
 
 
+def test_dns_over_tls_is_refused(pod):
+    """Port 53 goes to the forwarder; DNS over TLS would go past it."""
+    assert inside("wget -q -T 10 -O /dev/null https://1.1.1.1/").returncode == 0, "the address is reachable"
+    assert inside("nc -z -w 5 1.1.1.1 853").returncode != 0
+
+
 def test_ipv6_is_refused(pod):
     assert inside("ping -6 -c 1 -W 3 2606:4700:4700::1111").returncode != 0
 

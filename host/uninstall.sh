@@ -50,6 +50,17 @@ skill_copies() {
   return 0
 }
 
+# The forwarder's pid, when its pid file names a vivibox hostd that runs; nothing otherwise: a
+# file left from before names a pid another process may have taken since.
+hostd_pid() {
+  local pid
+  [[ -r "$HOSTD_PID" ]] || return 0
+  pid=$(cat "$HOSTD_PID")
+  [[ $pid =~ ^[0-9]+$ ]] || return 0
+  if tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'vivibox hostd'; then echo "$pid"; fi
+  return 0
+}
+
 # Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -178,10 +189,10 @@ do_old_helper() { sudo rm -f "$OLD_HELPER"; }
 
 do_engine() {
   # The forwarder (vivibox hostd) first: it listens on vivibox0's address.
-  if [[ -r "$HOSTD_PID" ]]; then
-    kill "$(cat "$HOSTD_PID")" 2>/dev/null || true
-    rm -f "$HOSTD_PID"
-  fi
+  local pid
+  pid=$(hostd_pid)
+  if [[ -n $pid ]]; then kill "$pid" 2>/dev/null || true; fi
+  rm -f "$HOSTD_PID"
   sudo nft delete table inet vivibox 2>/dev/null || true
   sudo ip link del vivibox0 2>/dev/null || true
 }

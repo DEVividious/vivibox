@@ -290,11 +290,9 @@ docker_problem() {
   return 0
 }
 
-# Sourced by the tests for the functions above.
-[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
-
-[[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 ok() { printf '  ok       %s\n' "$1"; }
+# What is so and needs nothing from setup: said, and not a step.
+info() { printf '  info     %s\n' "$1"; }
 
 # What setup cannot change for you: said with the rest, and the check goes on.
 problems=()
@@ -316,6 +314,30 @@ update() {
   todo+=("update $1")
   [[ -z "$2" ]] || actions+=("$2")
 }
+
+# The host's address for the pods, on vivibox0: checked first by this checkout's helper, which
+# refuses, naming it, an address another interface or a route already holds, or one in the pool.
+# A reboot takes vivibox0 and the rules' table away, and the next pod start makes them again with
+# the installed helper (helper_ready yes): then it is said, and is not a step. Takes the address,
+# the pool and whether the helper and its sudo rule are installed.
+report_engine() {
+  local address=$1 pool=$2 helper_ready=$3 said
+  ENGINE_JSON="{\"host_address\": \"$address\", \"pool\": \"$pool\"}"
+  if ! said=$(python3 "$HERE/vivibox-host" --dry-run prepare-engine host "$ENGINE_JSON" 2>&1 >/dev/null); then
+    problem "${said#vivibox-host: } (network.host_address in $CONFIG_TOML)"
+  elif ip -4 -o addr show dev vivibox0 2>/dev/null | grep -qF " ${address} "; then
+    ok "host address for the pods $address on vivibox0"
+  elif [[ $helper_ready == yes ]]; then
+    info "host address for the pods $address: vivibox0 and the pods' rules are made at the next pod start (a restart of this machine takes them away)"
+  else
+    need "host address for the pods $address on vivibox0, and the table for their egress rules" do_engine
+  fi
+}
+
+# Sourced by the tests for the functions above.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
+[[ $# -eq 0 || "$CHECK_ONLY" == true ]] || { echo "usage: $0 [--check]" >&2; exit 2; }
 
 # --- checks -----------------------------------------------------------------------------------
 
@@ -394,7 +416,9 @@ else
 fi
 
 helper_state=$(copy_state "$HERE/vivibox-host" "$HELPER")
+helper_ready=no
 if [[ $helper_state == same && "$(stat -c '%U %a' "$HELPER")" == "root 755" ]]; then
+  helper_ready=yes
   ok "root helper $HELPER"
 elif [[ $helper_state == older ]]; then
   update "root helper $HELPER to this checkout's host/vivibox-host" do_helper
@@ -408,6 +432,7 @@ fi
 
 SUDO_RULE="$USER ALL=(root) NOPASSWD: $HELPER"
 if ! sudo -n -l "$HELPER" >/dev/null 2>&1; then
+  helper_ready=no
   need "sudo rule in $SUDOERS: $SUDO_RULE" do_sudoers
 elif [[ -e "$OLD_HELPER" ]] && sudo -n -l "$OLD_HELPER" >/dev/null 2>&1; then
   update "sudo rule in $SUDOERS: only $HELPER, not $OLD_HELPER" do_sudoers
@@ -415,18 +440,7 @@ else
   ok "sudo rule for $HELPER"
 fi
 
-# The host's address for the pods, on vivibox0: checked first by this checkout's helper, which
-# refuses, naming it, an address another interface or a route already holds, or one in the pool.
-# A reboot takes vivibox0 and the rules away; a task's start makes them again.
-HOST_ADDR=$(host_address)
-ENGINE_JSON="{\"host_address\": \"$HOST_ADDR\", \"pool\": \"$pool\"}"
-if ! engine_said=$(python3 "$HERE/vivibox-host" --dry-run prepare-engine host "$ENGINE_JSON" 2>&1 >/dev/null); then
-  problem "${engine_said#vivibox-host: } (network.host_address in $CONFIG_TOML)"
-elif ip -4 -o addr show dev vivibox0 2>/dev/null | grep -qF " ${HOST_ADDR} "; then
-  ok "host address for the pods $HOST_ADDR on vivibox0"
-else
-  need "host address for the pods $HOST_ADDR on vivibox0, and the table for their egress rules" do_engine
-fi
+report_engine "$(host_address)" "$pool" "$helper_ready"
 
 mapfile -t LEGACY < <(legacy_pods)
 for entry in "${LEGACY[@]}"; do

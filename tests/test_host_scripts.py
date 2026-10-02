@@ -491,5 +491,73 @@ def test_uninstall_removes_the_hosts_rules_and_address():
     body = uninstall[uninstall.index("do_engine() {") :]
     body = body[: body.index("\n}\n")]
     assert "sudo nft delete table inet vivibox" in body and "sudo ip link del vivibox0" in body
-    assert "hostd" in body, "the forwarder stops too"
+    assert "pid=$(hostd_pid)" in body, "the forwarder stops too, and only the forwarder"
     assert "HELPER=/usr/local/libexec/vivibox-host" in uninstall and "vivibox-netns" in uninstall
+
+
+def engine_fakes(tmp_path, *, has_address: bool, refused: str = "") -> dict:
+    """ip and python3 as setup.sh asks them about the host's address for the pods."""
+    fake = tmp_path / "fakes"
+    fake.mkdir(exist_ok=True)
+    listing = "5: vivibox0    inet 203.0.113.1/32 scope global vivibox0" if has_address else ""
+    (fake / "ip").write_text(f"#!/bin/sh\necho '{listing}'\n")
+    if refused:
+        (fake / "python3").write_text(f'#!/bin/sh\necho "{refused}" >&2\nexit 1\n')
+    else:
+        (fake / "python3").write_text("#!/bin/sh\nexit 0\n")
+    for f in fake.iterdir():
+        f.chmod(0o755)
+    return {"PATH": f"{fake}:{os.environ['PATH']}"}
+
+
+def report_engine(tmp_path, ready: str, **fakes) -> subprocess.CompletedProcess:
+    env = engine_fakes(tmp_path, **fakes)
+    return setup_fn(f'report_engine 203.0.113.1/32 198.51.100.0/24 {ready}; echo "todo=${{#todo[@]}}"', env)
+
+
+def test_after_a_reboot_the_missing_interface_is_said_and_is_nothing_to_do(tmp_path):
+    """vivibox0 and the table are gone after a reboot; the next pod start makes them again with
+    the installed helper. --check says so and still finds nothing to do."""
+    done = report_engine(tmp_path, "yes", has_address=False)
+    assert "  info     " in done.stdout and "next pod start" in done.stdout
+    assert done.stdout.strip().endswith("todo=0"), done.stdout + done.stderr
+
+
+def test_without_the_helper_the_interface_is_a_step_to_take(tmp_path):
+    done = report_engine(tmp_path, "no", has_address=False)
+    assert "  missing  host address for the pods 203.0.113.1/32" in done.stdout
+    assert done.stdout.strip().endswith("todo=1"), done.stdout + done.stderr
+
+
+def test_the_interface_with_its_address_is_ok(tmp_path):
+    done = report_engine(tmp_path, "no", has_address=True)
+    assert "  ok       host address for the pods 203.0.113.1/32 on vivibox0" in done.stdout
+    assert done.stdout.strip().endswith("todo=0")
+
+
+def test_an_address_the_helper_refuses_is_a_problem_however_ready(tmp_path):
+    said = "vivibox-host: network.host_address 203.0.113.1 is already an address of eth1"
+    done = report_engine(tmp_path, "yes", has_address=False, refused=said)
+    assert "  problem  network.host_address 203.0.113.1 is already an address of eth1" in done.stdout
+    assert done.stdout.strip().endswith("todo=0")
+
+
+def uninstall_fn(call: str, env: dict) -> subprocess.CompletedProcess:
+    script = f'source "{HOST / "uninstall.sh"}"; {call}'
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={**os.environ, **env})
+
+
+@pytest.mark.parametrize(
+    ("argv", "ours"), [(["vivibox", "hostd", "run"], True), (["something", "else"], False)]
+)
+def test_uninstall_stops_only_a_process_that_is_the_forwarder(tmp_path, argv, ours):
+    """A pid file left from before names a pid another process may have taken since."""
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", *argv])
+    try:
+        (tmp_path / "vivibox").mkdir()
+        (tmp_path / "vivibox" / "hostd.pid").write_text(str(process.pid))
+        found = uninstall_fn("hostd_pid", {"XDG_RUNTIME_DIR": str(tmp_path)}).stdout.strip()
+        assert found == (str(process.pid) if ours else "")
+    finally:
+        process.kill()
+        process.wait()

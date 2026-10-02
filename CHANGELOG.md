@@ -29,8 +29,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - `host/setup.sh` installs that helper and its sudo rule and removes `vivibox-netns` and its rule;
   gives your machine its address for the pods on `vivibox0`, refusing, by name, one another
   interface or route already holds; needs `nft` and `python3`; and lists the tasks from an earlier
-  vivibox whose pod still runs, to delete and create again. `host/uninstall.sh` removes the
-  pods' rules, `vivibox0` and the forwarder too.
+  vivibox whose pod still runs, to delete and create again. After a restart of your machine,
+  `--check` says `vivibox0` comes back at the next pod start, and finds nothing to do.
+  `host/uninstall.sh` removes the pods' rules, `vivibox0` and the forwarder too, stopping only a
+  process that is the forwarder.
 - Tasks created by an earlier vivibox can't be run any more: they are not carried over to the
   new layout of a task's files. The list and `vivibox status` show them as `from an earlier
   vivibox` (and say when their supervisor or pod still runs); delete them with

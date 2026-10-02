@@ -141,6 +141,7 @@ from .review import (  # noqa: F401
 )
 from .risky import Approvals
 from .roles import (  # noqa: F401
+    AGENT_ROLES,
     MODELS_CACHE_SECONDS,
     POPULAR,
     Choice,
@@ -471,8 +472,10 @@ def _start(
         why := model_missing(config, task, available_models(refresh=True))
     ):
         raise PodError(why)
-    secrets.prepare(task.id, provider_keys(config, task) + providers.mcp_secrets())
-    used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in config.roles)
+    # The keys of the roles that run in the pod, the reviewer's not among them, and the secrets of
+    # the MCP servers there; at every start, so a key nobody here needs any more is gone.
+    secrets.prepare(task.id, provider_keys(config, task, AGENT_ROLES) + providers.mcp_secrets())
+    used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in AGENT_ROLES)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)
     if config.hub_mirror:

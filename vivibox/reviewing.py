@@ -213,17 +213,15 @@ def up(task: Task, pod: Pod, config: Config) -> Path:
     # The reviewer's model where config.toml names one, else the writer's (planner_writer_reviewer
     # without [roles.reviewer]).
     role = roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
-    provider = opencode.provider_of(role.model)
-    needed = ([] if providers.keyless(provider) else [provider]) + providers.mcp_secrets()
-    runtime = secrets.prepare(secrets_id(task.id), needed)
+    settings = opencode.config(role.model, (), task.repo)
+    # Exactly what its opencode.json reads: its provider's key and its MCP servers' secrets.
+    runtime = secrets.prepare(secrets_id(task.id), providers.mounted(settings))
     pod.review_fresh()
     harness = pod.review_dir / "harness"
     harness.mkdir()
     branch = repo.branch_name(task.id)
     (harness / "instructions.md").write_text(brief.common(task.id, pod.review_src, branch))
-    (harness / "opencode.json").write_text(
-        json.dumps(opencode.config(role.model, (), task.repo), indent=2) + "\n"
-    )
+    (harness / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     out = pod.review_dir / "out"
     out.mkdir()
     # The mount point inside /task, which the container has read-only: it has to exist already.

@@ -49,7 +49,7 @@ def provider_entry(provider: str) -> dict:
 
 
 def config(model: str, used: list[str] | tuple = (), repo: Path | None = None) -> dict:
-    """used: every provider the task's roles run on; the writer's is always there."""
+    """used: every provider the roles in the pod run on; the writer's is always there."""
     names = list(dict.fromkeys([provider_of(model), *used]))
     return {
         "$schema": "https://opencode.ai/config.json",

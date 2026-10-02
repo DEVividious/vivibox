@@ -325,11 +325,18 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
     return opencode.OpenCode(pod, role.model, task=task if role_name == "writer" else None)
 
 
-def provider_keys(config: Config, task: Task | None = None) -> list[str]:
-    """Every metered provider a role needs, on the models this task runs them on: a task moved to
-    another provider's model needs that provider's key, not the one config.toml's model uses."""
+# The roles whose harness runs in the task's pod, in every mode. The reviewer reads in a container
+# of its own (reviewing.up); where a mode has no reviewer of its own, the planner or the writer
+# reviews in the pod on its own model.
+AGENT_ROLES = ("planner", "writer")
+
+
+def provider_keys(config: Config, task: Task | None = None, roles: tuple[str, ...] = ()) -> list[str]:
+    """Every metered provider these roles need, every role's when none are named, on the models
+    this task runs them on: a task moved to another provider's model needs that provider's key, not
+    the one config.toml's model uses. A container gets the keys of the roles that run in it."""
     found = []
-    for name, role in ((n, role_of(task, n, config)) for n in config.roles):
+    for name, role in ((n, role_of(task, n, config)) for n in (roles or config.roles)):
         if not role.model and role.harness == opencode.NAME:
             raise ConfigError(f"the {name} has no model yet; pick one when you create a task, or press m")
         if role.harness == opencode.NAME and (p := opencode.provider_of(role.model)) not in found:

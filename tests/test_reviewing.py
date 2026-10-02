@@ -170,3 +170,42 @@ def test_both_review_prompts_carry_the_same_rules():
 
     assert prompts.REVIEW_RULES in prompts.REVIEW_PROMPT
     assert "## Checked" in prompts.REVIEW_RULES and "## Checked" in prompts.REVIEW_REPAIR_PROMPT
+
+
+def test_the_reviewers_container_has_the_secrets_of_the_mcp_servers_its_opencode_json_names(env, monkeypatch):
+    """Its own provider's key, and a secret only for an MCP server its configuration has: none at
+    all without one, and never one of a server you turned off, nor a key the writer had there."""
+    import json
+    import subprocess
+
+    from vivibox import actions, keys, providers, secrets
+    from vivibox import pod as pods
+    from vivibox.config import load_config
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(env / "run"))
+    cfg = env / "config" / "config.toml"
+    cfg.write_text(cfg.read_text() + '[roles.reviewer]\nharness = "opencode"\nmodel = "other/strong"\n')
+    for name in ("other", "deepseek", "mcp.tools.token", "mcp.off.token"):
+        keys.set_key(name, f"key-{name}")
+    task = actions.create("demo", "Add divide")
+    pod = pods.Pod(
+        task.id, task.repo, "img", runner=lambda cmd: subprocess.CompletedProcess(cmd, 0, "", ""),
+        review_dir=task.root / "review",
+    )  # fmt: skip
+    # What a round before left there: the writer's key, which no reviewer reads.
+    secrets.prepare(reviewing.secrets_id(task.id), ["other", "deepseek"])
+    providers.set_serena_mode("off")
+    reviewing.up(task, pod, load_config())
+    d = secrets.runtime_dir(reviewing.secrets_id(task.id))
+    assert sorted(p.name for p in d.iterdir()) == ["other", "server-password"]
+
+    def server(name):
+        token = f"{{file:{secrets.MOUNT}/mcp.{name}.token}}"
+        return {"type": "local", "command": [name], "environment": {"TOKEN": token}}
+
+    providers._save(providers.mcp_path(), {"tools": server("tools"), "off": server("off")})
+    providers.set_enabled(providers.MCP, "off", False)
+    reviewing.up(task, pod, load_config())
+    assert sorted(p.name for p in d.iterdir()) == ["mcp.tools.token", "other", "server-password"]
+    written = json.loads((task.root / "review" / "harness" / "opencode.json").read_text())
+    assert list(written["mcp"]) == ["tools"], "the secrets are those of the servers it names"

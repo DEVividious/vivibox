@@ -190,7 +190,12 @@ def is_provider_key(name: str) -> bool:
 
 def mcp_secrets() -> list[str]:
     """The key store entries the MCP servers read in a task's pod."""
-    return sorted(set(MOUNTED.findall(json.dumps(task_mcp()))))
+    return sorted(set(mounted(task_mcp())))
+
+
+def mounted(config: dict) -> list[str]:
+    """The key store entries a configuration reads from the mounted secrets, each once."""
+    return list(dict.fromkeys(MOUNTED.findall(json.dumps(config))))
 
 
 def without_comments(text: str) -> str:

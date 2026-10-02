@@ -1,7 +1,8 @@
 """Secrets handed to a running task: files on tmpfs, mounted read-only into the agent container.
 
 The files live under $XDG_RUNTIME_DIR (memory, gone at logout), so keys never appear in images,
-volumes, `docker inspect` or the repository. Only the keys the task's model needs are copied.
+volumes, `docker inspect` or the repository. A container's directory holds the keys of the roles
+that run in it and nothing else.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 from . import keys
 
 MOUNT = "/run/vivibox-secrets"
+PASSWORD = "server-password"
 
 
 def runtime_dir(task_id: str) -> Path:
@@ -33,14 +35,19 @@ def prepare(
     providers: list[str],
     get_key: Callable[[str], str] = keys.get_key,
 ) -> Path:
-    """Writes the provider keys and a server password for the task; keeps an existing password."""
+    """Leaves the directory holding exactly these keys and a server password, an existing password
+    kept: a key left from before, or from a role since moved to another provider, is removed, and
+    the container sees it gone, its mount being this directory."""
     d = runtime_dir(task_id)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(d, 0o700)
+    for name in os.listdir(d):
+        if name not in (*providers, PASSWORD):
+            os.unlink(d / name)  # by name: a link goes, what it points at stays
     for provider in providers:
         _write(d / provider, get_key(provider))
-    if not (d / "server-password").exists():
-        _write(d / "server-password", random.token_urlsafe(24))
+    if not (d / PASSWORD).exists():
+        _write(d / PASSWORD, random.token_urlsafe(24))
     return d
 
 

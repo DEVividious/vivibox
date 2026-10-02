@@ -17,7 +17,8 @@ import pytest
 
 from vivibox import image, toolchain
 from vivibox.config import HostService
-from vivibox.pod import CA_BUNDLE, FIREWALL, SOCKET, Pod
+from vivibox.pod import CA_BUNDLE, SOCKET, Pod
+from vivibox.pod_egress import helper_missing
 
 pytestmark = pytest.mark.docker
 
@@ -52,8 +53,8 @@ def lan_ip() -> str:
 def env():
     if not TASKS_ROOT.is_dir():
         pytest.skip("run host/setup.sh first")
-    if subprocess.run(["sudo", "-n", "-l", FIREWALL], capture_output=True).returncode != 0:
-        pytest.skip("firewall helper not installed; run host/setup.sh")
+    if why := helper_missing():
+        pytest.skip(why)
     allowed, denied = serve(), serve()
     tasks_dir = TASKS_ROOT / f".pytest-{secrets.token_hex(4)}"
     task_id = f"podcheck-{random.randint(1000, 9999)}"

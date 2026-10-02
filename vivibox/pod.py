@@ -19,16 +19,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import display, handoff, podspec, repo
-from .config import DEFAULT_NETWORK_POOL, HostService
+from .config import DEFAULT_HOST_ADDRESS, DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
 from .pod_egress import ETHERNET_MTU as ETHERNET_MTU
-from .pod_egress import FIREWALL as FIREWALL
+from .pod_egress import HELPER as HELPER
 from .pod_egress import LINK as LINK
 from .pod_egress import PodEgress
+from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
 from .pod_network import PodError as PodError
-from .pod_network import PodNetwork
+from .pod_network import PodNetwork, RoleNetwork
 from .podspec import AGENT_MAVEN_OPTS as AGENT_MAVEN_OPTS
 from .podspec import CA_LABEL as CA_LABEL
 from .podspec import CACHES as CACHES
@@ -103,11 +104,16 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     review_dir: Path | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
     network_pool: str = DEFAULT_NETWORK_POOL
+    # The host's address for the pods, where the DNS forwarder listens; see config.Config.
+    host_address: str = DEFAULT_HOST_ADDRESS
+    # Where the task's network ranges are kept once allocated (pod_network); None: in memory.
+    allocation: Path | None = None
     # Where the daemon pulls Docker Hub's images through, "" for Docker Hub itself (mirror.py).
     hub_mirror: str = ""
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
+    _in_memory: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def sidecar(self) -> str:
@@ -200,8 +206,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         found = self._run("docker", "inspect", "-f", template, self.sidecar, check=False)
         return found.stdout.strip() if found.returncode == 0 else ""
 
-    def sidecar_command(self, address: str = "") -> list[str]:
-        return podspec.sidecar_command(self, ca_mounts(), ca_digest(), address)
+    def sidecar_command(self, net: RoleNetwork | None = None) -> list[str]:
+        return podspec.sidecar_command(self, ca_mounts(), ca_digest(), net or self.recorded_network())
 
     def docker_env(self) -> list[str]:
         return podspec.docker_env(self)
@@ -232,33 +238,40 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         """Starts whatever is not running. Idempotent."""
         if not self.repo.is_dir():
             raise PodError(f"task repo {self.repo} does not exist")
-        if self._state(self.sidecar) == "running" and self._stale_ca():
+        prepare_host(self.host_address, self.network_pool, self.runner)
+        state = self._state(self.sidecar)
+        if state == "running" and self._stale_ca():
             # Its daemon read the host's authorities at its start and would go on failing TLS
             # against a new one ("x509: certificate signed by unknown authority"); up() runs
             # before any turn, so this is the moment to make it again.
-            self._run("docker", "rm", "-f", self.agent, check=False)
-            self._run("docker", "rm", "-f", self.sidecar, check=False)
-        if self._state(self.sidecar) != "running":
+            state = self._sidecar_gone()
+        if state is not None and self.recorded_network() is None:
+            # Its address is not one vivibox allocated in today's pool: made again, data in volumes.
+            state = self._sidecar_gone()
+        if state != "running":
             # The agent joins the sidecar's network namespace, which a sidecar restart replaces.
             self._run("docker", "rm", "-f", self.agent, check=False)
-            if self._state(self.sidecar) is not None and self._outdated_sidecar():
+            if state is not None and self._outdated_sidecar():
                 # docker start would run the script it was made with; its data is in volumes.
-                self._run("docker", "rm", "-f", self.sidecar, check=False)
-            if self._state(self.sidecar) is None:
-                # Pinned rather than left to Docker: this address goes into your configuration files,
-                # so it has to be the same one after every restart.
-                subnet = self.ensure_network()
-                self._run(*self.sidecar_command(str(subnet[2])))
-            else:
-                self._run("docker", "start", self.sidecar)
-            self._wait_for_daemon(timeout)
-        # Rules live in the sidecar's network namespace and are gone after any restart: always apply,
-        # and before the agent exists.
+                state = self._sidecar_gone()
+        net = self.ensure_network() if state is None else self.recorded_network()
+        # The host's rules for the task's bridges, before anything of the pod sends a packet, and
+        # again at every start: they follow the uplink of the moment (a VPN on or off).
         self.apply_firewall()
+        if state is None:
+            self._run(*self.sidecar_command(net))
+        elif state != "running":
+            self._run("docker", "start", self.sidecar)
+        if state != "running":
+            self._wait_for_daemon(timeout)
         if self._state(self.agent) != "running":
             self._run("docker", "rm", "-f", self.agent, check=False)
             self._placeholders(self.agent_mounts)
             self._run(*self.agent_command())
+
+    def _sidecar_gone(self) -> None:
+        self._run("docker", "rm", "-f", self.agent, check=False)
+        self._run("docker", "rm", "-f", self.sidecar, check=False)
 
     def _placeholders(self, mounts: list[Mount]) -> None:
         """Each mount point in a folder the agent writes made a plain empty file (Mount.placeholder),
@@ -414,6 +427,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         self._run(
             "docker", "volume", "rm", *self.volumes.values(), f"vivibox-{self.task_id}-config", check=False
         )
+        # The host's rules go before the bridge: one left without them is refused outright.
+        self.remove_firewall()
         self._run("docker", "network", "rm", self.network, check=False)
 
     # --- inside the pod ---------------------------------------------------------------------

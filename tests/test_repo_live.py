@@ -15,7 +15,7 @@ from vivibox import image, repo
 from vivibox import secrets as task_secrets
 from vivibox.actions import task_pod
 from vivibox.cli import main
-from vivibox.pod import FIREWALL
+from vivibox.pod_egress import helper_missing
 
 pytestmark = pytest.mark.docker
 
@@ -24,8 +24,8 @@ TASKS_ROOT = Path("/srv/vivibox")
 
 @pytest.fixture(scope="module")
 def task(tmp_path_factory):
-    if subprocess.run(["sudo", "-n", "-l", FIREWALL], capture_output=True).returncode != 0:
-        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
     image.build()
     tmp = tmp_path_factory.mktemp("repo-live")
     source = make_repo(tmp / "source")
@@ -146,8 +146,8 @@ def test_deleting_git_dir_leaves_protected_files(task):
 @pytest.fixture(scope="module")
 def lib_task(tmp_path_factory):
     """A task whose repository has a submodule: its git dir under .git/modules is protected alike."""
-    if subprocess.run(["sudo", "-n", "-l", FIREWALL], capture_output=True).returncode != 0:
-        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
     image.build()
     tmp = tmp_path_factory.mktemp("repo-live-lib")
     mp = pytest.MonkeyPatch()

@@ -88,7 +88,7 @@ from .demo import (  # noqa: F401
 from .orchestration import mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
-from .pod import HOST_GATEWAY, Mount, Pod, PodError
+from .pod import Mount, Pod, PodError, prepare_host
 from .projects import (  # noqa: F401
     GROUNDWORK,
     broken_projects,
@@ -231,11 +231,12 @@ def pod_of(task: Task, project: Project) -> Pod:
     }
     config = load_config()
     # The mirror is reached as a service of the host's, through the pod's firewall.
-    through = [HostService(HOST_GATEWAY, config.hub_mirror_port)] if config.hub_mirror else []
+    through = [HostService(config.host_ip, config.hub_mirror_port)] if config.hub_mirror else []
     return Pod(
         task.id, task.repo, ref, [*project.host_services, *through], mounts, env, project.pass_env,
-        gate_dir=task.root / "gate", review_dir=task.root / ".review",
-        network_pool=config.network_pool, hub_mirror=mirror.url(config.hub_mirror_port) if through else "",
+        gate_dir=task.root / "gate", review_dir=task.root / ".review", allocation=task.meta / "network.json",
+        network_pool=config.network_pool, host_address=config.host_address,
+        hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",
     )  # fmt: skip
 
 
@@ -248,7 +249,8 @@ def ensure_mirror(task: Task, config: Config) -> None:
     if not config.hub_mirror:
         return
     try:
-        mirror.ensure(config.hub_mirror_port)
+        prepare_host(config.host_address, config.network_pool)  # it listens on the host's address
+        mirror.ensure(config.hub_mirror_port, config.host_ip)
     except PodError as e:
         task.event("mirror", problem=str(e))
 

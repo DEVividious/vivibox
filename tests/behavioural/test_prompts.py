@@ -33,7 +33,7 @@ from conftest import make_repo
 
 from vivibox import actions, gate, image, keys, plan, prompts, supervisor, ui
 from vivibox.config import load_config
-from vivibox.pod import FIREWALL
+from vivibox.pod_egress import helper_missing
 from vivibox.states import State
 from vivibox.supervise import make_supervisor
 
@@ -105,8 +105,8 @@ REPORT_ONLY = (
 def bench(tmp_path_factory):
     if not TASKS_ROOT.is_dir():
         pytest.skip("run host/setup.sh first")
-    if subprocess.run(["sudo", "-n", "-l", FIREWALL], capture_output=True).returncode != 0:
-        pytest.skip("firewall helper not installed; run host/setup.sh")
+    if why := helper_missing():
+        pytest.skip(why)
     real_keys = keys.store()
     if not (real_keys / "deepseek").exists():
         pytest.skip("no deepseek key in the key store")

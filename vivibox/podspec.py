@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .pod import Pod
+    from .pod_network import RoleNetwork
 
 DIND_IMAGE = "docker:29.8.1-dind"
 # The Ryuk Testcontainers runs in the pod, over the one a project's library would pick. Ryuk before
@@ -81,7 +82,9 @@ def binds(command: list[str]) -> list[str]:
     return [command[i + 1] for i, arg in enumerate(command) if arg == "-v"]
 
 
-def sidecar_command(pod: Pod, ca_mounts: list[Mount], ca_digest: str, address: str = "") -> list[str]:
+def sidecar_command(
+    pod: Pod, ca_mounts: list[Mount], ca_digest: str, net: RoleNetwork | None = None
+) -> list[str]:
     # The daemon listens only on the unix socket. 666: the socket is owned by root of the
     # Sysbox user namespace, the agent runs as your UID, and only this pair mounts the volume.
     # The socket left by the last run goes first: the wait would find it at once, chmod it, and
@@ -104,8 +107,14 @@ def sidecar_command(pod: Pod, ca_mounts: list[Mount], ca_digest: str, address: s
         "docker", "run", "-d", "--name", pod.sidecar, "--runtime=sysbox-runc",
         "--label", f"vivibox.task={pod.task_id}",
         *(("--label", f"{CA_LABEL}={digest}") if digest else ()),
-        "--network", pod.network, *(("--ip", address) if address else ()),
-        "--add-host", f"{HOST_GATEWAY}:host-gateway",
+        # Pinned rather than left to Docker: this address goes into your configuration files, so
+        # it has to be the same one after every restart. The host is the bridge's gateway.
+        "--network", pod.network,
+        *(("--ip", net.address, "--add-host", f"{HOST_GATEWAY}:{net.gateway}") if net else ()),
+        # Every DNS client in the pod asks the host's forwarder: Docker's own resolver in the
+        # sidecar, which the agent shares, and the daemon in it, which its containers inherit.
+        # No search domain of the host's ("." is Docker's none).
+        "--dns", pod.host_ip, "--dns-search", ".",
         "-e", "DOCKER_TLS_CERTDIR=",
         "-v", f"{pod.volumes['docker']}:/var/lib/docker",
         "-v", f"{pod.volumes['socket']}:{SOCKET_DIR}",

@@ -3,8 +3,8 @@ the second task that needs mysql takes it from here and not from the internet ag
 its own daemon and its own images; only the download is shared.
 
 One container on your Docker, vivibox-mirror, from the registry image, on the host's network and
-listening only on the bridge's gateway: the address a pod knows the host by (host.docker.internal),
-which your LAN does not reach. Its port is let through the pod's firewall like a host service.
+listening only on the host's address for the pods (network.host_address, on vivibox0), which your
+LAN does not reach. Its port is let through the host's rules for the pods like a host service.
 A task can pull from it and nothing else: a registry that proxies takes no pushes, and deletes are
 off. It holds public images and no credentials. Deleting a task never touches it; the registry
 forgets what nobody pulled for two weeks. When it is down, a pod's daemon pulls from Docker Hub
@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable
 
 from .config import DEFAULT_HUB_MIRROR_PORT
-from .pod import CA_BUNDLE, HOST_CA_BUNDLE, HOST_GATEWAY, PodError, Runner, run
+from .pod import CA_BUNDLE, HOST_CA_BUNDLE, PodError, Runner, run
 
 NAME = "vivibox-mirror"
 VOLUME = "vivibox-mirror"
@@ -28,21 +28,13 @@ UPSTREAM = "https://registry-1.docker.io"
 # How long a layer nobody pulls stays; the registry then deletes it by itself.
 TTL = "336h"
 DEFAULT_PORT = DEFAULT_HUB_MIRROR_PORT
-# The address the mirror was made to listen on, so a change of the bridge or the port remakes it.
+# The address the mirror was made to listen on, so a change of the address or the port remakes it.
 LABEL = "vivibox.mirror.listen"
 
 
-def url(port: int) -> str:
-    """Where a pod's daemon finds the mirror."""
-    return f"http://{HOST_GATEWAY}:{port}"
-
-
-def bridge_gateway(runner: Runner = run) -> str:
-    """The host's address on Docker's default bridge: what host.docker.internal is in a pod."""
-    p = runner(["docker", "network", "inspect", "bridge", "-f", "{{(index .IPAM.Config 0).Gateway}}"])
-    if p.returncode != 0 or not p.stdout.strip():
-        raise PodError(f"cannot find the address of Docker's bridge: {p.stderr.strip()}")
-    return p.stdout.strip()
+def url(address: str, port: int) -> str:
+    """Where a pod's daemon finds the mirror: the host's address for the pods."""
+    return f"http://{address}:{port}"
 
 
 def command(listen: str) -> list[str]:
@@ -78,10 +70,11 @@ def found(runner: Runner = run) -> tuple[str, str]:
 
 
 def ensure(
-    port: int, runner: Runner = run, ready: Callable[[str], bool] = answers, timeout: float = 15
+    port: int, address: str, runner: Runner = run, ready: Callable[[str], bool] = answers, timeout: float = 15
 ) -> str:
-    """Starts the mirror unless it runs already; returns the address a pod's daemon pulls through."""
-    listen = f"{bridge_gateway(runner)}:{port}"
+    """Starts the mirror unless it runs already, listening on address (the host's for the pods,
+    which must be there: pod.prepare_host); returns the address a pod's daemon pulls through."""
+    listen = f"{address}:{port}"
     state, made_for = found(runner)
     if state and made_for != listen:
         runner(["docker", "rm", "-f", NAME])
@@ -98,7 +91,7 @@ def ensure(
             said = runner(["docker", "logs", "--tail", "5", NAME])
             raise PodError(f"the Docker Hub mirror did not answer on {listen}: {said.stderr.strip()[-400:]}")
         time.sleep(0.3)
-    return url(port)
+    return url(address, port)
 
 
 def size(runner: Runner = run) -> str:

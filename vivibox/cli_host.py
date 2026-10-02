@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import image, mirror
+from . import image, mirror, pod_egress
 from .config import load_config
 from .egress import hostd, resolver
 
@@ -71,11 +71,8 @@ def cmd_hostd(args: argparse.Namespace) -> int:
     config = load_config()
     where = f"{config.host_ip}:{resolver.PORT}"
     if args.action == "start":
-        try:
-            hostd.ensure(config.host_ip)
-        except hostd.HostdError as e:
-            print(f"vivibox: {e}", file=sys.stderr)
-            return 1
+        # The address it listens on is made by the root helper, with the base of the host's rules.
+        pod_egress.prepare_host(config.host_address, config.network_pool)
     if why := hostd.problem(config.host_ip):
         print(why)
         return 1

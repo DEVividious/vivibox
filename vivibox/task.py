@@ -23,7 +23,9 @@ MAX_PROBLEM = 2000
 # before it would not meet (what the task's folder holds, what its pod mounts) raises it. A task
 # written under another is never run nor written here, and never migrated: one from an earlier
 # vivibox is shown and can be deleted, one from a newer vivibox is only shown.
-TASK_SCHEMA_VERSION = 2
+# 2: your replies kept where no agent writes; 3: the pod's network on a bridge of vivibox's
+# naming, its range kept with the task, its egress enforced on the host.
+TASK_SCHEMA_VERSION = 3
 CURRENT, EARLIER, NEWER = "current", "earlier", "newer"
 # What a task is opened for (find_task): an operation that runs, moves or opens it needs the
 # layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.

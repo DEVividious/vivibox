@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import re
 import subprocess
@@ -38,6 +39,7 @@ class FakeDocker:
         self.binds: dict[str, list[str]] = {}
         self.labels: dict[str, dict[str, str]] = {}
         self.subnets = ""
+        self.networks: set[str] = set()  # the networks it has made, by name
         self.proc_net_tcp = ""
         self.leftovers = ""  # what the agent container has listening: pid, port in hex, command
         self.alive = False
@@ -87,12 +89,23 @@ class FakeDocker:
             out = self.links
         elif cmd[:3] == ["docker", "network", "ls"]:
             out = "net1\n" if self.subnets else ""
+        elif cmd[:3] == ["docker", "network", "create"]:
+            self.networks.add(cmd[-1])
+        elif cmd[:3] == ["docker", "network", "rm"]:
+            self.networks.discard(cmd[-1])
+        elif cmd[:3] == ["docker", "network", "inspect"] and cmd[-1] in self.networks:
+            out, rc = "", 0
         elif cmd[:3] == ["docker", "network", "inspect"]:
             out, rc = (self.subnets, 0) if cmd[-1] != "vivibox-shop-1-net" else ("", 1)
         return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
 
     def find(self, *prefix):
         return [c for c in self.calls if c[: len(prefix)] == list(prefix)]
+
+
+def applied_policy(pod) -> dict:
+    """The JSON the last apply-policy was given."""
+    return json.loads([c for c in pod.runner.find("sudo") if c[3] == "apply-policy"][-1][5])
 
 
 @pytest.fixture
@@ -171,17 +184,39 @@ def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):
     ) > args.index(f"{pod.repo}:{pod.repo}"), "protective mounts must come after the repo mount to cover it"
 
 
-def test_up_creates_sidecar_then_firewall_then_agent(pod):
+def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(pod):
+    """The host's rules for the task's bridge are loaded before its sidecar exists: no packet of
+    the pod's leaves before them. The bridge's name is vivibox's, so the rules can be keyed by it
+    before Docker has made it."""
     pod.up()
     steps = [
-        c[4] if c[:2] == ["docker", "run"] else "firewall"
+        c[4] if c[:2] == ["docker", "run"] else c[3] if c[0] == "sudo" else "network"
         for c in pod.runner.calls
-        if c[:4] == ["docker", "run", "-d", "--name"] or c[0] == "sudo"
+        if c[:4] == ["docker", "run", "-d", "--name"]
+        or c[0] == "sudo"
+        or c[:3] == ["docker", "network", "create"]
     ]
-    assert steps == ["vivibox-shop-1-dind", "firewall", "vivibox-shop-1-agent"]
-    assert pod.runner.find("sudo")[0][3:] == [
-        "apply", "vivibox-shop-1-dind", "--pool", DEFAULT_NETWORK_POOL, "172.20.0.1:5432"
-    ]  # fmt: skip
+    assert steps == [
+        "prepare-engine",
+        "network",
+        "apply-policy",
+        "vivibox-shop-1-dind",
+        "vivibox-shop-1-agent",
+    ]
+    prepare = pod.runner.find("sudo")[0]
+    assert prepare[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "prepare-engine", "host"]
+    assert json.loads(prepare[5]) == {"host_address": "203.0.113.1/32", "pool": DEFAULT_NETWORK_POOL}
+    applied = pod.runner.find("sudo")[1]
+    assert applied[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "apply-policy", "shop-1"]
+    assert json.loads(applied[5]) == {
+        "state": "present",
+        "networks": [{"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"}],
+        "pool": DEFAULT_NETWORK_POOL,
+        "mtu": 1500,
+        "hostsvc": ["198.51.100.1:5432"],
+        "dns": "203.0.113.1",
+        "dns_port": 5053,
+    }
 
 
 WIFI = (
@@ -206,31 +241,30 @@ ROUTE_WIFI = "1.1.1.1 via 192.168.50.1 dev wlp0s20f3 src 192.168.50.219 uid 1000
 def test_a_tunnel_smaller_than_ethernet_clamps_the_pods_mss(pod):
     """The work laptop's case, third round: behind Cloudflare WARP (MTU 1280) the pod's daemon fetched an
     image's manifest and then got 0 of a layer's 115 MB: "unexpected EOF". The pod's interfaces
-    have 1500 and offer an MSS the tunnel cannot carry; the firewall clamps it to the tunnel's.
+    have 1500 and offer an MSS the tunnel cannot carry; the host's rules clamp it to the tunnel's.
     WARP steers traffic through rules of its own, so `ip route get` still names the Wi-Fi: a
     tunnel that is up counts whatever the route says."""
     pod.runner.route = ROUTE_WIFI
     pod.runner.links = "\n".join([WIFI, WARP, VETH]) + "\n"
     pod.up()
-    firewall = pod.runner.find("sudo")[0]
-    assert firewall[firewall.index("--mtu") + 1] == "1280"
-    assert firewall.index("--mtu") < firewall.index("172.20.0.1:5432"), "options before the targets"
+    assert applied_policy(pod)["mtu"] == 1280
 
 
 def test_an_ethernet_uplink_needs_no_clamping(pod):
-    """A tunnel that is down does not count either."""
+    """A tunnel that is down does not count either: the route's own MTU is clamped to."""
     pod.runner.route = ROUTE_WIFI
     pod.runner.links = "\n".join([WIFI, TUN_DOWN, VETH]) + "\n"
     pod.up()
-    assert "--mtu" not in pod.runner.find("sudo")[0]
+    assert applied_policy(pod)["mtu"] == 1500
 
 
 def test_up_with_running_pod_only_reapplies_firewall(pod):
+    pod.ensure_network()
     made_now(pod, state="running")
     pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up()
     assert not pod.runner.find("docker", "run")
-    assert len(pod.runner.find("sudo")) == 1
+    assert [c[3] for c in pod.runner.find("sudo")] == ["prepare-engine", "apply-policy"]
 
 
 def test_a_running_sidecar_from_before_the_hosts_certificates_changed_is_made_again(pod):
@@ -250,12 +284,19 @@ def test_a_running_sidecar_from_before_the_hosts_certificates_changed_is_made_ag
 
 
 def test_restarted_sidecar_gets_a_new_agent(pod):
+    pod.ensure_network()
     made_now(pod, state="exited")
     pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up(timeout=1)
     assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-agent")
     assert pod.runner.find("docker", "start", "vivibox-shop-1-dind")
     assert not pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind"), "its script is current"
+    steps = [
+        c[1] if c[0] == "docker" else c[3]
+        for c in pod.runner.calls
+        if c[:2] == ["docker", "start"] or c[0] == "sudo"
+    ]
+    assert steps == ["prepare-engine", "apply-policy", "start"], "the rules before it starts again"
 
 
 def test_a_task_started_again_passes_what_its_project_passes_now(env, tmp_path, monkeypatch):
@@ -533,7 +574,113 @@ def test_the_sidecar_is_pinned_to_the_same_address_every_time(pod):
     run = pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")[0]
     assert run[run.index("--network") + 1] == "vivibox-shop-1-net"
     assert run[run.index("--ip") + 1] == "198.51.100.2"
-    assert pod.runner.find("docker", "network", "create")
+    [made] = pod.runner.find("docker", "network", "create")
+    assert made[made.index("--subnet") + 1] == "198.51.100.0/28"
+    assert made[made.index("--gateway") + 1] == "198.51.100.1", "the gateway is vivibox's choice too"
+    assert made[made.index("-o") + 1] == "com.docker.network.bridge.name=vbx-shop-1-w"
+
+
+def test_every_dns_client_in_the_pod_asks_the_hosts_forwarder(pod):
+    """The sidecar asks the forwarder on the host's address, and Docker's resolver in it, the
+    agent and the nested daemon with it; no search domain of the host's goes in."""
+    pod.up()
+    run = pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")[0]
+    assert run[run.index("--dns") + 1] == "203.0.113.1"
+    assert run[run.index("--dns-search") + 1] == ".", "Docker's way of saying none"
+    assert "--dns-opt" not in run
+    assert run[run.index("--add-host") + 1] == "host.docker.internal:198.51.100.1", "the bridge's gateway"
+
+
+def test_the_policy_holds_nothing_from_dockers_output(pod):
+    """Invariant 13: the root helper is given what vivibox allocated and what the host resolved,
+    never what a docker command printed, whatever it prints."""
+    real = pod.runner
+    evil = "6.6.6.6 host.docker.internal\n6.6.6.0/24 evil;}\n"
+
+    def lying(cmd):
+        done = real(cmd)
+        cmd = list(cmd)
+        listing = cmd[:3] in (["docker", "network", "inspect"], ["docker", "network", "ls"])
+        if (
+            listing
+            or cmd[:2] == ["docker", "exec"]
+            or (cmd[:2] == ["docker", "inspect"] and "IPAddress" in str(cmd))
+        ):
+            return subprocess.CompletedProcess(cmd, done.returncode, stdout=evil, stderr="")
+        return done
+
+    pod.runner = lying
+    pod.up()
+    sent = [c[5] for c in real.find("sudo")]
+    assert sent and not any("6.6.6" in s or "evil" in s for s in sent)
+    policy = json.loads(sent[-1])
+    assert policy["networks"][0]["subnet"] == "198.51.100.0/28"
+    assert policy["hostsvc"] == ["198.51.100.1:5432"]
+    assert not [c for c in real.calls if c[-1:] == ["/etc/hosts"]], "nothing is read from the sidecar"
+
+
+def test_the_gateway_is_the_allocations(pod):
+    pod.ensure_network()
+    assert pod.gateway() == "198.51.100.1"
+    assert not pod.runner.find("docker", "exec")
+
+
+def test_a_pod_without_an_allocation_has_no_gateway(pod):
+    with pytest.raises(PodError, match="no network"):
+        pod.gateway()
+
+
+def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_path):
+    pod.allocation = tmp_path / "network.json"
+    first = pod.ensure_network()
+    assert json.loads(pod.allocation.read_text()) == {
+        "networks": [{"role": "w", "subnet": "198.51.100.0/28"}]
+    }
+    again = Pod("shop-1", pod.repo, "img", runner=FakeDocker(), allocation=pod.allocation)
+    again.runner.networks.add("vivibox-shop-1-net")  # its own network, which Docker has
+    assert again.recorded_network() == first and again.gateway() == "198.51.100.1"
+    again.runner.states["vivibox-shop-1-dind"] = "exited"
+    made_now(again, state="exited")
+    again.up(timeout=1)
+    assert not again.runner.find("docker", "network", "create"), "the network is there: started, not made"
+    assert json.loads(again.runner.find("sudo")[1][5])["networks"][0]["subnet"] == "198.51.100.0/28"
+
+
+def test_an_allocation_outside_the_pool_now_is_made_again(pod, tmp_path):
+    pod.allocation = tmp_path / "network.json"
+    pod.allocation.write_text(json.dumps({"networks": [{"role": "w", "subnet": "10.9.9.0/28"}]}))
+    assert pod.recorded_network() is None, "the pool moved since"
+    made_now(pod, state="exited")
+    pod.up(timeout=1)
+    assert pod.runner.find("docker", "rm", "-f", "vivibox-shop-1-dind"), "its address is outside the pool"
+    assert pod.recorded_network().subnet.subnet_of(ipaddress.IPv4Network(DEFAULT_NETWORK_POOL))
+
+
+def test_a_pod_does_not_start_when_the_host_cannot_be_prepared(pod):
+    real = pod.runner
+
+    def no_helper(cmd):
+        if list(cmd)[:1] == ["sudo"]:
+            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="sudo: a password is required")
+        return real(cmd)
+
+    pod.runner = no_helper
+    with pytest.raises(PodError, match="host/setup.sh") as e:
+        pod.up()
+    assert "a password is required" in str(e.value)
+    assert not real.find("docker", "run") and not real.find("docker", "network", "create")
+
+
+def test_a_pod_does_not_start_while_the_dns_forwarder_is_down(pod, monkeypatch):
+    from vivibox.egress import hostd
+
+    def down(address, port=0, upstream="", timeout=0):
+        raise hostd.HostdError("the DNS forwarder on 203.0.113.1:5053 did not start: it ended")
+
+    monkeypatch.setattr(hostd, "ensure", down)
+    with pytest.raises(PodError, match="DNS forwarder not running: .*did not start"):
+        pod.up()
+    assert not pod.runner.find("docker", "run"), "fail-closed: no pod without its DNS"
 
 
 def test_a_full_pool_says_what_to_do_about_it(pod):
@@ -560,9 +707,16 @@ def test_listening_ports_are_read_from_the_kernel(pod):
     assert not pod.listening()[1].why_not
 
 
-def test_removing_a_task_takes_its_network_with_it(pod):
+def test_removing_a_task_takes_its_network_and_its_rules_with_it(pod):
     pod.remove()
-    assert pod.runner.find("docker", "network", "rm", "vivibox-shop-1-net")
+    calls = pod.runner.calls
+    gone = next(i for i, c in enumerate(calls) if c[:1] == ["sudo"])
+    assert calls.index(["docker", "network", "rm", "vivibox-shop-1-net"]) > gone, "the rules first"
+    assert calls[gone][3:5] == ["apply-policy", "shop-1"]
+    assert json.loads(calls[gone][5]) == {
+        "state": "absent",
+        "networks": [{"role": r, "bridge": f"vbx-shop-1-{r}"} for r in ("w", "r", "p")],
+    }
 
 
 def test_demo_reports_the_port_that_was_not_there_before(pod):
@@ -710,7 +864,7 @@ def test_a_range_another_task_took_meanwhile_is_given_up_for_the_next(pod):
         return real(cmd)
 
     pod.runner = racing
-    assert str(pod.ensure_network()) == "198.51.100.16/28"
+    assert str(pod.ensure_network().subnet) == "198.51.100.16/28"
     made = real.find("docker", "network", "create")
     assert [c[c.index("--subnet") + 1] for c in made] == ["198.51.100.0/28", "198.51.100.16/28"]
 

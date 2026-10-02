@@ -1,16 +1,24 @@
-"""The pod's network rules on the host: the firewall helper that fences the sidecar's network
-namespace, and the facts it is given. Mixed into Pod, whose _run, sidecar, host_services, runner and
-network_pool it uses."""
+"""What a pod may reach, enforced on the host: the root helper (host/vivibox-host) loads the rules
+for the task's bridges, and the DNS forwarder (egress/hostd.py) answers the pod's every query.
+The helper is given only what vivibox allocated (pod_network), its configuration and what the
+host resolved: nothing Docker printed (invariant 13). Mixed into Pod, whose _run, task_id,
+host_services, runner, network_pool and host_address it uses."""
 
 from __future__ import annotations
 
+import json
 import re
 import socket
 
+from . import names
+from .egress import hostd, resolver
 from .pod_network import PodError
 from .podspec import HOST_GATEWAY, Runner, run
 
-FIREWALL = "/usr/local/libexec/vivibox-netns"
+HELPER = "/usr/local/libexec/vivibox-host"
+# The one policy there is until a task's names are allowed by name (phase 4a): the internet open,
+# everything private, the host and the other tasks refused.
+POLICY = "open"
 ETHERNET_MTU = 1500
 
 LINK = re.compile(r"^\d+: ([^:@]+)(?:@\S+)?: <([^>]*)> mtu (\d+) .*?\blink/(\w+)")
@@ -37,14 +45,46 @@ def uplink_mtu(runner: Runner = run) -> int:
     return min(mtus, default=ETHERNET_MTU)
 
 
+def helper(runner: Runner, *args: str) -> None:
+    p = runner(["sudo", "-n", HELPER, *args])
+    if p.returncode != 0:
+        said = (p.stderr or p.stdout).strip()[-600:]
+        raise PodError(
+            f"this machine's rules for pods could not be set: {said}. If the helper or its sudo rule "
+            "is missing (sudo asks for a password, or the file is not there), run host/setup.sh"
+        )
+
+
+def helper_missing(runner: Runner = run) -> str:
+    """Why the root helper does not run without a password; "" when it does. For the live tests,
+    which skip without it."""
+    if runner(["sudo", "-n", HELPER, "--version"]).returncode == 0:
+        return ""
+    return f"the root helper {HELPER} is not installed, or sudo does not allow it; run host/setup.sh"
+
+
+def prepare_host(host_address: str, pool: str, runner: Runner = run) -> None:
+    """This machine ready for any pod: the host's services address on vivibox0 and the base of
+    the rules (the helper refuses, naming it, an address another interface or route holds), and
+    the DNS forwarder answering there. No pod starts without it: its DNS would go nowhere."""
+    helper(runner, "prepare-engine", "host", json.dumps({"host_address": host_address, "pool": pool}))
+    try:
+        hostd.ensure(host_address.partition("/")[0])
+    except hostd.HostdError as e:
+        raise PodError(f"DNS forwarder not running: {e}; no pod starts without it") from None
+
+
 class PodEgress:
+    @property
+    def host_ip(self) -> str:
+        return self.host_address.partition("/")[0]
+
     def gateway(self) -> str:
-        hosts = self._run("docker", "exec", self.sidecar, "cat", "/etc/hosts").stdout
-        for line in hosts.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and HOST_GATEWAY in parts[1:]:
-                return parts[0]
-        raise PodError(f"{HOST_GATEWAY} missing in {self.sidecar}")
+        """The host's address on the writer's bridge, from the allocation."""
+        net = self.recorded_network()
+        if net is None:
+            raise PodError(f"{self.task_id} has no network allocated yet; start it first")
+        return net.gateway
 
     def firewall_targets(self) -> list[str]:
         """Every address a name answers with, not just the first: a service behind a load balancer
@@ -62,13 +102,34 @@ class PodEgress:
             targets += [f"{ip}:{s.port}" for ip in found if f"{ip}:{s.port}" not in targets]
         return targets
 
+    def policy(self) -> dict:
+        """What the helper is given for this task: its role networks, the pool (every other task's
+        range, refused), the uplink's MTU (the MSS clamp follows a VPN going on or off), the host
+        services and where the forwarder listens."""
+        nets = self.networks()
+        if not nets:
+            raise PodError(f"{self.task_id} has no network allocated yet")
+        return {
+            "state": "present",
+            "networks": [
+                {"role": n.role, "bridge": n.bridge, "subnet": str(n.subnet), "policy": POLICY} for n in nets
+            ],
+            "pool": self.network_pool,
+            "mtu": uplink_mtu(self.runner),
+            "hostsvc": self.firewall_targets(),
+            "dns": self.host_ip,
+            "dns_port": resolver.PORT,
+        }
+
     def apply_firewall(self) -> None:
-        # The pool is not a private range, so the helper has to be told to reject it by name:
-        # without that, one task could reach another task's ports. Applied on every start, so the
-        # MSS clamp follows the uplink of the moment: a VPN on or off since the last start.
-        mtu = uplink_mtu(self.runner)
-        self._run(
-            "sudo", "-n", FIREWALL, "apply", self.sidecar,
-            "--pool", self.network_pool, *(("--mtu", str(mtu)) if mtu < ETHERNET_MTU else ()),
-            *self.firewall_targets(),
-        )  # fmt: skip
+        helper(self.runner, "apply-policy", self.task_id, json.dumps(self.policy()))
+
+    def remove_firewall(self) -> None:
+        """The task's rules gone, for every role it may have had a network for. A task id that is
+        not one has none."""
+        try:
+            nets = [{"role": r, "bridge": names.bridge(self.task_id, r)} for r in names.ROLES]
+        except ValueError:
+            return
+        gone = json.dumps({"state": "absent", "networks": nets})
+        self.runner(["sudo", "-n", HELPER, "apply-policy", self.task_id, gone])

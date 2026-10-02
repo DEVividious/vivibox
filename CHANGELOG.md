@@ -10,10 +10,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
-- `vivibox hostd` runs a DNS forwarder on your machine, on `[network] host_address` (default
-  `203.0.113.1/32`) at port 5053, passing queries to your machine's resolver unchanged, over UDP
-  and TCP. `vivibox hostd` says whether it runs, `start` and `stop` start and stop it; when it
-  has ended, the header says so and what to run.
+- Every DNS query a pod makes, to whatever server it names, goes to a forwarder on your machine,
+  which passes it to your machine's resolver unchanged, over UDP and TCP. `vivibox hostd` runs
+  it, on `[network] host_address` (default `203.0.113.1/32`, an interface of its own,
+  `vivibox0`) at port 5053, and the first task's start starts it; `vivibox hostd` says whether
+  it runs, `start` and `stop` start and stop it. A pod does not start while it is down, a running
+  pod resolves no names then, and the header says so and what to run.
+- A pod reaches your machine's services (`host.docker.internal`) on its own network's gateway,
+  and the Docker Hub mirror listens on `network.host_address` instead of Docker's bridge.
+- A pod's egress rules are loaded by a new root helper, `/usr/local/libexec/vivibox-host`, through
+  one sudo rule, instead of `vivibox-netns`. Tasks created before this change are from an earlier
+  vivibox: delete them and create them again.
 - Tasks created by an earlier vivibox can't be run any more: they are not carried over to the
   new layout of a task's files. The list and `vivibox status` show them as `from an earlier
   vivibox` (and say when their supervisor or pod still runs); delete them with
@@ -51,6 +58,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Root in a pod can no longer remove its egress rules: they are on your machine, keyed by the
+  bridge of the task's network, loaded before the pod's first packet and replaced in one step.
+  Private ranges, your LAN, your machine but for the project's host services, other tasks' ranges,
+  IPv6 and UDP other than DNS are refused; the internet stays open.
 - The agent can no longer change your replies. vivibox keeps them in the task's own folder,
   where no agent writes, and the agents and the reviewer read them read-only where they always
   did. A link, a folder or a file the agent leaves where they are read is never followed: a

@@ -108,7 +108,7 @@ def no_real_hostd(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_real_docker(request, monkeypatch, tmp_path_factory):
-    """No test but one marked docker reaches the machine's Docker: a docker first on PATH answers
+    """No test but one marked docker reaches the machine's Docker, nor sudo: a docker first on PATH answers
     every call as a daemon with nothing in it would, and a test that asked it to change something
     fails, so a stand-in that stops intercepting (a pod built another way) is caught. A task's pod
     (actions.Pod) answers the same way without asking, as a test's own stand-in may still do."""
@@ -128,6 +128,10 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     fake = folder / "docker"
     fake.write_text(FAKE_DOCKER)
     fake.chmod(0o755)
+    # Nor sudo: the root helper is the person's to run, through host/setup.sh and a pod's start.
+    sudo = folder / "sudo"
+    sudo.write_text('#!/bin/sh\necho "the tests reach no sudo (tests/conftest.py)" >&2\nexit 1\n')
+    sudo.chmod(0o755)
     log = folder / "calls.log"
     monkeypatch.setenv("VIVIBOX_TEST_DOCKER_LOG", str(log))
     monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ.get('PATH', '')}")

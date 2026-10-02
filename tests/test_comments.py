@@ -45,7 +45,7 @@ def test_a_new_task_has_an_empty_file_for_your_replies(tmp_path):
     """The mount's source: missing, Docker would make a folder of root's in its place."""
     task = create_task(tmp_path, "demo", "Reset view", "# Goal\n")
     assert (task.meta / "comments.md").read_text() == ""
-    assert task.read_state().task_schema_version == 2
+    assert task.read_state().task_schema_version == task_module.TASK_SCHEMA_VERSION
 
 
 def test_a_task_of_the_layout_that_kept_replies_in_handoff_is_not_run(tmp_path):
@@ -58,7 +58,7 @@ def test_a_task_of_the_layout_that_kept_replies_in_handoff_is_not_run(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(TaskLayoutError, match="created by an earlier vivibox"):
         find_task(tmp_path, task.id)
-    assert task_module.TASK_SCHEMA_VERSION == 2
+    assert task_module.TASK_SCHEMA_VERSION >= 2
 
 
 def test_a_reply_whose_criteria_are_refused_writes_no_comment(tmp_path):

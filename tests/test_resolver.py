@@ -292,3 +292,30 @@ def test_vivibox_hostd_says_whether_it_runs(env, monkeypatch, capsys):
     monkeypatch.setattr(hostd, "stop", lambda: stopped.append(True) or True)
     assert main(["hostd", "stop"]) == 0 and stopped
     assert "resolve no names" in capsys.readouterr().out
+
+
+def test_vivibox_hostd_start_prepares_the_host_first(env, monkeypatch, capsys):
+    """The forwarder listens on the host's address for the pods, which the root helper makes."""
+    from vivibox import pod_egress
+    from vivibox.cli import main
+
+    asked = []
+    monkeypatch.setattr(pod_egress, "prepare_host", lambda address, pool: asked.append((address, pool)))
+    monkeypatch.setattr(hostd, "problem", lambda address, port=resolver.PORT, timeout=1.0: "")
+    monkeypatch.setattr(hostd, "running", lambda: 4242)
+    assert main(["hostd", "start"]) == 0
+    assert asked == [("203.0.113.1/32", "198.51.100.0/24")]
+    assert "runs on 203.0.113.1:5053 (process 4242)" in capsys.readouterr().out
+
+
+def test_vivibox_hostd_start_says_why_it_could_not(env, monkeypatch, capsys):
+    from vivibox import pod_egress
+    from vivibox.cli import main
+    from vivibox.pod import PodError
+
+    def refused(address, pool):
+        raise PodError("this machine's rules for pods could not be set: sudo: a password is required")
+
+    monkeypatch.setattr(pod_egress, "prepare_host", refused)
+    assert main(["hostd", "start"]) == 1
+    assert "a password is required" in capsys.readouterr().err

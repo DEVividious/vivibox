@@ -228,6 +228,29 @@ def test_delete_removes_everything_of_a_task_from_an_earlier_vivibox(
     assert actions.archive_path("demo-1").is_dir()
 
 
+def test_a_task_from_before_the_host_held_its_rules_is_deleted_with_its_network(env, monkeypatch, capsys):
+    """Layout 2: its network had no bridge of vivibox's naming and its rules lived in the pod,
+    where root in it could remove them. It is not run; deleting it takes its network, and asks
+    the host to drop whatever rules a bridge of its name could have."""
+    from functools import partial
+
+    from test_pod import FakeDocker
+
+    task = implementing("Add health endpoint")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data["task_schema_version"] = 2
+    path.write_text(json.dumps(data))
+    with pytest.raises(TaskLayoutError, match=EARLIER_SAYS):
+        find_task(load_config().tasks_dir, "demo-1")
+    docker = FakeDocker()
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=docker))
+    assert main(["delete", "demo-1", "--yes"]) == 0
+    assert docker.find("docker", "network", "rm", "vivibox-demo-1-net")
+    [gone] = docker.find("sudo")
+    assert gone[3:5] == ["apply-policy", "demo-1"] and json.loads(gone[5])["state"] == "absent"
+
+
 @pytest.mark.parametrize("how", NEWER)
 def test_delete_refuses_a_task_from_a_newer_vivibox(env, how, monkeypatch, capsys):
     """An older vivibox cannot know what a newer layout made for the task: half a deletion is

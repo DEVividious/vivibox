@@ -555,7 +555,11 @@ class Vivibox(
         self.call_from_thread(self.busy_with, task_id, "accepting…")
         try:
             task, project = actions.load(task_id)
-            actions.finish(task, project, on_ready=lambda done: self.call_from_thread(self.finished, done))
+            done = actions.finish(task, project, on_ready=lambda d: self.call_from_thread(self.finished, d))
+            if left := done.left:  # the rules stayed, the helper's words: text, never markup
+                self.call_from_thread(
+                    self.notify, f"{task_id} is done, but {left}", severity="warning", markup=False
+                )
         except Exception as e:
             self.call_from_thread(self.fail, e)
         finally:

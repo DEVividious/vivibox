@@ -72,7 +72,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 - A pod does not start on a network of its name that is not on the bridge vivibox named, as the
   kernel lists it: this machine's rules would not hold there. Deleting a task says when this
-  machine kept its rules (the helper refused), instead of saying nothing.
+  machine kept its rules (the helper refused), instead of saying nothing; accepting one finishes
+  all the same, with the commit step, and says so on the screen and on the task's record.
 - Root in a pod can no longer remove its egress rules: they are on your machine, keyed by the
   bridge of the task's network, loaded before the pod's first packet and replaced in one step.
   Private ranges, your LAN, your machine but for the project's host services, other tasks' ranges,

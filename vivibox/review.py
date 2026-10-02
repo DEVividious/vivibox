@@ -33,7 +33,7 @@ from .config import (
     Project,
 )
 from .plan import PlanError, parse_plan
-from .pod import PodError
+from .pod import PodError, RulesLeft
 from .risky import Approvals
 from .states import State
 from .task import Task, now
@@ -246,6 +246,8 @@ class Finished:
     # nobody knows it), and a new branch named after the task.
     start_branch: str = ""
     new_branch: str = ""
+    # What this machine kept of the task's rules once it went (pod_egress.RulesLeft); "" for none.
+    left: str = ""
 
 
 def finish(
@@ -295,8 +297,20 @@ def finish(
         if on_ready:
             on_ready(done)
     finally:
-        actions.remove(task, project, accepted=True)
+        try:
+            actions.remove(task, project, accepted=True)
+        except RulesLeft as e:
+            # The work is in your checkout: what stayed is said, on the record and to you, not raised.
+            done.left = e.left
+            note(task.id, "rules_left", problem=e.left)
     return done
+
+
+def note(task_id: str, type_: str, **data) -> None:
+    """An event on a task that is gone: on the record its archive keeps (l shows it)."""
+    line = json.dumps({"ts": now(), "task": task_id, "type": type_, "data": data}, ensure_ascii=False)
+    with (archive_path(task_id) / "events.jsonl").open("a") as f:
+        f.write(line + "\n")
 
 
 def suggested_message(

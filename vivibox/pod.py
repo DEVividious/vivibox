@@ -26,6 +26,7 @@ from .pod_egress import ETHERNET_MTU as ETHERNET_MTU
 from .pod_egress import HELPER as HELPER
 from .pod_egress import LINK as LINK
 from .pod_egress import PodEgress
+from .pod_egress import RulesLeft as RulesLeft
 from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
 from .pod_network import PodError as PodError

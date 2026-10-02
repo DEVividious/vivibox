@@ -88,7 +88,7 @@ from .demo import (  # noqa: F401
 from .orchestration import mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
-from .pod import Mount, Pod, PodError, prepare_host
+from .pod import Mount, Pod, PodError, RulesLeft, prepare_host
 from .projects import (  # noqa: F401
     GROUNDWORK,
     broken_projects,
@@ -611,7 +611,7 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     # Plain file removal: no git runs in the clone on the host.
     shutil.rmtree(task.root)
     if left:
-        raise PodError(f"deleted {task.id}, but {left}")
+        raise RulesLeft(task.id, left)
     return worktree
 
 

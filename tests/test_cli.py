@@ -214,6 +214,47 @@ def test_accept_puts_the_work_in_your_checkout_and_offers_a_commit(env, capsys, 
     assert git("log", "-1", "--format=%s").strip() == "Goal"
 
 
+def test_accepting_finishes_when_the_host_keeps_the_tasks_rules_and_says_so(env, capsys, monkeypatch):
+    """The work is in your checkout when the pod goes: rules the helper would not remove are
+    said, on the task's record and on the screen, and the commit step still comes."""
+    import json
+    import subprocess
+    from functools import partial
+
+    from vivibox import actions
+    from vivibox.config import load_config
+    from vivibox.pod import Pod
+    from vivibox.task import find_task
+
+    def refusing(cmd, timeout=None):
+        if list(cmd)[:1] == ["sudo"]:
+            return subprocess.CompletedProcess(list(cmd), 1, "", "sudo: a password is required")
+        return subprocess.CompletedProcess(list(cmd), 1, "", "Error: No such object")
+
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=refusing))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    for n in (1, 2):
+        assert main(["new", "demo", "Goal", "--draft"]) == 0
+        task = find_task(load_config().tasks_dir, f"demo-{n}")
+        agent_commit(task, f"f{n}.txt")
+        final_checkpoint(task)
+
+    done = actions.finish(*actions.load("demo-1"))
+    assert "vbx-demo-1-w" in done.left and "a password is required" in done.left
+    assert not task.root.parent.joinpath("demo-1").exists(), "the rest of the task went"
+    events = (actions.archive_path("demo-1") / "events.jsonl").read_text().splitlines()
+    assert json.loads(events[-1])["type"] == "rules_left", "on the task's record"
+    source = actions.load_project("demo").repo
+    subprocess.run(["git", "commit", "-qm", "Mine"], cwd=source, check=True, capture_output=True)
+
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    capsys.readouterr()
+    assert main(["accept", "demo-2"]) == 0
+    assert asked, "the commit step came"
+    assert "vbx-demo-2-w" in capsys.readouterr().err
+
+
 def test_the_suggested_commit_message_is_a_subject_and_a_list(env):
     """Use actual changes, with further commit subjects as bullets and no acceptance checklist."""
     import subprocess

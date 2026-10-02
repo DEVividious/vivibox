@@ -175,7 +175,18 @@ def test_setup_installs_missing_git_after_confirmation(tmp_path):
 
 
 def run_setup_without_host_changes(
-    tmp_path, *, check, installed, routes="", networks="", config="", home=None, pods="", engine="", path=None
+    tmp_path,
+    *,
+    check,
+    installed,
+    routes="",
+    networks="",
+    config="",
+    home=None,
+    pods="",
+    engine="",
+    path=None,
+    fakes=None,
 ):
     fake = tmp_path / "bin"
     fake.mkdir()
@@ -202,6 +213,7 @@ def run_setup_without_host_changes(
         scripts["python3"] = (
             f'case "$*" in *prepare-engine*) echo "{engine}" >&2; exit 1 ;; esac\nexec {sys.executable} "$@"'
         )
+    scripts.update(fakes or {})
     for name, body in scripts.items():
         script = fake / name
         script.write_text("#!/bin/sh\n" + body + "\n")
@@ -561,3 +573,19 @@ def test_uninstall_stops_only_a_process_that_is_the_forwarder(tmp_path, argv, ou
     finally:
         process.kill()
         process.wait()
+
+
+def test_setup_check_asks_for_the_interface_while_the_helper_is_not_ready(tmp_path):
+    """The whole script: with the helper not installed as it must be (here, not root's 755), no
+    vivibox0 is a step to take, not a line that a pod's start will make it."""
+    result, calls = run_setup_without_host_changes(
+        tmp_path, check=True, installed=True, routes="default via 192.168.1.1 dev wlan0\n",
+        fakes={
+            "python3": f'case "$*" in *prepare-engine*) exit 0 ;; esac\nexec {sys.executable} "$@"',
+            "stat": 'case "$*" in *libexec/vivibox-host*) echo "root 644" ;;\n'
+            '  *) exec /usr/bin/stat "$@" ;;\nesac',
+        },
+    )  # fmt: skip
+    assert "  missing  host address for the pods 203.0.113.1/32 on vivibox0" in result.stdout, result.stdout
+    assert "  info     host address" not in result.stdout
+    assert result.returncode == 1 and "prepare-engine" not in calls, "--check changes nothing"

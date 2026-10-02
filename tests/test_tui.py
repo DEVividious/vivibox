@@ -4892,6 +4892,29 @@ def test_the_header_says_first_what_would_keep_every_task_from_starting(env, mon
     run(scenario)
 
 
+def test_accepting_says_when_the_host_kept_the_tasks_rules(env, monkeypatch):
+    from vivibox import actions
+    from vivibox.review import Finished
+    from vivibox.ui import Spend
+
+    left = "this machine's rules for demo-1's network (bridge vbx-demo-1-w) were not removed: refused"
+    monkeypatch.setattr(actions, "load", lambda task_id, *a: (None, None))
+    monkeypatch.setattr(
+        actions,
+        "finish",
+        lambda task, project, on_ready=None: Finished("demo-1", env, Spend(), "", left=left),
+    )
+
+    async def scenario(app, pilot):
+        app.finish("demo-1")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        said = [str(n.message) for n in app._notifications]
+        assert any("demo-1 is done, but" in m and "vbx-demo-1-w" in m for m in said), said
+
+    run(scenario, notifications=True)
+
+
 def test_the_header_says_when_the_dns_forwarder_is_down(env, monkeypatch):
     """A pod resolves no names while the forwarder is down, and none starts: the header says why
     and what to run, as it says Docker is down."""

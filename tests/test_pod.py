@@ -943,3 +943,31 @@ def test_deleting_a_task_says_what_the_host_kept(env, monkeypatch, capsys):
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     assert main(["pod", "rm", "demo-2"]) == 1
     assert "a password is required" in capsys.readouterr().err
+
+
+def test_pods_starting_at_once_prepare_the_host_one_at_a_time():
+    """Two at once both saw no vivibox0, both ran ip link add, and the second failed."""
+    import threading
+    import time
+
+    from vivibox.pod_egress import prepare_host
+
+    inside: list[int] = []
+    most: list[int] = []
+
+    def helper(cmd, timeout=None):
+        inside.append(1)
+        most.append(len(inside))
+        time.sleep(0.2)
+        inside.pop()
+        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+
+    starts = [
+        threading.Thread(target=prepare_host, args=("203.0.113.1/32", DEFAULT_NETWORK_POOL, helper))
+        for _ in range(3)
+    ]
+    for t in starts:
+        t.start()
+    for t in starts:
+        t.join()
+    assert len(most) == 3 and max(most) == 1, "one prepare-engine at a time"

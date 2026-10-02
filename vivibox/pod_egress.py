@@ -76,6 +76,14 @@ def prepare_host(host_address: str, pool: str, runner: Runner = run) -> None:
         raise PodError(f"DNS forwarder not running: {e}; no pod starts without it") from None
 
 
+class RulesLeft(PodError):
+    """A task gone but for this machine's rules for its network, which the helper kept (left)."""
+
+    def __init__(self, task_id: str, left: str):
+        super().__init__(f"deleted {task_id}, but {left}")
+        self.left = left
+
+
 class PodEgress:
     @property
     def host_ip(self) -> str:
@@ -139,6 +147,6 @@ class PodEgress:
             return ""
         said = (p.stderr or p.stdout).strip()[-400:]
         return (
-            f"this machine's rules for {self.task_id}'s network were not removed: {said}. They hold no "
-            "network now; host/setup.sh installs the helper if it is missing"
+            f"this machine's rules for {self.task_id}'s network (bridge {nets[0]['bridge']}) were not "
+            f"removed: {said}. They hold no network now; host/setup.sh installs the helper if it is missing"
         )

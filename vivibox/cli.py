@@ -287,6 +287,8 @@ def cmd_accept(args: argparse.Namespace) -> int:
 
 
 def report_finished(done: actions.Finished) -> None:
+    if done.left:
+        print(f"vivibox: {done.task_id} is done, but {done.left}", file=sys.stderr)
     if done.conflicts:
         print(f"{done.task_id} is done ({done.cost}), but its work conflicts with your checkout in:")
         print("".join(f"  {display.name(f)}\n" for f in done.conflicts), end="")

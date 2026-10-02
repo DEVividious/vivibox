@@ -98,7 +98,7 @@ approval, stopping just the pod keeps the decision in Waiting for you, its label
   keys that work anywhere lose their words first, then the longest words shorten to their first. The bar above the list counts what
   waits for you and what works, what `h` and `H` hide, and what today's tasks have cost, each in
   its meaning's colour; first of all it says, in red, what would keep every task from starting
-  (Docker down, a provider without a key). At 80 columns every key of the footer fits. A key named in any text is a key the footer offers at that moment: ask the same
+  (Docker down, the DNS forwarder down, a provider without a key). At 80 columns every key of the footer fits. A key named in any text is a key the footer offers at that moment: ask the same
   function that enables the key (`watchable`, `check_action`), never repeat its condition.
 - The list is projects with their tasks under them. Enter on a project folds or unfolds it, and
   that choice is kept. A folded project's status says how many tasks wait, and projects with a

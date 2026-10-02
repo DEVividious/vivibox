@@ -4892,6 +4892,26 @@ def test_the_header_says_first_what_would_keep_every_task_from_starting(env, mon
     run(scenario)
 
 
+def test_the_header_says_when_the_dns_forwarder_is_down(env, monkeypatch):
+    """A pod resolves no names while the forwarder is down, and none starts: the header says why
+    and what to run, as it says Docker is down."""
+    from vivibox import probe
+
+    said = "DNS forwarder not running: its process 4242 has ended, so pods resolve no names; " + (
+        "start it again: vivibox hostd start"
+    )
+    monkeypatch.setattr(probe, "forwarder_problem", lambda config: said)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await app.workers.wait_for_complete()
+        app.reload()
+        await pilot.pause()
+        assert app.sub_title.startswith(said + " · "), app.sub_title
+
+    run(scenario)
+
+
 @pytest.mark.parametrize("missing", ["name", "email", "both"])
 def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeypatch, missing):
     from ux import screen_text

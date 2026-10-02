@@ -76,6 +76,8 @@ def no_real_start(request, monkeypatch):
     )
     # The view asks the daemon for the header's warning; the tests have no daemon to ask.
     monkeypatch.setattr(probe, "docker_running", lambda: True)
+    # Nor a DNS forwarder to ask about; and none is started by a test but one marked real_hostd.
+    monkeypatch.setattr(probe, "forwarder_problem", lambda config: "")
     # vivibox new asks for the agent image before it creates a task; nor is there an image.
     from vivibox import image
 
@@ -91,6 +93,17 @@ printf '%s\\n' "$*" >> "$VIVIBOX_TEST_DOCKER_LOG"
 echo "the tests reach no Docker (tests/conftest.py: no_real_docker)" >&2
 exit 1
 """
+
+
+@pytest.fixture(autouse=True)
+def no_real_hostd(request, monkeypatch):
+    """No test starts the host's DNS forwarder but one marked real_hostd or docker: a pod's start
+    asks for it (hostd.ensure), and it would outlive the test."""
+    if "real_hostd" in request.keywords or "docker" in request.keywords:
+        return
+    from vivibox.egress import hostd
+
+    monkeypatch.setattr(hostd, "ensure", lambda address, port=0, upstream="", timeout=0: None)
 
 
 @pytest.fixture(autouse=True)

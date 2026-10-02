@@ -188,6 +188,7 @@ class Vivibox(
         # Whether the daemon answered when last asked (None: not yet), and when; asked off the
         # loop with the pods, every DOCKER_EVERY seconds, since docker info takes a moment.
         self.docker_ok: bool | None = None
+        self.forwarder_note = ""
         self.docker_checked = 0.0
         self.machine_note = ""
         self.waiting_ids: set[str] | None = None  # None until the first refresh: nothing is new then
@@ -334,7 +335,7 @@ class Vivibox(
         known = projects()
         self.take_history(live, known)
         self.problems = {name: actions.project_problem(name) for name in known}
-        self.machine_note = actions.machine_problem(self.config, self.docker_ok)
+        self.machine_note = actions.machine_problem(self.config, self.docker_ok, self.forwarder_note)
         now = self.snapshot()
         if now == self.drawn:
             self.set_sub_title()  # the header's warning may have changed with the daemon
@@ -447,6 +448,7 @@ class Vivibox(
         Exclusive: a refresh that arrives while one is in flight replaces it."""
         if time.monotonic() - self.docker_checked > DOCKER_EVERY:
             self.docker_ok = probe.docker_running()
+            self.forwarder_note = probe.forwarder_problem(self.config)
             self.docker_checked = time.monotonic()
         found = pod_views(task_ids) if task_ids else {}
         # Docker can take longer than the app lives, and a closed view has nobody to tell.

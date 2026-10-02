@@ -347,11 +347,14 @@ def provider_keys(config: Config, task: Task | None = None, roles: tuple[str, ..
     return found
 
 
-def machine_problem(config: Config, docker_ok: bool | None = None) -> str:
-    """What would keep every task from starting, in a line for the header: Docker down, a role
-    without a model, or a provider a role needs without a key. "" when nothing would."""
+def machine_problem(config: Config, docker_ok: bool | None = None, forwarder: str = "") -> str:
+    """What would keep every task from starting, in a line for the header: Docker down, the DNS
+    forwarder down (forwarder: what hostd.problem said), a role without a model, or a provider a
+    role needs without a key. "" when nothing would."""
     if docker_ok is False:
         return "Docker is not running: no task can start"
+    if forwarder:
+        return forwarder
     try:
         needed = provider_keys(config)
     except ConfigError as e:

@@ -121,3 +121,11 @@ def docker_running() -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def forwarder_problem(config) -> str:
+    """Whether the DNS forwarder that should run answers (egress.hostd.problem), for the header: a
+    pod's DNS fails while it does not, and no pod starts."""
+    from .egress import hostd
+
+    return hostd.problem(config.host_ip)

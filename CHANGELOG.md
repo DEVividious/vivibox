@@ -10,6 +10,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- `vivibox hostd` runs a DNS forwarder on your machine, on `[network] host_address` (default
+  `203.0.113.1/32`) at port 5053, passing queries to your machine's resolver unchanged, over UDP
+  and TCP. `vivibox hostd` says whether it runs, `start` and `stop` start and stop it; when it
+  has ended, the header says so and what to run.
 - Tasks created by an earlier vivibox can't be run any more: they are not carried over to the
   new layout of a task's files. The list and `vivibox status` show them as `from an earlier
   vivibox` (and say when their supervisor or pod still runs); delete them with

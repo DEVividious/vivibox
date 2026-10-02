@@ -13,6 +13,9 @@ from pathlib import Path
 HARNESSES = ("opencode", "claude-code", "manual")
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
 DEFAULT_NETWORK_POOL = "198.51.100.0/24"
+# The host's own address for the pods (the DNS forwarder listens there), on an interface of its
+# own, vivibox0: TEST-NET-3 (RFC 5737), for the reason the pool is TEST-NET-2.
+DEFAULT_HOST_ADDRESS = "203.0.113.1/32"
 # Where the Docker Hub mirror listens on the host (mirror.py), unless config.toml says otherwise.
 DEFAULT_HUB_MIRROR_PORT = 5055
 # What goes to ntfy: what the desktop gets (decisions), or every stage of a task too.
@@ -173,6 +176,9 @@ class Config:
     # Addresses the task networks are cut from, one /28 per task. The default is TEST-NET-2, which
     # RFC 5737 reserves for documentation: nothing may use it in a real network, so nothing collides.
     network_pool: str = DEFAULT_NETWORK_POOL
+    # Where the pods reach the host's own services (the DNS forwarder, the mirror): one address,
+    # <ipv4>/32, on the interface vivibox0, which host/vivibox-host makes.
+    host_address: str = DEFAULT_HOST_ADDRESS
     # Docker Hub kept once on this machine for every pod's daemon, and the port it listens on.
     hub_mirror: bool = False
     hub_mirror_port: int = DEFAULT_HUB_MIRROR_PORT
@@ -194,6 +200,10 @@ class Config:
     ntfy: str = ""
     ntfy_server: str = DEFAULT_NTFY_SERVER
     ntfy_events: str = "decisions"
+
+    @property
+    def host_ip(self) -> str:
+        return self.host_address.partition("/")[0]
 
 
 @dataclass(frozen=True)
@@ -368,6 +378,9 @@ def load_config(base: Path | None = None) -> Config:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} one task needs"
         )
+    host_address = _host_address(
+        data.get("network", {}).get("host_address", DEFAULT_HOST_ADDRESS), parsed, path
+    )
     hub_mirror = data.get("network", {}).get("hub_mirror", False)
     if not isinstance(hub_mirror, bool):
         raise ConfigError(f"{path}: network.hub_mirror is true or false")
@@ -392,7 +405,26 @@ def load_config(base: Path | None = None) -> Config:
         ntfy_events=ntfy_events,
         hub_mirror=hub_mirror,
         hub_mirror_port=hub_mirror_port,
+        host_address=host_address,
     )
+
+
+def _host_address(value, pool: ipaddress.IPv4Network, path: Path) -> str:
+    """network.host_address as <ipv4>/32: one address, not loopback, outside the task pool."""
+    example = f'e.g. "{DEFAULT_HOST_ADDRESS}"'
+    try:
+        found = ipaddress.IPv4Interface(value) if isinstance(value, str) else None
+    except ValueError:
+        found = None
+    if found is None:
+        raise ConfigError(f"{path}: network.host_address must be an IPv4 address, {example}")
+    if found.network.prefixlen != 32:
+        raise ConfigError(f"{path}: network.host_address must be one address, <ipv4>/32, {example}")
+    if found.ip.is_loopback or found.ip.is_multicast or found.ip.is_unspecified:
+        raise ConfigError(f"{path}: network.host_address {found.ip} is a loopback or reserved address")
+    if found.ip in pool:
+        raise ConfigError(f"{path}: network.host_address {found.ip} is in network.pool {pool}")
+    return str(found)
 
 
 def _host_service(text: str, where: Path) -> HostService:

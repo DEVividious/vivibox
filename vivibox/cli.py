@@ -13,6 +13,7 @@ from . import (
     actions,
     answers,
     cli_agent,
+    cli_host,
     clone_read,
     context,
     display,
@@ -745,6 +746,7 @@ def parser() -> argparse.ArgumentParser:
     pod.add_argument("task", help="task id")
     pod.set_defaults(func=cmd_pod)
     cli_agent.register(sub)
+    cli_host.register(sub)
     return p
 
 

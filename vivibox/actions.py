@@ -168,7 +168,7 @@ from .roles import (  # noqa: F401
     writer,
 )
 from .states import State
-from .task import Task, TaskState, create_task, find_task
+from .task import DELETE, RUN, Task, TaskState, check_layout, create_task, find_task
 from .window import (  # noqa: F401
     LEAVE_BINDING,
     LEAVE_KEY,
@@ -193,8 +193,9 @@ from .window import (  # noqa: F401
 SUPERVISOR_PID = "supervisor.pid"
 
 
-def load(task_id: str) -> tuple[Task, Project]:
-    task = find_task(load_config().tasks_dir, task_id)
+def load(task_id: str, use: str = RUN) -> tuple[Task, Project]:
+    """use: what the task is opened for (task.find_task); a task of another layout is not run."""
+    task = find_task(load_config().tasks_dir, task_id, use)
     return task, load_project(task.read_state().project)
 
 
@@ -202,7 +203,10 @@ def load(task_id: str) -> tuple[Task, Project]:
 
 
 def task_pod(task_id: str) -> Pod:
-    task, project = load(task_id)
+    return pod_of(*load(task_id))
+
+
+def pod_of(task: Task, project: Project) -> Pod:
     # Mount sources must exist, or Docker creates them as root-owned directories.
     runtime = secrets.runtime_dir(task.id)
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -587,13 +591,15 @@ def stop(task: Task, force: bool = False) -> None:
 def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     """Everything of the task; a branch from accepting it stays in your repository. A task you
     remove is kept in the history as deleted; one you accepted is there as done already.
-    Returns the review copy it removed, if there was one."""
+    Returns the review copy it removed, if there was one. A task from an earlier vivibox goes the
+    same way, its supervisor and pod too; one from a newer vivibox is refused (check_layout)."""
+    check_layout(task, DELETE)
     stop_supervisor(task)
     if not accepted:
         cli_usage.count(task, "conversation")
         remember_removed(task, project)
     archive(task)
-    task_pod(task.id).remove()
+    pod_of(task, project).remove()
     secrets.remove(task.id)
     reviewing.forget(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)

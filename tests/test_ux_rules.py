@@ -2,6 +2,7 @@
 person sees; update the guidelines with it, or fix the change."""
 
 import asyncio
+import json
 import re
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from vivibox import (
     widgets,
 )
 from vivibox.states import State
+from vivibox.task import TASK_SCHEMA_VERSION
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "ux-guidelines.md"
 # round n/N and N× vary; everything else is a fixed word from the table.
@@ -132,6 +134,12 @@ def situations(env):
     closed = actions.open_box("demo")
     closed.set_paused(True)
     found.append((closed, False))
+    for how in ("earlier", "earlier, still running", "newer"):  # tasks this vivibox does not run
+        other = implementing(f"from an {how} vivibox")
+        state = json.loads((other.meta / "state.json").read_text())
+        state["task_schema_version"] = 0 if how.startswith("earlier") else TASK_SCHEMA_VERSION + 1
+        (other.meta / "state.json").write_text(json.dumps(state))
+        found.append((other, how.endswith("running")))
     return found
 
 

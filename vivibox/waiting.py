@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 
 from .states import State, waits_for_user
-from .task import Task, TaskState
+from .task import CURRENT, Task, TaskState, layout
 
 INTERVAL = 2.0
 # As timeout(1) exits when its time is up, so a script tells it from a task that ended the wait.
@@ -21,7 +21,7 @@ def reason(st: TaskState, running: bool) -> str:
     """Why this task ends a wait, or "" while it is moving on its own."""
     if st.state is State.DONE:
         return "done"
-    if st.problem:
+    if st.problem or layout(st) != CURRENT:  # a task this vivibox does not run moves no more
         return "problem"
     if waits_for_user(st.state):
         return "waiting"

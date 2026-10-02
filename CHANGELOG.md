@@ -10,6 +10,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- Tasks created by an earlier vivibox can't be run any more: they are not carried over to the
+  new layout of a task's files. The list and `vivibox status` show them as `from an earlier
+  vivibox` (and say when their supervisor or pod still runs); delete them with
+  `vivibox delete <id>` and create them again. A new task records the layout it was created
+  under and the vivibox that created it; one from a newer vivibox is only shown, not deleted.
 - `vivibox init` gives a Maven project Java 25 when `.mvn/jvm.config` starts Maven with options
   Java 21 refuses (OpenFeign's), and notes a `pom.xml` that asks for other JDKs through the
   toolchains plugin.

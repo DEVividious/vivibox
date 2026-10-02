@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import version
 from .config import current_mode
 from .states import State, check_transition
 
@@ -17,6 +18,20 @@ TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
 
 # A reason is for reading in the view; the whole of a build's output belongs in its log.
 MAX_PROBLEM = 2000
+
+# The layout of a task's files and state that this vivibox runs. A change that a task created
+# before it would not meet (what the task's folder holds, what its pod mounts) raises it. A task
+# written under another is never run nor written here, and never migrated: one from an earlier
+# vivibox is shown and can be deleted, one from a newer vivibox is only shown.
+TASK_SCHEMA_VERSION = 1
+CURRENT, EARLIER, NEWER = "current", "earlier", "newer"
+# What a task is opened for (find_task): an operation that runs, moves or opens it needs the
+# layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.
+RUN, SHOW, DELETE = "run", "show", "delete"
+
+
+class TaskLayoutError(Exception):
+    """A task of another layout, opened for what needs this one."""
 
 
 def now() -> str:
@@ -81,6 +96,11 @@ class TaskState:
     # Why the writer was sent on its last fix turn (what the gate found, or the review's count),
     # for the row to say beside the round; "" before the first.
     round_reason: str = ""
+    # The layout the task was created under (TASK_SCHEMA_VERSION), the only thing that says
+    # whether this vivibox runs it. 0: a task from before the field (v0.1.x).
+    task_schema_version: int = 0
+    # The vivibox that created it (version.current()): for a bug report, never for compatibility.
+    created_by_version: str = ""
 
 
 class Task:
@@ -237,6 +257,10 @@ class Task:
         return TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
 
     def _write_state(self, st: TaskState) -> None:
+        # Behind every operation: a task of another layout is never written over, which would
+        # drop what a newer vivibox keeps and move a task this one does not run.
+        if why := layout_problem(st):
+            raise TaskLayoutError(why)
         path = self.meta / "state.json"
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(st), indent=2, ensure_ascii=False) + "\n")
@@ -287,6 +311,38 @@ class Task:
         return st
 
 
+def layout(st: TaskState) -> str:
+    """CURRENT, EARLIER (no version, or an older one) or NEWER (a higher one, or one that is not a
+    whole number, which no vivibox this one knows wrote)."""
+    number = st.task_schema_version
+    if isinstance(number, bool) or not isinstance(number, int) or number > TASK_SCHEMA_VERSION:
+        return NEWER
+    return CURRENT if number == TASK_SCHEMA_VERSION else EARLIER
+
+
+def layout_problem(st: TaskState) -> str:
+    """Why this vivibox does not run the task, and what to do instead; "" for a task it runs."""
+    if (found := layout(st)) == EARLIER:
+        return (
+            f"{st.id} was created by an earlier vivibox, whose tasks this one does not run; "
+            f"delete it and create it again: vivibox delete {st.id}"
+        )
+    if found == NEWER:
+        return (
+            f"{st.id} was created by a newer vivibox, whose tasks this one can neither run nor "
+            "delete; use that vivibox, or update this one"
+        )
+    return ""
+
+
+def check_layout(task: Task, use: str) -> None:
+    """Refuses to open a task for what its layout does not allow here (RUN, SHOW, DELETE). Reads
+    the task's state and writes nothing."""
+    st = task.read_state()
+    if use != SHOW and (why := layout_problem(st)) and (use == RUN or layout(st) == NEWER):
+        raise TaskLayoutError(why)
+
+
 def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, after: int = 0) -> Task:
     """after: the highest number already used elsewhere, e.g. by branches in your repository."""
     tasks_dir.mkdir(parents=True, exist_ok=True)
@@ -315,7 +371,12 @@ def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, af
         (task.meta / sub).mkdir(parents=True)
     task.plan_path.write_text(plan_template.replace("{{goal}}", goal))
     ts = now()
-    task._write_state(TaskState(task.id, project, goal, State.PLAN, 0, False, ts, ts))
+    task._write_state(
+        TaskState(
+            task.id, project, goal, State.PLAN, 0, False, ts, ts,
+            task_schema_version=TASK_SCHEMA_VERSION, created_by_version=version.current(),
+        )
+    )  # fmt: skip
     task.event("created", project=project, goal=goal)
     return task
 
@@ -331,8 +392,12 @@ def list_tasks(tasks_dir: Path) -> list[Task]:
     return sorted(tasks, key=lambda t: t.read_state().created)
 
 
-def find_task(tasks_dir: Path, task_id: str) -> Task:
+def find_task(tasks_dir: Path, task_id: str, use: str = RUN) -> Task:
+    """The task, opened for use: RUN, the default, for anything that runs, moves or opens it,
+    which a task of another layout refuses (check_layout); SHOW to look at it; DELETE."""
     root = tasks_dir / task_id
     if not TASK_ID.match(task_id) or not (root / ".task" / "state.json").exists():
         raise KeyError(f"No task '{task_id}'")
-    return Task(root)
+    task = Task(root)
+    check_layout(task, use)
+    return task

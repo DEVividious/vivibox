@@ -49,7 +49,7 @@ from .sections import (  # noqa: F401 (criteria and checklist: the list reads th
     roles_section,
 )
 from .states import State
-from .task import Task, TaskState
+from .task import CURRENT, EARLIER, Task, TaskState, layout
 
 REFRESH_SECONDS = 2.0
 # How often the view looks whether vivibox changed on disk: a git pull, not a keystroke.
@@ -305,6 +305,8 @@ def after_window(session_gone: bool) -> None:
 def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod: PodView) -> str:
     """The keys that move this task on, first thing in the panel. Only keys the footer offers now:
     a hint the footer contradicts is worse than none."""
+    if layout(st) != CURRENT:
+        return "`x` delete it, then create it again" if seen.commands else "use the vivibox that created it"
     watch = " · `w` look at the agent" if watchable(task, st, running) else ""
     if st.box and st.state is State.IMPLEMENT:
         if st.paused:
@@ -529,6 +531,8 @@ def planned_by_you(task: Task) -> bool:
 def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running: bool) -> dict[str, bool]:
     """Which of the task's keys do something now, one table for every state: the footer, the
     hints and the actions all ask here. busy: a start or a stop of this task is under way."""
+    if layout(st) != CURRENT:  # shown, and deleted when it is an earlier vivibox's; nothing else
+        return {action: layout(st) == EARLIER and action in ("remove", "show_log") for action in TASK_ACTIONS}
     at_work = running and not st.paused
     if st.box and st.state is State.IMPLEMENT:
         # A box has no agent to reply to, watch or model; its keys are the pod's.
@@ -605,6 +609,14 @@ def detail(
 ) -> str:
     """What you need to decide on this task, as markdown."""
     seen = ui.view(task, st, running, max_iterations)
+    if layout(st) != CURRENT:  # of a task this vivibox does not run, nothing is read but its state
+        up = (pod if pod is not None else pod_view(st.id)).address
+        return "\n".join([
+            f"### {st.id} · {seen.status}", "", f"*{st.project} · created {ui.ago(st.created)}*", "",
+            f"**Next:** {next_steps(task, st, seen, running, PodView())}", "",
+            *([f"*Its pod from that vivibox is {ui.STILL_RUNNING}.*", ""] if up else []),
+            f"**{seen.status.capitalize()}.**", "", display.fenced(seen.problem),
+        ])  # fmt: skip
     watch = " Look at the agent with `w`." if watchable(task, st, running) else ""
     head = [
         f"### {st.id} · {seen.status}",

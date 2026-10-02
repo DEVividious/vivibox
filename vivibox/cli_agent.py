@@ -10,11 +10,12 @@ from pathlib import Path
 
 from . import about, actions, answers, reviewing, skill, ui, waiting
 from .config import load_config
+from .task import SHOW
 from .waiting import JSON_VERSION, TIMED_OUT
 
 
 def cmd_wait(args: argparse.Namespace) -> int:
-    tasks = [actions.load(task_id)[0] for task_id in args.task]
+    tasks = [actions.load(task_id, SHOW)[0] for task_id in args.task]  # waiting only looks
     found = actions.wait(tasks, timeout=args.timeout)
     max_rounds = load_config().max_rounds
     shown = []

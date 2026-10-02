@@ -67,6 +67,9 @@ Status labels, the only ones allowed:
 | a box, its pod up, for you to work in | `box open` | Working |
 | a box whose pod is down (`s`); closing a box is `a`, which brings its work to review | `box stopped` | Stopped |
 | accepted | `done` | Done |
+| created by an earlier vivibox, which this one does not run (tasks are not migrated): `x` deletes it | `from an earlier vivibox` | Waiting for you |
+| the same, with its supervisor or pod from that vivibox still up; nothing here stops them but `x` | `from an earlier vivibox, still running` | Waiting for you |
+| created by a newer vivibox: only shown, not even deleted, here | `from a newer vivibox` | Waiting for you |
 
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock
 (`ui.clock`), never cut out of a UTC timestamp.

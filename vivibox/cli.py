@@ -6,6 +6,7 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from . import (
@@ -33,10 +34,10 @@ from .cli_providers import cmd_auth, cmd_models
 from .cli_reports import cmd_stats, cmd_usage
 from .config import ORCHESTRATION_MODES, ConfigError, config_dir, current_mode, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
-from .pod import PodError
+from .pod import Pod, PodError, addresses
 from .states import State
 from .supervise import cmd_supervise
-from .task import Task, find_task, list_tasks
+from .task import CURRENT, DELETE, SHOW, Task, TaskLayoutError, find_task, layout, list_tasks
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -119,7 +120,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_timeline(args: argparse.Namespace) -> int:
     """What happened to a task, one line each, on your clock."""
-    task, _ = actions.load(args.task)
+    task, _ = actions.load(args.task, SHOW)
     print(timeline.render(task), end="")
     return 0
 
@@ -128,8 +129,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     config = load_config()
     style = ui.Style(ui.use_color())
     if args.task:
-        task = find_task(config.tasks_dir, args.task)
-        running = actions.supervisor_running(task)
+        task = find_task(config.tasks_dir, args.task, SHOW)
+        running = still_running([task])(task)
         print(ui.task_detail(task, _criteria, config.max_rounds, args.events, style, running), end="")
         return 0
     tasks = list_tasks(config.tasks_dir)
@@ -139,10 +140,21 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("No tasks. Create one with 'vivibox new <project> \"<goal>\"'.")
         return 0
     shown = ui.task_list(
-        tasks, _criteria, config.max_rounds, style, running=actions.supervisor_running, finished=finished
+        tasks, _criteria, config.max_rounds, style, running=still_running(tasks), finished=finished
     )
     print(shown, end="")
     return 0
+
+
+def still_running(tasks: list[Task]) -> Callable[[Task], bool]:
+    """Whether a task's supervisor runs; for a task this vivibox does not run, also whether its pod
+    is up, which an earlier vivibox may have left. Read from the pid file and Docker, never stopped."""
+    others = {Pod(t.id, Path("."), "").sidecar for t in tasks if layout(t.read_state()) != CURRENT}
+    try:
+        up = set(addresses(sorted(others)))
+    except OSError:  # no docker to ask
+        up = set()
+    return lambda t: actions.supervisor_running(t) or Pod(t.id, Path("."), "").sidecar in up
 
 
 def ensure_image() -> None:
@@ -184,7 +196,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_rm(args: argparse.Namespace) -> int:
-    task, project = actions.load(args.task)
+    task, project = actions.load(args.task, DELETE)
     st = task.read_state()
     if not args.yes:
         doing = ui.view(task, st, actions.supervisor_running(task), load_config().max_rounds).status
@@ -742,6 +754,7 @@ def main(argv: list[str] | None = None) -> int:
         keys.KeyStoreError,
         context.ContextError,
         harness.HarnessError,
+        TaskLayoutError,
         KeyError,
     ) as e:
         print(f"vivibox: {display.terminal(str(e.args[0] if e.args else e))}", file=sys.stderr)

@@ -12,7 +12,7 @@ from pathlib import Path
 from . import cli_session, display, prepare
 from .plan import PlanError, parse_plan
 from .states import State
-from .task import Task, TaskState
+from .task import CURRENT, EARLIER, Task, TaskState, layout, layout_problem
 
 CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "cyan": "36"}
 
@@ -447,9 +447,28 @@ def _decision(task: Task, st: TaskState, max_rounds: int) -> TaskView:
     return TaskView(status, WAITS, DECISION, commands=commands)
 
 
+# A task this vivibox does not run (task.layout): one from an earlier vivibox waits for you to
+# delete it, and says when its supervisor or pod from that vivibox still runs.
+EARLIER_LABEL, NEWER_LABEL = "from an earlier vivibox", "from a newer vivibox"
+STILL_RUNNING = "still running"
+
+
+def other_layout(st: TaskState, running: bool) -> TaskView:
+    """running: its supervisor, or for a task from an earlier vivibox its pod too, still runs."""
+    if layout(st) != EARLIER:
+        return TaskView(NEWER_LABEL, WAITS, FAILED, layout_problem(st))
+    why = layout_problem(st)
+    if running:
+        why += f"; its supervisor or pod from that vivibox is {STILL_RUNNING}, and deleting it stops them"
+    label = f"{EARLIER_LABEL}, {STILL_RUNNING}" if running else EARLIER_LABEL
+    return TaskView(label, WAITS, FAILED, why, (f"vivibox delete {st.id}",))
+
+
 def view(task: Task, st: TaskState, running: bool, max_rounds: int) -> TaskView:
     """running: whether the task's supervisor is alive. Whatever will not move without you waits
     for you; "Stopped" is only what you stopped yourself."""
+    if layout(st) != CURRENT:
+        return other_layout(st, running)
     if st.state is State.DONE:
         return TaskView("done", DONE, FINISHED, commands=(f"vivibox delete {st.id}",))
     if st.box and st.state is State.IMPLEMENT:
@@ -581,7 +600,7 @@ def task_detail(
     if shown.problem:
         lines.append(f"{style('Why', 'bold')}   {style(display.terminal(shown.problem, ''), 'red')}")
     lines += [
-        f"{style('Next', 'bold')}  " + "   ".join(shown.commands),
+        *([f"{style('Next', 'bold')}  " + "   ".join(shown.commands)] if shown.commands else []),
         "",
         style("Recent events", "bold"),
     ]

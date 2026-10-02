@@ -66,7 +66,7 @@ from .panel import (
 from .settings import Settings
 from .states import State
 from .table import TaskTable
-from .task import Task, TaskState, list_tasks
+from .task import CURRENT, DELETE, Task, TaskState, layout, list_tasks
 from .usage_view import Usage
 from .widgets import Confirm
 
@@ -321,7 +321,9 @@ class Vivibox(
         self.check_code()
         selected = self.selected_id()
         pairs = [(t, t.read_state()) for t in list_tasks(self.config.tasks_dir)]
-        self.running = {st.id for task, st in pairs if actions.supervisor_running(task)}
+        # Of a task this vivibox does not run, its pod left up counts too: an earlier vivibox's.
+        self.running = {st.id for task, st in pairs if actions.supervisor_running(task)
+                        or (layout(st) != CURRENT and self.pods.get(st.id, PodView()).address)}  # fmt: skip
         # Worked out once per refresh; the list, the panel and the keys all read it from here.
         self.views = {
             st.id: ui.view(task, st, st.id in self.running, self.config.max_rounds) for task, st in pairs
@@ -764,7 +766,7 @@ class Vivibox(
     @work(thread=True)
     def remove_task(self, task_id: str) -> None:
         try:
-            task, project = actions.load(task_id)
+            task, project = actions.load(task_id, DELETE)
             actions.remove(task, project)
             self.call_from_thread(self.notify, f"Deleted {task_id}.", markup=False)
         except Exception as e:

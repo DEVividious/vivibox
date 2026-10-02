@@ -894,7 +894,7 @@ def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
     said = approvals.diff(Change("build.gradle", "added"))
     assert "larger than 64 MiB, too large to show here" in said
     assert "vivibox checks whether it changes, not what it says" in said
-    assert shlex.join(["less", "-L", str(task.meta / "risky" / "view" / "build.gradle")]) in said
+    assert shlex.join(["less", "-L", str(approvals.copy_for_you("build.gradle"))]) in said
     assert "does not read it" not in said
 
 
@@ -1032,8 +1032,9 @@ def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task, 
     """Read where the agent cannot change it or put a link in its place, and as text: a build
     file opened in your IDE is what the approval is there to prevent."""
     big = past_the_limit_to_show(task.repo / "build.gradle", monkeypatch, b"plugins { id 'java' }\n")
-    said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
-    view = task.meta / "risky" / "view" / "build.gradle"
+    approvals = Approvals(task.meta, task.repo)
+    said = approvals.diff(Change("build.gradle", "added"))
+    view = approvals.copy_for_you("build.gradle")
     assert shlex.join(["less", "-L", str(view)]) in said and "not in your IDE" in said
     assert str(task.repo) not in said
     assert view.is_file() and not view.is_symlink()
@@ -1053,8 +1054,9 @@ def test_a_risky_file_swapped_for_a_link_before_its_copy_is_not_copied(task, out
                 big.symlink_to(outside / "secret.txt")
 
     monkeypatch.setattr(clone_read, "read_bytes", read_then_swap)
-    said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
-    view = task.meta / "risky" / "view" / "build.gradle"
+    approvals = Approvals(task.meta, task.repo)
+    said = approvals.diff(Change("build.gradle", "added"))
+    view = approvals.copy_for_you("build.gradle")
     assert "could not copy it for you to read" in said and "less " not in said
     assert not view.is_symlink() and not (view.exists() and SECRET in view.read_text())
 
@@ -1098,9 +1100,10 @@ def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task
     folder = "$(touch PWNED) it's; x"
     rel = f"buildSrc/{folder}/x.gradle"
     past_the_limit_to_show(task.repo / rel, monkeypatch)
-    said = Approvals(task.meta, task.repo).diff(Change(rel, "added"))
+    approvals = Approvals(task.meta, task.repo)
+    said = approvals.diff(Change(rel, "added"))
     command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
-    assert shlex.split(command) == ["less", "-L", str(task.meta / "risky" / "view" / rel)]
+    assert shlex.split(command) == ["less", "-L", str(approvals.copy_for_you(rel))]
     stub = tmp_path / "bin"
     stub.mkdir()
     (stub / "less").write_text("#!/bin/sh\nexit 0\n")
@@ -1115,7 +1118,7 @@ def test_a_copy_for_you_never_outlives_the_file_it_was_made_of(task, then, monke
     big = past_the_limit_to_show(task.repo / "build.gradle", monkeypatch, b"OLD CONTENT\n")
     approvals = Approvals(task.meta, task.repo)
     approvals.diff(Change("build.gradle", "added"))
-    view = task.meta / "risky" / "view" / "build.gradle"
+    view = approvals.copy_for_you("build.gradle")
     assert view.is_file()
     big.unlink()
     if then == "a FIFO":
@@ -1324,7 +1327,7 @@ def test_a_copy_for_you_past_the_budget_says_so(task, monkeypatch):
     sparse(task.repo / "build.gradle", 70 << 20)
     said = "\n".join(actions_diffs(task))
     assert "could not copy it for you to read: scan budget exceeded" in said
-    assert not (task.meta / "risky" / "view" / "build.gradle").exists()
+    assert not Approvals(task.meta, task.repo).copy_for_you("build.gradle").exists()
 
 
 def actions_diffs(task) -> list[str]:

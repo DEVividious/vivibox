@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import display
 from .podspec import Mount
 
 # Settings a fresh clone needs; everything else in the source repo's local config is dropped.
@@ -71,7 +72,8 @@ def git(
     else:
         p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."))
     if check and p.returncode != 0:
-        raise RepoError(f"git {' '.join(args[:3])}…: {p.stderr.strip()}")
+        # The arguments and what git says of them may carry a name the agent chose in the clone.
+        raise RepoError(f"git {display.name(' '.join(args[:3]))}…: {display.name(p.stderr.strip())}")
     return p
 
 
@@ -140,12 +142,8 @@ def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path, sl
     return GitTimeout(_unanswered(list(args), seconds, clone, slow))
 
 
-def shown(text: str) -> str:
-    """A name from the clone, which the agent chose, as text to read: a control character, a line
-    break or a backslash as its escape, so none of it reaches a terminal as anything but text."""
-    return "".join(
-        c if c.isprintable() and c != "\\" else c.encode("unicode_escape").decode("ascii") for c in text
-    )
+# A name from the clone, which the agent chose, as text to read (display.name).
+shown = display.name
 
 
 def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") -> str:
@@ -374,7 +372,8 @@ def update_review_worktree(source: Path, task_root: Path, commit: str, base: str
     if not path.exists():
         git("worktree", "add", "--quiet", "--detach", str(path), commit, cwd=source)
     elif changed := local_changes(path):
-        raise RepoError(f"{path} has changes you made ({', '.join(changed[:3])}); discard them first")
+        named = display.name(", ".join(changed[:3]))
+        raise RepoError(f"{path} has changes you made ({named}); discard them first")
     else:
         _hide_ide_files(path, hide=False)
         # --force: what the IDE rewrote in its project files gives way to the new work.

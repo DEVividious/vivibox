@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import podspec, repo
+from . import display, podspec, repo
 from .config import DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
@@ -153,7 +153,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         # The keyword only when there is one: runners that know no time limit (tests) keep working.
         p = self.runner(cmd, timeout=timeout) if timeout else self.runner(cmd)
         if check and p.returncode != 0:
-            raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
+            said = display.name((p.stderr or p.stdout).strip())
+            raise PodError(f"{display.name(' '.join(cmd[:4]))}…: {said}")
         return p
 
     def _copying_clone(
@@ -179,7 +180,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         if expired.is_set():  # even had git just finished: the container is gone
             raise repo.timed_out(cmd[cmd.index("git") + 1 :], repo.COPY_TIMEOUT, self.repo, COPYING_IS_SLOW)
         if check and p.returncode != 0:
-            raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
+            said = display.name((p.stderr or p.stdout).strip())
+            raise PodError(f"{display.name(' '.join(cmd[:4]))}…: {said}")
         return p
 
     def _state(self, name: str) -> str | None:

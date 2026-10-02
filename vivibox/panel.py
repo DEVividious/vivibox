@@ -16,6 +16,7 @@ from pathlib import Path
 from . import (
     actions,
     code,
+    display,
     gate,
     manual,
     progress,
@@ -154,7 +155,7 @@ def removed_tests(task: Task) -> list[str]:
             return [
                 "",
                 f"**{ui.count(n, 'test')} removed**; see whether the plan meant it:",
-                *(f"- `{g}`" for g in gone),
+                *(f"- {display.code(display.name(g))}" for g in gone),
             ]
     return []
 
@@ -629,7 +630,7 @@ def detail(
         head += [
             f"**{seen.status.capitalize()}.**",
             "",
-            f"```\n{seen.problem}\n```",
+            display.fenced(seen.problem),
             "",
             "The task goes on from where it was once started again.",
             "",
@@ -698,7 +699,7 @@ def detail(
             "",
             f"Review copy: `{copy}`",
             "",
-            f"```\n{stat.rstrip() or 'no changes fetched yet'}\n```",
+            display.fenced(stat.rstrip() or "no changes fetched yet"),
             *removed_tests(task),
         ]
     elif st.state is State.APPROVAL_RISKY:
@@ -709,7 +710,7 @@ def detail(
         body = [
             "**Risky files changed.** They run code on your machine when your IDE imports the project.",
             "",
-            *(f"```diff\n{d.rstrip()}\n```" for d in diffs),
+            *(display.fenced(d.rstrip(), "diff") for d in diffs),
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = agents_question(task, "**The agent asks:**")
@@ -739,7 +740,7 @@ def detail(
             body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]
         if st.state is State.IMPLEMENT:
             # A long turn is a still row; what happened lately says it is a turn, not a hang.
-            body += ["", "**Lately**", "", *(f"- `{line}`" for line in timeline.latest(task)), "",
+            body += ["", "**Lately**", "", *(f"- {display.code(line)}" for line in timeline.latest(task)), "",
                      "`l` reads the whole timeline."]  # fmt: skip
     else:
         events = task.events()[-8:]
@@ -751,7 +752,7 @@ def detail(
             for e in events
         ]
     if st.state is State.CHECKPOINT_FINAL and (message := review.proposed_message(task).get("message")):
-        body += ["", "#### Proposed commit", "", f"```text\n{message}\n```"]
+        body += ["", "#### Proposed commit", "", display.fenced(message, "text")]
     if st.state is State.IMPLEMENT and (todos := progress.read(task)):
         marks = {"completed": "☑", "in_progress": "→", "pending": "☐", "cancelled": "—"}
         body += [

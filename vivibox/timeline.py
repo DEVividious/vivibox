@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import ui
+from . import display, ui
 from .gate import proposal_fault
 from .risky import stop_said
 from .states import State
@@ -60,7 +60,7 @@ def _gate(data: dict, task_id: str) -> str:
         if data.get(key):
             text += f"; {data[key]} {said}"
     if risky := data.get("risky_changes"):
-        text += f"; risky: {', '.join(risky)}"
+        text += f"; risky: {', '.join(map(display.name, risky))}"
     if log := data.get("log"):
         text += f" ({log})"
     return text
@@ -196,7 +196,7 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "review":
             text = "work fetched for your review"
         elif kind == "risky_approved":
-            text = f"you: risky files approved: {', '.join(data.get('paths') or [])}"
+            text = f"you: risky files approved: {', '.join(map(display.name, data.get('paths') or []))}"
         elif kind == "criteria_added":
             text = f"you: {len(data.get('criteria') or [])} criteria added"
         elif kind == "plan_imported":

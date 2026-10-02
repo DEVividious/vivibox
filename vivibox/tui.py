@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, gate, handoff, ide, look, probe, skill, ui
+from . import actions, code, display, gate, handoff, ide, look, probe, skill, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -401,7 +401,7 @@ class Vivibox(
             text = NO_PROJECTS
         if text != self.shown:  # redrawing resets the scroll position
             self.shown = text
-            self.text.update(text)
+            self.text.update(display.terminal(text))  # nothing the agent wrote reaches the terminal as is
 
     def action_toggle_done(self) -> None:
         self.show_done = not self.show_done
@@ -494,7 +494,8 @@ class Vivibox(
         return keys_for(task, st, self.agent_running(st.id), st.id in self.starting, self.pod.demo)[action]
 
     def fail(self, error: Exception) -> None:
-        self.notify(str(error.args[0] if error.args else error), severity="error", timeout=10)
+        # Never markup: an error may name a file the agent chose ([link=…] in it).
+        self.notify(str(error.args[0] if error.args else error), severity="error", timeout=10, markup=False)
 
     # --- actions ---
 

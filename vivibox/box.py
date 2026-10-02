@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import (
     actions,
+    display,
     gate,
     image,
     keys,
@@ -138,7 +139,8 @@ def _git_in_box(pod, *args: str, check: bool = True):
     if p.returncode in KILLED and time.monotonic() - began >= seconds:
         raise repo.timed_out(args, seconds, pod.repo, "a very large set of new files")
     if check and p.returncode != 0:
-        raise PodError(f"git {' '.join(args[:3])}…: {(p.stderr or p.stdout).strip()}")
+        said = display.name((p.stderr or p.stdout).strip())
+        raise PodError(f"git {display.name(' '.join(args[:3]))}…: {said}")
     return p
 
 

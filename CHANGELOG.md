@@ -40,6 +40,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A file name or a line of a risky file that holds a control or an invisible character (ESC, a
+  carriage return, a bidi override, a zero-width space) can no longer hide lines or draw text of
+  its own in the details panel, in `vivibox risky` and in the messages that name the file: each
+  such character is shown as its code point, `‹U+001B›`, and the change is still yours to approve
+  as the bytes it is. Backticks, markdown and markup in a name or a file are shown as they are,
+  never as formatting or a link. The copy of a large risky file to read has a name of vivibox's
+  own, so the `less -L` command shown for it holds nothing the agent named.
 - A risky file the task adds or changes that is not text vivibox can show you (bytes that are not
   UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
   longer be approved after the word "(binary)": `p` refuses it, and the writer can take its

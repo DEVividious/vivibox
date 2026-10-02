@@ -353,7 +353,7 @@ def test_control_characters_in_a_name_reach_no_terminal(task):
     fifo(task.repo, f"{folder}/.gitignore")
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
     assert not [c for c in said if ord(c) < 0x20 or ord(c) == 0x7F], repr(said)
-    assert "sub\\x1b[31mRED\\x1b[0m\\nFAKE LINE/.gitignore is a named pipe" in said
+    assert "sub‹U+001B›[31mRED‹U+001B›[0m‹U+000A›FAKE LINE/.gitignore is a named pipe" in said
 
 
 def test_whether_the_commits_have_a_file_is_asked_of_its_name_alone(task):
@@ -477,7 +477,7 @@ def test_control_characters_reach_neither_the_notification_nor_the_status(tmp_pa
     t, note, whole = notified(tmp_path, monkeypatch, "x\x1b]0;title\x07\nFAKE/.gitignore")
     for shown in (note, whole):
         assert not [c for c in shown if ord(c) < 0x20 or ord(c) == 0x7F], repr(shown)
-        assert "x\\x1b]0;title\\x07\\nFAKE/.gitignore" in shown
+        assert "x‹U+001B›]0;title‹U+0007›‹U+000A›FAKE/.gitignore" in shown
 
 
 class BlockingDocker:
@@ -602,4 +602,4 @@ def test_control_characters_reach_no_terminal_in_the_command_lines_error(env, mo
     said = capsys.readouterr().err
     assert said.startswith("vivibox: the box could not close: git ")
     assert not [c for c in said.rstrip("\n") if ord(c) < 0x20 or ord(c) == 0x7F], repr(said)
-    assert "x\\x1b[2J\\nFAKE/.gitignore is a named pipe (FIFO)" in said
+    assert "x‹U+001B›[2J‹U+000A›FAKE/.gitignore is a named pipe (FIFO)" in said

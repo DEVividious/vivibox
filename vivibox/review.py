@@ -18,6 +18,7 @@ from pathlib import Path
 from . import (
     actions,
     cli_usage,
+    display,
     gate,
     handoff,
     ide,
@@ -379,7 +380,8 @@ def apply_work(source: Path, task_id: str, commit: str, base: str) -> list[str]:
         return []
     conflicts = repo.git("diff", "--name-only", "--diff-filter=U", cwd=source).stdout.split()
     if not conflicts:  # refused before touching anything, e.g. an untracked file in the way
-        raise gate.GateError(f"cannot apply the work to {source}: {(p.stderr or p.stdout).strip()[:300]}")
+        why = display.name((p.stderr or p.stdout).strip()[:300])
+        raise gate.GateError(f"cannot apply the work to {source}: {why}")
     repo.create_branch(source, task_id, commit)
     return conflicts
 
@@ -447,11 +449,10 @@ def commit_work(source: Path, message: str, branch: str = "", create: bool = Fal
         switch = ("switch", "--quiet", *(("-c",) if create else ()), branch)
         p = repo.git(*switch, cwd=source, check=False)
         if p.returncode != 0:
-            why = (p.stderr or p.stdout).strip()[:300]
+            why = display.name((p.stderr or p.stdout).strip()[:300])
             raise gate.GateError(f"could not switch to {branch}; the changes stay staged: {why}")
     p = repo.git("commit", "--quiet", "-m", message.strip(), cwd=source, check=False)
     if p.returncode != 0:
-        raise gate.GateError(
-            f"the commit failed; the changes stay staged: {(p.stderr or p.stdout).strip()[:300]}"
-        )
+        why = display.name((p.stderr or p.stdout).strip()[:300])
+        raise gate.GateError(f"the commit failed; the changes stay staged: {why}")
     return repo.git("log", "-1", "--format=%h %s", cwd=source).stdout.strip()

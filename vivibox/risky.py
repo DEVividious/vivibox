@@ -21,7 +21,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import baseline, clone_read
+from . import baseline, clone_read, display
 
 # Pattern forms: "name" matches a file name at any depth, "dir/**" everything under a directory with
 # that name at any depth, anything else the whole path relative to the repo root.
@@ -212,10 +212,10 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
     repository that your repository did not have, with that target, at the task's base commit. A
     link it had is tolerated by its target alone: never followed, never read. A file the scan had
     no budget left for: heavy, when your risky files were past the budget at the base commit."""
-    unknown = _unknown(base)
+    unknown, name = _unknown(base), display.name(path)
     if digest.startswith(UNCHECKED) and heavy:
         return (
-            f"{path} was not checked: {digest.removeprefix(UNCHECKED)}. Your repository's risky files "
+            f"{name} was not checked: {digest.removeprefix(UNCHECKED)}. Your repository's risky files "
             "together were more than vivibox reads at a time "
             f"({clone_read.size_of(clone_read.SCAN_BUDGET)}) when the task started, so vivibox cannot "
             "tell whether the task changed them, and no task of this project can be approved while they "
@@ -223,24 +223,25 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
         )
     if digest.startswith(UNCHECKED):
         return (
-            f"{path} was not checked: {digest.removeprefix(UNCHECKED)}, so vivibox cannot tell whether "
+            f"{name} was not checked: {digest.removeprefix(UNCHECKED)}, so vivibox cannot tell whether "
             f"the task changed it, and it cannot be approved: {_spent()}{unknown}"
         )
     if digest.startswith(TOO_LARGE):
         if base.sizes.get(path, 0) > clone_read.HASH_LIMIT:  # yours: nothing for the writer to do
             return (
-                f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely. It "
+                f"{name} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely. It "
                 "was that large in your repository when the task started, so vivibox cannot tell "
                 "whether the task changed it, and no task of this project can be approved while it is "
                 f"that large: delete this task (vivibox delete {task_id})"
             )
         return (
-            f"{path} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
+            f"{name} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
             f"task's change to it cannot be approved: reply, and the writer {_undo(path, base)}{unknown}"
         )
     if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
-            f"{path} is a link that leads out of the repository ({digest.removeprefix(OUT_LINK)}), and "
+            f"{name} is a link that leads out of the repository "
+            f"({display.name(digest.removeprefix(OUT_LINK))}), and "
             "vivibox cannot check what it points to, so it cannot be approved: reply, and the writer "
             f"removes the link or makes it a file in the repository{unknown}"
         )
@@ -444,7 +445,7 @@ class Approvals:
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
-        head = f"{change.path}: {change.kind}"
+        head = f"{display.name(change.path)}: {change.kind}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         digest = "" if now is None else now.get(change.path, "")
@@ -453,7 +454,7 @@ class Approvals:
             if why := self.unapprovable({change.path: digest}):
                 return f"{head}: {why[change.path]}\n", True  # refused for that already
         want, target = _content(digest), clone_read.link(self.repo, new)
-        linked = f"{head}, symlink to {target}\n" if target is not None else ""
+        linked = f"{head}, symlink to {display.name(target)}\n" if target is not None else ""
         if target is not None and want is None:  # by its target alone: nothing of it is read
             return linked, True
         with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
@@ -465,7 +466,7 @@ class Approvals:
             if e.kind == clone_read.OVER_BUDGET:
                 return f"{linked}{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
-                return f"{linked}{head} ({e})\n", want is None
+                return f"{linked}{head} ({display.name(str(e))})\n", want is None
             view, seen = self._view(change.path, budget, want)
             return f"{linked}{head}: {e.kind}, too large to show here; {view}\n", seen
         except OSError:  # gone, or a folder
@@ -486,7 +487,9 @@ class Approvals:
                 return f"{linked}{head} (what was approved before is not text: {e.why})\n", True
             before = f"what was approved before is not text ({e.why})"
             a, note = [], f"{head}: {before}, so the new content is shown whole\n"
-        diff = difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}")
+        # What you read, never what is hashed: the digest above is of raw, as it is.
+        a, b, name = map(display.content, a), map(display.content, b), display.name(change.path)
+        diff = difflib.unified_diff(list(a), list(b), f"approved/{name}", f"task/{name}")
         return linked + note + "".join(diff), True
 
     def _unseen(self, path: str, why: str = "") -> str:
@@ -507,8 +510,10 @@ class Approvals:
         return f"{self._unseen(path, f'it is {e}')}; {YOURSELF}"
 
     def copy_for_you(self, path: str) -> Path:
-        """Where _view copies a risky file of path: the task's metadata, which no container writes."""
-        return self.dir / "view" / path
+        """Where _view copies a risky file of path: the task's metadata, which no container writes,
+        by a name of vivibox's own, so the command to read it holds nothing the agent named."""
+        digest = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()
+        return self.dir / "view" / f"{digest[:16]}.txt"
 
     def _view(
         self, path: str, budget: clone_read.Budget | None = None, want: str | None = None
@@ -516,8 +521,8 @@ class Approvals:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
         task's metadata, where no link of the agent's can be, read as text, and only text (it is
         deleted when it turns out not to be, and the change is not seen). Opened in your IDE, a
-        build file is imported, which is what approving it is there for. The agent names the
-        folders on the way, so the command is quoted, and less runs no LESSOPEN unpacker (-L)."""
+        build file is imported, which is what approving it is there for. The copy's name is
+        vivibox's (copy_for_you), and less runs no LESSOPEN unpacker (-L)."""
         view = self.copy_for_you(path)
         said = "vivibox checks whether it changes, not what it says"
         try:
@@ -533,7 +538,7 @@ class Approvals:
             with contextlib.suppress(OSError):
                 view.unlink(missing_ok=True)
             over = getattr(e, "kind", "") == clone_read.OVER_BUDGET
-            why = self._unseen(path) if over else self._unseen(path, str(e))
+            why = self._unseen(path) if over else self._unseen(path, display.name(str(e)))
             return (
                 f"{said}, and could not copy it for you to read: {e.kind + ', as ' if over else ''}{why}",
                 False,

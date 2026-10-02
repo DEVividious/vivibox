@@ -14,6 +14,7 @@ from . import (
     cli_agent,
     clone_read,
     context,
+    display,
     gate,
     harness,
     image,
@@ -382,15 +383,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
     for p in result.commit_problems:
         print(f"FAIL  commit {p}")
     for h in result.hidden_characters:
+        h = display.name(h)
         print(f"FAIL  {h}" if h.endswith(clone_read.NOT_CHECKED) else f"FAIL  invisible character at {h}")
     for f in result.uncommitted:
-        print(f"FAIL  not committed: {f}")
+        print(f"FAIL  not committed: {display.name(f)}")
     for f in result.no_red_evidence:
-        print(f"FAIL  no red evidence in red.md for: {f}")
+        print(f"FAIL  no red evidence in red.md for: {display.name(f)}")
     for t in result.removed_tests:
-        print(f"GONE  test removed: {t}")
+        print(f"GONE  test removed: {display.name(t)}")
     for c in result.risky:
-        print(f"RISK  {c.kind}: {c.path}")
+        print(f"RISK  {c.kind}: {display.name(c.path)}")
     print(f"\nLog: {result.log}")
     if result.risky:
         print(

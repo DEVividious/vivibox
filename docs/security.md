@@ -68,5 +68,12 @@ it does not independently prove that each criterion is satisfied or that the rec
 actually failed before the fix. Code review and your final acceptance still matter. Once you
 approve risky files and run the review copy in your IDE, that code runs with your permissions.
 
+The agent chooses file names and what the files say. Wherever vivibox shows them to you (the
+risky files' diffs, `vivibox risky`, the details panel, the messages that name a file), a
+control or invisible character (ESC, a carriage return, a bidi override, a zero-width space) is
+shown as its code point, `‹U+001B›`, and `‹` and `›` themselves the same way, so no line is
+hidden from you and no text is drawn that the file does not hold. What you approve is still the
+file's bytes, not what is shown.
+
 ---
 Back to the [README](../README.md).

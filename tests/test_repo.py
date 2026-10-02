@@ -454,9 +454,11 @@ def test_the_risky_files_scan_asks_no_git_of_a_changed_clone(cloned, monkeypatch
     real = r._bounded
     monkeypatch.setattr(r, "_bounded", lambda command, *a: ran.append(command) or real(command, *a))
     with pytest.raises(r.RepoError, match="changed"):
-        risky.ignored(repo)
-    with pytest.raises(r.RepoError, match="changed"):
-        risky.untracked(repo, repo / "node_modules")
+        r.check_protection(repo, meta)
+    # What git cannot say for a refused clone is answered as when it does not answer: nothing left
+    # out of the scan, and a folder scanned.
+    assert risky.ignored(repo) == set()
+    assert risky.untracked(repo, repo / "node_modules") is False
     assert not r._committed(repo, "README.md")
     assert ran == []
 
@@ -655,3 +657,73 @@ def test_a_record_vivibox_cannot_read_runs_no_git(cloned, monkeypatch):
     with pytest.raises(r.RepoError, match="could not check the task's clone"):
         r.in_clone(repo, "status")
     assert ran == []
+
+
+# --- An index the agent wrote that vivibox cannot read is a refusal, never a crash ---------------
+
+
+def _index_of(repo: Path, version: str) -> bytes:
+    git(repo, "update-index", "--index-version", version)
+    return (repo / ".git" / "index").read_bytes()
+
+
+def broken_indexes(repo: Path) -> list[bytes]:
+    """A truncated entry, a real version-4 index cut short in its entries, and seeded fuzz: each
+    says it holds more entries than its bytes can."""
+    import random
+    import struct
+
+    v4 = _index_of(repo, "4")
+    found = [b"DIRC" + struct.pack(">II", 4, 1) + b"\0" * 62, v4[:40], v4[: len(v4) // 2]]
+    rng = random.Random(20261002)
+    for _ in range(40):
+        version = rng.choice([2, 3, 4])
+        count = rng.randint(4, 10**6)
+        found.append(b"DIRC" + struct.pack(">II", version, count) + rng.randbytes(rng.randint(0, 200)))
+    return found
+
+
+def test_an_index_vivibox_cannot_read_is_a_refusal(cloned):
+    _, repo, meta, _ = cloned
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{git(repo, 'rev-parse', 'HEAD')},zz")
+    for n, data in enumerate(broken_indexes(repo)):
+        (repo / ".git" / "index").write_bytes(data)
+        try:
+            r.check_protection(repo, meta)
+        except r.RepoError as e:
+            assert ".git/index is an index vivibox cannot read" in str(e), (n, e)
+        else:
+            pytest.fail(f"index {n} passed: {data[:24]!r}")
+
+
+def test_the_risky_scan_of_a_clone_with_such_an_index_answers_as_when_git_cannot_say(cloned):
+    from vivibox import risky
+
+    _, repo, meta, _ = cloned
+    (repo / ".git" / "index").write_bytes(broken_indexes(repo)[0])
+    assert risky.ignored(repo) == set()
+    assert risky.untracked(repo, repo / "node_modules") is False
+
+
+def test_a_change_while_a_task_recorded_before_is_recorded_again_is_not_recorded(
+    recorded_before, monkeypatch
+):
+    """The record written is what was compared, never a later read of the clone."""
+    from vivibox import protection
+
+    repo, meta = recorded_before
+    real = protection.differences
+    changed = []
+
+    def then_the_agent_writes(*args):
+        found = real(*args)
+        if not changed:
+            changed.append(True)
+            (repo / ".git" / "commondir").write_text("../elsewhere\n")
+        return found
+
+    monkeypatch.setattr(protection, "differences", then_the_agent_writes)
+    with pytest.raises(r.RepoError, match="changed"):
+        r.check_protection(repo, meta)
+    record = json.loads((meta / r.PROTECTION_RECORD).read_text())
+    assert record.get(".git/commondir", protection.ABSENT) == protection.ABSENT

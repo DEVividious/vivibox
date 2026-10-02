@@ -253,7 +253,7 @@ def untracked(repo: Path, folder: Path) -> bool:
     try:
         listed = git_repo.in_clone(repo, "ls-files", "--", folder.relative_to(repo).as_posix(), check=False,
                                    timeout=30)  # fmt: skip
-    except (OSError, git_repo.GitTimeout):
+    except (OSError, git_repo.RepoError):  # no answer in time, or a clone refused
         return False
     return listed.returncode == 0 and not listed.stdout.strip()
 
@@ -264,7 +264,7 @@ def ignored(repo: Path) -> set[str]:
     try:
         listed = git_repo.in_clone(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
                                    "--directory", check=False, timeout=30)  # fmt: skip
-    except (OSError, git_repo.GitTimeout):
+    except (OSError, git_repo.RepoError):  # no answer in time, or a clone refused
         return set()
     return set(filter(None, listed.stdout.split("\0"))) if listed.returncode == 0 else set()
 

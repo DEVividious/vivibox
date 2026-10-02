@@ -294,7 +294,7 @@ def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
                     return f"{display.name(index)} is larger than {INDEX_LIMIT >> 20} MiB"
                 try:
                     listed = gitlinks(data, hash_length)
-                except (ValueError, struct.error):
+                except ValueError:
                     return f"{display.name(index)} is an index vivibox cannot read"
                 if len(_LISTED) > 64:
                     _LISTED.clear()
@@ -306,7 +306,17 @@ def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
 
 def gitlinks(data: bytes, hash_length: int = 20) -> list[str]:
     """The paths of the submodules (mode 160000) in an index file's content. ValueError for one
-    vivibox cannot read: a split index or a sparse one keeps entries elsewhere."""
+    vivibox cannot read, whatever is wrong with it: the agent writes every byte. A split index or
+    a sparse one keeps entries elsewhere, and is one too."""
+    try:
+        return _gitlinks_of(data, hash_length)
+    except ValueError:
+        raise
+    except Exception as e:  # a name or a size past the end (IndexError, struct.error), or anything else
+        raise ValueError(f"an index vivibox cannot read: {e!r}") from None
+
+
+def _gitlinks_of(data: bytes, hash_length: int) -> list[str]:
     if data[:4] != b"DIRC":
         raise ValueError("no index")
     version, count = struct.unpack_from(">II", data, 4)
@@ -478,11 +488,13 @@ def _upgrade(root: Path, meta: Path, old: dict[str, str]) -> list[str]:
     want: dict[str, str] = {}
     for d in dirs:
         want.update(_as_prepared(d, old))
-    found = differences(want, fingerprint(root, [])) or gitfiles(root, dirs, lambda rel: True)[1]
+    files, found = gitfiles(root, dirs, lambda rel: True)  # each leads to one of dirs (_home)
+    now = fingerprint(root, files)
+    found = differences(want, {k: v for k, v in now.items() if k not in files}) or found
     if found:
         return [*found[:-1], f"{found[-1]}; {EARLIER}"]
-    files = gitfiles(root, dirs, lambda rel: True)[0]
-    write(meta, _recorded(dirs, files, fingerprint(root, files)))
+    # What was compared is what is recorded, never a later read; the check after it reads again.
+    write(meta, _recorded(dirs, files, now))
     return check(root, meta)
 
 

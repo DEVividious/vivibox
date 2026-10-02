@@ -64,6 +64,13 @@ class Forwarder:
         timeout: float = 5.0,
         on_query: Callable[[tuple, str], None] | None = None,
     ):
+        try:
+            if ipaddress.ip_address(listen[0]).is_unspecified:
+                raise ValueError
+        except ValueError:
+            raise ResolverError(
+                f"not an address to listen on, it would be every interface: {listen[0]!r}"
+            ) from None
         self.upstream = upstream
         self.timeout = timeout
         self.on_query = on_query

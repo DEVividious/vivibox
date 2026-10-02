@@ -58,7 +58,8 @@ def cmd_image_check(args: argparse.Namespace) -> int:
 
 def cmd_hostd(args: argparse.Namespace) -> int:
     if args.action == "run":
-        return hostd.serve(args.address, args.port, args.upstream)
+        # Never every interface: on the host's address for the pods, which only they reach.
+        return hostd.serve(args.address or load_config().host_ip, args.port, args.upstream)
     if args.action == "stop":
         if hostd.stop():
             print(

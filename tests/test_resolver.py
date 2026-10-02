@@ -319,3 +319,20 @@ def test_vivibox_hostd_start_says_why_it_could_not(env, monkeypatch, capsys):
     monkeypatch.setattr(pod_egress, "prepare_host", refused)
     assert main(["hostd", "start"]) == 1
     assert "a password is required" in capsys.readouterr().err
+
+
+def test_vivibox_hostd_run_listens_only_on_the_hosts_address_for_the_pods(env, monkeypatch):
+    """Run by hand without --address, it takes network.host_address; never every interface, which
+    would make it a resolver for your LAN."""
+    from vivibox.cli import main
+
+    asked = []
+    monkeypatch.setattr(hostd, "serve", lambda address, port, upstream: asked.append(address) or 0)
+    assert main(["hostd", "run"]) == 0
+    assert asked == ["203.0.113.1"]
+
+
+@pytest.mark.parametrize("address", ["", "0.0.0.0", "::"])
+def test_the_forwarder_never_listens_on_every_interface(address):
+    with pytest.raises(resolver.ResolverError, match="every interface"):
+        resolver.Forwarder((address, 0), ("127.0.0.1", 53))

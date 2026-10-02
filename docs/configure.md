@@ -173,7 +173,7 @@ host the agent may reach and for extra risky patterns:
 repo = "~/projects/myproject"
 verify = ["./gradlew test --no-daemon --console=plain"]
 java = "17"                                     # empty for Java 21
-host_services = ["host.docker.internal:5432"]   # optional, network access to services on your host
+host_services = ["host.docker.internal:5432"]   # optional, services on your host the agent may reach
 pass_env = ["REPO_TOKEN"]                       # optional, variables passed from your shell
 prepare = ["./gradlew assemble"]                # optional, once per new task clone
 # tools = ["go@1.25.3"]                        # for a Go project; installed by mise
@@ -236,7 +236,34 @@ off on a slow or metered connection (a VPN) more than on a fast one. It serves D
 quay.io, ghcr.io and other registries are pulled as before. `vivibox mirror` says whether it runs
 and how much it holds; it forgets a layer nobody pulled for two weeks, and `vivibox mirror remove`
 removes it with everything it holds. If it is down, a pod pulls from Docker Hub itself. It listens on
-port 5055 of the address the pods reach your machine by; `hub_mirror_port` changes it.
+port 5055 of your machine's address for the pods, `network.host_address`; `hub_mirror_port` changes
+it.
+
+## Network
+
+A pod reaches the internet; it does not reach your machine, your LAN, other private ranges, other
+tasks, IPv6, or UDP other than DNS. These rules are on your machine, not in the pod, keyed by the
+task network's bridge (`vbx-<task>-w`), and loaded before the pod's first packet; root in the pod
+cannot remove them. A project's `host_services` are the exceptions: `host.docker.internal:5432`
+is your machine, on the gateway of the task's network, so a service listening on all addresses
+answers there; a name resolves on your machine when the task starts.
+
+Every DNS query a pod makes, whatever server it names, goes to a forwarder on your machine,
+`vivibox hostd`, which passes it to your machine's resolver: names resolve in the pod as they do
+on your machine, through your VPN too. The first task's start starts it, on port 5053 of
+`network.host_address`. A pod does not start while it is down, and a running one resolves no
+names: the view's header says so, with `vivibox hostd start`. `vivibox hostd` says whether it
+runs; `vivibox hostd stop` stops it.
+
+```toml
+[network]
+pool = "198.51.100.0/24"           # the ranges task networks are cut from, a /28 each
+host_address = "203.0.113.1/32"    # your machine's address for the pods, on vivibox0
+```
+
+`host_address` is one address that nothing else on your machine has or routes, outside the pool.
+Both defaults are ranges reserved for documentation (RFC 5737), which no real network uses. If
+yours does, set another and run `host/setup.sh`: it says when an address is taken, and by what.
 
 A repository you move or delete leaves its project file behind. vivibox does not offer a project it
 cannot work in: it names those on start and offers to forget them, which removes the project file

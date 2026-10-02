@@ -33,7 +33,15 @@ another. See [configuration](configure.md) for manual planning and role defaults
 `host/setup.sh` moves Docker's default networks off `172.17.0.0/16` (Docker restarts) to the first
 ranges nothing on your machine routes, a VPN included (`VIVIBOX_DOCKER_RANGES="<bridge> <pool>"`
 chooses them instead), installs Sysbox, creates `/srv/vivibox` mounted `nosuid,nodev`, and allows
-your user to run only the pod firewall helper through sudo. As you, without sudo, it installs
+your user to run only vivibox's root helper, `/usr/local/libexec/vivibox-host`, through sudo (it
+removes the firewall helper an earlier vivibox installed, `vivibox-netns`, and its rule). Through
+that helper it gives your machine an address for the pods, `network.host_address`
+(`203.0.113.1/32` unless you set it), on an interface of its own, `vivibox0`, and an nft table,
+`inet vivibox`, which every pod's egress rules go in. The helper refuses an address another
+interface already has, or that a route through another interface covers, or that is in the task
+pool, and says which; setup then lists it to fix and changes nothing. A reboot takes `vivibox0` and
+the table away; a task's start makes them again. Setup needs `nft` and `python3` (`sudo apt-get
+install nftables python3`), and stops without them. As you, without sudo, it installs
 [uv](https://docs.astral.sh/uv/) in `~/.local/bin` when you have none, and the `vivibox` command
 from this checkout, editable, so it follows the checkout as you update it. When an update changes
 `pyproject.toml`, run `uv tool install --force --editable .` for the new dependencies.
@@ -49,6 +57,10 @@ Setup also checks that the range task networks are cut from (`network.pool` in `
 it says what, and which Docker network it is when it is one, and goes on with the other checks;
 remove that network or set another `network.pool`, and run it again.
 
+A task created before vivibox kept the pods' rules on your machine is from an earlier vivibox: its
+pod ran under rules root in it could remove. Setup lists those whose pod still runs; delete them
+(`vivibox delete <id>`) and create them again. Nothing restarts them under the new rules.
+
 A running view keeps the code it started with, and so does every task's supervisor. After an
 update the view's title says *vivibox changed on disk: quit and start it again*, and the details of
 a task whose supervisor is older say so too; stop and start that task (`s`) when it suits you.
@@ -61,7 +73,8 @@ host/uninstall.sh --check    # only lists
 ```
 
 It undoes `setup.sh` step by step: every task's pod (containers, networks, volumes, the agent
-image), the `vivibox` command, the sudo rule and the firewall helper, the bind mount and its
+image), the `vivibox` command, the sudo rule and the root helper (and the old firewall helper), the
+pods' egress rules, `vivibox0` and the DNS forwarder, the bind mount and its
 `/etc/fstab` line, Sysbox, and the Docker network ranges (`/etc/docker/daemon.json` goes back to the
 copy `setup.sh` kept, or loses only those two keys; Docker restarts). Then it asks, one by one,
 before deleting anything of yours: the tasks directory, `~/.config/vivibox` and the stored API keys.

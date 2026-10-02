@@ -37,10 +37,13 @@ Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
 after a test, and the pod's daemon then loses the image another test is still pulling, at random. A
 project that needs another Ryuk passes the variable in `pass_env`.
-A firewall in the pod's network namespace blocks your host and every private network, except the
-services you list per project; DNS and the internet are open. When the host reaches the internet
-through a tunnel smaller than Ethernet (a VPN such as Cloudflare WARP), the firewall clamps TCP MSS in
-the pod to fit it, so large downloads do not stall. The pod trusts the certificate
+Rules on your host, keyed by the bridge of the task's network and loaded before the pod's first
+packet, refuse your host, every private network, other tasks' ranges, IPv6 and UDP other than DNS,
+except the services you list per project; the internet is open. Root in the pod cannot remove them:
+they are not in its network namespace. Every DNS query in the pod goes to a forwarder on your host,
+which passes it to your host's resolver; while it is down, the pod resolves nothing. When the host
+reaches the internet through a tunnel smaller than Ethernet (a VPN such as Cloudflare WARP), the
+rules clamp TCP MSS to fit it, so large downloads do not stall. The pod trusts the certificate
 authorities your host trusts: the host's CA bundle is mounted read-only over the sidecar's, the
 agent's and the gate's, so a registry or a proxy behind a corporate authority works in the pod as
 it does on your host. The sidecar remembers the bundle it started with: when the host's changes,
@@ -50,7 +53,8 @@ the sidecar again, because its Docker daemon reads the authorities once, at its 
 With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
 pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not
 daemons: each pod keeps its own images, containers and volumes. The cache listens only on the address
-the pods know your host by, and each pod's firewall lets through that one port, as for a host service.
+the pods know your host by (`network.host_address`), and the rules let through that one port, as for
+a host service.
 A task can pull from it and nothing else: a registry that proxies refuses pushes, and deletes are off.
 It has no credentials of its own, so what it keeps is what anyone may pull from Docker Hub.
 Deleting a task never touches it.
@@ -66,9 +70,9 @@ that each is as recorded; when one is not, it runs no git there. Alternates are 
 
 ## Limits of the boundary
 
-Sysbox containers share the host kernel; they are not virtual machines. The firewall blocks
-host and private-network access except explicitly allowed services, but DNS and public internet
-access remain open. The agent can read credentials passed to its build in `pass_env`.
+Sysbox containers share the host kernel; they are not virtual machines. The host's rules block
+host and private-network access except explicitly allowed services, but public internet access
+remains open, and the DNS forwarder applies no policy: any name resolves. The agent can read credentials passed to its build in `pass_env`.
 
 The check of the task's clone guards the git vivibox runs, at the moment it runs it. Git you run
 yourself in the clone, or an IDE you open on it, is not checked: open the review copy instead, which

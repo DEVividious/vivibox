@@ -21,6 +21,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - A pod's egress rules are loaded by a new root helper, `/usr/local/libexec/vivibox-host`, through
   one sudo rule, instead of `vivibox-netns`. Tasks created before this change are from an earlier
   vivibox: delete them and create them again.
+- `host/setup.sh` installs that helper and its sudo rule and removes `vivibox-netns` and its rule;
+  gives your machine its address for the pods on `vivibox0`, refusing, by name, one another
+  interface or route already holds; needs `nft` and `python3`; and lists the tasks from an earlier
+  vivibox whose pod still runs, to delete and create again. `host/uninstall.sh` removes the
+  pods' rules, `vivibox0` and the forwarder too.
 - Tasks created by an earlier vivibox can't be run any more: they are not carried over to the
   new layout of a task's files. The list and `vivibox status` show them as `from an earlier
   vivibox` (and say when their supervisor or pod still runs); delete them with

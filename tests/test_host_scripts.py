@@ -1,24 +1,22 @@
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).parent.parent
 HOST = Path(__file__).parent.parent / "host"
-HELPER = HOST / "vivibox-netns"
-
-
-def helper(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(HELPER), *args], capture_output=True, text=True)
+HELPER = HOST / "vivibox-host"
 
 
 def test_scripts_pass_shellcheck():
     shellcheck = shutil.which("shellcheck")
     assert shellcheck, "run 'uv sync' to install shellcheck-py"
-    scripts = [HOST / "setup.sh", HOST / "uninstall.sh", HELPER]
+    scripts = [HOST / "setup.sh", HOST / "uninstall.sh"]
     result = subprocess.run([shellcheck, "-x", *map(str, scripts)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
 
@@ -36,76 +34,6 @@ def test_uninstall_undoes_every_step_setup_makes():
     steps = set(re.findall(r"^do_(\w+)\(\)", setup, re.MULTILINE)) - {"packages", "uv"}
     undone = set(re.findall(r"^do_(\w+)\(\)", uninstall, re.MULTILINE))
     assert steps <= undone, f"setup steps without a removal: {sorted(steps - undone)}"
-
-
-@pytest.mark.parametrize(
-    "args",
-    [(), ("apply",), ("drop", "vivibox-shop-1-dind"), ("clear", "vivibox-shop-1-dind", "extra")],
-)
-def test_helper_rejects_bad_usage(args):
-    assert helper(*args).returncode == 2
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["other", "vivibox-shop-dind", "vivibox-shop-1", "vivibox-Shop-1-dind", "vivibox-shop-1-dind;id", "-f"],
-)
-def test_helper_rejects_non_sidecar_names(name):
-    result = helper("show", name)
-    assert result.returncode == 1 and "not an vivibox sidecar" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "10.0.0.1",
-        "10.0.0.1:0",
-        "10.0.0.1:65536",
-        "256.0.0.1:80",
-        "10.0.0:80",
-        "host:80",
-        "10.0.0.1:80;id",
-        "::1:80",
-    ],
-)
-def test_helper_rejects_bad_targets(target):
-    result = helper("apply", "vivibox-shop-1-dind", "10.0.0.2:5432", target)
-    assert result.returncode == 1 and "not <ipv4>:<port>" in result.stderr
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="checks the non-root path")
-def test_helper_validates_before_requiring_root():
-    result = helper("apply", "vivibox-shop-1-dind", "172.20.0.1:5432", "192.168.1.10:8080")
-    assert result.returncode == 1 and "must run as root" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "pool",
-    ["198.51.100.0", "198.51.100.0/", "198.51.100.0/31", "198.51.100.0/7", "256.0.0.0/24", "x/24"],
-)
-def test_helper_rejects_a_bad_pool(pool):
-    result = helper("apply", "vivibox-shop-1-dind", "--pool", pool)
-    assert result.returncode == 1 and "not an ipv4 network" in result.stderr
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="checks the non-root path")
-def test_helper_takes_a_pool_before_the_targets():
-    result = helper("apply", "vivibox-shop-1-dind", "--pool", "198.51.100.0/24", "172.20.0.1:5432")
-    assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"
-
-
-@pytest.mark.parametrize("mtu", ["1280x", "12", "70000", "-1280", ""])
-def test_helper_rejects_a_bad_mtu(mtu):
-    result = helper("apply", "vivibox-shop-1-dind", "--mtu", mtu)
-    assert result.returncode == 1 and "not an mtu" in result.stderr
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="checks the non-root path")
-def test_helper_takes_an_mtu_with_the_pool_before_the_targets():
-    result = helper(
-        "apply", "vivibox-shop-1-dind", "--pool", "198.51.100.0/24", "--mtu", "1280", "172.20.0.1:5432"
-    )
-    assert result.returncode == 1 and "must run as root" in result.stderr, "validation got that far"
 
 
 def setup_fn(call: str, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -136,8 +64,8 @@ def test_ranges_overlap_by_their_addresses_not_their_prefix(a, b, shared):
 
 def test_the_task_networks_in_use_are_not_routes_the_pool_collides_with(tmp_path):
     """setup.sh on a machine with a task: the pool overlapped the route to the task's own network,
-    which is the pool in use. A task network's bridge is br-<network id>; those routes are left out.
-    A Docker network of someone else's in the pool still counts."""
+    which is the pool in use. A task network's bridge is vbx… (br-<network id> before); those
+    routes are left out. A Docker network of someone else's in the pool still counts."""
     fake = tmp_path / "bin"
     fake.mkdir()
     (fake / "ip").write_text(
@@ -146,6 +74,8 @@ def test_the_task_networks_in_use_are_not_routes_the_pool_collides_with(tmp_path
         "echo '192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.2'\n"
         "echo '198.51.100.0/28 dev br-bc2b47432840 proto kernel scope link src 198.51.100.1 linkdown'\n"
         "echo '198.51.100.16/28 dev br-0123456789ab proto kernel scope link src 198.51.100.17'\n"
+        "echo '198.51.100.32/28 dev vbx-shop-1-w proto kernel scope link src 198.51.100.33'\n"
+        "echo '198.51.100.48/28 dev vbx0123456789-w proto kernel scope link src 198.51.100.49'\n"
     )
     (fake / "docker").write_text("#!/bin/sh\necho bc2b47432840\n")
     for script in ("ip", "docker"):
@@ -245,7 +175,7 @@ def test_setup_installs_missing_git_after_confirmation(tmp_path):
 
 
 def run_setup_without_host_changes(
-    tmp_path, *, check, installed, routes="", networks="", config="", home=None
+    tmp_path, *, check, installed, routes="", networks="", config="", home=None, pods="", engine="", path=None
 ):
     fake = tmp_path / "bin"
     fake.mkdir()
@@ -253,6 +183,7 @@ def run_setup_without_host_changes(
     scripts = {
         "docker": (
             'case "$*" in *--no-trunc*) printf "%s" "$TEST_NETWORKS" ;;\n'
+            '  ps*) printf "%s" "$TEST_PODS" ;;\n'
             "  network*) ;;\n  *) echo sysbox-runc ;;\nesac"
         ),
         # `ip -4 route show table all`, and `docker network ls` for the name of a bridge's network.
@@ -266,13 +197,18 @@ def run_setup_without_host_changes(
         "sudo": 'echo "$*" >> "$TEST_SUDO_CALLS"\n[ "$1" != apt-get ] || exit 31',
         "uv": 'echo "$TEST_TOOL_DIR"',
     }
+    if engine:
+        # The checkout's helper, run for its check of the host's address: what it says, else Python.
+        scripts["python3"] = (
+            f'case "$*" in *prepare-engine*) echo "{engine}" >&2; exit 1 ;; esac\nexec {sys.executable} "$@"'
+        )
     for name, body in scripts.items():
-        path = fake / name
-        path.write_text("#!/bin/sh\n" + body + "\n")
-        path.chmod(0o755)
+        script = fake / name
+        script.write_text("#!/bin/sh\n" + body + "\n")
+        script.chmod(0o755)
     env = {
         **os.environ,
-        "PATH": f"{fake}:{os.environ['PATH']}",
+        "PATH": f"{fake}:{path if path is not None else os.environ['PATH']}",
         # Yours only when a test gives none: the skill's step reads the agent CLIs' folders.
         "HOME": str(home or os.environ["HOME"]),
         "VIVIBOX_TASKS_DIR": str(tmp_path / "tasks"),
@@ -281,6 +217,7 @@ def run_setup_without_host_changes(
         "TEST_TOOL_DIR": str(tmp_path / "tools"),
         "TEST_ROUTES": routes,
         "TEST_NETWORKS": networks,
+        "TEST_PODS": pods,
         "VIVIBOX_CONFIG_DIR": str(tmp_path / "config"),
     }
     if config:
@@ -467,3 +404,92 @@ def test_setup_says_where_to_get_docker_when_there_is_none(tmp_path):
     found = setup_fn(f'PATH="{tmp_path}"; docker_problem')
     assert "Docker is not installed" in found.stdout
     assert "https://docs.docker.com/engine/install/ubuntu/" in found.stdout
+
+
+# --- the root helper, the host's address and tasks from before ------------------------------------
+
+
+def test_setup_refuses_without_nft_or_python3(tmp_path):
+    """The root helper is Python, and loads the host's rules with nft: setup says so, and what to
+    install, before anything else."""
+    nowhere = setup_fn(f'PATH="{tmp_path}"; required_tools')
+    assert nowhere.returncode == 1
+    assert "nft" in nowhere.stdout and "python3" in nowhere.stdout and "apt-get install" in nowhere.stdout
+    for tool in ("nft", "python3"):
+        (tmp_path / tool).write_text("#!/bin/sh\n")
+        (tmp_path / tool).chmod(0o755)
+    there = setup_fn(f'PATH="{tmp_path}"; required_tools')
+    assert there.returncode == 0 and there.stdout == ""
+
+
+def test_setup_check_stops_where_nft_is_missing(tmp_path):
+    # /usr/bin and /bin have the shell's tools; nft lives in /usr/sbin, which is left out.
+    result, calls = run_setup_without_host_changes(tmp_path, check=True, installed=True, path="/usr/bin:/bin")
+    assert result.returncode == 1
+    assert "nft" in result.stderr and "nftables" in result.stderr, result.stderr
+    assert "Checking host" not in result.stdout and calls == ""
+
+
+def test_setup_installs_the_new_helper_and_its_rule_and_drops_the_old(tmp_path):
+    result, calls = run_setup_without_host_changes(tmp_path, check=True, installed=True)
+    assert "/usr/local/libexec/vivibox-host" in result.stdout
+    setup = (HOST / "setup.sh").read_text()
+    assert "HELPER=/usr/local/libexec/vivibox-host" in setup
+    assert '"$HERE/vivibox-host" "$HELPER"' in setup, "the checkout's helper is what is installed"
+    assert "vivibox-netns" in setup and "do_old_helper" in setup, "the old one goes"
+    assert not (HOST / "vivibox-netns").exists()
+
+
+@pytest.mark.parametrize(
+    ("config", "address"),
+    [
+        ("", "203.0.113.1/32"),
+        ('[network]\nhost_address = "10.250.0.1/32"\n', "10.250.0.1/32"),
+        ('[network]\nhost_address = "10.250.0.2"\n', "10.250.0.2/32"),
+        ('network.host_address = "10.250.0.3"\n', "10.250.0.3/32"),
+    ],
+)
+def test_the_host_address_is_read_as_vivibox_reads_it(tmp_path, config, address):
+    (tmp_path / "config.toml").write_text(config)
+    assert setup_fn("host_address", {"VIVIBOX_CONFIG_DIR": str(tmp_path)}).stdout.strip() == address
+
+
+def test_a_host_address_another_interface_holds_is_named_and_nothing_changes(tmp_path):
+    said = "vivibox-host: network.host_address 203.0.113.1 is already an address of eth1. Nothing was changed"
+    result, calls = run_setup_without_host_changes(tmp_path, check=False, installed=True, engine=said)
+    line = next(line for line in result.stdout.splitlines() if "already an address of eth1" in line)
+    assert line.startswith("  problem") and "network.host_address" in line
+    assert "prepare-engine" not in calls, "nothing run as root for it"
+
+
+def test_setup_lists_the_tasks_from_before_whose_pods_still_run(tmp_path):
+    tasks = tmp_path / "tasks"
+    for task_id, version in (("shop-1", 2), ("shop-2", None), ("shop-3", 999)):
+        meta = tasks / task_id / ".task"
+        meta.mkdir(parents=True)
+        state = {} if version is None else {"task_schema_version": version}
+        (meta / "state.json").write_text(json.dumps(state))
+    current = re.search(r"^TASK_SCHEMA_VERSION = (\d+)$", (REPO / "vivibox" / "task.py").read_text(), re.M)
+    (tasks / "shop-3" / ".task" / "state.json").write_text(
+        json.dumps({"task_schema_version": int(current[1])})
+    )
+    result, _ = run_setup_without_host_changes(
+        tmp_path, check=True, installed=True, pods="shop-1\nshop-2\nshop-3\nshop-1\ngone-9\n"
+    )
+    problems = [line for line in result.stdout.splitlines() if line.startswith("  problem")]
+    for task_id in ("shop-1", "shop-2"):
+        line = next(p for p in problems if f" {task_id} " in p or p.endswith(task_id))
+        assert "earlier vivibox" in line and f"vivibox delete {task_id}" in line
+    assert not any("shop-3" in p for p in problems), "a task of today's layout is fine"
+    gone = next(p for p in problems if "gone-9" in p)
+    assert "docker rm -f" in gone
+    assert sum("shop-1" in p for p in problems) == 1, "each task once"
+
+
+def test_uninstall_removes_the_hosts_rules_and_address():
+    uninstall = (HOST / "uninstall.sh").read_text()
+    body = uninstall[uninstall.index("do_engine() {") :]
+    body = body[: body.index("\n}\n")]
+    assert "sudo nft delete table inet vivibox" in body and "sudo ip link del vivibox0" in body
+    assert "hostd" in body, "the forwarder stops too"
+    assert "HELPER=/usr/local/libexec/vivibox-host" in uninstall and "vivibox-netns" in uninstall

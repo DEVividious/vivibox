@@ -8,7 +8,9 @@
 #
 # What it removes:
 #   - every task's pod: containers, networks, volumes (the shared caches too) and the agent image;
-#   - the vivibox command (uv tool), the sudo rule and the firewall helper;
+#   - the vivibox command (uv tool), the sudo rule and the root helper (the old firewall helper too);
+#   - the pods' egress rules (nft table inet vivibox), the host's address for the pods (vivibox0)
+#     and the DNS forwarder (vivibox hostd);
 #   - the vivibox skill for Claude Code and Codex, where vivibox installed it;
 #   - the tasks directory's bind mount and its /etc/fstab line;
 #   - Sysbox CE (restarts Docker);
@@ -19,7 +21,9 @@
 set -euo pipefail
 
 TASKS_DIR=${VIVIBOX_TASKS_DIR:-/srv/vivibox}
-HELPER=/usr/local/libexec/vivibox-netns
+HELPER=/usr/local/libexec/vivibox-host
+OLD_HELPER=/usr/local/libexec/vivibox-netns
+HOSTD_PID=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/vivibox/hostd.pid
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
 CONFIG_DIR=${VIVIBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/vivibox}
@@ -92,7 +96,16 @@ if ((${#SKILLS[@]})); then found "the vivibox skill in ${SKILLS[*]}" do_skill; e
 
 if [[ -e "$SUDOERS" ]]; then found "sudo rule $SUDOERS" do_sudoers; else absent "sudo rule $SUDOERS"; fi
 
-if [[ -e "$HELPER" ]]; then found "firewall helper $HELPER" do_helper; else absent "firewall helper $HELPER"; fi
+if [[ -e "$HELPER" ]]; then found "root helper $HELPER" do_helper; else absent "root helper $HELPER"; fi
+
+if [[ -e "$OLD_HELPER" ]]; then found "old firewall helper $OLD_HELPER" do_old_helper; fi
+
+# The rules' table cannot be listed without root; it is there where vivibox0 or the helper is.
+if ip -o link show vivibox0 >/dev/null 2>&1 || [[ -e "$HELPER" || -e "$HOSTD_PID" ]]; then
+  found "the pods' egress rules (nft table inet vivibox), vivibox0 and the DNS forwarder" do_engine
+else
+  absent "the pods' egress rules and vivibox0"
+fi
 
 # --- the tasks directory's mount ----------------------------------------------------------------
 
@@ -160,6 +173,18 @@ do_skill() { rm -rf "${SKILLS[@]}"; }
 do_sudoers() { sudo rm -f "$SUDOERS"; }
 
 do_helper() { sudo rm -f "$HELPER"; }
+
+do_old_helper() { sudo rm -f "$OLD_HELPER"; }
+
+do_engine() {
+  # The forwarder (vivibox hostd) first: it listens on vivibox0's address.
+  if [[ -r "$HOSTD_PID" ]]; then
+    kill "$(cat "$HOSTD_PID")" 2>/dev/null || true
+    rm -f "$HOSTD_PID"
+  fi
+  sudo nft delete table inet vivibox 2>/dev/null || true
+  sudo ip link del vivibox0 2>/dev/null || true
+}
 
 do_mount() {
   if findmnt -n --mountpoint "$TASKS_DIR" >/dev/null 2>&1; then

@@ -79,9 +79,9 @@ host/setup.sh    # install
 vivibox          # open the view
 ```
 
-Setup asks before changing Sysbox, Docker networking, host tools or task storage; it may restart
-Docker. It also installs or updates the vivibox skill for installed Claude Code and Codex CLIs.
-First launch builds the agent image. [Installation and uninstall](docs/install.md).
+Setup asks before changing Sysbox, Docker networking, the rules on your machine for the pods'
+network, host tools or task storage; it may restart Docker. It also installs or updates the
+vivibox skill for installed Claude Code and Codex CLIs. First launch builds the agent image. [Installation and uninstall](docs/install.md).
 
 In the view:
 

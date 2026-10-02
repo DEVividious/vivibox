@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from vivibox import image, toolchain
-from vivibox.config import HostService
+from vivibox.config import HostService, load_config
 from vivibox.pod import CA_BUNDLE, SOCKET, Pod
 from vivibox.pod_egress import helper_missing
 
@@ -71,9 +71,10 @@ def env():
     git("add", ".")
     git("commit", "-q", "-m", "Fixture project")
     ref, _ = image.build()
+    cfg = load_config()  # the host's address and the pool this machine was set up with
     pod = Pod(
         task_id, repo, ref, [HostService("host.docker.internal", allowed.server_address[1])],
-        gate_dir=tasks_dir / task_id / "gate",
+        gate_dir=tasks_dir / task_id / "gate", host_address=cfg.host_address, network_pool=cfg.network_pool,
     )  # fmt: skip
     try:
         pod.up()
@@ -155,6 +156,25 @@ def test_only_allowed_host_service_is_reachable(env):
     )
     assert agent(env, wget.format(gw, ok), check=False).returncode == 0
     assert agent(env, wget.format(gw, no), check=False).returncode != 0
+
+
+def test_every_dns_client_in_the_pod_asks_the_hosts_forwarder(env):
+    """The agent (Docker's resolver in the sidecar), the nested daemon's containers, and a query to
+    another server, which the host turns to the forwarder: each answers."""
+    assert agent(env, "getent hosts example.com", check=False).returncode == 0
+    nested = "docker run --rm alpine:3 nslookup example.com"
+    assert agent(env, nested, check=False).returncode == 0, "the nested daemon inherits --dns"
+    assert agent(env, nested + " 8.8.8.8", check=False).returncode == 0, "another server: DNAT"
+
+
+def test_root_in_a_nested_container_cannot_remove_the_rules(env):
+    """H10: a privileged container in the pod, on the sidecar's network, flushes all it sees."""
+    flush = "apk add -q --no-cache nftables iptables && nft flush ruleset; iptables -F; echo done"
+    out = agent(env, f"docker run --rm --privileged --network host alpine:3 sh -c '{flush}'", check=False)
+    assert "done" in out.stdout, out
+    gw, no = env["pod"].gateway(), env["denied"]
+    assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{gw}:{no}/", check=False).returncode != 0
+    assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{lan_ip()}:22/", check=False).returncode != 0
 
 
 def test_internet_is_reachable(env):

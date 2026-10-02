@@ -13,14 +13,20 @@
 #   - Docker networks moved off the ranges Docker uses inside Sysbox containers (restarts Docker);
 #   - Sysbox CE, the runtime for the per-task Docker sidecar;
 #   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev;
-#   - the egress firewall helper and a sudo rule that allows running only that helper;
+#   - the root helper (vivibox-host) and a sudo rule that allows running only that helper, in
+#     place of the old firewall helper (vivibox-netns) and its rule;
+#   - the host's address for the pods (network.host_address) on an interface of its own,
+#     vivibox0, and the nft table inet vivibox the pods' egress rules go in, through the helper,
+#     which refuses an address another interface or route already holds;
 #   - uv, in ~/.local/bin, and the vivibox command installed from this checkout;
 #   - the vivibox skill for Claude Code and Codex, where either is installed.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TASKS_DIR=${VIVIBOX_TASKS_DIR:-/srv/vivibox}
-HELPER=/usr/local/libexec/vivibox-netns
+HELPER=/usr/local/libexec/vivibox-host
+# What vivibox-host replaced; removed, with its sudo rule.
+OLD_HELPER=/usr/local/libexec/vivibox-netns
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
 PACKAGES=(git tmux jq libnotify-bin curl)
@@ -32,6 +38,9 @@ DOCKER_CANDIDATES=(172.20.0.0/16 172.25.0.0/16 172.{21..24}.0.0/16 172.{26..31}.
 # Where task networks are cut from unless config.toml's network.pool says otherwise; keep in step
 # with DEFAULT_NETWORK_POOL in vivibox/config.py.
 TASK_POOL=198.51.100.0/24
+# The host's address for the pods unless config.toml's network.host_address says otherwise; keep
+# in step with DEFAULT_HOST_ADDRESS in vivibox/config.py.
+HOST_ADDRESS=203.0.113.1/32
 CONFIG_TOML=${VIVIBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/vivibox}/config.toml
 SYSBOX_VERSION=0.7.1
 SYSBOX_DEB="sysbox-ce_${SYSBOX_VERSION}.linux_amd64.deb"
@@ -66,8 +75,9 @@ overlaps() {
   (($(($(ip2int "${a%/*}") & mask)) == $(($(ip2int "${b%/*}") & mask))))
 }
 
-# The bridges of vivibox's own task networks, br-<network id>: a route to one of them is the task
-# pool in use, not something else routed there. Nothing when Docker cannot be asked.
+# The bridges of vivibox's own task networks from before they were named vbx… (those are left out
+# by name in routed), br-<network id>: a route to one of them is the task pool in use, not
+# something else routed there. Nothing when Docker cannot be asked.
 task_bridges() {
   command -v docker >/dev/null || return 0
   docker network ls -q --filter 'name=^vivibox-.*-net$' 2>/dev/null | sed 's/^/br-/' || true
@@ -84,27 +94,77 @@ routed() {
   ip -4 route show table all | awk -v skip="$skip" '$1 ~ /^[0-9]+\./ {
     dev = ""
     for (i = 1; i < NF; i++) if ($i == "dev") dev = $(i + 1)
-    if (index(skip, " " dev " ")) next
+    if (index(skip, " " dev " ") || dev ~ /^vbx/) next
     bits = ($1 ~ /\//) ? substr($1, index($1, "/") + 1) + 0 : 32
     if (bits < 8) next
     print $1
   }'
 }
 
-# The pool vivibox cuts task networks from: network.pool in config.toml, as a [network] table or a
-# dotted key, else the default. Read by lines: setup runs before vivibox, and Python may not be here.
-task_pool() {
-  local found=""
-  [[ -r "$CONFIG_TOML" ]] && found=$(awk '
+# A key of [network] in config.toml, as a [network] table or a dotted key; nothing when it is not
+# there. Read by lines: setup runs before vivibox, and vivibox may not be installed yet.
+network_value() {
+  [[ -r "$CONFIG_TOML" ]] || return 0
+  awk -v want="$1" '
     { line = $0; sub(/[ \t]*#.*/, "", line) }
     line ~ /^[ \t]*\[/ { section = line; gsub(/[ \t\[\]]/, "", section); next }
     index(line, "=") {
       key = line; sub(/=.*/, "", key); gsub(/[ \t]/, "", key)
-      if ((section == "network" && key == "pool") || (section == "" && key == "network.pool")) {
+      if ((section == "network" && key == want) || (section == "" && key == "network." want)) {
         value = line; sub(/^[^=]*=/, "", value); gsub(/["\047 \t]/, "", value); print value; exit
       }
-    }' "$CONFIG_TOML")
+    }' "$CONFIG_TOML"
+}
+
+# The pool vivibox cuts task networks from: network.pool in config.toml, else the default.
+task_pool() {
+  local found
+  found=$(network_value pool)
   echo "${found:-$TASK_POOL}"
+}
+
+# The host's address for the pods, <ipv4>/32: network.host_address in config.toml, else the default.
+host_address() {
+  local found
+  found=$(network_value host_address)
+  found=${found:-$HOST_ADDRESS}
+  [[ $found == */* ]] || found=$found/32
+  echo "$found"
+}
+
+# The root helper is Python, and loads the pods' rules with nft: both must be here.
+required_tools() {
+  local missing=() tool
+  for tool in nft python3; do command -v "$tool" >/dev/null || missing+=("$tool"); done
+  ((${#missing[@]} == 0)) && return 0
+  echo "${missing[*]} not found: vivibox's root helper needs them; install them: sudo apt-get install nftables python3"
+  return 1
+}
+
+# The task layout this checkout runs (TASK_SCHEMA_VERSION in vivibox/task.py).
+schema_version() {
+  sed -n 's/^TASK_SCHEMA_VERSION = \([0-9][0-9]*\)$/\1/p' "$REPO/vivibox/task.py"
+}
+
+# The pods that run without this machine's rules for them: a task's from an earlier vivibox, or
+# one whose task is gone. "<id> earlier|gone" a line, each task once.
+legacy_pods() {
+  local current id version state
+  current=$(schema_version)
+  command -v docker >/dev/null || return 0
+  while read -r id; do
+    [[ -n $id ]] || continue
+    state=$TASKS_DIR/$id/.task/state.json
+    if [[ ! -f $state ]]; then
+      echo "$id gone"
+      continue
+    fi
+    version=$(python3 -c 'import json, sys
+v = json.load(open(sys.argv[1])).get("task_schema_version", 0)
+print(v if isinstance(v, int) and not isinstance(v, bool) else 0)' "$state" 2>/dev/null) || version=0
+    ((version < current)) && echo "$id earlier"
+  done < <(docker ps --filter label=vivibox.task --format '{{.Label "vivibox.task"}}' 2>/dev/null | sort -u)
+  return 0
 }
 
 # The Docker network a route leads to, by its bridge (br-<network id>); nothing for another route.
@@ -263,6 +323,7 @@ update() {
 [[ "$TASKS_DIR" == /* && "$TASKS_DIR" != "$HOME"* ]] || die "VIVIBOX_TASKS_DIR must be absolute and outside \$HOME"
 why=$(docker_problem)
 [[ -z "$why" ]] || die "$why"
+why=$(required_tools) || die "$why"
 
 echo "Checking host…"
 
@@ -332,21 +393,50 @@ else
   need "$TASKS_DIR as a nosuid,nodev bind mount in /etc/fstab" do_mount
 fi
 
-helper_state=$(copy_state "$HERE/vivibox-netns" "$HELPER")
+helper_state=$(copy_state "$HERE/vivibox-host" "$HELPER")
 if [[ $helper_state == same && "$(stat -c '%U %a' "$HELPER")" == "root 755" ]]; then
-  ok "firewall helper $HELPER"
+  ok "root helper $HELPER"
 elif [[ $helper_state == older ]]; then
-  update "firewall helper $HELPER to this checkout's host/vivibox-netns" do_helper
+  update "root helper $HELPER to this checkout's host/vivibox-host" do_helper
 else
-  need "firewall helper $HELPER (root-owned copy of host/vivibox-netns)" do_helper
+  need "root helper $HELPER (root-owned copy of host/vivibox-host)" do_helper
+fi
+
+if [[ -e "$OLD_HELPER" ]]; then
+  need "removal of the old firewall helper $OLD_HELPER, which vivibox-host replaces" do_old_helper
 fi
 
 SUDO_RULE="$USER ALL=(root) NOPASSWD: $HELPER"
-if sudo -n -l "$HELPER" >/dev/null 2>&1; then
-  ok "sudo rule for $HELPER"
-else
+if ! sudo -n -l "$HELPER" >/dev/null 2>&1; then
   need "sudo rule in $SUDOERS: $SUDO_RULE" do_sudoers
+elif [[ -e "$OLD_HELPER" ]] && sudo -n -l "$OLD_HELPER" >/dev/null 2>&1; then
+  update "sudo rule in $SUDOERS: only $HELPER, not $OLD_HELPER" do_sudoers
+else
+  ok "sudo rule for $HELPER"
 fi
+
+# The host's address for the pods, on vivibox0: checked first by this checkout's helper, which
+# refuses, naming it, an address another interface or a route already holds, or one in the pool.
+# A reboot takes vivibox0 and the rules away; a task's start makes them again.
+HOST_ADDR=$(host_address)
+ENGINE_JSON="{\"host_address\": \"$HOST_ADDR\", \"pool\": \"$pool\"}"
+if ! engine_said=$(python3 "$HERE/vivibox-host" --dry-run prepare-engine host "$ENGINE_JSON" 2>&1 >/dev/null); then
+  problem "${engine_said#vivibox-host: } (network.host_address in $CONFIG_TOML)"
+elif ip -4 -o addr show dev vivibox0 2>/dev/null | grep -qF " ${HOST_ADDR} "; then
+  ok "host address for the pods $HOST_ADDR on vivibox0"
+else
+  need "host address for the pods $HOST_ADDR on vivibox0, and the table for their egress rules" do_engine
+fi
+
+mapfile -t LEGACY < <(legacy_pods)
+for entry in "${LEGACY[@]}"; do
+  read -r id why <<<"$entry"
+  if [[ $why == gone ]]; then
+    problem "the pod of $id, whose task is gone, runs without this machine's egress rules: docker rm -f \$(docker ps -aq --filter label=vivibox.task=$id)"
+  else
+    problem "the pod of $id, a task from an earlier vivibox, runs without this machine's egress rules: delete it and create it again: vivibox delete $id"
+  fi
+done
 
 UV=$(command -v uv || echo "$BIN/uv")
 if [[ -x "$UV" ]]; then
@@ -456,7 +546,15 @@ do_mount() {
 
 do_helper() {
   sudo install -d -o root -g root -m 755 "$(dirname "$HELPER")"
-  sudo install -o root -g root -m 755 "$HERE/vivibox-netns" "$HELPER"
+  sudo install -o root -g root -m 755 "$HERE/vivibox-host" "$HELPER"
+}
+
+do_old_helper() {
+  sudo rm -f "$OLD_HELPER"
+}
+
+do_engine() {
+  sudo "$HELPER" prepare-engine host "$ENGINE_JSON"
 }
 
 do_sudoers() {

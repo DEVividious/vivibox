@@ -12,7 +12,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 - A pod's DNS queries to port 53, UDP or TCP, whatever server they name, go to a forwarder on your
   machine, which passes them to your machine's resolver unchanged; DNS over TLS (port 853) is
-  refused. DNS over HTTPS looks like any HTTPS and is not stopped yet. `vivibox hostd` runs
+  refused. DNS over HTTPS looks like any HTTPS and is not stopped yet. One pod holds at most a
+  quarter of the queries and connections the forwarder waits on, so a flood of names nobody
+  answers in one task leaves the others their DNS. `vivibox hostd` runs
   it, on `[network] host_address` (default `203.0.113.1/32`, an interface of its own,
   `vivibox0`) at port 5053, and the first task's start starts it; `vivibox hostd` says whether
   it runs, `start` and `stop` start and stop it. A pod does not start while it is down, a running

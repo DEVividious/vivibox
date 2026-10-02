@@ -15,15 +15,20 @@ import selectors
 import socket
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 # Where it listens on the host's services address; the host's rules turn port 53 into it.
 PORT = 5053
 RESOLV_CONF = Path("/etc/resolv.conf")
-# What one forwarder holds at once: queries waiting on the stub, and TCP connections.
+# What one forwarder holds at once: queries waiting on the stub, and TCP connections; and of each,
+# what one address (a pod) may hold, so that one task's flood of unanswered names leaves room for
+# every other task's DNS.
 PENDING_LIMIT = 512
 TCP_LIMIT = 64
+PER_SOURCE = PENDING_LIMIT // 4
+TCP_PER_SOURCE = TCP_LIMIT // 4
 DATAGRAM = 65535
 
 
@@ -63,6 +68,10 @@ class Forwarder:
         upstream: tuple[str, int],
         timeout: float = 5.0,
         on_query: Callable[[tuple, str], None] | None = None,
+        pending_limit: int = PENDING_LIMIT,
+        per_source: int = PER_SOURCE,
+        tcp_limit: int = TCP_LIMIT,
+        tcp_per_source: int = TCP_PER_SOURCE,
     ):
         try:
             if ipaddress.ip_address(listen[0]).is_unspecified:
@@ -74,6 +83,11 @@ class Forwarder:
         self.upstream = upstream
         self.timeout = timeout
         self.on_query = on_query
+        self.pending_limit, self.per_source = pending_limit, per_source
+        self.tcp_limit, self.tcp_per_source = tcp_limit, tcp_per_source
+        self.waiting: Counter[str] = Counter()  # queries waiting on the stub, by source address
+        self.connected: Counter[str] = Counter()  # TCP connections, by source address
+        self.counting = threading.Lock()
         self.stopped = threading.Event()
         self.udp = socket.socket(family(listen[0]), socket.SOCK_DGRAM)
         self.tcp = socket.socket(family(listen[0]), socket.SOCK_STREAM)
@@ -81,12 +95,11 @@ class Forwarder:
             self.udp.bind(listen)
             self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.tcp.bind((listen[0], self.udp.getsockname()[1]))
-            self.tcp.listen(TCP_LIMIT)
+            self.tcp.listen(tcp_limit)
         except OSError:
             self.udp.close()
             self.tcp.close()
             raise
-        self.connections = threading.BoundedSemaphore(TCP_LIMIT)
         # Where it listens, the port the system picked for port 0 included.
         self.address: tuple[str, int] = self.udp.getsockname()[:2]
 
@@ -125,7 +138,7 @@ class Forwarder:
             return
         if self.on_query:
             self.on_query(peer, "udp")
-        if len(pending) >= PENDING_LIMIT:
+        if len(pending) >= self.pending_limit or self.waiting[peer[0]] >= self.per_source:
             return
         up = socket.socket(family(self.upstream[0]), socket.SOCK_DGRAM)
         try:
@@ -137,6 +150,7 @@ class Forwarder:
             return
         sel.register(up, selectors.EVENT_READ, peer)
         pending[up] = (peer, time.monotonic() + self.timeout)
+        self.waiting[peer[0]] += 1
 
     def _answer(self, sel: selectors.BaseSelector, pending: dict, up) -> None:
         peer, _ = pending.get(up, (None, 0))
@@ -148,9 +162,11 @@ class Forwarder:
             pass  # the stub refused (nothing listens there): no answer
         self._drop(sel, pending, up)
 
-    @staticmethod
-    def _drop(sel: selectors.BaseSelector, pending: dict, up) -> None:
-        pending.pop(up, None)
+    def _drop(self, sel: selectors.BaseSelector, pending: dict, up) -> None:
+        if (found := pending.pop(up, None)) is not None:
+            self.waiting[found[0][0]] -= 1
+            if self.waiting[found[0][0]] <= 0:
+                del self.waiting[found[0][0]]
         with contextlib.suppress(KeyError, ValueError):
             sel.unregister(up)
         up.close()
@@ -162,12 +178,19 @@ class Forwarder:
             return
         if self.on_query:
             self.on_query(peer, "tcp")
-        if not self.connections.acquire(blocking=False):
+        with self.counting:
+            room = (
+                sum(self.connected.values()) < self.tcp_limit
+                and self.connected[peer[0]] < self.tcp_per_source
+            )
+            if room:
+                self.connected[peer[0]] += 1
+        if not room:
             conn.close()
             return
-        threading.Thread(target=self._relay, args=(conn,), daemon=True).start()
+        threading.Thread(target=self._relay, args=(conn, peer[0]), daemon=True).start()
 
-    def _relay(self, conn: socket.socket) -> None:
+    def _relay(self, conn: socket.socket, source: str) -> None:
         """Bytes both ways between the pod's connection and one to the stub, until both ends
         close or nothing moves for a while."""
         try:
@@ -195,4 +218,7 @@ class Forwarder:
         except OSError:
             pass
         finally:
-            self.connections.release()
+            with self.counting:
+                self.connected[source] -= 1
+                if self.connected[source] <= 0:
+                    del self.connected[source]

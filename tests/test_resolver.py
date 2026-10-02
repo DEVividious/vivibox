@@ -336,3 +336,136 @@ def test_vivibox_hostd_run_listens_only_on_the_hosts_address_for_the_pods(env, m
 def test_the_forwarder_never_listens_on_every_interface(address):
     with pytest.raises(resolver.ResolverError, match="every interface"):
         resolver.Forwarder((address, 0), ("127.0.0.1", 53))
+
+
+# --- what one client may hold of the forwarder ------------------------------------------------------
+
+
+class Quiet:
+    """A stub that answers only queries starting with b"answer-me", as one whose name servers
+    are dead answers nothing: what a flood of random names leaves waiting. Over TCP it accepts and
+    holds every connection."""
+
+    def __init__(self):
+        self.got: list[bytes] = []
+        self.held: list[socket.socket] = []
+        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp.bind(("127.0.0.1", 0))
+        self.port = self.udp.getsockname()[1]
+        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.tcp.bind(("127.0.0.1", self.port))
+        self.tcp.listen(64)
+        threading.Thread(target=self.serve_udp, daemon=True).start()
+        threading.Thread(target=self.serve_tcp, daemon=True).start()
+
+    def serve_udp(self):
+        while True:
+            try:
+                data, peer = self.udp.recvfrom(65535)
+            except OSError:
+                return
+            self.got.append(data)
+            if data.startswith(b"answer-me"):
+                self.udp.sendto(b"answered", peer)
+
+    def serve_tcp(self):
+        while True:
+            try:
+                self.held.append(self.tcp.accept()[0])
+            except OSError:
+                return
+
+    def close(self):
+        for s in [self.udp, self.tcp, *self.held]:
+            s.close()
+
+
+@pytest.fixture
+def quiet():
+    q = Quiet()
+    yield q
+    q.close()
+
+
+def send_from(source: str, address, data: bytes, wait: float = 0.0) -> bytes | None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind((source, 0))
+        s.settimeout(wait or 0.01)
+        s.sendto(data, address)
+        if not wait:
+            return None
+        try:
+            return s.recvfrom(65535)[0]
+        except TimeoutError:
+            return None
+
+
+def settled(check, seconds: float = 2.0) -> None:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not check():
+        time.sleep(0.02)
+    time.sleep(0.2)  # and nothing more arrives
+
+
+def test_one_source_holds_at_most_its_share_of_the_waiting_queries(quiet):
+    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    try:
+        for n in range(10):
+            send_from("127.0.0.2", f.address, b"q%d" % n)
+        settled(lambda: len(quiet.got) >= 2)
+        assert len(quiet.got) == 2, "its share, not the forwarder's whole room"
+    finally:
+        f.stop()
+
+
+def test_all_sources_together_hold_at_most_the_forwarders_room(quiet):
+    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    try:
+        for source in range(2, 8):
+            for n in range(2):
+                send_from(f"127.0.0.{source}", f.address, b"q%d" % n)
+        settled(lambda: len(quiet.got) >= 8)
+        assert len(quiet.got) == 8
+    finally:
+        f.stop()
+
+
+def test_a_flood_of_unanswered_queries_from_one_pod_leaves_room_for_another(quiet):
+    """The review's case: one task asking random names whose servers never answer took every
+    waiting slot, and another task's DNS went unanswered."""
+    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    try:
+        for n in range(50):
+            send_from("127.0.0.2", f.address, b"q%d" % n)
+        assert send_from("127.0.0.3", f.address, b"answer-me", wait=2) == b"answered"
+    finally:
+        f.stop()
+
+
+def test_the_default_share_is_a_quarter():
+    assert resolver.PER_SOURCE == resolver.PENDING_LIMIT // 4
+    assert resolver.TCP_PER_SOURCE == resolver.TCP_LIMIT // 4
+
+
+def connect_from(source: str, address) -> socket.socket:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((source, 0))
+    s.connect(address)
+    return s
+
+
+def test_tcp_connections_are_held_to_a_share_and_to_the_forwarders_room(quiet):
+    f = forwarding(("127.0.0.1", quiet.port), tcp_limit=4, tcp_per_source=1)
+    mine = []
+    try:
+        mine += [connect_from("127.0.0.2", f.address) for _ in range(3)]
+        settled(lambda: len(quiet.held) >= 1)
+        assert len(quiet.held) == 1, "one source: its share"
+        mine += [connect_from(f"127.0.0.{n}", f.address) for n in range(3, 9)]
+        settled(lambda: len(quiet.held) >= 4)
+        assert len(quiet.held) == 4, "all sources: the forwarder's room"
+    finally:
+        for s in mine:
+            s.close()
+        f.stop()

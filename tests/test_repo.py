@@ -727,3 +727,86 @@ def test_a_change_while_a_task_recorded_before_is_recorded_again_is_not_recorded
         r.check_protection(repo, meta)
     record = json.loads((meta / r.PROTECTION_RECORD).read_text())
     assert record.get(".git/commondir", protection.ABSENT) == protection.ABSENT
+
+
+# --- Reading an index takes time in proportion to it, whatever the agent wrote -------------------
+
+
+def _v4_index_with_varint(run: int) -> bytes:
+    """A version-4 index of one entry whose name's prefix length is a run of continuation bytes."""
+    import struct
+
+    entry = b"\0" * 24 + struct.pack(">I", 0o100644) + b"\0" * 12 + b"\0" * 20 + struct.pack(">H", 1)
+    return b"DIRC" + struct.pack(">II", 4, 1) + entry + b"\xff" * run + b"\x00" + b"a\0" + b"\0" * 20
+
+
+def timed(call, seconds: float):
+    """call's result or error, and how long it took; a failure past seconds, never a hang."""
+    import time
+
+    began = time.monotonic()
+    said = in_time(call, seconds)
+    return said, time.monotonic() - began
+
+
+@pytest.mark.parametrize("run", [240_000, 1 << 20])
+def test_a_long_varint_in_the_index_is_refused_at_once(cloned, run):
+    _, repo, meta, _ = cloned
+    (repo / ".git" / "index").write_bytes(_v4_index_with_varint(run))
+    said, took = timed(lambda: r.check_protection(repo, meta), 10)
+    assert isinstance(said, r.RepoError) and ".git/index is an index vivibox cannot read" in str(said), said
+    assert took < 1, f"{took:.1f} s"
+
+
+@pytest.mark.parametrize("version", ["2", "4"])
+def test_a_large_index_of_a_real_repository_is_read_in_time(cloned, version):
+    """100,000 files, more than most repositories: read in well under a second, and passed."""
+    _, repo, meta, _ = cloned
+    blob = git(repo, "hash-object", "-w", "--stdin")
+    lines = "".join(f"100644 {blob}\tsrc/module-{n % 300}/pkg/sub/File{n}.java\n" for n in range(100_000))
+    subprocess.run(["git", "update-index", "--index-info"], cwd=repo, input=lines, text=True, check=True)
+    git(repo, "update-index", "--index-version", version)
+    said, took = timed(lambda: r.check_protection(repo, meta), 10)
+    assert said is None, said
+    assert took < 1, f"{took:.1f} s"
+
+
+def test_an_index_past_the_limit_is_refused_without_being_read(cloned, monkeypatch):
+    from vivibox import protection
+
+    _, repo, meta, _ = cloned
+    index = repo / ".git" / "index"
+    with index.open("r+b") as f:  # sparse: no disk for the test
+        f.truncate(protection.INDEX_LIMIT + 1)
+    read = []
+    real = os.read
+
+    def counted(fd, n):
+        chunk = real(fd, n)
+        read.append(len(chunk))
+        return chunk
+
+    monkeypatch.setattr(os, "read", counted)
+    said, took = timed(lambda: r.check_protection(repo, meta), 10)
+    assert isinstance(said, r.RepoError), said
+    assert f".git/index is larger than {protection.INDEX_LIMIT >> 20} MiB" in str(said)
+    assert protection.INDEX_LIMIT <= 128 << 20, "a limit a real repository's index stays far under"
+    assert sum(read) < 1 << 20, "not read"
+
+
+def test_an_index_refused_is_not_read_again_until_it_changes(cloned, monkeypatch):
+    from vivibox import protection
+
+    _, repo, meta, _ = cloned
+    (repo / ".git" / "index").write_bytes(_v4_index_with_varint(100))
+    parsed = []
+    real = protection.gitlinks
+    monkeypatch.setattr(protection, "gitlinks", lambda *a: parsed.append(1) or real(*a))
+    for _ in range(3):
+        with pytest.raises(r.RepoError, match="an index vivibox cannot read"):
+            r.check_protection(repo, meta)
+    assert len(parsed) == 1
+    (repo / ".git" / "index").write_bytes(_v4_index_with_varint(101))
+    with pytest.raises(r.RepoError, match="an index vivibox cannot read"):
+        r.check_protection(repo, meta)
+    assert len(parsed) == 2

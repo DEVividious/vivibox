@@ -37,8 +37,17 @@ from .handoff import FLAGS
 RECORD = "git-protection.json"
 FORMAT = 2
 LIMIT = 1 << 20
-# An index of a few million files; past it vivibox cannot tell which submodules git goes into.
-INDEX_LIMIT = 1 << 30
+# An index is about 80 to 140 bytes a file: 100,000 files are 8 MB, and 128 MiB is a million files
+# or more, read in about half a second (two million entries of the least size, the agent's worst,
+# in 1.4 s, once). Past it vivibox reads none of it, and refuses the clone: it cannot tell which
+# submodules git goes into.
+INDEX_LIMIT = 128 << 20
+# A name in the index: past it no system checks the file out (PATH_MAX is 4096 on Linux).
+MAX_NAME = 4096
+# Bytes of a name's prefix length in a version-4 index: 3 hold MAX_NAME.
+VARINT = 10
+# Submodules in one index: far above any repository's; each costs a name to copy.
+MAX_GITLINKS = 10_000
 # Entries of .git/modules and of hooks looked at in one pass, whatever the agent put there.
 MAX_ENTRIES = 10_000
 # Folders .git/modules may hold one in another: submodules of submodules, names with a / in them.
@@ -259,9 +268,10 @@ def _hash_length(root: Path, git_dir: str) -> int:
     return 20
 
 
-# The submodules an index lists, by what its file was when it was read: the inode and the change
-# time say a file was written since, and the agent cannot set a change time.
-_LISTED: dict[tuple, list[str]] = {}
+# What an index lists, or why vivibox cannot read it, by what its file was when it was read: the
+# inode and the change time say a file was written since, and the agent cannot set a change time.
+# An index refused is not read again until it changes.
+_LISTED: dict[tuple, list[str] | str] = {}
 
 
 def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
@@ -287,21 +297,29 @@ def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
             key = (str(root), git_dir, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
                    info.st_ctime_ns, hash_length)  # fmt: skip
             if key not in _LISTED:
-                data = b""
-                while len(data) <= INDEX_LIMIT and (chunk := os.read(f, INDEX_LIMIT + 1 - len(data))):
-                    data += chunk
-                if len(data) > INDEX_LIMIT or info.st_size > INDEX_LIMIT:
-                    return f"{display.name(index)} is larger than {INDEX_LIMIT >> 20} MiB"
-                try:
-                    listed = gitlinks(data, hash_length)
-                except ValueError:
-                    return f"{display.name(index)} is an index vivibox cannot read"
                 if len(_LISTED) > 64:
                     _LISTED.clear()
-                _LISTED[key] = listed
+                _LISTED[key] = _listed(f, info.st_size, hash_length, display.name(index))
             return _LISTED[key]
         finally:
             os.close(f)
+
+
+def _listed(f: int, size: int, hash_length: int, index: str) -> list[str] | str:
+    """The submodules the index open at f lists; why not, never reading past INDEX_LIMIT."""
+    too_large = f"{index} is larger than {INDEX_LIMIT >> 20} MiB"
+    if size > INDEX_LIMIT:
+        return too_large
+    chunks, read = [], 0
+    while read <= INDEX_LIMIT and (chunk := os.read(f, min(1 << 24, INDEX_LIMIT + 1 - read))):
+        chunks.append(chunk)
+        read += len(chunk)
+    if read > INDEX_LIMIT:  # it grew since its size was looked at
+        return too_large
+    try:
+        return gitlinks(b"".join(chunks), hash_length)
+    except ValueError:
+        return f"{index} is an index vivibox cannot read"
 
 
 def gitlinks(data: bytes, hash_length: int = 20) -> list[str]:
@@ -316,34 +334,48 @@ def gitlinks(data: bytes, hash_length: int = 20) -> list[str]:
         raise ValueError(f"an index vivibox cannot read: {e!r}") from None
 
 
+_MODE, _FLAGS, _SIZES = struct.Struct(">I"), struct.Struct(">H"), struct.Struct(">4sI")
+
+
 def _gitlinks_of(data: bytes, hash_length: int) -> list[str]:
+    """One pass over data, each byte looked at a bounded number of times: a name, a prefix's
+    length and the submodules are bounded too, whatever the agent wrote."""
     if data[:4] != b"DIRC":
         raise ValueError("no index")
     version, count = struct.unpack_from(">II", data, 4)
     if version not in (2, 3, 4):
         raise ValueError(f"index version {version}")
-    fixed, pos, previous, found = 40 + hash_length, 12, b"", []
+    fixed, pos, previous, found = 40 + hash_length, 12, bytearray(), []
+    mode_of, flags_of, find = _MODE.unpack_from, _FLAGS.unpack_from, data.find
     for _ in range(count):
-        mode = struct.unpack_from(">I", data, pos + 24)[0]
-        flags = struct.unpack_from(">H", data, pos + fixed)[0]
-        head = fixed + (4 if flags & 0x4000 else 2)
+        mode = mode_of(data, pos + 24)[0]
+        head = fixed + (4 if flags_of(data, pos + fixed)[0] & 0x4000 else 2)
         start = pos + head
         if version == 4:
             strip, start = _varint(data, start)
             if strip > len(previous):
                 raise ValueError("a name that strips more than the one before")
-            end = data.index(b"\0", start)
-            path = previous[: len(previous) - strip] + data[start:end]
+            end = find(b"\0", start, start + MAX_NAME + 1)
+            if end < 0:
+                raise ValueError("a name past its limit, or not ended")
+            del previous[len(previous) - strip :]
+            previous += data[start:end]
+            if len(previous) > MAX_NAME:
+                raise ValueError("a name past its limit")
             pos = end + 1
+            path = previous
         else:
-            end = data.index(b"\0", start)
+            end = find(b"\0", start, start + MAX_NAME + 1)
+            if end < 0:
+                raise ValueError("a name past its limit, or not ended")
             path = data[start:end]
-            pos += (head + len(path) + 8) & ~7
-        previous = path
+            pos += (head + end - start + 8) & ~7
         if mode == 0o160000:
-            found.append(os.fsdecode(path))
+            if len(found) >= MAX_GITLINKS:
+                raise ValueError(f"more than {MAX_GITLINKS} submodules")
+            found.append(os.fsdecode(bytes(path)))
     while pos + 8 <= len(data) - hash_length:
-        signature, size = data[pos : pos + 4], struct.unpack_from(">I", data, pos + 4)[0]
+        signature, size = _SIZES.unpack_from(data, pos)
         if signature in (b"link", b"sdir"):
             raise ValueError("a split or sparse index")
         pos += 8 + size
@@ -351,14 +383,17 @@ def _gitlinks_of(data: bytes, hash_length: int) -> list[str]:
 
 
 def _varint(data: bytes, pos: int) -> tuple[int, int]:
-    """git's offset varint at pos, and where what follows it starts."""
+    """git's offset varint at pos, and where what follows it starts; at most VARINT bytes, so that
+    a run of continuation bytes costs nothing (a value past MAX_NAME strips more than any name)."""
     c = data[pos]
     value, pos = c & 0x7F, pos + 1
-    while c & 0x80:
+    for _ in range(VARINT):
+        if not c & 0x80:
+            return value, pos
         c = data[pos]
         value = ((value + 1) << 7) | (c & 0x7F)
         pos += 1
-    return value, pos
+    raise ValueError("a prefix length of more bytes than any name needs")
 
 
 def _home(root: Path, rel: str, dirs: list[str]) -> str | None:

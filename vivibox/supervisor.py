@@ -702,7 +702,8 @@ class Supervisor(ReviewRound):
     def _briefly(self, environment: str) -> str:
         """For a notification: the task's own files by their place in it, so the sentence fits;
         vivibox status gives the whole path."""
-        return environment.replace(f"{self.task.meta}/", "")[:150]
+        said = environment.replace(f"{self.task.meta}/", "").replace(f"{self.task.repo}/", "")
+        return said if len(said) <= 150 else said[:150].rsplit(" ", 1)[0] + "…"  # never in a word
 
     def _whole_build_holds(self, st: TaskState) -> bool:
         """The whole build, when the work is about to come to you and it was verified by its modules

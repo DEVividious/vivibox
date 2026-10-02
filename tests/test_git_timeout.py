@@ -73,7 +73,8 @@ def fifo(clone: Path, rel: str) -> None:
     os.mkfifo(path)
 
 
-WHERE_GIT_READS = [".gitignore", "sub/.gitignore", ".gitattributes", ".git/info/exclude"]
+# .git/packed-refs: rev-parse HEAD, the verification's first question, waits on it too.
+WHERE_GIT_READS = [".gitignore", "sub/.gitignore", ".gitattributes", ".git/info/exclude", ".git/packed-refs"]
 
 
 @pytest.mark.parametrize("rel", WHERE_GIT_READS)
@@ -166,19 +167,61 @@ def test_the_work_is_not_fetched_when_the_clone_does_not_answer(stuck, source):
     """git fetch runs in your checkout but reads the clone's refs."""
     said = in_time(lambda: repo.fetch_to(source, stuck.repo, stuck.meta, stuck.id))
     assert isinstance(said, repo.GitTimeout), f"taken as an answer: {said!r}"
-    assert "fetch" in str(said)
+    assert str(said).startswith("the work could not be brought back from the task's clone: git fetch")
+    assert f"vivibox status {stuck.id}" in str(said)
     shown = subprocess.run(["git", "for-each-ref", "refs/vivibox/"], cwd=source, capture_output=True)
     assert shown.stdout == b"", "nothing of the task's in your checkout"
 
 
-def test_a_box_does_not_close_when_the_clone_does_not_answer(stuck, monkeypatch):
-    monkeypatch.setattr(box, "commit_in_box", lambda task: None)  # in the pod, which is not here
-    stuck.set_box()
-    stuck.transition(State.CHECKPOINT_PLAN)
-    stuck.transition(State.IMPLEMENT)
-    said = in_time(lambda: box.close_box(stuck, None))
+class LocalPod:
+    """The box's pod, its docker exec run here, in the clone, as docker exec -w <clone> runs it."""
+
+    def __init__(self, clone: Path):
+        self.repo = clone
+
+    def exec(self, *cmd, check=True):
+        from vivibox.pod import PodError
+
+        p = subprocess.run(list(cmd), cwd=self.repo, capture_output=True, text=True)
+        if check and p.returncode != 0:
+            raise PodError(f"{' '.join(cmd[:4])}…: {p.stderr.strip()}")
+        return p
+
+
+def a_box(task, monkeypatch):
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
+    for who in ("AUTHOR", "COMMITTER"):  # the pod's gitconfig, which is not here
+        monkeypatch.setenv(f"GIT_{who}_NAME", "You")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "you@example.com")
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: LocalPod(task.repo))
+    task.set_box()
+    task.transition(State.CHECKPOINT_PLAN)
+    task.transition(State.IMPLEMENT)
+    return task
+
+
+@pytest.mark.parametrize("rel", [".gitignore", ".gitattributes", ".git/packed-refs"])
+def test_a_box_does_not_close_when_the_clone_does_not_answer(task, monkeypatch, rel):
+    """Its commit runs in the pod, where your shell is: git there is killed, not the container."""
+    box_ = a_box(task, monkeypatch)
+    (box_.repo / "work.txt").write_text("by hand\n")
+    fifo(box_.repo, rel)
+    said = in_time(lambda: box.close_box(box_, None))
     assert isinstance(said, repo.GitTimeout), f"taken as an answer: {said!r}"
-    assert stuck.read_state().state is State.IMPLEMENT, "not brought to review"
+    assert str(said).startswith("the box could not close: git ")
+    assert f"{rel} is a named pipe (FIFO)" in str(said) and f"vivibox accept {box_.id}" in str(said)
+    assert box_.read_state().state is State.IMPLEMENT, "not brought to review"
+
+
+def test_a_box_with_nothing_wrong_still_closes(task, monkeypatch):
+    box_ = a_box(task, monkeypatch)
+    (box_.repo / "work.txt").write_text("by hand\n")
+    monkeypatch.setattr(actions, "prepare_review", lambda task, project: Path("review"))
+    from types import SimpleNamespace
+
+    assert box.close_box(box_, SimpleNamespace(risky_extra=[])) == Path("review")
+    shown = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=box_.repo, capture_output=True, text=True)
+    assert shown.stdout.strip() == box.BOX_COMMIT
 
 
 def test_the_risky_check_scans_everything_when_git_cannot_say_what_it_ignores(task, monkeypatch):
@@ -255,7 +298,20 @@ def test_the_reason_says_what_timed_out_and_what_to_do(task):
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
     assert said.startswith(f"git status did not answer in {LIMIT} s: ")
     assert f"{task.repo / '.gitattributes'} is a named pipe (FIFO)" in said
-    assert said.endswith("delete it")
+    assert said.endswith(f"delete it: rm {task.repo / '.gitattributes'}")
+
+
+def test_a_file_the_commits_have_is_restored_not_deleted(task):
+    """Deleted, a committed .gitattributes is an uncommitted change, and the next verification
+    spends a round of the writer's on it. (A committed .gitignore git reads from its index.)"""
+    (task.repo / ".gitattributes").write_text("* text=auto\n")
+    subprocess.run(["git", "add", ".gitattributes"], cwd=task.repo, check=True)
+    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "Line endings"],
+                   cwd=task.repo, check=True)  # fmt: skip
+    fifo(task.repo, ".gitattributes")
+    said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    assert said.endswith(f"restore it from the commits: git -C {task.repo} checkout -- .gitattributes")
+    assert "rm " not in said
 
 
 def test_the_reason_without_a_special_file_found_names_where_to_look(task, tmp_path, monkeypatch):
@@ -269,8 +325,9 @@ def test_the_reason_without_a_special_file_found_names_where_to_look(task, tmp_p
     assert ".gitignore" in said and ".git/info/exclude" in said
 
 
-def test_what_the_verification_asks_the_clone_before_it_runs_ends_it_the_same_way(env, monkeypatch):
-    """By modules, the changed files decide what is built: asked of git before the gate runs."""
+def by_modules(env, monkeypatch, **settings):
+    """The command line's supervisor of a task in a project verified by its modules, its plan
+    accepted, and its clone's refs a FIFO; and the list of gate runs it reached."""
     from test_supervise import config
 
     from vivibox import supervise
@@ -279,8 +336,8 @@ def test_what_the_verification_asks_the_clone_before_it_runs_ends_it_the_same_wa
     from vivibox.task import find_task
 
     path = env / "config" / "projects" / "demo.toml"
-    by_modules = 'verify = ["mvn -pl {modules} -am verify"]'
-    path.write_text(path.read_text().replace('verify = ["true"]', by_modules))
+    command = 'verify = ["mvn -pl {modules} -am verify"]'
+    path.write_text(path.read_text().replace('verify = ["true"]', command))
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     t = find_task(supervise.load_config().tasks_dir, "demo-1")
     (t.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
@@ -296,11 +353,60 @@ def test_what_the_verification_asks_the_clone_before_it_runs_ends_it_the_same_wa
         def review_side(self):
             return self
 
-    sup = supervise.make_supervisor(t, load_project("demo"), Pod(), config())
+    sup = supervise.make_supervisor(t, load_project("demo"), Pod(), config(**settings))
     fifo(t.repo, ".git/packed-refs")
+    return t, sup, built
+
+
+def test_what_the_verification_asks_the_clone_before_it_runs_ends_it_the_same_way(env, monkeypatch):
+    """By modules, the changed files decide what is built: asked of git before the gate runs."""
+    t, sup, built = by_modules(env, monkeypatch)
     result = in_time(lambda: sup.ports.run_gate(t))
     assert isinstance(result, gate.GateResult), f"the verification raised instead: {result!r}"
     assert not result.passed and "did not answer" in result.environment and built == []
+
+
+def test_the_whole_build_before_review_ends_the_same_way(env, monkeypatch):
+    t, sup, built = by_modules(env, monkeypatch, whole_build_before_review=True)
+    result = in_time(lambda: sup.ports.run_whole_gate(t))
+    assert isinstance(result, gate.GateResult), f"the verification raised instead: {result!r}"
+    assert not result.passed and "did not answer" in result.environment and built == []
+
+
+def test_the_supervisor_asks_where_the_work_stands_within_the_limit(env, monkeypatch):
+    """Before a review and at the end, it compares the clone's HEAD with what was verified."""
+    t, sup, _ = by_modules(env, monkeypatch)
+    said = in_time(sup.ports.head)
+    assert isinstance(said, repo.GitTimeout), f"taken as an answer: {said!r}"
+    assert ".git/packed-refs" in str(said)
+
+
+def test_the_notification_names_the_file_from_the_clones_root_whole(tmp_path, monkeypatch):
+    """Under a long tasks folder the clone's own path would take the notification's whole length."""
+    source = make_repo(tmp_path / "source")
+    t = create_task(tmp_path / ("a-long-folder-for-tasks-" * 3) / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    Approvals(t.meta, t.repo).approve()
+    monkeypatch.setattr(repo, "CLONE_TIMEOUT", LIMIT, raising=False)
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        t.transition(s)
+    fifo(t.repo, "src/main/resources/.gitignore")
+    notes = []
+    ports = supervisor.Ports(
+        run_gate=lambda x: gate.run_gate(x, FakePod(), ["make test"], []),
+        risky_changes=lambda: [],
+        notify=lambda _id, msg, kind="": notes.append(msg),
+        sleep=lambda seconds: None,
+    )
+    sup = supervisor.Supervisor(t, FakeHarness(t), ports, max_rounds=3, project_verify=["make test"])
+    sup.step()  # implement
+    in_time(sup.step)  # verify
+    assert "src/main/resources/.gitignore is a named pipe (FIFO)" in notes[-1]
+    assert str(t.repo) not in notes[-1] and "press g" in notes[-1]
+    said = notes[-1].removeprefix("verification could not run: ").split("; fix it, then press g")[0]
+    whole = ui.environment_problem(t).replace(f"{t.repo}/", "")
+    cut = said.removesuffix("…")
+    assert said == whole or (said.endswith("…") and whole[len(cut)] == " "), "never cut in a word"
 
 
 class BlockingDocker:
@@ -308,8 +414,8 @@ class BlockingDocker:
     the container is removed, as git on a FIFO does. The FIFO is made as git starts there: by a
     process the agent left in its pod, after every check the host made."""
 
-    def __init__(self, clone: Path, waits_on: str):
-        self.clone, self.waits_on = clone, waits_on
+    def __init__(self, clone: Path, waits_on: str, make_fifo: bool = True):
+        self.clone, self.waits_on, self.make_fifo = clone, waits_on, make_fifo
         self.calls: list[list[str]] = []
         self.waiting: dict[str, threading.Event] = {}
 
@@ -320,7 +426,8 @@ class BlockingDocker:
             for name in cmd[3:]:
                 self.waiting.pop(name, threading.Event()).set()
         elif cmd[:2] == ["docker", "exec"] and "git" in cmd and cmd[cmd.index("git") + 1] == self.waits_on:
-            fifo(self.clone, ".git/packed-refs")
+            if self.make_fifo:
+                fifo(self.clone, ".git/packed-refs")
             removed = self.waiting[cmd[4]] = threading.Event()  # docker exec -w DIR CONTAINER git …
             removed.wait(timeout=60)
             return subprocess.CompletedProcess(cmd, 137, "", "")
@@ -393,5 +500,18 @@ def test_the_reviewers_clone_of_a_clone_that_does_not_answer_stops_the_round_for
     assert st.state is State.REVIEW and st.reviews == 0, "no review taken, empty or passing"
     assert "git clone did not answer" in st.problem and ".git/packed-refs" in st.problem
     assert "git clone did not answer" in notes[-1]
+    assert st.problem.startswith("stopped on an error: the review could not start: git clone")
+    assert f"vivibox start {task.id}" in st.problem
     assert reviewer.prompts == [] and not (task.meta / "handoff" / "review-1.md").exists()
     assert docker.removed_after(pod.review, "clone"), "the review container, and git in it, went down"
+
+
+def test_a_copy_that_did_not_finish_without_a_special_file_is_not_blamed_on_one(task, tmp_path, monkeypatch):
+    """A large repository, or its submodules over a slow network, take long with nothing wrong."""
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
+    docker = BlockingDocker(task.repo, "clone", make_fifo=False)
+    result = in_time(lambda: gate.run_gate(task, a_pod(task, docker, tmp_path), ["make test"], []))
+    assert isinstance(result, gate.GateResult), f"the verification raised instead: {result!r}"
+    assert result.environment.startswith(f"git clone did not finish in {LIMIT} s in {task.repo}: ")
+    assert "very large repository" in result.environment and "submodules" in result.environment
+    assert "named pipe (FIFO) where" not in result.environment and not result.passed

@@ -5,6 +5,7 @@ through actions, like everything the view and the command line call.
 from __future__ import annotations
 
 import shutil
+import time
 from importlib.resources import files
 from pathlib import Path
 
@@ -117,9 +118,28 @@ def commit_in_box(task: Task) -> None:
     """What you left uncommitted is committed, in the pod, as you: accepting flattens the work
     to uncommitted changes in your checkout anyway, so the message is never seen."""
     pod = actions.task_pod(task.id)
-    pod.exec("git", "add", "-A")
-    if pod.exec("git", "diff", "--cached", "--quiet", check=False).returncode != 0:
-        pod.exec("git", "commit", "-q", "-m", BOX_COMMIT)
+    _git_in_box(pod, "add", "-A")
+    if _git_in_box(pod, "diff", "--cached", "--quiet", check=False).returncode != 0:
+        _git_in_box(pod, "commit", "-q", "-m", BOX_COMMIT)
+
+
+# How `timeout -s KILL` ends when it killed git: it signals its own process group, itself in it,
+# so docker exec says 128 + 9, and a process run here says -9.
+KILLED = (128 + 9, -9)
+
+
+def _git_in_box(pod, *args: str, check: bool = True):
+    """git in the box's clone, which an agent you ran there may have written (a named pipe where git
+    reads its settings makes it wait forever). Your shell is in that container, so it stays up:
+    git is killed in it past repo.COPY_TIMEOUT, as add and commit hash whatever you made."""
+    seconds = repo.COPY_TIMEOUT
+    began = time.monotonic()
+    p = pod.exec("timeout", "-s", "KILL", f"{seconds:g}", "git", *args, check=False)
+    if p.returncode in KILLED and time.monotonic() - began >= seconds:
+        raise repo.timed_out(args, seconds, pod.repo, "a very large set of new files")
+    if check and p.returncode != 0:
+        raise PodError(f"git {' '.join(args[:3])}…: {(p.stderr or p.stdout).strip()}")
+    return p
 
 
 def close_box(task: Task, project: Project) -> Path | None:
@@ -129,8 +149,13 @@ def close_box(task: Task, project: Project) -> Path | None:
     st = task.read_state()
     if not st.box or st.state is not State.IMPLEMENT:
         raise gate.GateError(f"{task.id} is not an open box")
-    commit_in_box(task)
-    head = repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
+    try:
+        commit_in_box(task)
+        head = repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
+    except repo.GitTimeout as e:
+        raise repo.GitTimeout(
+            f"the box could not close: {e}; then try again: vivibox accept {task.id}"
+        ) from None
     if head == st.base_commit:
         raise gate.GateError(f"nothing changed in {task.id}; there is nothing to bring back")
     task.transition(State.VERIFY, reason="box closed")

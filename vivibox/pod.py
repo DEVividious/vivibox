@@ -78,6 +78,10 @@ def ca_digest() -> str:
         return ""
 
 
+# What makes a copy of the task's clone slow with nothing wrong in it.
+COPYING_IS_SLOW = "a very large repository, or a slow fetch of its submodules over the network,"
+
+
 @dataclass
 class Pod(PodNetwork, PodDemo, PodEgress):
     task_id: str
@@ -173,7 +177,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
             timer.cancel()
             timer.join()  # a container being taken down is gone before anyone is told
         if expired.is_set():  # even had git just finished: the container is gone
-            raise repo.timed_out(cmd[cmd.index("git") + 1 :], repo.COPY_TIMEOUT, self.repo)
+            raise repo.timed_out(cmd[cmd.index("git") + 1 :], repo.COPY_TIMEOUT, self.repo, COPYING_IS_SLOW)
         if check and p.returncode != 0:
             raise PodError(f"{' '.join(cmd[:4])}…: {(p.stderr or p.stdout).strip()}")
         return p
@@ -372,7 +376,12 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         self._run(*self.review_command(mounts, env))
         where = ("docker", "exec", "-w", str(self.review_dir), self.review)
         clone = ("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.review_src)
-        self._copying_clone(self.review_down, *where, *clone)
+        try:
+            self._copying_clone(self.review_down, *where, *clone)
+        except repo.GitTimeout as e:
+            raise repo.GitTimeout(
+                f"the review could not start: {e}; then start the task again: vivibox start {self.task_id}"
+            ) from None
 
     def review_down(self) -> None:
         self._run("docker", "rm", "-f", self.review, check=False)

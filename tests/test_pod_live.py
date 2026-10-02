@@ -453,3 +453,38 @@ def test_a_fifo_in_the_clone_ends_the_gates_clone_in_time_and_takes_the_gate_dow
         if kept is not None:
             packed.write_bytes(kept)
         pod.gate_down()
+
+
+def test_git_in_a_box_that_waits_on_a_fifo_is_killed_and_the_box_stays_up(env, monkeypatch):
+    """Closing a box commits in the agent's container, where your shell is: on a named pipe at
+    .gitignore git is killed in it past its limit, and the container stays."""
+    from vivibox import box, repo
+
+    pod, ignore = env["pod"], env["repo"] / ".gitignore"
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", 3, raising=False)  # the red run has none
+    kept = ignore.read_bytes() if ignore.exists() else None
+    ignore.unlink(missing_ok=True)
+    os.mkfifo(ignore)
+    done = []
+
+    def add():
+        try:
+            done.append(box._git_in_box(pod, "add", "-A"))
+        except Exception as e:
+            done.append(e)
+
+    try:
+        worker = threading.Thread(target=add, daemon=True)
+        worker.start()
+        worker.join(timeout=60)
+        assert done, "git in the box hung on the named pipe"
+        assert isinstance(done[0], repo.GitTimeout), f"not a timeout: {done[0]!r}"
+        assert ".gitignore is a named pipe (FIFO)" in str(done[0])
+        left = agent(env, "cat /proc/[0-9]*/comm 2>/dev/null | grep -cx git || true").stdout.strip()
+        assert left == "0", "no git left waiting in the box"
+        assert pod._state(pod.agent) == "running", "your shell's container stays"
+    finally:
+        ignore.unlink()
+        if kept is not None:
+            ignore.write_bytes(kept)
+        agent(env, "pkill -x git || true", check=False)

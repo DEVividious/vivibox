@@ -134,18 +134,25 @@ def special_files(clone: Path) -> list[tuple[str, str]]:
     return found
 
 
-def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path) -> GitTimeout:
-    """The error for git, run with args, that did not answer in seconds on the clone."""
-    return GitTimeout(_unanswered(list(args), seconds, clone))
+def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path, slow: str = "") -> GitTimeout:
+    """The error for git, run with args, that did not answer in seconds on the clone. slow: what
+    takes that long with nothing wrong (a copy of a large repository), when something can."""
+    return GitTimeout(_unanswered(list(args), seconds, clone, slow))
 
 
-def _unanswered(args: list[str], seconds: float, clone: Path) -> str:
+def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") -> str:
     """What timed out, why it likely did, and what to do, in a sentence."""
     i = 0
     while i < len(args) - 1 and args[i].startswith("-"):
         i += 2 if args[i] in ("-c", "-C") else 1
-    what = f"git {args[i] if args else ''} did not answer in {seconds:g} s"
+    command = f"git {args[i] if args else ''}"
     found = special_files(clone)[:3]
+    if not found and slow:
+        return (
+            f"{command} did not finish in {seconds:g} s in {clone}: {slow} can take this long, and "
+            "nothing where git reads its settings or refs is a named pipe; try again"
+        )
+    what = f"{command} did not answer in {seconds:g} s"
     if not found:
         return (
             f"{what} in {clone}; a named pipe (FIFO) where git reads its settings or refs (.gitignore, "
@@ -153,8 +160,30 @@ def _unanswered(args: list[str], seconds: float, clone: Path) -> str:
         )
     # The path first: a notification cut short loses the explanation, not the file.
     named = ", ".join(f"{clone / path} is {kind}" for path, kind in found)
-    it = "it" if len(found) == 1 else "them"
-    return f"{what}: {named}, which git waits on forever; delete {it}"
+    committed = [path for path, _ in found if _committed(clone, path)]
+    gone = [path for path, _ in found if path not in committed]
+    todo = []
+    if gone:  # git never had it: nothing to put back
+        which = ("it" if len(gone) == 1 else "them") if not committed else ", ".join(gone)
+        todo.append(f"delete {which}: rm {' '.join(str(clone / p) for p in gone)}")
+    if committed:  # deleted, it would be an uncommitted change, and a round of the writer's
+        which = ("it" if len(committed) == 1 else "them") if not gone else ", ".join(committed)
+        todo.append(f"restore {which} from the commits: git -C {clone} checkout -- {' '.join(committed)}")
+    return f"{what}: {named}, which git waits on forever; {'; '.join(todo)}"
+
+
+def _committed(clone: Path, path: str) -> bool:
+    """Whether the clone's index has path, as committed files are; False when git cannot say in a
+    few seconds (its index may be the special file), and what is in .git never is."""
+    if path.split("/")[0] == ".git":
+        return False
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", path], cwd=clone, capture_output=True, timeout=5
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return listed.returncode == 0 and bool(listed.stdout)
 
 
 def branch_name(task_id: str) -> str:
@@ -364,8 +393,13 @@ def fetch_to(source: Path, repo: Path, meta: Path, task_id: str) -> str:
     """Brings the task's commits into your repository under refs/vivibox/<id>. Returns the commit."""
     check_protection(repo, meta)
     refspec = f"+refs/heads/{branch_name(task_id)}:{review_ref(task_id)}"
-    # Run in your checkout, but upload-pack reads the clone: its refs may be a pipe the agent made.
-    in_clone(repo, "fetch", "--quiet", "--no-tags", str(repo), refspec, cwd=source)
+    try:  # run in your checkout, but upload-pack reads the clone: its refs may be a pipe the agent made
+        in_clone(repo, "fetch", "--quiet", "--no-tags", str(repo), refspec, cwd=source)
+    except GitTimeout as e:
+        raise GitTimeout(
+            f"the work could not be brought back from the task's clone: {e}; then try again, or see "
+            f"vivibox status {task_id}"
+        ) from None
     return git("rev-parse", review_ref(task_id), cwd=source).stdout.strip()
 
 

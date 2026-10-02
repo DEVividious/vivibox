@@ -55,6 +55,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   are shown as text; the task's summary in the list, `vivibox status` and the timeline, desktop
   notifications (no markup) and `f`, which now pages the diff with every escape sequence of the
   agent's shown and vivibox's own colours, are too.
+- The logs under `l` open in less with `-+R -+r`, whatever your `LESS` says, and the
+  verification's log under `w` is shown as text: what the agent's code printed can no longer
+  hide lines, make links or move the cursor there.
 - A risky file the task adds or changes that is not text vivibox can show you (bytes that are not
   UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
   longer be approved after the word "(binary)": `p` refuses it, and the writer can take its

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from . import handoff, look, prepare, reviewing, timeline, transcript
+from . import display, handoff, look, prepare, reviewing, timeline, transcript
 from .panel import pager_command
 from .states import State
 from .task import Task, TaskState
@@ -182,8 +182,8 @@ def follow_verification(
     def more() -> None:
         nonlocal shown
         text = log.read_text()
-        if len(text) > shown:
-            out.write(text[shown:])
+        if len(text) > shown:  # the build's output, as text: no escape sequence of it reaches the terminal
+            out.write(display.terminal(text[shown:]))
             out.flush()
             shown = len(text)
 

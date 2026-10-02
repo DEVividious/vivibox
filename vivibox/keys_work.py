@@ -43,7 +43,7 @@ def diff_pager(task: Task, project) -> list[str]:
         said = p.stderr.read().decode("utf-8", "replace")
     if p.returncode != 0:
         raise repo.RepoError(f"git diff: {display.name(said.strip())}")
-    return pager_command(path)
+    return pager_command(path, colours=True)  # escaped, its colours vivibox's own
 
 
 class WorkKeys:

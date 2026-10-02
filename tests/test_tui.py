@@ -3432,18 +3432,32 @@ def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
     newest.write_text("new\n")
     monkeypatch.setenv("PAGER", "less -R")
     assert panel.newest_log(task) == newest
-    assert panel.pager_command(newest) == ["less", "-R", str(newest)]
+    assert panel.pager_command(newest) == ["less", "-R", "-+R", "-+r", str(newest)]
     # Where the trouble is: at the end. While the verification runs: following it as it is written.
-    assert panel.pager_command(newest, at_end=True) == ["less", "-R", "+G", str(newest)]
-    assert panel.pager_command(newest, follow=True) == ["less", "-R", "+F", str(newest)]
+    assert panel.pager_command(newest, at_end=True) == ["less", "-R", "-+R", "-+r", "+G", str(newest)]
+    assert panel.pager_command(newest, follow=True) == ["less", "-R", "-+R", "-+r", "+F", str(newest)]
     monkeypatch.setenv("PAGER", "more")
     assert panel.pager_command(newest, follow=True) == ["more", str(newest)], "only less knows the flags"
     monkeypatch.setenv("PAGER", "less -R")
-    assert panel.log_command(task, task.read_state(), running=False) == ["less", "-R", "+G", str(newest)]
+    assert panel.log_command(task, task.read_state(), running=False) == [
+        "less",
+        "-R",
+        "-+R",
+        "-+r",
+        "+G",
+        str(newest),
+    ]
     task.transition(State.IMPLEMENT)
     task.transition(State.VERIFY)
-    assert panel.log_command(task, task.read_state(), running=True) == ["less", "-R", "+F", str(newest)]
-    assert panel.log_command(task, task.read_state(), running=False)[2] == "+G", "nothing is being written"
+    assert panel.log_command(task, task.read_state(), running=True) == [
+        "less",
+        "-R",
+        "-+R",
+        "-+r",
+        "+F",
+        str(newest),
+    ]
+    assert panel.log_command(task, task.read_state(), running=False)[4] == "+G", "nothing is being written"
 
     async def scenario(app, pilot):
         app.reload()
@@ -3468,7 +3482,9 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         assert app.check_action("show_log", ())
         await pilot.press("l")
         await pilot.pause()
-        assert opened == [["less", "+G", str(task.meta / "log" / "timeline.txt")]], "one entry opens at once"
+        assert opened == [["less", "-+R", "-+r", "+G", str(task.meta / "log" / "timeline.txt")]], (
+            "one entry opens at once"
+        )
         assert "created: Goal" in (task.meta / "log" / "timeline.txt").read_text()
         (task.meta / "log" / "verify-1-120000.log").write_text(
             "# started 12:00:00\n$ npm test\nFAIL a\n[exit 1 after 3 s]\n\n# summary\n"
@@ -3497,7 +3513,9 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         assert app.screen.query_one(OptionList).highlighted == 0, "the timeline first, nothing running"
         await pilot.press("down", "enter")
         await pilot.pause()
-        assert opened[-1] == ["less", "+G", str(task.meta / "log" / "writer.log")], "at its newest turn"
+        assert opened[-1] == ["less", "-+R", "-+r", "+G", str(task.meta / "log" / "writer.log")], (
+            "at its newest turn"
+        )
 
     run(scenario)
 
@@ -3513,7 +3531,9 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         assert app.screen.query_one(OptionList).highlighted == 2, "the log being written"
         await pilot.press("enter")
         await pilot.pause()
-        assert opened[-1] == ["less", "+F", str(task.meta / "log" / "verify-2-130000.log")], "followed"
+        assert opened[-1] == ["less", "-+R", "-+r", "+F", str(task.meta / "log" / "verify-2-130000.log")], (
+            "followed"
+        )
 
     run(verifying)
 

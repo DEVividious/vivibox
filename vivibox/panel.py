@@ -269,12 +269,15 @@ def git_env() -> dict[str, str]:
     return {**os.environ, "LESS": os.environ.get("LESS") or "R"}
 
 
-def pager_command(path: Path, follow: bool = False, at_end: bool = False) -> list[str]:
+def pager_command(path: Path, follow: bool = False, at_end: bool = False, colours: bool = False) -> list[str]:
     """Your pager on the file. With less: following it as it is written (Ctrl-C stops following),
-    or opened at its end, where a failed build says why."""
+    or opened at its end, where a failed build says why; and, but for a file vivibox escaped
+    itself and coloured (colours), with -+R -+r: what a log holds is what the agent's code
+    printed, and no escape sequence of it reaches the terminal, whatever your LESS says."""
     pager = os.environ.get("PAGER") or shutil.which("less") or "more"
     command = pager.split()
     if Path(command[0]).name == "less":
+        command += [] if colours else ["-+R", "-+r"]
         command += ["+F"] if follow else ["+G"] if at_end else []
     return [*command, str(path)]
 

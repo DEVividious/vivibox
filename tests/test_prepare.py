@@ -166,10 +166,10 @@ def test_l_follows_the_preparation_while_it_runs_and_starts_on_it(task, monkeypa
     log.write_text("[INFO] Building\n")
     found, start = logs.entries(task, task.read_state(), running=True)
     assert found[start].label == "prepare.log", "the cursor on what is being written"
-    assert found[start].command == ["less", "+F", str(log)], "followed as it is written"
+    assert found[start].command == ["less", "-+R", "-+r", "+F", str(log)], "followed as it is written"
     assert found[start].said == "the project's preparation · running · 1 lines"
     pod.finish(0)
     found, start = logs.entries(task, task.read_state(), running=True)
     assert start == 0
     entry = next(e for e in found if e.label == "prepare.log")
-    assert entry.command == ["less", "+G", str(log)]
+    assert entry.command == ["less", "-+R", "-+r", "+G", str(log)]

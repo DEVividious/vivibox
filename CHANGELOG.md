@@ -63,6 +63,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   notification are shown as text, never as markup (`[/b]` in a name no longer breaks the dialog);
   a line break in a message is indented in the supervisor's window; no empty block stands where
   there is no verification feedback.
+- No notification or dialog reads text vivibox did not write as markup or passes its control
+  characters on: what the agent left running when the app starts, its question on how to run
+  it, an earlier task's way to run it, file and branch names, a provider's error. A name with
+  `[/b]` in it no longer ends the view. `l` with a pager other than less says why when its copy
+  cannot be made instead of ending the view.
 - A risky file the task adds or changes that is not text vivibox can show you (bytes that are not
   UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
   longer be approved after the word "(binary)": `p` refuses it, and the writer can take its

@@ -43,7 +43,7 @@ class BranchPicker(Dialog):
         with Vertical(classes="dialog"):
             yield Input(placeholder="Type a branch name, path or ticket number", id="branch-query")
             yield OptionList(id="branch-options", classes="catalog")
-            yield Label("Loading branches…", id="branch-count", classes="note")
+            yield Label("Loading branches…", id="branch-count", classes="note", markup=False)  # git's words
             with Horizontal(classes="buttons"):
                 yield Button("Use branch", variant="primary", id="choose", disabled=True)
                 yield Button("Cancel", id="cancel")

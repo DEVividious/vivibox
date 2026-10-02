@@ -28,7 +28,7 @@ class ModelKeys:
             try:
                 reading = providers.read_opencode(path)
             except ConfigError as e:
-                self.notify(e.args[0], severity="error", timeout=10)
+                self.notify(e.args[0], severity="error", timeout=10, markup=False)
                 done([])
                 return
             self.push_screen(ChooseImport(path, reading), chosen)
@@ -36,7 +36,7 @@ class ModelKeys:
         def chosen(found: list[providers.Found]) -> None:
             if found:
                 providers.bring_over(found)
-                self.notify(f"Imported {', '.join(f.name for f in found)}.", timeout=8)
+                self.notify(f"Imported {', '.join(f.name for f in found)}.", timeout=8, markup=False)
             done([f.name for f in found])
 
         self.push_screen(ImportSource(providers.discover(project_repos())), picked)
@@ -51,6 +51,7 @@ class ModelKeys:
                 self.notify,
                 f"opencode lists no models for {', '.join(missing)}; check the name.",
                 severity="warning",
+                markup=False,
             )
 
     def hint_opencode(self) -> None:
@@ -62,6 +63,7 @@ class ModelKeys:
             self.notify(
                 f"Found your opencode configuration, {where}. Press k to bring its providers over.",
                 timeout=15,
+                markup=False,
             )
 
     @work(thread=True)
@@ -121,5 +123,7 @@ class ModelKeys:
         if not model and harness != manual.NAME:
             return  # "no model yet" is where the role is, not a model to put it on
         actions.choose_role(task, role, choice, config)
-        self.notify(f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6)
+        self.notify(
+            f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6, markup=False
+        )
         self.reload()

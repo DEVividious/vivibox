@@ -55,10 +55,10 @@ class Ask(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.prompt, classes="wrap")
+            yield Label(self.prompt, classes="wrap", markup=False)
             yield Input(self.value, id="value", compact=True)
             if self.hint:
-                yield Label(self.hint, classes="files wrap")
+                yield Label(self.hint, classes="files wrap", markup=False)
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -82,10 +82,10 @@ class AskLines(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.prompt, classes="wrap")
+            yield Label(self.prompt, classes="wrap", markup=False)
             yield EdgeTextArea("\n".join(self.lines), id="lines")
             if self.hint:
-                yield Label(self.hint, classes="files wrap")
+                yield Label(self.hint, classes="files wrap", markup=False)
 
     def on_mount(self) -> None:
         self.query_one(TextArea).focus()
@@ -200,7 +200,7 @@ class Rows(Dialog):
         self.dismiss(None)
 
     def say(self, text: str) -> None:
-        self.app.notify(text, timeout=6)
+        self.app.notify(text, timeout=6, markup=False)
 
     def edit_file(self, path: Path) -> None:
         """The file itself, in your editor, for what has no row."""

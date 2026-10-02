@@ -24,7 +24,7 @@ class BoxKeys:
             said = f"{task_id} closed; " + (
                 f"its work is ready for your review in {where}" if where else "it changed risky files"
             )
-            self.call_from_thread(self.notify, said, timeout=8)
+            self.call_from_thread(self.notify, said, timeout=8, markup=False)
         self.call_from_thread(self.busy_with, task_id, "")
 
     def action_enter_box(self) -> None:
@@ -60,7 +60,7 @@ class BoxKeys:
 
     def action_new_box(self) -> None:
         name = self.selected_project()
-        self.notify(f"Opening a box in {name}…")
+        self.notify(f"Opening a box in {name}…", markup=False)
         self.open_box(name)
 
     @work(thread=True)
@@ -70,6 +70,8 @@ class BoxKeys:
         except Exception as e:
             self.call_from_thread(self.fail, e)
         else:
-            self.call_from_thread(self.notify, f"{task.id} is open; w enters it, a brings its work back.")
+            self.call_from_thread(
+                self.notify, f"{task.id} is open; w enters it, a brings its work back.", markup=False
+            )
             self.call_from_thread(self.select, task.id)
         self.call_from_thread(self.reload)

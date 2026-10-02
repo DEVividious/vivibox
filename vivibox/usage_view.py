@@ -32,7 +32,7 @@ class Usage(Dialog):
             table.add_columns(*usage.COLUMNS)
             yield table
             yield Label("", id="usage-caches", classes="spaced wrap")
-            yield Label("", id="usage-problem", classes="files")
+            yield Label("", id="usage-problem", classes="files", markup=False)  # Docker's words
             yield Label("Reading the tasks' events…", id="usage-note", classes="files")
 
     def on_mount(self) -> None:

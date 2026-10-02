@@ -604,7 +604,7 @@ def test_the_files_to_commit_are_never_markup(env):
     from vivibox import ui
     from vivibox.dialogs import CommitWork
 
-    status = "A  x[/b].java\nA  a[black on black].java\nA  after\x1b[2K‮.java\n"
+    status = "A  x[/b].java\nA  a[black on black].java\nA  after\x1b[2K\u202e.java\n"
     done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], status)
     done.start_branch, done.new_branch = "main", "feature/demo-1"
 
@@ -659,7 +659,7 @@ def test_the_files_left_uncommitted_are_printed_as_text(env, capsys, monkeypatch
 
     monkeypatch.setattr(actions, "current_branch", lambda source: "main")
     monkeypatch.setattr(cli, "offer_commit", lambda done: None)
-    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], "A  a‮b\x1b[2K.java\n")
+    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], "A  a\u202eb\x1b[2K.java\n")
     cli.report_finished(done)
     said = capsys.readouterr().out
     assert "A  a‹U+202E›b‹U+001B›[2K.java" in said and not hidden(said), repr(said)

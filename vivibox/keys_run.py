@@ -49,7 +49,7 @@ class RunKeys:
         step("starting…")
         try:
             model = actions.start(task_id, resume=resume, on_step=step)
-            self.call_from_thread(self.notify, f"{task_id} started ({model}).")
+            self.call_from_thread(self.notify, f"{task_id} started ({model}).", markup=False)
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.busy_with, task_id, "")
@@ -61,7 +61,9 @@ class RunKeys:
         self.call_from_thread(self.busy_with, task_id, "stopping…")
         try:
             actions.stop(actions.load(task_id)[0], force=force)
-            self.call_from_thread(self.notify, f"{task_id} stopped{' by force' if force else ''}.")
+            self.call_from_thread(
+                self.notify, f"{task_id} stopped{' by force' if force else ''}.", markup=False
+            )
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.busy_with, task_id, "")

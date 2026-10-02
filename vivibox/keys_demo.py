@@ -72,7 +72,11 @@ class DemoKeys:
         if result.stopped:
             what = "; ".join(result.stopped)
             self.call_from_thread(
-                self.notify, f"Stopped what the agent left running: {what}", severity="warning", timeout=8
+                self.notify,
+                f"Stopped what the agent left running: {what}",
+                severity="warning",
+                timeout=8,
+                markup=False,
             )
         if result.question:
             self.call_from_thread(self.answer_demo, task_id, result.question)
@@ -80,7 +84,11 @@ class DemoKeys:
             self.call_from_thread(self.open_url, urls[0])
         elif blocked := result.unreachable:
             self.call_from_thread(
-                self.notify, f"Port {blocked[0].port} is {blocked[0].why_not}", severity="warning", timeout=10
+                self.notify,
+                f"Port {blocked[0].port} is {blocked[0].why_not}",
+                severity="warning",
+                timeout=10,
+                markup=False,
             )
         elif not result.commands:
             self.say("Still nothing says how to run it")
@@ -93,7 +101,7 @@ class DemoKeys:
             self.say("It stopped without listening; press d for what it said")
 
     def say(self, message: str) -> None:
-        self.call_from_thread(self.notify, message, severity="error", timeout=8)
+        self.call_from_thread(self.notify, message, severity="error", timeout=8, markup=False)
 
     def answer_demo(self, task_id: str, question: str) -> None:
         """The agent asked something only you can decide. Answering carries the same conversation on,

@@ -56,7 +56,9 @@ class AskVerify(Dialog):
                 yield Checkbox(
                     MODULES.format(count=len(self.modules)), value=by_modules(command), id="modules"
                 )
-                yield Label("", id="modules-preview", classes="files wrap")
+                yield Label(
+                    "", id="modules-preview", classes="files wrap", markup=False
+                )  # your modules' names
             if self.writer_box:
                 yield Checkbox(WRITER, value=not self.verify and not self.no_build, id="writer")
             if self.no_build:

@@ -49,6 +49,16 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+# The suite's own temporary folder: what vivibox copies there for a pager (display.terminal_copy)
+# never lands in yours.
+TEMPORARY = Path(tempfile.mkdtemp(prefix="vivibox-tests-tmp-"))
+
+
+@pytest.fixture(autouse=True)
+def own_temporary_folder(monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(TEMPORARY))
+
+
 @pytest.fixture(autouse=True)
 def no_real_start(request, monkeypatch):
     """A decision now starts a task nobody is working on, and starting means Docker. Tests get a

@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 
-from . import look
+from . import display, look
 
 
 class ContextHelp(Label):
@@ -187,7 +187,9 @@ class Choose(Dialog):
     def options(self) -> list[Option]:
         width = min(max((len(name) for name, _ in self.entries), default=0), self.NAME_WIDTH)
         return [
-            Option(f"{escape(name.ljust(width))}  {look.muted(said)}" if said else escape(name))
+            Option(
+                f"{escape(name.ljust(width))}  {look.muted(display.terminal(said))}" if said else escape(name)
+            )
             for name, said in self.entries
         ]
 
@@ -195,7 +197,7 @@ class Choose(Dialog):
         with Vertical(classes="dialog"):
             yield OptionList(*self.options(), classes="catalog")
             if self.note:
-                yield Label(self.note, classes="files wrap")
+                yield Label(self.note, classes="files wrap", markup=False)
 
     def on_mount(self) -> None:
         options = self.query_one(OptionList)
@@ -226,7 +228,9 @@ class Confirm(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog narrow"):
-            yield Label(self.question, classes="wrap")
+            yield Label(
+                display.terminal(self.question), classes="wrap", markup=False
+            )  # a command the agent wrote
             with Horizontal(classes="buttons"):
                 yield Button(self.yes, variant="error" if self.destructive else "primary", id="yes")
                 yield Button("Cancel", id="no")

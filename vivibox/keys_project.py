@@ -39,7 +39,7 @@ class ProjectKeys:
         try:
             project = load_project(self.selected_project())
             actions.open_in_ide(self.config, project.repo, project)
-            self.notify(f"Opening {shown_path(project.repo)}")
+            self.notify(f"Opening {shown_path(project.repo)}", markup=False)
         except Exception as e:
             self.fail(e)
 
@@ -84,7 +84,7 @@ class ProjectKeys:
             except Exception as e:
                 self.fail(e)
                 return
-            self.notify(f"Set up {form['name']} in {target}")
+            self.notify(f"Set up {form['name']} in {target}", markup=False)
             self.action_new(form["name"])
 
         self.push_screen(NewProject(), done)

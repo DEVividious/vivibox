@@ -43,7 +43,7 @@ class NewKeys:
                 return
             if not self.git_identity_ready(form["project"]):
                 return
-            self.notify(f"Creating a task in {form['project']}…")
+            self.notify(f"Creating a task in {form['project']}…", markup=False)
             self.create(form)
 
         self.push_screen(NewTask(preselect, self.available), create)
@@ -61,10 +61,12 @@ class NewKeys:
             )
             self.call_from_thread(self.reload)
             for note in actions.context_notes(task):
-                self.call_from_thread(self.notify, f"{task.id}: {note}.", severity="warning", timeout=12)
+                self.call_from_thread(
+                    self.notify, f"{task.id}: {note}.", severity="warning", timeout=12, markup=False
+                )
             if form["draft"]:
                 self.call_from_thread(
-                    self.notify, f"Created {task.id}; edit its plan with e, start it with s."
+                    self.notify, f"Created {task.id}; edit its plan with e, start it with s.", markup=False
                 )
                 return
             step = lambda doing: self.call_from_thread(self.busy_with, task.id, doing)  # noqa: E731
@@ -73,7 +75,7 @@ class NewKeys:
                 model = actions.start(task.id, on_step=step)
             finally:
                 step("")
-            self.call_from_thread(self.notify, f"{task.id} started ({model}).")
+            self.call_from_thread(self.notify, f"{task.id} started ({model}).", markup=False)
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.reload)

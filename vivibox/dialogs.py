@@ -85,7 +85,9 @@ class Reply(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"{self.prompt}:", classes="wrap")
+            yield Label(
+                f"{display.terminal(self.prompt)}:", classes="wrap", markup=False
+            )  # the agent's question
             yield EdgeTextArea(id="comment")
             with Horizontal(classes="buttons"):
                 yield Button("Send", variant="primary", id="send")
@@ -127,7 +129,7 @@ class ReplyWithCriteria(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"Your comment for the agent on {self.task_id}:", classes="wrap")
+            yield Label(f"Your comment for the agent on {self.task_id}:", classes="wrap", markup=False)
             yield EdgeTextArea(id="comment")
             yield Label("New acceptance criteria, one per line (optional)", classes="wrap files")
             yield Label(
@@ -211,7 +213,7 @@ class NewProject(Dialog):
                     yield Label("Preparation", classes="key")
                     yield Label("", id="prepare", classes="value")
                     yield Button("Change…", compact=True, id="change-prepare", classes="inline")
-            yield Label("", id="notes", classes="files wrap")
+            yield Label("", id="notes", classes="files wrap", markup=False)  # your repository's names
             yield ContextHelp(3, id="about")
             with Horizontal(classes="buttons"):
                 yield Button("Set up", variant="primary", id="create")
@@ -506,7 +508,9 @@ class CommitWork(Dialog):
         self.frame_title = f"Commit · {self.done.task_id}"
         with Vertical(classes="dialog form plain"):
             yield Label(
-                f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:", classes="wrap"
+                f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:",
+                classes="wrap",
+                markup=False,
             )
             # git's names of the agent's files: text, never markup ([/b] in one), no escape sequence.
             yield Label(

@@ -42,6 +42,7 @@ class PlanKeys:
                 f"That is not a plan yet: {e}. A message asking your chat to fix it is in your clipboard.",
                 severity="warning",
                 timeout=15,
+                markup=False,
             )
             return
         except Exception as e:
@@ -80,7 +81,7 @@ class PlanKeys:
             self.fail(e)
             return
         file = task.meta / (manual.PROMPT_CLI if cli else manual.PROMPT)
-        self.notify(f"Copied the prompt ({where}); it is also in {file}.", timeout=8)
+        self.notify(f"Copied the prompt ({where}); it is also in {file}.", timeout=8, markup=False)
 
     def action_copy_prompt_cli(self) -> None:
         self.action_copy_prompt(cli=True)

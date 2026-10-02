@@ -200,7 +200,7 @@ class Vivibox(
             # The CLI would drive this vivibox by an older skill's commands.
             said = f"The vivibox skill of {' and '.join(stale)} is older than vivibox"
             said += ": run vivibox skill install."
-            self.notify(said, severity="warning", timeout=15)
+            self.notify(said, severity="warning", timeout=15, markup=False)
         self.set_interval(SPIN_SECONDS, self.spin)
         self.set_interval(REFRESH_SECONDS, self.reload)
         self.call_after_refresh(self.check_projects)
@@ -493,10 +493,14 @@ class Vivibox(
         task, st = pick
         return keys_for(task, st, self.agent_running(st.id), st.id in self.starting, self.pod.demo)[action]
 
+    def notify(self, message: str, *args, **kwargs) -> None:
+        """Every notification, a dialog's too: no control character of what it quotes reaches the
+        terminal. Whether it is markup the caller says (tests/test_markup_rules.py)."""
+        super().notify(display.terminal(str(message)), *args, **kwargs)
+
     def fail(self, error: Exception) -> None:
         # Never markup: an error may name a file the agent chose ([link=…] in it).
-        said = display.terminal(str(error.args[0] if error.args else error))
-        self.notify(said, severity="error", timeout=10, markup=False)
+        self.notify(str(error.args[0] if error.args else error), severity="error", timeout=10, markup=False)
 
     # --- actions ---
 
@@ -602,9 +606,11 @@ class Vivibox(
         st = task.read_state()
         starts = actions.needs_start(task)
         if done and starts:
-            self.notify(f"{done}; starting {task.id}, nobody was working on it.")
+            self.notify(f"{done}; starting {task.id}, nobody was working on it.", markup=False)
         elif done:
-            self.notify(f"{done}; {task.id} is {ui.WORKING.get(st.state, 'waiting for you')} now.")
+            self.notify(
+                f"{done}; {task.id} is {ui.WORKING.get(st.state, 'waiting for you')} now.", markup=False
+            )
         if starts:
             self.start(task.id, resume=True)
 
@@ -627,7 +633,8 @@ class Vivibox(
             try:
                 count, review = actions.approve_risky(task, actions.load(task.id)[1])
                 self.notify(
-                    f"Approved {count} change(s)." + (f" Ready for review in {review}" if review else "")
+                    f"Approved {count} change(s)." + (f" Ready for review in {review}" if review else ""),
+                    markup=False,
                 )
             except Exception as e:
                 self.fail(e)
@@ -759,7 +766,7 @@ class Vivibox(
         try:
             task, project = actions.load(task_id)
             actions.remove(task, project)
-            self.call_from_thread(self.notify, f"Deleted {task_id}.")
+            self.call_from_thread(self.notify, f"Deleted {task_id}.", markup=False)
         except Exception as e:
             self.call_from_thread(self.fail, e)
         self.call_from_thread(self.reload)

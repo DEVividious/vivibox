@@ -71,7 +71,7 @@ class WorkKeys:
             return
         try:
             actions.open_in_ide(self.config, path, project)
-            self.notify(f"Opening {path}")
+            self.notify(f"Opening {path}", markup=False)
         except Exception as e:
             self.fail(e)
 
@@ -93,14 +93,18 @@ class WorkKeys:
     def action_show_log(self) -> None:
         """The timeline, a verification log, or the supervisor's, in your pager: one entry opens
         at once, more are picked from."""
-        if (pick := self.selected()) is None:  # a finished task: what its archive kept
-            found, start = logs.archived_entries(actions.archive_path(self.selected_id() or "")), 0
-            if not found:
-                self.notify("Nothing kept: this task finished before vivibox kept logs.", timeout=6)
-                return
-        else:
-            task, st = pick
-            found, start = logs.entries(task, st, self.agent_running(task.id))
+        pick = self.selected()
+        try:  # a copy for a pager other than less refused (its folder not yours alone): said
+            if pick is None:  # a finished task: what its archive kept
+                found, start = logs.archived_entries(actions.archive_path(self.selected_id() or "")), 0
+            else:
+                found, start = logs.entries(pick[0], pick[1], self.agent_running(pick[0].id))
+        except OSError as e:
+            self.fail(e)
+            return
+        if not found:
+            self.notify("Nothing kept: this task finished before vivibox kept logs.", timeout=6)
+            return
         if len(found) == 1:
             self.read_log(found[0].command)
             return

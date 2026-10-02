@@ -90,6 +90,7 @@ class ChooseImport(Dialog):
                 yield Label(
                     f"Left in the file, not for vivibox: {', '.join(self.reading.left)}.",
                     classes="files wrap",
+                    markup=False,
                 )
             yield Label(
                 "Ticked comes over, unticked stays out. One that would replace yours starts unticked; "
@@ -339,7 +340,7 @@ class ManageItems(Dialog):
 
             def answered(yes: bool) -> None:
                 if yes and providers.forget(name, kind):
-                    self.notify(f"Removed {name}.")
+                    self.notify(f"Removed {name}.", markup=False)
                     self.dismiss([name])
 
             self.app.push_screen(

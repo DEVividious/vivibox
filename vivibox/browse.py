@@ -207,7 +207,7 @@ class Browse(Dialog):
         if ok:
             self.dismiss(path)
         else:
-            self.notify(said or "Pick one of the marked entries.", severity="warning")
+            self.notify(said or "Pick one of the marked entries.", severity="warning", markup=False)
 
     @on(Button.Pressed, "#new-folder")
     def new_folder(self) -> None:
@@ -220,7 +220,7 @@ class Browse(Dialog):
             try:
                 made.mkdir()
             except OSError as e:
-                self.notify(f"Cannot make {shown_path(made)}: {e.strerror}", severity="error")
+                self.notify(f"Cannot make {shown_path(made)}: {e.strerror}", severity="error", markup=False)
                 return
             self.dismiss(made)
 

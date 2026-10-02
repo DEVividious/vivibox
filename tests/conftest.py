@@ -96,10 +96,14 @@ exit 1
 
 
 @pytest.fixture(autouse=True)
-def no_real_hostd(request, monkeypatch):
+def no_real_hostd(request, monkeypatch, tmp_path_factory):
     """No test starts the host's DNS forwarder but one marked real_hostd or docker: a pod's start
-    asks for it (hostd.ensure), and it would outlive the test."""
-    if "real_hostd" in request.keywords or "docker" in request.keywords:
+    asks for it (hostd.ensure), and it would outlive the test. Nor takes its locks in your
+    runtime folder: every test has one of its own."""
+    if "docker" in request.keywords:
+        return
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("run")))
+    if "real_hostd" in request.keywords:
         return
     from vivibox.egress import hostd
 

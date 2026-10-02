@@ -13,10 +13,14 @@ import time
 
 import pytest
 
+from vivibox import probe
 from vivibox.config import ConfigError, load_config
 from vivibox.egress import hostd, resolver
 
 pytestmark = pytest.mark.real_hostd
+
+# The header's own, before conftest stands in for it.
+FORWARDER_PROBLEM = probe.forwarder_problem
 
 ROLES = (
     '[roles.planner]\nharness = "opencode"\nmodel = "m"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
@@ -469,3 +473,86 @@ def test_tcp_connections_are_held_to_a_share_and_to_the_forwarders_room(quiet):
         for s in mine:
             s.close()
         f.stop()
+
+
+# --- a forwarder whose pid file is gone, two starts at once, no runtime folder -------------------
+
+
+def test_a_forwarder_without_its_pid_file_is_named_while_a_pod_runs(runtime):
+    """Logging out without linger empties $XDG_RUNTIME_DIR: the pid file goes, a pod still runs and
+    resolves nothing. The header says so whenever a pod runs and the forwarder does not answer."""
+    port = free_port()
+    assert hostd.recorded() is None
+    said = hostd.problem("127.0.0.1", port, timeout=0.3, pods_up=lambda: True)
+    assert said.startswith("DNS forwarder not running: ") and "vivibox hostd start" in said
+    assert hostd.problem("127.0.0.1", port, timeout=0.3, pods_up=lambda: False) == "", (
+        "no pod: nothing to say"
+    )
+
+
+def test_the_header_asks_whether_a_pod_runs(monkeypatch):
+    from vivibox.config import Config
+
+    asked = {}
+
+    def problem(address, port=resolver.PORT, timeout=1.0, pods_up=lambda: False):
+        asked["pods_up"] = pods_up
+        return ""
+
+    monkeypatch.setattr(hostd, "problem", problem)
+    FORWARDER_PROBLEM(Config(tasks_dir=__import__("pathlib").Path("/t"), max_rounds=3, roles={}))
+    assert asked["pods_up"] is probe.pods_running
+
+
+@pytest.mark.parametrize(("out", "code", "up"), [("3f2a\n", 0, True), ("", 0, False), ("3f2a\n", 1, False)])
+def test_a_running_pod_is_one_docker_lists_with_vivibox_s_label(out, code, up):
+    seen = []
+
+    def runner(cmd, timeout=None):
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, code, out, "")
+
+    assert probe.pods_running(runner) is up
+    assert seen[0][:2] == ["docker", "ps"] and "label=vivibox.task" in seen[0]
+
+
+def test_two_starts_at_once_leave_one_forwarder_that_answers(runtime, stub):
+    """Several tasks started after a reboot: each start ensures the forwarder, and neither may
+    stop the other's."""
+    port = free_port()
+    failed = []
+
+    def start():
+        try:
+            hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+        except hostd.HostdError as e:
+            failed.append(str(e))
+
+    starts = [threading.Thread(target=start) for _ in range(3)]
+    for t in starts:
+        t.start()
+    for t in starts:
+        t.join()
+    assert failed == []
+    assert hostd.check("127.0.0.1", port) == "" and hostd.running() is not None
+
+
+def test_a_forwarder_on_another_address_is_replaced_not_left_behind(runtime, stub):
+    """network.host_address changed: the forwarder on the old one goes, it is not left answering."""
+    old, new = free_port(), free_port()
+    upstream = f"127.0.0.1:{stub.port}"
+    hostd.ensure("127.0.0.1", old, upstream=upstream)
+    hostd.ensure("127.0.0.1", new, upstream=upstream)
+    assert hostd.check("127.0.0.1", new) == ""
+    assert hostd.check("127.0.0.1", old, timeout=0.5) != "", "the old one is gone"
+
+
+def test_no_runtime_folder_is_a_reason_not_a_crash(tmp_path, monkeypatch):
+    shut = tmp_path / "shut"
+    shut.mkdir(mode=0o500)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(shut))
+    try:
+        with pytest.raises(hostd.HostdError, match="XDG_RUNTIME_DIR"):
+            hostd.ensure("127.0.0.1", free_port(), upstream="127.0.0.1:53", timeout=1)
+    finally:
+        shut.chmod(0o700)

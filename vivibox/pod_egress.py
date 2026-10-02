@@ -67,8 +67,10 @@ def prepare_host(host_address: str, pool: str, runner: Runner = run) -> None:
     """This machine ready for any pod: the host's services address on vivibox0 and the base of
     the rules (the helper refuses, naming it, an address another interface or route holds), and
     the DNS forwarder answering there. No pod starts without it: its DNS would go nowhere."""
-    helper(runner, "prepare-engine", "host", json.dumps({"host_address": host_address, "pool": pool}))
     try:
+        # One at a time: two pods starting at once would both make vivibox0, and one would fail.
+        with hostd.locked("host.lock"):
+            helper(runner, "prepare-engine", "host", json.dumps({"host_address": host_address, "pool": pool}))
         hostd.ensure(host_address.partition("/")[0])
     except hostd.HostdError as e:
         raise PodError(f"DNS forwarder not running: {e}; no pod starts without it") from None

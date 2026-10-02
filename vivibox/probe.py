@@ -128,4 +128,16 @@ def forwarder_problem(config) -> str:
     pod's DNS fails while it does not, and no pod starts."""
     from .egress import hostd
 
-    return hostd.problem(config.host_ip)
+    return hostd.problem(config.host_ip, pods_up=pods_running)
+
+
+def pods_running(runner=None) -> bool:
+    """Whether any pod of vivibox's runs, as Docker lists its containers by their label."""
+    run = runner or (
+        lambda cmd, timeout=None: subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    )
+    try:
+        p = run(["docker", "ps", "-q", "--filter", "label=vivibox.task"], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0 and bool(p.stdout.strip())

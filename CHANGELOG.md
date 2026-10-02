@@ -18,7 +18,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   it, on `[network] host_address` (default `203.0.113.1/32`, an interface of its own,
   `vivibox0`) at port 5053, and the first task's start starts it; `vivibox hostd` says whether
   it runs, `start` and `stop` start and stop it. A pod does not start while it is down, a running
-  pod resolves no names then, and the header says so and what to run.
+  pod resolves no names then, and the header says so and what to run, its pid file gone with a
+  logout included. Tasks started at once prepare the host and the forwarder one at a time; a
+  session without a runtime folder (`XDG_RUNTIME_DIR`) is told so.
 - A pod reaches your machine's services (`host.docker.internal`) on its own network's gateway,
   and the Docker Hub mirror listens on `network.host_address` instead of Docker's bridge.
 - A pod's egress rules are loaded by a new root helper, `/usr/local/libexec/vivibox-host`, through

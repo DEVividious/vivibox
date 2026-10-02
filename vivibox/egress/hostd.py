@@ -10,6 +10,7 @@ why (problem)."""
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import secrets
 import signal
@@ -17,6 +18,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from . import resolver
@@ -34,6 +36,32 @@ class HostdError(Exception):
 def folder() -> Path:
     base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     return Path(base) / "vivibox"
+
+
+def prepared_folder() -> Path:
+    """The folder, made when it is not there; HostdError says why it cannot be."""
+    where = folder()
+    try:
+        where.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError as e:
+        raise HostdError(
+            f"no folder of yours for its pid file, {where}: {e.strerror or e}; a login session has "
+            f"one in /run/user/{os.getuid()}, or set XDG_RUNTIME_DIR to a folder of yours"
+        ) from None
+    return where
+
+
+@contextlib.contextmanager
+def locked(name: str) -> Iterator[None]:
+    """One process at a time through what follows, on this machine for this user: several tasks
+    started at once each prepare the host and ensure the forwarder."""
+    try:
+        lock = (prepared_folder() / name).open("a")
+    except OSError as e:
+        raise HostdError(f"cannot take the lock {folder() / name}: {e.strerror or e}") from None
+    with lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def pid_file() -> Path:
@@ -87,11 +115,17 @@ def check(address: str, port: int = PORT, timeout: float = 2.0) -> str:
     return f"{where} does not answer, or the resolver it asks does not"
 
 
-def problem(address: str, port: int = PORT, timeout: float = 1.0) -> str:
-    """What the view's header says while the forwarder that should run does not; "" when it runs,
-    or when it was never started (the next task's start starts it) or stopped on purpose."""
+def problem(
+    address: str, port: int = PORT, timeout: float = 1.0, pods_up: Callable[[], bool] = lambda: False
+) -> str:
+    """What the view's header says while the forwarder that should run does not; "" when it runs.
+    Without a pid file, never started or stopped on purpose (the next task's start starts it),
+    it says so only while a pod runs (pods_up), whose DNS then goes nowhere: a logout without
+    linger empties the runtime folder, pid file and all."""
     pid = recorded()
     if pid is None:
+        if pods_up() and (why := check(address, port, timeout)):
+            return f"DNS forwarder not running: {why}, so pods resolve no names; {NEXT_STEP}"
         return ""
     if running() is None:
         return (
@@ -103,7 +137,7 @@ def problem(address: str, port: int = PORT, timeout: float = 1.0) -> str:
 
 
 def start(address: str, port: int = PORT, upstream: str = "") -> int:
-    folder().mkdir(parents=True, exist_ok=True, mode=0o700)
+    prepared_folder()
     command = [sys.executable, "-m", "vivibox", "hostd", "run", "--address", address, "--port", str(port)]
     with log_file().open("a") as out:
         p = subprocess.Popen(
@@ -133,24 +167,26 @@ def stop() -> bool:
 
 def ensure(address: str, port: int = PORT, upstream: str = "", timeout: float = 5.0) -> None:
     """The forwarder answering on address:port, started when it does not. HostdError says why
-    it does not answer after timeout seconds."""
-    if not check(address, port, timeout=1.0):
-        return
-    # One that runs and does not answer listens elsewhere (another address in config.toml) or is
-    # stuck: it goes, and one for here starts.
-    stop()
-    pid = start(address, port, upstream)
-    deadline = time.monotonic() + timeout
-    why = "it did not answer"
-    while time.monotonic() < deadline:
-        if running() != pid:
-            why = "it ended"
-            break
-        if not (why := check(address, port, timeout=0.5)):
+    it does not answer after timeout seconds. One at a time (locked): two at once would
+    stop each other's."""
+    with locked("hostd.lock"):
+        if not check(address, port, timeout=1.0):
             return
-        time.sleep(0.1)
-    stop()
-    raise HostdError(f"the DNS forwarder on {address}:{port} did not start: {why}; its log: {tail()}")
+        # One that runs and does not answer listens elsewhere (another address in config.toml) or is
+        # stuck: it goes, and one for here starts.
+        stop()
+        pid = start(address, port, upstream)
+        deadline = time.monotonic() + timeout
+        why = "it did not answer"
+        while time.monotonic() < deadline:
+            if running() != pid:
+                why = "it ended"
+                break
+            if not (why := check(address, port, timeout=0.5)):
+                return
+            time.sleep(0.1)
+        stop()
+        raise HostdError(f"the DNS forwarder on {address}:{port} did not start: {why}; its log: {tail()}")
 
 
 def tail(lines: int = 5) -> str:
@@ -170,9 +206,13 @@ def serve(address: str, port: int = PORT, upstream: str = "") -> int:
     except (resolver.ResolverError, OSError, ValueError) as e:
         print(f"vivibox hostd: cannot listen on {address}:{port}: {e}", file=sys.stderr, flush=True)
         return 1
+    try:
+        prepared_folder()
+    except HostdError as e:
+        print(f"vivibox hostd: {e}", file=sys.stderr, flush=True)
+        return 1
     signal.signal(signal.SIGTERM, lambda *_: forwarder.stop())
     signal.signal(signal.SIGINT, lambda *_: forwarder.stop())
-    folder().mkdir(parents=True, exist_ok=True, mode=0o700)
     pid_file().write_text(str(os.getpid()))
     print(f"vivibox hostd: forwarding {address}:{port} to {stub[0]}:{stub[1]}", flush=True)
     try:

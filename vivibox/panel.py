@@ -100,7 +100,7 @@ class PodView:
         out = [f"Pod `{self.address}` · demo {state}"]
         if not self.demo and self.log:
             # It ran and is gone. What it said last is the only thing that explains why.
-            out += ["", "It stopped. Its last output:", "", f"```\n{self.log}\n```"]
+            out += ["", "It stopped. Its last output:", "", display.fenced(self.log)]
         return out
 
 
@@ -172,7 +172,7 @@ def plans_verify(task: Task, st: TaskState) -> list[str]:
         return []
     return [
         "**Verification:** "
-        + " && ".join(f"`{c}`" for c in verify)
+        + " && ".join(display.code(c) for c in verify)
         + ". From the plan; it becomes the project's command when you accept.",
         "",
     ]
@@ -192,18 +192,18 @@ def command_to_review(task: Task) -> list[str]:
             "Type the one that builds the project and runs its tests, or ask the writer for one.",
             "",
         ]
-    lines = [f"**Proposed command:** `{command}`", ""]
+    lines = [f"**Proposed command:** {display.code(command)}", ""]
     if (selection := gate.narrowed_proposal(command)) and gate.DEBUG_OUTPUT.fullmatch(selection):
         lines += [
-            f"*This command has debug output on ({selection}): every verification log would be"
+            f"*This command has debug output on ({display.code(selection)}): every verification log would be"
             " megabytes of it. Take it out, or ask the writer for the command without it.*",
             "",
         ]
     elif selection:
         lines += [
-            f"*This command is narrowed to {selection}: verified by a part of the project alone, this task"
-            " and every one after it pass whatever they break elsewhere. Change it to the whole build,"
-            " or ask the writer for it.*",
+            f"*This command is narrowed to {display.code(selection)}: verified by a part of the project"
+            " alone, this task and every one after it pass whatever they break elsewhere. Change it to the"
+            " whole build, or ask the writer for it.*",
             "",
         ]
     lines += [
@@ -224,7 +224,7 @@ def build_said(log: Path, feedback: str = "") -> list[str]:
     return [
         "#### What the build said",
         "",
-        f"```\n{gate.log_excerpt(text)}\n```",
+        display.fenced(gate.log_excerpt(text)),
         "",
         f"Full log: `{log}`",
         "",
@@ -247,10 +247,10 @@ def verification_running(task: Task, st: TaskState) -> list[str]:
     text = read(log) if log and log.name.startswith("verify-") else ""
     commands = re.findall(r"^\$ (.+)$", text, re.MULTILINE)
     running = " ".join(filter(None, ["**Verification running**", ui.lasting(st.updated)]))
-    lines = [running + (f": `{commands[-1]}`" if commands else "") + "."]
+    lines = [running + (f": {display.code(commands[-1])}" if commands else "") + "."]
     if text:
         tail = "\n".join(text.splitlines()[-12:])
-        lines += ["", f"```\n{tail}\n```", "", f"Full log: `{log}`"]
+        lines += ["", display.fenced(tail), "", f"Full log: `{log}`"]
     return lines
 
 
@@ -262,10 +262,10 @@ def git_diff(task: Task, project) -> list[str]:
 
 
 def git_env() -> dict[str, str]:
-    """The environment for git's own pager. With LESS unset git sets it to FRX, and -X keeps less
-    on the terminal's main screen: the diff scrolls among what the terminal showed before, and
-    stays there after q. R alone puts it on the alternate screen, as the pager under l is. Your
-    own LESS stays as it is."""
+    """The environment for the diff's pager (f). With LESS unset git set it to FRX, and -X kept less
+    on the terminal's main screen: the diff scrolled among what the terminal showed before, and
+    stayed there after q. R alone puts it on the alternate screen, as the pager under l is, and
+    shows vivibox's colours, the only escape sequences left in the diff. Your own LESS stays."""
     return {**os.environ, "LESS": os.environ.get("LESS") or "R"}
 
 
@@ -466,7 +466,8 @@ def finished_detail(entry: dict) -> str:
     if entry.get("deleted"):
         return deleted_detail(entry)
     if entry["conflicts"]:
-        where = f"with conflicts in {', '.join(entry['conflicts'])}, also on `{entry['branch']}`"
+        named = ", ".join(display.code(display.name(c)) for c in entry["conflicts"])
+        where = f"with conflicts in {named}, also on `{entry['branch']}`"
     elif entry["branch"]:
         where = f"on branch `{entry['branch']}`"
     else:
@@ -714,14 +715,14 @@ def detail(
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = agents_question(task, "**The agent asks:**")
-        broken = ui.environment_problem(task)
+        broken = display.code(display.name(said)) if (said := ui.environment_problem(task)) else ""
         body = (
             question
             if question
             else [
                 f"**Verification could not run:** {broken}" if broken else "**Verification keeps failing.**",
                 "",
-                handed(handoff / "verify-feedback.md"),
+                display.fenced(handed(handoff / "verify-feedback.md")),
                 "",
                 *build_said(handoff / "verify.log", handed(handoff / "verify-feedback.md")),
             ]  # fmt: skip
@@ -737,7 +738,7 @@ def detail(
             body += ["", *left]
         if gate_failed(task):  # what the agent is fixing now, in the build's own words
             feedback = handed(handoff / "verify-feedback.md")
-            body += ["", feedback, "", *build_said(handoff / "verify.log", feedback)]
+            body += ["", display.fenced(feedback), "", *build_said(handoff / "verify.log", feedback)]
         if st.state is State.IMPLEMENT:
             # A long turn is a still row; what happened lately says it is a turn, not a hang.
             body += ["", "**Lately**", "", *(f"- {display.code(line)}" for line in timeline.latest(task)), "",

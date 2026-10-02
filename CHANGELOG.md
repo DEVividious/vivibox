@@ -47,6 +47,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   as the bytes it is. Backticks, markdown and markup in a name or a file are shown as they are,
   never as formatting or a link. The copy of a large risky file to read has a name of vivibox's
   own, so the `less -L` command shown for it holds nothing the agent named.
+- A risky file's line breaks are shown as they are: a line ends at `\n` alone, and a carriage
+  return, a form feed or U+2028 in it is shown in its line, so a change from `\r\n` to `\r`
+  can no longer be approved unseen, and a diff always names its file and its change.
+- What the agent wrote can no longer colour, hide or link anything on your screen: the build's
+  output, the verification's feedback and the names of conflicting files in the details panel
+  are shown as text; the task's summary in the list, `vivibox status` and the timeline, desktop
+  notifications (no markup) and `f`, which now pages the diff with every escape sequence of the
+  agent's shown and vivibox's own colours, are too.
 - A risky file the task adds or changes that is not text vivibox can show you (bytes that are not
   UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
   longer be approved after the word "(binary)": `p` refuses it, and the writer can take its

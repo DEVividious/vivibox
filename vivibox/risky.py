@@ -476,21 +476,26 @@ class Approvals:
         if want is not None and hashlib.sha256(raw).hexdigest() != want:
             return f"{linked}{head}: not shown: {self._unseen(change.path, changed)}\n", False
         try:
-            b = clone_read.as_text(raw).splitlines(keepends=True)
+            b = display.lines(clone_read.as_text(raw))
         except clone_read.NotText as e:
             return f"{linked}{head}: not shown: {self._not_text(change.path, e)}\n", False
         note = ""
         try:
-            a = clone_read.as_text(old.read_bytes()).splitlines(keepends=True) if old.exists() else []
+            a = display.lines(clone_read.as_text(old.read_bytes())) if old.exists() else []
         except clone_read.NotText as e:
             if change.kind == "removed":
                 return f"{linked}{head} (what was approved before is not text: {e.why})\n", True
             before = f"what was approved before is not text ({e.why})"
             a, note = [], f"{head}: {before}, so the new content is shown whole\n"
-        # What you read, never what is hashed: the digest above is of raw, as it is.
-        a, b, name = map(display.content, a), map(display.content, b), display.name(change.path)
-        diff = difflib.unified_diff(list(a), list(b), f"approved/{name}", f"task/{name}")
-        return linked + note + "".join(diff), True
+        # Of the raw lines, escaped only to be read: the digest above is of raw, as it is.
+        name = display.name(change.path)
+        if diff := display.diff(difflib.unified_diff(a, b, f"approved/{name}", f"task/{name}")):
+            return (linked + note or f"{head}\n") + diff, True
+        if not b:  # nothing to show, and nothing in it unshown
+            return f"{linked}{head} (empty)\n", True
+        # Never a change taken as seen with nothing of it shown.
+        nothing = "the difference is in nothing vivibox shows as lines"
+        return f"{linked}{head}: not shown: {self._unseen(change.path, nothing)}\n", False
 
     def _unseen(self, path: str, why: str = "") -> str:
         """Why the task's change to path cannot be approved when you could not read it, and what
@@ -513,7 +518,7 @@ class Approvals:
         """Where _view copies a risky file of path: the task's metadata, which no container writes,
         by a name of vivibox's own, so the command to read it holds nothing the agent named."""
         digest = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()
-        return self.dir / "view" / f"{digest[:16]}.txt"
+        return self.dir / "view" / f"{digest}.txt"  # whole: no two paths share a copy
 
     def _view(
         self, path: str, budget: clone_read.Budget | None = None, want: str | None = None
@@ -543,7 +548,8 @@ class Approvals:
                 f"{said}, and could not copy it for you to read: {e.kind + ', as ' if over else ''}{why}",
                 False,
             )
-        command = shlex.join(["less", "-L", str(view)])
+        # -+R -+r: no escape sequence of the copy's reaches the terminal, whatever your LESS says.
+        command = shlex.join(["less", "-L", "-+R", "-+r", str(view)])
         return f"{said}: read its copy as text, not in your IDE ({command}), before you approve", True
 
 

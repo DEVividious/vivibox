@@ -495,7 +495,8 @@ class Vivibox(
 
     def fail(self, error: Exception) -> None:
         # Never markup: an error may name a file the agent chose ([link=…] in it).
-        self.notify(str(error.args[0] if error.args else error), severity="error", timeout=10, markup=False)
+        said = display.terminal(str(error.args[0] if error.args else error))
+        self.notify(said, severity="error", timeout=10, markup=False)
 
     # --- actions ---
 
@@ -555,9 +556,9 @@ class Vivibox(
     def finished(self, done: actions.Finished) -> None:
         self.reload()
         if done.conflicts:
-            files = ", ".join(done.conflicts[:5])
+            files = ", ".join(map(display.name, done.conflicts[:5]))  # the agent's names: text, never markup
             text = f"{done.task_id}: conflicts in {files}; resolve them in your IDE. Also on {done.branch}."
-            self.notify(text, severity="warning", timeout=15)
+            self.notify(text, severity="warning", timeout=15, markup=False)
             return
 
         def commit(answer: dict) -> None:
@@ -569,7 +570,7 @@ class Vivibox(
                         done.source, answer["message"], answer["branch"], answer["create"]
                     )
                     on = f" on {answer['branch']}" if answer["branch"] else ""
-                    self.notify(f"Committed{on}: {made}")
+                    self.notify(f"Committed{on}: {display.name(made)}", markup=False)
                 except Exception as e:
                     self.fail(e)
 
@@ -744,7 +745,7 @@ class Vivibox(
         about_task.append(str(ui.cost(task)))
         dialog = DeleteTask(
             f"Delete {task.id}?",
-            f"{st.goal} ({', '.join(about_task)})",
+            f"{display.terminal(st.goal, '')} ({', '.join(about_task)})",
             "its clone with every commit the agent made, its plan, its pod and anything running in it, "
             "and its review copy. It is not accepted: none of its work reaches your repository.",
             "a line in the history, with what it was for, what it cost and how far it got. "

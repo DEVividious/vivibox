@@ -7,6 +7,7 @@ prompt, runs the gate and records every step in the task's event log.
 
 from __future__ import annotations
 
+import html
 import re
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, feedback, gate, handoff, manual, orchestration, proposal, transcript, ui
+from . import brief, display, feedback, gate, handoff, manual, orchestration, proposal, transcript, ui
 from . import init as project_init
 from .config import DEFAULT_VERIFY_TIMEOUT, Project, by_modules
 from .harness import Harness, HarnessError, Turn
@@ -55,11 +56,14 @@ class Action:
 
 
 def notify(task_id: str, message: str, desktop: bool = True, actions: Sequence[Action] = ()) -> None:
-    """Always in the supervisor window; on the desktop too unless notifications.desktop is false."""
+    """Always in the supervisor window; on the desktop too unless notifications.desktop is false.
+    What the agent wrote in it reaches neither as anything but text: no control character to the
+    terminal, no markup to the desktop's notifications, which read <b> and &amp; in the body."""
+    message = display.terminal(message)
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
     if not desktop or not shutil.which("notify-send"):
         return
-    command = ["notify-send", "--app-name=vivibox", f"vivibox {task_id}", message]
+    command = ["notify-send", "--app-name=vivibox", f"vivibox {task_id}", html.escape(message, quote=False)]
     if not actions:
         subprocess.run(command, check=False)
         return

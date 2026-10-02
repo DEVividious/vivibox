@@ -13,7 +13,7 @@ from textual.content import Content
 from textual.events import Resize
 from textual.widgets import Static
 
-from . import actions, look, orchestration, ui
+from . import actions, display, look, orchestration, ui
 from .dialogs import NO_PROJECTS
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
@@ -163,7 +163,7 @@ class TaskTable:
                      "COST": self.total_cell(spent), "PLAN": plan, "IMPL": impl, "REVIEW": review,
                      "CREATED": look.muted(short_ago(st.created)),
                      "UPDATED": look.muted(short_ago(live["at"] if live else st.updated)),
-                     "GOAL": escape(st.goal)},
+                     "GOAL": escape(display.terminal(st.goal, ""))},
                     st.id,
                 ))  # fmt: skip
             for entry in done:
@@ -177,7 +177,7 @@ class TaskTable:
                      "PLAN": plan, "IMPL": impl, "REVIEW": review,
                      "CREATED": look.muted(short_ago(entry["created"])) if entry.get("created") else NONE,
                      "UPDATED": look.muted(short_ago(entry["finished"])),
-                     "GOAL": look.secondary(entry["title"])},
+                     "GOAL": look.secondary(display.terminal(entry["title"], ""))},
                     entry["id"],
                 ))  # fmt: skip
         # The goal gets what the other columns leave: a goal that runs off the screen is a goal

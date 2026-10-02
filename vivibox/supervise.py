@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from . import (
     actions,
+    display,
     gate,
     keys,
     ntfy,
@@ -94,7 +95,8 @@ def notifier(task: Task, project, current: Callable[[], Config]):
         )
         if channel := channel_for(config):
             st = task.read_state()
-            channel.decision(task_id, message, waiting=waits_for_user(st.state), trouble=st.paused)
+            said = display.terminal(message)  # what the agent wrote, as text on your phone too
+            channel.decision(task_id, said, waiting=waits_for_user(st.state), trouble=st.paused)
 
     return notify
 

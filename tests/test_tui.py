@@ -605,7 +605,7 @@ def test_a_narrowed_command_is_shown_with_its_selection(env):
 
     async def scenario(app, pilot):
         app.reload()
-        assert "narrowed to -Dtest=PetTests" in detail(task, task.read_state(), 3, True, None)
+        assert "narrowed to `-Dtest=PetTests`" in detail(task, task.read_state(), 3, True, None)
         await pilot.press("e")
         await pilot.pause()
         assert isinstance(app.screen, AskVerify) and "narrowed to -Dtest=PetTests" in app.screen.heading

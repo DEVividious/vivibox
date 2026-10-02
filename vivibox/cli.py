@@ -262,7 +262,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
 def report_finished(done: actions.Finished) -> None:
     if done.conflicts:
         print(f"{done.task_id} is done ({done.cost}), but its work conflicts with your checkout in:")
-        print("".join(f"  {f}\n" for f in done.conflicts), end="")
+        print("".join(f"  {display.name(f)}\n" for f in done.conflicts), end="")
         print(f"Resolve them in your IDE and commit. The work is also on branch {done.branch}.")
     elif done.branch:
         print(f"{done.task_id} is done ({done.cost}): branch {done.branch} in {done.source}.")
@@ -744,7 +744,7 @@ def main(argv: list[str] | None = None) -> int:
         harness.HarnessError,
         KeyError,
     ) as e:
-        print(f"vivibox: {e.args[0] if e.args else e}", file=sys.stderr)
+        print(f"vivibox: {display.terminal(str(e.args[0] if e.args else e))}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as e:
         print(f"vivibox: command failed ({e.returncode}): {' '.join(e.cmd)}", file=sys.stderr)

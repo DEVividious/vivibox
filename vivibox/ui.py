@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import cli_session, prepare
+from . import cli_session, display, prepare
 from .plan import PlanError, parse_plan
 from .states import State
 from .task import Task, TaskState
@@ -509,7 +509,7 @@ def task_list(
                 *cost_cells(spent),
                 ago(st.created, now),
                 ago(st.updated, now),
-                st.goal,
+                display.terminal(st.goal, ""),  # the agent's summary: no escape sequence of its own
                 COLORS[shown.group],
             )
         )
@@ -522,7 +522,7 @@ def task_list(
                 *cost_cells(finished_spend(entry)),
                 ago(entry["created"], now) if entry.get("created") else "-",
                 ago(entry["finished"], now),
-                entry["title"],
+                display.terminal(entry["title"], ""),
                 "dim" if entry.get("deleted") else "green",
             )
         )
@@ -563,7 +563,7 @@ def task_detail(
         f"{style(st.id, 'bold')}  {style(shown.status, COLORS[shown.group])}"
         f"  {style(' · '.join(meta), 'dim')}",
         "",
-        st.goal,
+        display.terminal(st.goal, ""),
         "",
         *([] if st.box else [f"{style('Plan', 'bold')}  {task.plan_path}"]),
         *([f"{style('Build', 'bold')} {note}"] if (note := modules_note(task)) else []),
@@ -579,7 +579,7 @@ def task_detail(
     ):
         lines.append(f"{style('Why', 'bold')}   {why}")
     if shown.problem:
-        lines.append(f"{style('Why', 'bold')}   {style(shown.problem, 'red')}")
+        lines.append(f"{style('Why', 'bold')}   {style(display.terminal(shown.problem, ''), 'red')}")
     lines += [
         f"{style('Next', 'bold')}  " + "   ".join(shown.commands),
         "",
@@ -590,5 +590,5 @@ def task_detail(
         when = clock(e["ts"])
         data = "  ".join(f"{k}={v}" for k, v in e["data"].items() if v not in ("", None))
         kind = style(e["type"].ljust(8), "red" if e["type"] == "error" else "cyan")
-        lines.append(f"  {style(when, 'dim')}  {kind}  {shorten(data, cols - 22)}")
+        lines.append(f"  {style(when, 'dim')}  {kind}  {shorten(display.terminal(data, ''), cols - 22)}")
     return "\n".join(lines) + "\n"

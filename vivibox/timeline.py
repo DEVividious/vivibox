@@ -207,7 +207,7 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = "auto: the plan is accepted without you" if data.get("enabled") else "auto off"
         else:
             text = _generic(kind, data)
-        found.append((ui.clock(ts), ui.shorten(text.replace("\n", " "), 160)))
+        found.append((ui.clock(ts), display.terminal(ui.shorten(text.replace("\n", " "), 160), "")))
     return found
 
 
@@ -221,7 +221,7 @@ def latest(task: Task, count: int = 3) -> list[str]:
 
 def render(task: Task) -> str:
     st = task.read_state()
-    return f"# {st.id}: {st.goal}\n\n" + "\n".join(lines(task)) + "\n"
+    return f"# {st.id}: {display.terminal(st.goal, '')}\n\n" + "\n".join(lines(task)) + "\n"
 
 
 def write(task: Task) -> Path:

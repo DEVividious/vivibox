@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 
 OPEN, CLOSE = "‹", "›"
 # Unicode's categories of what has nothing to see: controls (C0, DEL, C1), format characters (bidi
 # embeddings, overrides and isolates, zero-width characters, the BOM, tags), surrogates, private use,
 # unassigned code points, the line and paragraph separators, and every space but the ASCII one.
 INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"})
-# What ends a line for str.splitlines, which splits a file into the lines of its diff.
-LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85  "
 NO_NEWLINE = "\\ No newline at end of file"
 # Printable ASCII never needs a look; anything else (‹ and › among it) is looked up.
 _LOOK = re.compile(r"[^\x20-\x7e]")
@@ -46,22 +45,38 @@ def name(text: str) -> str:
     return _escape(text)
 
 
+def lines(text: str) -> list[str]:
+    """text's lines, each with its \\n: a line ends there alone. What another tool may take for a
+    line break (\\r for bash; FF, VT, NEL or U+2028 for Groovy, which takes them for spaces) stays
+    in the line it is in, where content shows it: a line of its own here would be a line you read
+    and no tool runs, or the other way round."""
+    found = text.split("\n")
+    return [line + "\n" for line in found[:-1]] + ([found[-1]] if found[-1] else [])
+
+
 def content(line: str) -> str:
-    """A line of a file in a diff, its line break with it (str.splitlines(keepends=True)): a tab
-    stays, every other invisible character is shown, \\r too, and the line ends in one \\n
-    whatever ended it in the file. A last line with no line break says so, as git does."""
+    """A line of a file (lines) as you read it: a tab stays, every other invisible character is
+    shown, \\r too, and it ends in its \\n. A last line with no \\n says so, as git does."""
     if line.endswith("\n"):
         return _escape(line[:-1], "\t") + "\n"
-    if line and line[-1] in LINE_BREAKS:
-        return _escape(line, "\t") + "\n"
     return _escape(line, "\t") + f"\n{NO_NEWLINE}\n"
 
 
-def terminal(text: str) -> str:
-    """Text vivibox puts on the screen whole (the details panel's markdown): every invisible
-    character but a line break and a tab as its code point, so none reaches the terminal as
-    itself. ‹ and › stay: what was escaped already (name, content) is not escaped twice."""
-    return _escape(text, "\n\t", markers=False)
+def diff(found: Iterable[str]) -> str:
+    """A unified diff of raw lines (lines), as you read it: computed on the files' own lines and
+    escaped only here. Its first two lines carry names escaped already (name); a hunk's head
+    starts with @, and every other line with its mark, the line of the file after it."""
+    return "".join(
+        line if i < 2 or line.startswith("@") else line[0] + content(line[1:]) for i, line in enumerate(found)
+    )
+
+
+def terminal(text: str, keep: str = "\n\t") -> str:
+    """Text vivibox puts on the screen whole (the details panel's markdown, what the agent wrote
+    in the list or a notification): every invisible character but those kept (a line break and a
+    tab; none in a row of a list) as its code point, so none reaches the terminal as itself.
+    ‹ and › stay: what was escaped already (name, content) is not escaped twice."""
+    return _escape(text, keep, markers=False)
 
 
 def fenced(text: str, info: str = "") -> str:

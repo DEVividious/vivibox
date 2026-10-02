@@ -894,7 +894,7 @@ def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
     said = approvals.diff(Change("build.gradle", "added"))
     assert "larger than 64 MiB, too large to show here" in said
     assert "vivibox checks whether it changes, not what it says" in said
-    assert shlex.join(["less", "-L", str(approvals.copy_for_you("build.gradle"))]) in said
+    assert shlex.join(["less", "-L", "-+R", "-+r", str(approvals.copy_for_you("build.gradle"))]) in said
     assert "does not read it" not in said
 
 
@@ -1035,7 +1035,7 @@ def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task, 
     approvals = Approvals(task.meta, task.repo)
     said = approvals.diff(Change("build.gradle", "added"))
     view = approvals.copy_for_you("build.gradle")
-    assert shlex.join(["less", "-L", str(view)]) in said and "not in your IDE" in said
+    assert shlex.join(["less", "-L", "-+R", "-+r", str(view)]) in said and "not in your IDE" in said
     assert str(task.repo) not in said
     assert view.is_file() and not view.is_symlink()
     assert risky._digest(task.meta / "risky" / "view", view) == risky._digest(task.repo, big)
@@ -1103,7 +1103,7 @@ def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task
     approvals = Approvals(task.meta, task.repo)
     said = approvals.diff(Change(rel, "added"))
     command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
-    assert shlex.split(command) == ["less", "-L", str(approvals.copy_for_you(rel))]
+    assert shlex.split(command) == ["less", "-L", "-+R", "-+r", str(approvals.copy_for_you(rel))]
     stub = tmp_path / "bin"
     stub.mkdir()
     (stub / "less").write_text("#!/bin/sh\nexit 0\n")

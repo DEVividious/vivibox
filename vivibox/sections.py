@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from . import gate, handoff, orchestration, reviewing, ui
+from . import display, gate, handoff, orchestration, reviewing, ui
 from .config import ConfigError, load_config
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
@@ -68,7 +68,8 @@ def build_files_left(task: Task) -> list[str]:
     for event in reversed(task.events()):
         if event["type"] == "gate":
             return [
-                f"**{source} names `{command}`**, and this project runs nothing yet: `e` on its row picks it."
+                f"**{display.code(display.name(source))} names {display.code(command)}**, and this project"
+                " runs nothing yet: `e` on its row picks it."
                 for command, source in event["data"].get("build_files") or []
             ]
     return []

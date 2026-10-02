@@ -4,10 +4,46 @@ timeline and the logs. Mixed into the app in tui.py.
 
 from __future__ import annotations
 
-from . import actions, ide, logs
+import subprocess
+from collections.abc import Iterable, Iterator
+
+from . import actions, display, ide, logs, repo
 from .app_support import in_terminal
 from .config import ConfigError
-from .panel import git_diff, git_env
+from .panel import git_diff, git_env, pager_command
+from .task import Task
+
+# The colours of the diff, vivibox's own: no escape sequence in the pager is anyone else's.
+BOLD, GREEN, RED, CYAN, RESET = "\x1b[1m", "\x1b[32m", "\x1b[31m", "\x1b[36m", "\x1b[0m"
+
+
+def shown_diff(found: Iterable[str]) -> Iterator[str]:
+    """git's diff, without its colours, as you read it: every line escaped as a risky file's is,
+    so what the agent wrote can neither hide a line (SGR 8, \\r) nor be a link (OSC 8) whatever
+    your pager passes on; then coloured as git does, a file's head bold, its lines by their mark."""
+    head = False
+    for line in found:
+        head = line.startswith("diff ") or (head and not line.startswith("@"))
+        text = display.content(line).removesuffix("\n")
+        colour = BOLD if head else CYAN if text[:1] == "@" else {"+": GREEN, "-": RED}.get(text[:1], "")
+        yield f"{colour}{text}{RESET}\n" if colour else f"{text}\n"
+
+
+def diff_pager(task: Task, project) -> list[str]:
+    """f: the work as a diff, from the review ref in your repository, written escaped to the
+    task's metadata and opened in your pager there; git's own pager would show it as it is."""
+    path = task.meta / "log" / "work.diff"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    command = [*git_diff(task, project), "--no-color"]
+    with (
+        subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p,
+        open(path, "w") as out,
+    ):
+        out.writelines(shown_diff(raw.decode("utf-8", "surrogateescape") for raw in p.stdout))
+        said = p.stderr.read().decode("utf-8", "replace")
+    if p.returncode != 0:
+        raise repo.RepoError(f"git diff: {display.name(said.strip())}")
+    return pager_command(path)
 
 
 class WorkKeys:
@@ -44,9 +80,10 @@ class WorkKeys:
         return git_diff(task, actions.load(task.id)[1])
 
     def action_show_diff(self) -> None:
-        """The work as a diff, in git's own pager, before you accept it."""
+        """The work as a diff, in your pager, before you accept it."""
         try:
-            command = self.diff_command()
+            task, _ = self.selected()
+            command = diff_pager(task, actions.load(task.id)[1])
         except Exception as e:
             self.fail(e)
             return

@@ -1518,8 +1518,9 @@ def test_a_change_vivibox_can_show_you_is_approvable(task, size, monkeypatch):
 def test_a_change_vivibox_cannot_show_you_is_refused_at_p(task, monkeypatch):
     from vivibox import actions
 
-    changed_risky(task, "build.gradle", 70 << 20)
-    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 100 << 20)  # the hash fits, its copy does not
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)  # kept small: written whole
+    changed_risky(task, "build.gradle", 2 * clone_read.CHUNK)
+    monkeypatch.setattr(clone_read, "SCAN_BUDGET", 3 * clone_read.CHUNK)  # the hash fits, its copy does not
     said = "\n".join(actions.risky_diffs(task, SimpleNamespace(risky_extra=[])))
     assert "could not copy it for you to read: scan budget exceeded" in said
     assert "so the task's change to it cannot be approved: reply, and the writer" in said
@@ -1795,6 +1796,22 @@ def test_a_large_copy_of_text_is_read_whole_and_approvable(task, monkeypatch):
     assert "read its copy as text" in said
     assert Approvals(task.meta, task.repo).copy_for_you("build.gradle").read_bytes() == path.read_bytes()
     assert actions.approve_risky(task, P)[0] == 1
+
+
+def test_a_large_copy_cut_off_in_a_character_is_refused_and_deleted(task, monkeypatch):
+    """The file ends in the first two of a character's three bytes: no chunk is invalid on its
+    own, only its end is."""
+    from vivibox import actions
+
+    path = past_the_limit_to_show(task.repo / "build.gradle", monkeypatch)
+    with open(path, "ab") as file:
+        file.write("€".encode()[:2])
+    view = Approvals(task.meta, task.repo).copy_for_you("build.gradle")
+    said = actions.risky_diffs(task, P)[0]
+    assert f"could not copy it for you to read: {NOT_TEXT} ({clone_read.INVALID})" in said
+    assert not view.exists()
+    assert f"{NOT_TEXT} ({clone_read.INVALID})" in refused_at_p(task)
+    assert not view.exists()
 
 
 def test_a_link_in_the_repository_to_a_file_that_is_not_text_is_not_approvable(task):

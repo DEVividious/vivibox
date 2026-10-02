@@ -89,7 +89,7 @@ class Budget:
             raise Refused(str(path), OVER_BUDGET)
 
 
-# Why content is not text vivibox shows you as it is (NotText). Bytes that are no UTF-8 are a
+# Why content is not text vivibox shows you as it is (NotText). Bytes that are not UTF-8 are a
 # binary file's, or text in another encoding (Latin-1): which, vivibox cannot tell.
 INVALID, BINARY = "not UTF-8: binary, or text in another encoding", "binary"
 

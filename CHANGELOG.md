@@ -14,7 +14,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   new layout of a task's files. The list and `vivibox status` show them as `from an earlier
   vivibox` (and say when their supervisor or pod still runs); delete them with
   `vivibox delete <id>` and create them again. A new task records the layout it was created
-  under and the vivibox that created it; one from a newer vivibox is only shown, not deleted.
+  under and the vivibox that created it; one from a newer vivibox is only shown, not deleted,
+  even when its state holds what this vivibox does not know. `vivibox status` waits at most 5 s
+  for Docker to say whether such a task's pod is up, and says when it could not tell.
 - `vivibox init` gives a Maven project Java 25 when `.mvn/jvm.config` starts Maven with options
   Java 21 refuses (OpenFeign's), and notes a `pom.xml` that asks for other JDKs through the
   toolchains plugin.
@@ -152,6 +154,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The timeline `l` opens is written to a folder of yours under the temporary one, not into the
+  task: looking at a task writes nothing in it.
+- The tests reach no Docker but in a test marked `docker`: a `docker` first on PATH answers as an
+  empty daemon, and a test that asks it to change something fails.
 - The pod's container recipes, its demo commands and its network rules moved from `pod.py` to
   modules of their own (`podspec.py`, `pod_demo.py`, `pod_egress.py`); nothing changes for a person.
 

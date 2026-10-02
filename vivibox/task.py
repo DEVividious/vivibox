@@ -240,7 +240,10 @@ class Task:
         self.event("repo", base_commit=commit)
 
     def read_state(self) -> TaskState:
-        data = json.loads((self.meta / "state.json").read_text())
+        path = self.meta / "state.json"
+        data = json.loads(path.read_text())
+        if classify(data.get("task_schema_version", 0)) != CURRENT:
+            return self._read_other(data, path)
         data["state"] = State(data["state"])
         # A flow chosen under a name it has since changed (config.RENAMED_MODES).
         data["orchestration"] = current_mode(data.get("orchestration", ""))
@@ -255,6 +258,27 @@ class Task:
                 sessions.setdefault(role, sessions.pop(harness))
         # Fields a newer vivibox added are ignored: a running supervisor may be older than the CLI.
         return TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
+
+    def _read_other(self, data: dict, path: Path) -> TaskState:
+        """The state of a task of another layout, for showing it: what it has of the fields this
+        vivibox knows, of the types it knows them by; a state it does not know as written; the
+        rest from the folder. Whatever else a newer vivibox keeps is left alone, never written."""
+        when = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(timespec="milliseconds")
+        found = TASK_ID.match(self.id)
+        shape = asdict(
+            TaskState(self.id, found["project"] if found else "", "", State.PLAN, 0, False, when, when)
+        )
+        known = {
+            k: v
+            for k, v in data.items()
+            if k in shape and type(v) is type(shape[k]) and (k not in ("created", "updated") or _iso(v))
+        }
+        try:
+            state = State(data.get("state"))
+        except ValueError:
+            state = str(data.get("state", ""))  # a newer vivibox's own, as it wrote it
+        raw = data.get("task_schema_version", 0)
+        return TaskState(**{**shape, **known, "id": self.id, "state": state, "task_schema_version": raw})
 
     def _write_state(self, st: TaskState) -> None:
         # Behind every operation: a task of another layout is never written over, which would
@@ -311,10 +335,22 @@ class Task:
         return st
 
 
+def _iso(text: str) -> bool:
+    """A time the view can count from: ISO, with its zone."""
+    try:
+        return datetime.fromisoformat(text).tzinfo is not None
+    except ValueError:
+        return False
+
+
 def layout(st: TaskState) -> str:
     """CURRENT, EARLIER (no version, or an older one) or NEWER (a higher one, or one that is not a
     whole number, which no vivibox this one knows wrote)."""
-    number = st.task_schema_version
+    return classify(st.task_schema_version)
+
+
+def classify(number) -> str:
+    """layout() of a version as state.json holds it."""
     if isinstance(number, bool) or not isinstance(number, int) or number > TASK_SCHEMA_VERSION:
         return NEWER
     return CURRENT if number == TASK_SCHEMA_VERSION else EARLIER

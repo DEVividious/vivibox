@@ -29,12 +29,13 @@ from . import (
     version,
 )
 from . import init as project_init
+from . import pod as pod_module
 from .cli_host import cmd_image_build, cmd_image_check, cmd_mirror
 from .cli_providers import cmd_auth, cmd_models
 from .cli_reports import cmd_stats, cmd_usage
 from .config import ORCHESTRATION_MODES, ConfigError, config_dir, current_mode, load_config, load_project
 from .plan import KINDS, PlanError, parse_plan
-from .pod import Pod, PodError, addresses
+from .pod import Pod, PodError
 from .states import State
 from .supervise import cmd_supervise
 from .task import CURRENT, DELETE, SHOW, Task, TaskLayoutError, find_task, layout, list_tasks
@@ -130,8 +131,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     style = ui.Style(ui.use_color())
     if args.task:
         task = find_task(config.tasks_dir, args.task, SHOW)
-        running = still_running([task])(task)
-        print(ui.task_detail(task, _criteria, config.max_rounds, args.events, style, running), end="")
+        running, unknown = still_running([task])
+        print(ui.task_detail(task, _criteria, config.max_rounds, args.events, style, running(task)), end="")
+        print(unknown, end="")
         return 0
     tasks = list_tasks(config.tasks_dir)
     live = {task.id for task in tasks}
@@ -139,22 +141,34 @@ def cmd_status(args: argparse.Namespace) -> int:
     if not tasks and not finished:
         print("No tasks. Create one with 'vivibox new <project> \"<goal>\"'.")
         return 0
-    shown = ui.task_list(
-        tasks, _criteria, config.max_rounds, style, running=still_running(tasks), finished=finished
+    running, unknown = still_running(tasks)
+    print(
+        ui.task_list(tasks, _criteria, config.max_rounds, style, running=running, finished=finished), end=""
     )
-    print(shown, end="")
+    print(unknown, end="")
     return 0
 
 
-def still_running(tasks: list[Task]) -> Callable[[Task], bool]:
+# How long vivibox status waits for Docker to say which pods are up.
+DOCKER_SECONDS = 5
+
+
+def still_running(tasks: list[Task]) -> tuple[Callable[[Task], bool], str]:
     """Whether a task's supervisor runs; for a task this vivibox does not run, also whether its pod
-    is up, which an earlier vivibox may have left. Read from the pid file and Docker, never stopped."""
+    is up, which an earlier vivibox may have left. Read from the pid file and Docker, never stopped.
+    With it, what to say when Docker did not answer in time: nothing is claimed then."""
     others = {Pod(t.id, Path("."), "").sidecar for t in tasks if layout(t.read_state()) != CURRENT}
+    up, unknown = set(), ""
     try:
-        up = set(addresses(sorted(others)))
-    except OSError:  # no docker to ask
-        up = set()
-    return lambda t: actions.supervisor_running(t) or Pod(t.id, Path("."), "").sidecar in up
+        up = set(pod_module.addresses(sorted(others), timeout=DOCKER_SECONDS))
+    except subprocess.TimeoutExpired:
+        unknown = (
+            f"Docker did not answer in {DOCKER_SECONDS} s: vivibox could not tell whether the pods"
+            " of tasks from an earlier vivibox still run.\n"
+        )
+    except OSError:  # no docker, and so no pod
+        pass
+    return (lambda t: actions.supervisor_running(t) or Pod(t.id, Path("."), "").sidecar in up), unknown
 
 
 def ensure_image() -> None:

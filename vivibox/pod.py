@@ -51,12 +51,14 @@ HOST_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
-def addresses(sidecars: Sequence[str], runner: Runner = run) -> dict[str, str]:
-    """Where each pod answers, for many pods at once: asking one at a time is what makes a list slow."""
+def addresses(sidecars: Sequence[str], runner: Runner = run, timeout: float | None = None) -> dict[str, str]:
+    """Where each pod answers, for many pods at once: asking one at a time is what makes a list slow.
+    timeout: seconds before subprocess.TimeoutExpired, for a daemon that does not answer."""
     if not sidecars:
         return {}
     template = "{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
-    found = runner(["docker", "inspect", "-f", template, *sidecars])
+    asked = ["docker", "inspect", "-f", template, *sidecars]
+    found = runner(asked, timeout=timeout) if timeout else runner(asked)
     out = {}
     for line in found.stdout.splitlines():
         name, _, address = line.strip().partition(" ")

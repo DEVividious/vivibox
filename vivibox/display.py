@@ -84,15 +84,21 @@ def terminal(text: str, keep: str = "\n\t") -> str:
     return _escape(text, keep, markers=False)
 
 
-def terminal_copy(path: Path) -> Path:
-    """path's text escaped (terminal), for a pager that passes every escape sequence on (cat,
-    more): in a folder of yours alone under the temporary one, named by the path's digest, so the
-    next copy of the same file takes its place. A file vivibox cannot read is said so there."""
+def own_folder() -> Path:
+    """A folder of yours alone under the temporary one, for what vivibox writes only to show it."""
     folder = Path(tempfile.gettempdir()) / f"vivibox-{os.getuid()}"
     folder.mkdir(mode=0o700, exist_ok=True)
     found = folder.lstat()
     if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid() or found.st_mode & 0o077:
         raise OSError(f"{folder} is not a folder of yours alone")
+    return folder
+
+
+def terminal_copy(path: Path) -> Path:
+    """path's text escaped (terminal), for a pager that passes every escape sequence on (cat,
+    more): in a folder of yours alone under the temporary one, named by the path's digest, so the
+    next copy of the same file takes its place. A file vivibox cannot read is said so there."""
+    folder = own_folder()
     try:  # never through a link, never waiting on a FIFO
         with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as file:
             if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):

@@ -6,6 +6,7 @@ either writes nothing in it."""
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from test_tui import implementing, rows, run
@@ -18,7 +19,8 @@ from vivibox.pod import Pod
 from vivibox.task import TaskLayoutError, find_task
 
 EARLIER = ("no version", "an older version")
-NEWER = ("a newer version", "a version that is not a number")
+# true is 1 to Python, and this vivibox's version is 1: it must still not read as one.
+NEWER = ("a newer version", "a version that is not a number", "true as a version")
 EARLIER_SAYS = "created by an earlier vivibox"
 NEWER_SAYS = "created by a newer vivibox"
 
@@ -42,6 +44,8 @@ def written_under(task, how: str, monkeypatch) -> None:
         monkeypatch.setattr(task_module, "TASK_SCHEMA_VERSION", task_module.TASK_SCHEMA_VERSION + 1)
     elif how == "a newer version":
         data["task_schema_version"] = task_module.TASK_SCHEMA_VERSION + 1
+    elif how == "true as a version":
+        data["task_schema_version"] = True
     else:
         data["task_schema_version"] = str(task_module.TASK_SCHEMA_VERSION)
     path.write_text(json.dumps(data, indent=2) + "\n")
@@ -311,3 +315,127 @@ def test_a_pod_of_an_earlier_vivibox_still_up_is_said_too(earlier):
     st = earlier.read_state()
     up = panel.PodView(address="10.0.0.2")
     assert "still running" in panel.detail(earlier, st, 3, False, up)
+
+
+# What a layout this vivibox does not know may have changed in the state: a state of its own,
+# fields gone, fields added. Read as far as it goes; shown, never written.
+CHANGES = {
+    "an unknown state": lambda data: data.update(state="some-new-state"),
+    "missing fields": lambda data: [
+        data.pop(k) for k in ("project", "goal", "state", "iteration", "paused", "created", "updated")
+    ],
+    "extra fields": lambda data: data.update(added_later={"kept": [1, 2]}, sessions_by_turn=[["a"]]),
+}
+
+
+@pytest.mark.parametrize("which", ["earlier", "newer"])
+@pytest.mark.parametrize("change", list(CHANGES))
+def test_a_state_this_vivibox_cannot_read_whole_is_shown_and_not_crashed_on(
+    env, which, change, monkeypatch, capsys
+):
+    task = implementing("Add health endpoint")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data["task_schema_version"] = 0 if which == "earlier" else task_module.TASK_SCHEMA_VERSION + 1
+    CHANGES[change](data)
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(Pod, "remove", lambda self: None)
+    monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
+    label = "from an earlier vivibox" if which == "earlier" else "from a newer vivibox"
+    before = snapshot(task)
+    assert main(["status"]) == 0 and label in capsys.readouterr().out
+    assert main(["status", "demo-1"]) == 0 and label in capsys.readouterr().out
+    assert main(["start", "demo-1"]) == 1
+    assert (EARLIER_SAYS if which == "earlier" else NEWER_SAYS) in capsys.readouterr().err
+    assert snapshot(task) == before, "reading it whole or not, nothing is written back"
+    if which == "newer":
+        assert main(["delete", "demo-1", "--yes"]) == 1 and NEWER_SAYS in capsys.readouterr().err
+        assert snapshot(task) == before
+    else:
+        assert main(["delete", "demo-1", "--yes"]) == 0 and not task.root.exists()
+
+
+def test_the_view_shows_a_newer_task_with_a_state_it_does_not_know(env, monkeypatch):
+    from ux import screen_text
+
+    task = implementing("Add health endpoint")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data.update(task_schema_version=task_module.TASK_SCHEMA_VERSION + 1, state="some-new-state")
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {i: panel.PodView() for i in ids})
+
+    async def scenario(app, pilot):
+        app.reload()
+        app.table.move_cursor(row=rows(app).index("demo-1"))
+        await pilot.press("d")
+        await pilot.pause()
+        assert "from a newer vivibox" in screen_text(app)
+
+    run(scenario)
+
+
+def test_l_on_a_task_from_an_earlier_vivibox_writes_nothing_in_it(earlier):
+    from vivibox import logs
+
+    before = snapshot(earlier)
+    found, _ = logs.entries(earlier, earlier.read_state(), False)
+    timeline = next(e for e in found if e.label == "timeline")
+    shown = timeline.command[-1]
+    assert earlier.root not in Path(shown).parents, "the timeline is written outside"
+    assert "Add health endpoint" in Path(shown).read_text()
+    assert snapshot(earlier) == before
+
+
+def test_a_pod_an_earlier_vivibox_left_up_is_said_in_the_list(earlier, monkeypatch, capsys):
+    from vivibox import pod
+
+    sidecar = Pod("demo-1", earlier.repo, "").sidecar
+    monkeypatch.setattr(pod, "addresses", lambda sidecars, **kw: {sidecar: "10.0.0.2"} if sidecars else {})
+    assert main(["status"]) == 0
+    assert "from an earlier vivibox, still running" in capsys.readouterr().out
+    assert main(["status", "demo-1"]) == 0
+    assert "still running" in capsys.readouterr().out
+
+
+def test_docker_that_does_not_answer_is_said_and_not_waited_for(earlier, monkeypatch, capsys):
+    from vivibox import pod
+
+    def stuck(sidecars, timeout=None, **kw):
+        if not timeout:
+            pytest.fail("asked Docker with no time limit: a daemon that hangs would hang status too")
+        raise subprocess.TimeoutExpired(["docker", "inspect"], timeout)
+
+    monkeypatch.setattr(pod, "addresses", stuck)
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "from an earlier vivibox" in out and "still running" not in out, "nothing claimed"
+    assert "could not tell" in out
+    assert main(["status", "demo-1"]) == 0 and "could not tell" in capsys.readouterr().out
+
+
+def test_the_view_says_a_pod_an_earlier_vivibox_left_up(earlier, monkeypatch):
+    from ux import screen_text
+
+    monkeypatch.setattr(tui, "pod_views", lambda ids: {i: panel.PodView(address="10.0.0.2") for i in ids})
+
+    async def scenario(app, pilot):
+        app.pods = {"demo-1": panel.PodView(address="10.0.0.2")}  # as the last look at the pods found
+        app.reload()
+        await pilot.pause()
+        assert "from an earlier vivibox, still running" in screen_text(app)
+
+    run(scenario)
+
+
+def test_the_tests_reach_no_docker():
+    """conftest.no_real_docker: the docker a test finds answers as an empty daemon, and writes down
+    what it was asked, which fails a test that asked it to change something."""
+    import os
+    import shutil
+
+    found = shutil.which("docker")
+    assert found and os.environ["VIVIBOX_TEST_DOCKER_LOG"].startswith(str(Path(found).parent))
+    answer = subprocess.run(["docker", "inspect", "vivibox-demo-1-dind"], capture_output=True, text=True)
+    assert answer.returncode == 1 and "reach no Docker" in answer.stderr
+    assert Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).read_text() == "inspect vivibox-demo-1-dind\n"

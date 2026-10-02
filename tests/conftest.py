@@ -42,6 +42,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))  # keys and history, never yours
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # opencode's configuration, never yours
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))  # a task's secrets, never yours
     monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
     # A test run from an agent's CLI would record that CLI's session with a task, and look for it.
     for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CODEX_THREAD_ID", "CODEX_HOME"):
@@ -79,3 +80,46 @@ def no_real_start(request, monkeypatch):
     from vivibox import image
 
     monkeypatch.setattr(image, "exists", lambda ref, runner=None: True)
+
+
+# What a test may ask a Docker that is not there: whether something exists or runs. Anything else
+# would change the machine's containers, images or networks, a real task's among them.
+# A throwaway container that lists the models (roles.py) leaves nothing behind either.
+READ_ONLY_DOCKER = (("inspect",), ("image", "inspect"), ("info",), ("version",), ("ps",), ("run", "--rm"))
+FAKE_DOCKER = """#!/bin/sh
+printf '%s\\n' "$*" >> "$VIVIBOX_TEST_DOCKER_LOG"
+echo "the tests reach no Docker (tests/conftest.py: no_real_docker)" >&2
+exit 1
+"""
+
+
+@pytest.fixture(autouse=True)
+def no_real_docker(request, monkeypatch, tmp_path_factory):
+    """No test but one marked docker reaches the machine's Docker: a docker first on PATH answers
+    every call as a daemon with nothing in it would, and a test that asked it to change something
+    fails, so a stand-in that stops intercepting (a pod built another way) is caught. A task's pod
+    (actions.Pod) answers the same way without asking, as a test's own stand-in may still do."""
+    if "docker" in request.keywords:
+        yield
+        return
+    from functools import partial
+
+    from vivibox import actions
+    from vivibox.pod import Pod
+
+    def nothing_there(cmd, timeout=None):
+        return subprocess.CompletedProcess(list(cmd), 1, "", "Error: No such object")
+
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=nothing_there))
+    folder = tmp_path_factory.mktemp("docker")
+    fake = folder / "docker"
+    fake.write_text(FAKE_DOCKER)
+    fake.chmod(0o755)
+    log = folder / "calls.log"
+    monkeypatch.setenv("VIVIBOX_TEST_DOCKER_LOG", str(log))
+    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ.get('PATH', '')}")
+    yield
+    calls = log.read_text().splitlines() if log.exists() else []
+    changing = [c for c in calls if not any(tuple(c.split()[: len(r)]) == r for r in READ_ONLY_DOCKER)]
+    if changing:
+        pytest.fail(f"asked Docker to change something: {changing[:5]}; fake it, or mark the test docker")

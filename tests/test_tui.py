@@ -2844,6 +2844,7 @@ def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch)
     task.event("turn", state="plan", cost=0.2, tokens=1)
     task.event("turn", state="implement", cost=0.05, tokens=1)
     monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {"remove": lambda self: None})())
+    monkeypatch.setattr(actions, "pod_of", lambda *_: type("P", (), {"remove": lambda self: None})())
     actions.remove(task, load_project("demo"))
     assert not task.root.exists()
     entry = actions.history()[0]
@@ -2891,6 +2892,7 @@ def test_deleting_a_task_says_what_goes_and_what_stays_and_cancel_comes_first(en
     task = new_task("Try the other approach")
     task.event("turn", state="plan", cost=0.2, tokens=1)
     monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {"remove": lambda self: None})())
+    monkeypatch.setattr(actions, "pod_of", lambda *_: type("P", (), {"remove": lambda self: None})())
 
     async def scenario(app, pilot):
         await pilot.press("x")
@@ -3473,7 +3475,7 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
     """A fresh task has its timeline to read, so l is always on. With more to read, l picks:
     the timeline, the verification logs newest first with what ran and how it went, the
     supervisor's log last; during a verification the cursor starts on its log."""
-    from vivibox import logs
+    from vivibox import logs, timeline
 
     task = new_task()
     opened = []
@@ -3485,10 +3487,11 @@ def test_l_always_has_the_timeline_and_picks_among_the_logs(env, monkeypatch):
         assert app.check_action("show_log", ())
         await pilot.press("l")
         await pilot.pause()
-        assert opened == [["less", "-+R", "-+r", "+G", str(task.meta / "log" / "timeline.txt")]], (
+        assert opened == [["less", "-+R", "-+r", "+G", str(timeline.shown_at(task))]], (
             "one entry opens at once"
         )
-        assert "created: Goal" in (task.meta / "log" / "timeline.txt").read_text()
+        assert "created: Goal" in timeline.shown_at(task).read_text()
+        assert task.root not in timeline.shown_at(task).parents, "looking at it writes nothing in it"
         (task.meta / "log" / "verify-1-120000.log").write_text(
             "# started 12:00:00\n$ npm test\nFAIL a\n[exit 1 after 3 s]\n\n# summary\n"
         )

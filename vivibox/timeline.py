@@ -4,6 +4,7 @@ agent's questions, your decisions. events.jsonl is the record; this is how it re
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -15,7 +16,6 @@ from .task import Task
 
 # What a state event says when the change was yours.
 YOURS = {"your reply", "accepted", "verify again"}
-FILE = "timeline.txt"
 # A state in the words the list uses for it (docs/ux-guidelines.md), never its raw name.
 WORDS = {
     **{str(state): words for state, (words, _) in ui.WAITING.items()},
@@ -225,8 +225,14 @@ def render(task: Task) -> str:
 
 
 def write(task: Task) -> Path:
-    """The timeline as a file, for your pager; written anew each time it is asked for."""
-    path = task.meta / "log" / FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """The timeline as a file, for your pager; written anew each time it is asked for, outside
+    the task: looking at a task writes nothing in it."""
+    path = shown_at(task)
     path.write_text(render(task))
     return path
+
+
+def shown_at(task: Task) -> Path:
+    """Where write puts the task's timeline: in a folder of yours, named by the task's folder."""
+    digest = hashlib.sha256(str(task.root).encode("utf-8", "surrogateescape")).hexdigest()[:12]
+    return display.own_folder() / f"timeline-{task.id}-{digest}.txt"

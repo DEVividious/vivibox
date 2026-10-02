@@ -83,7 +83,7 @@ def test_a_reply_at_review_can_bring_criteria(tmp_path):
         actions.reply(task, "The button does nothing on a fresh page.", ["works before a load"])
         is State.IMPLEMENT
     )
-    comments = (task.meta / "handoff" / "comments.md").read_text()
+    comments = (task.meta / "comments.md").read_text()
     assert "does nothing on a fresh page" in comments and "- works before a load" in comments
     assert "works before a load" in gate.missing_criteria(task)
 
@@ -91,7 +91,7 @@ def test_a_reply_at_review_can_bring_criteria(tmp_path):
 def test_criteria_alone_are_reply_enough(tmp_path):
     task = at_review(tmp_path)
     actions.reply(task, "", ["works before a load"])
-    assert "New acceptance criteria" in (task.meta / "handoff" / "comments.md").read_text()
+    assert "New acceptance criteria" in (task.meta / "comments.md").read_text()
 
 
 def test_criteria_wait_for_the_work_to_come_back(tmp_path):

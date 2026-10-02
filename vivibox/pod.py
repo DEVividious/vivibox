@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import display, podspec, repo
+from . import display, handoff, podspec, repo
 from .config import DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
@@ -257,7 +257,18 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         self.apply_firewall()
         if self._state(self.agent) != "running":
             self._run("docker", "rm", "-f", self.agent, check=False)
+            self._placeholders(self.agent_mounts)
             self._run(*self.agent_command())
+
+    def _placeholders(self, mounts: list[Mount]) -> None:
+        """Each mount point in a folder the agent writes made a plain empty file (Mount.placeholder),
+        before a container is made with it, or no container is made."""
+        for m in mounts:
+            if m.placeholder:
+                try:
+                    handoff.placeholder(Path(m.placeholder))
+                except handoff.HandoffError as e:
+                    raise PodError(str(e)) from None
 
     def _made_with(self) -> dict | None:
         """The sidecar's script, mounts and labels as it was made; None when it cannot be asked."""
@@ -379,6 +390,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
 
     def review_start(self, mounts: list[Mount], env: dict[str, str]) -> None:
         """The reviewer's container, with a fresh clone of the task branch in it."""
+        self._placeholders(mounts)
         self._run(*self.review_command(mounts, env))
         where = ("docker", "exec", "-w", str(self.review_dir), self.review)
         clone = ("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.review_src)

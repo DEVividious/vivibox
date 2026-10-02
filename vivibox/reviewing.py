@@ -15,7 +15,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, cli_usage, gate, handoff, opencode, providers, repo, roles, secrets
+from . import brief, cli_usage, comments, gate, handoff, opencode, providers, repo, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
@@ -228,6 +228,7 @@ def up(task: Task, pod: Pod, config: Config) -> Path:
     (task.meta / "review").mkdir(exist_ok=True)
     mounts = [
         Mount(str(task.meta), "/task", read_only=True),
+        comments.mount(task.meta),  # REVIEW_PROMPT reads them; the file under /task is a mount point
         Mount(str(harness), opencode.HARNESS_MOUNT, read_only=True),
         Mount(str(out), MOUNT),
         Mount(str(runtime), secrets.MOUNT, read_only=True),

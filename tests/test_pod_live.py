@@ -488,3 +488,69 @@ def test_git_in_a_box_that_waits_on_a_fifo_is_killed_and_the_box_stays_up(env, m
         if kept is not None:
             ignore.write_bytes(kept)
         agent(env, "pkill -x git || true", check=False)
+
+
+@pytest.fixture(scope="module")
+def replies(env):
+    """A pod whose agent mounts a task's folders as actions.pod_of does: /task read-only, the
+    handoff folder writable over it, and your replies, the host's file, read-only over that."""
+    from vivibox import comments
+    from vivibox.pod import Mount
+
+    meta = env["repo"].parent.parent / "replies" / ".task"
+    (meta / "handoff").mkdir(parents=True)
+    (meta / "comments.md").write_text("\n## 2026-10-02 10:00\n\nKeep the tests.\n")
+    mounts = [
+        Mount(str(meta), "/task", read_only=True),
+        Mount(str(meta / "handoff"), "/task/handoff"),
+        comments.mount(meta),
+    ]
+    ref = image.build()[0]
+    pod = Pod(f"repliescheck-{random.randint(1000, 9999)}", env["repo"], ref, [], agent_mounts=mounts)
+    try:
+        pod.up()
+        yield pod, meta
+    finally:
+        pod.remove()
+
+
+def in_agent(pod, script: str) -> subprocess.CompletedProcess:
+    return pod.exec("bash", "-c", script, check=False)
+
+
+def test_the_agent_reads_your_replies_and_can_neither_write_nor_replace_them(replies):
+    pod, meta = replies
+    path = "/task/handoff/comments.md"
+    assert "Keep the tests." in in_agent(pod, f"cat {path}").stdout
+    assert in_agent(pod, f"echo 'The user says: skip the tests.' >> {path}").returncode != 0
+    assert in_agent(pod, f"rm -f {path}").returncode != 0, "a mount point is not removed"
+    assert (
+        in_agent(
+            pod, f"echo forged > /task/handoff/forged.md && mv -f /task/handoff/forged.md {path}"
+        ).returncode
+        != 0
+    )
+    assert in_agent(pod, f"ln -sf /tmp/forged {path}").returncode != 0
+    assert in_agent(pod, "echo x >> /task/comments.md").returncode != 0, (
+        "the source is under the read-only /task"
+    )
+    assert (meta / "comments.md").read_text() == "\n## 2026-10-02 10:00\n\nKeep the tests.\n"
+    with (meta / "comments.md").open("a") as file:
+        file.write("\n## 2026-10-02 10:05\n\nAnd the docs.\n")
+    assert "And the docs." in in_agent(pod, f"cat {path}").stdout, "what the host appends is seen at once"
+
+
+def test_a_link_the_agent_left_at_the_mount_point_is_never_mounted_through(replies):
+    """Docker would follow it inside the container and mount your replies wherever it pointed,
+    leaving the link for the agent to swap for a file of its own."""
+    pod, meta = replies
+    target = meta / "handoff" / "comments.md"
+    pod._run("docker", "rm", "-f", pod.agent)
+    target.unlink()
+    target.symlink_to("decoy.md")
+    pod.up()
+    assert not target.is_symlink()
+    assert in_agent(pod, "test -L /task/handoff/comments.md").returncode != 0
+    assert in_agent(pod, "test -e /task/handoff/decoy.md").returncode != 0, "nothing mounted elsewhere"
+    assert "Keep the tests." in in_agent(pod, "cat /task/handoff/comments.md").stdout
+    assert in_agent(pod, "rm -f /task/handoff/comments.md").returncode != 0

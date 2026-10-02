@@ -68,6 +68,9 @@ class Mount:
     source: str
     target: str
     read_only: bool = False
+    # The host's path of the target, for a file mounted at a place the agent writes: made a plain
+    # empty file before a container is made with it (pod.Pod._placeholders), never followed.
+    placeholder: str = ""
 
     def arg(self) -> str:
         return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")

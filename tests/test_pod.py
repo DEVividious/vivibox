@@ -289,6 +289,26 @@ def test_a_task_started_again_passes_what_its_project_passes_now(env, tmp_path, 
     assert "AWS_SESSION_TOKEN" in passed and "AWS_ACCOUNT_ID" in passed
 
 
+def test_the_agent_reads_your_replies_from_a_read_only_mount_over_its_folder(env, monkeypatch):
+    """Kept by the host in .task/, and mounted where the prompts read them, over the folder the agent
+    writes: the agent can neither write them nor put another file in their place."""
+    from functools import partial
+
+    from vivibox import actions, image
+
+    docker = FakeDocker()
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=docker))
+    monkeypatch.setattr(image, "env", lambda ref: {})
+    task = actions.create("demo", "Add divide")
+    actions.task_pod(task.id).up(timeout=1)
+    made = docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-agent")[-1]
+    binds = [made[i + 1] for i, arg in enumerate(made) if arg == "-v"]
+    ro = f"{task.meta / 'comments.md'}:/task/handoff/comments.md:ro"
+    assert ro in binds
+    assert binds.index(ro) > binds.index(f"{task.meta / 'handoff'}:/task/handoff")
+    assert (task.meta / "handoff" / "comments.md").read_text() == "", "the mount point, made first"
+
+
 def test_a_stopped_sidecar_made_by_an_older_vivibox_is_made_again(pod):
     """docker start runs the script a container was made with, so a fix to it would never arrive."""
     pod.runner.states = {"vivibox-shop-1-dind": "exited", "vivibox-shop-1-agent": "exited"}

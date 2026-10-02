@@ -159,8 +159,8 @@ def test_criteria_are_not_added_through_a_linked_checklist(tmp_path):
 
 def test_a_reply_is_not_appended_through_a_link(tmp_path):
     task = at_review(tmp_path)
-    outside = linked(task.meta / "handoff" / "comments.md")
-    with pytest.raises(gate.GateError, match="handoff/comments.md"):
+    outside = linked(task.meta / "comments.md")
+    with pytest.raises(gate.GateError, match=r"\.task/comments\.md"):
         actions.reply(task, "The button does nothing on a fresh page.")
     assert outside.read_text() == OUTSIDE
     assert task.read_state().state is State.CHECKPOINT_FINAL, "the task stays with you"
@@ -170,17 +170,17 @@ def test_a_refused_reply_adds_no_criterion_and_a_retry_works(tmp_path):
     task = at_review(tmp_path)
     kept = {p: p.read_text() for p in (task.meta / gate.ACCEPTED_PLAN, task.plan_path)}
     checklist = (task.meta / "handoff" / gate.CRITERIA_FILE).read_text()
-    outside = linked(task.meta / "handoff" / "comments.md")
-    with pytest.raises(gate.GateError, match="handoff/comments.md"):
+    outside = linked(task.meta / "comments.md")
+    with pytest.raises(gate.GateError, match=r"\.task/comments\.md"):
         actions.reply(task, "It fails offline.", ["works offline"])
     assert outside.read_text() == OUTSIDE
     assert {p: p.read_text() for p in kept} == kept, "no criterion half added"
     assert (task.meta / "handoff" / gate.CRITERIA_FILE).read_text() == checklist
     assert not [e for e in task.events() if e["type"] == "criteria_added"]
     assert task.read_state().state is State.CHECKPOINT_FINAL
-    (task.meta / "handoff" / "comments.md").unlink()
+    (task.meta / "comments.md").unlink()
     assert actions.reply(task, "It fails offline.", ["works offline"]) is State.IMPLEMENT
-    assert "works offline" in (task.meta / "handoff" / "comments.md").read_text()
+    assert "works offline" in (task.meta / "comments.md").read_text()
 
 
 def in_time(call):

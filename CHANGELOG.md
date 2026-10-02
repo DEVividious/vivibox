@@ -47,6 +47,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The agent can no longer change your replies. vivibox keeps them in the task's own folder,
+  where no agent writes, and the agents and the reviewer read them read-only where they always
+  did. A link, a folder or a file the agent leaves where they are read is never followed: a
+  link or a file is replaced, and a folder or a special file stops the start with the reason.
+  Tasks created before this change are from an earlier vivibox.
 - The agent's container no longer holds the reviewer's key, nor the reviewer's container the
   planner's or the writer's, unless they share a provider. A key a container no longer needs,
   such as one for a provider you moved a role off, is removed when that container next starts.

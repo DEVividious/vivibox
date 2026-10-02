@@ -114,7 +114,7 @@ def test_accept_and_reply_follow_the_checkpoints(env, capsys):
     (task.meta / "handoff" / supervisor.QUESTION).write_text("unused")
     assert main(["reply", "demo-1", "Use Postgres, not H2"]) == 0
     assert task.read_state().state is State.PLAN
-    assert "Use Postgres, not H2" in (task.meta / "handoff" / "comments.md").read_text()
+    assert "Use Postgres, not H2" in (task.meta / "comments.md").read_text()
     assert not (task.meta / "handoff" / supervisor.QUESTION).exists(), "answered questions are archived"
     assert supervisor.next_prompt(task, "") == prompts.PLAN_COMMENT_PROMPT
 

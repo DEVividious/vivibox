@@ -23,7 +23,7 @@ MAX_PROBLEM = 2000
 # before it would not meet (what the task's folder holds, what its pod mounts) raises it. A task
 # written under another is never run nor written here, and never migrated: one from an earlier
 # vivibox is shown and can be deleted, one from a newer vivibox is only shown.
-TASK_SCHEMA_VERSION = 1
+TASK_SCHEMA_VERSION = 2
 CURRENT, EARLIER, NEWER = "current", "earlier", "newer"
 # What a task is opened for (find_task): an operation that runs, moves or opens it needs the
 # layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.
@@ -405,6 +405,7 @@ def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, af
     task = Task(root)
     for sub in ("handoff", "log"):
         (task.meta / sub).mkdir(parents=True)
+    (task.meta / "comments.md").write_text("")  # your replies; the pod mounts it (comments.py)
     task.plan_path.write_text(plan_template.replace("{{goal}}", goal))
     ts = now()
     task._write_state(

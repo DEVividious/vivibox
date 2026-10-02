@@ -399,7 +399,7 @@ def test_reply_sends_your_comment(env):
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert task.read_state().state is State.PLAN
-        assert "Use Postgres" in (task.meta / "handoff" / "comments.md").read_text()
+        assert "Use Postgres" in (task.meta / "comments.md").read_text()
 
     run(scenario)
 

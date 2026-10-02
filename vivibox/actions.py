@@ -12,7 +12,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
@@ -22,6 +21,7 @@ from . import (
     cli_session,
     cli_usage,
     code,
+    comments,
     context,
     firstrun,
     gate,
@@ -210,6 +210,7 @@ def pod_of(task: Task, project: Project) -> Pod:
     # Mount sources must exist, or Docker creates them as root-owned directories.
     runtime = secrets.runtime_dir(task.id)
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+    comments.ensure(task.meta)
     (task.meta / "harness").mkdir(exist_ok=True)
     (task.meta / "review").mkdir(exist_ok=True)
     mounts = [
@@ -217,6 +218,7 @@ def pod_of(task: Task, project: Project) -> Pod:
         # The plan, harness files and gate results: readable, not writable, for the agent.
         Mount(str(task.meta), "/task", read_only=True),
         Mount(str(task.meta / "handoff"), "/task/handoff"),
+        comments.mount(task.meta),  # your replies, over the folder the agent writes
         # Where a supervisor reading in the pod writes its review, as the reviewer's container does.
         Mount(str(task.meta / "review"), reviewing.MOUNT),
         Mount(str(runtime), secrets.MOUNT, read_only=True),
@@ -710,15 +712,9 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         target = targets[st.state]
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; replies are for checkpoints")
-    comments = task.meta / "handoff" / "comments.md"
-    try:
-        handoff.check(comments)  # refused before any criterion is added, not after
-        added = gate.add_criteria(task, criteria) if criteria else []
-        if added:
-            listed = "\n".join(f"- {c}" for c in added)
-            note = f"New acceptance criteria, added to criteria.md unticked; meet and tick them:\n\n{listed}"
-            comment = f"{comment.strip()}\n\n{note}" if comment.strip() else note
-        handoff.append_text(comments, f"\n## {time.strftime('%Y-%m-%d %H:%M')}\n\n{comment.strip()}\n")
+    try:  # open, or refused, before any criterion is added, not after
+        with handoff.appending(task.meta / comments.FILE) as file:
+            file.write(comments.entry(comment, gate.add_criteria(task, criteria) if criteria else []))
     except handoff.HandoffError as e:
         raise gate.GateError(str(e)) from e
     supervisor.put_question_away(task)

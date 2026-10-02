@@ -16,7 +16,7 @@ import os
 import shutil
 import stat
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import IO
 
@@ -124,19 +124,50 @@ def write_text(path: Path, text: str) -> None:
         file.write(text)
 
 
+def appending(path: Path) -> AbstractContextManager[IO]:
+    """The file open for appending, made when missing, or refused before anything is written: for
+    a step that must not happen in half, such as criteria added for a comment that then could not
+    be written, run while it is open."""
+    return _opened(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, "a")
+
+
 def append_text(path: Path, text: str) -> None:
-    with _opened(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, "a") as file:
+    with appending(path) as file:
         file.write(text)
 
 
-def check(path: Path) -> None:
-    """Refused as a write to path would be, with nothing written: before a step that must not
-    happen in half, such as criteria added for a comment that then could not be written."""
+def placeholder(path: Path) -> None:
+    """path a plain empty file, for the host to mount a file of its own over, in a folder the agent
+    writes. A link there is removed, never followed: Docker would follow it in the container and
+    mount the file where it points, leaving the link for the agent to swap for a file of its own.
+    A file there may hold the agent's words, or share another file's by a hard link: its name is
+    removed, and nothing in it is opened. A folder or a special file is refused: a folder's files
+    are not deleted for the agent, and vivibox makes neither. A plain empty file stays as it is:
+    a container may have it mounted, and a new file in its place would take that mount away."""
     try:
-        with _opened(path, os.O_WRONLY | os.O_APPEND, "a"):
-            pass
-    except FileNotFoundError:
-        return
+        folder = os.open(path.parent, FOLDER)
+    except OSError as e:
+        raise HandoffError(f"vivibox could not open {path.parent}: {e.strerror}") from e
+    try:
+        try:
+            found = os.stat(path.name, dir_fd=folder, follow_symlinks=False)
+        except FileNotFoundError:
+            found = None
+        if found and _plain(found) and found.st_size == 0:
+            return
+        if found and not (stat.S_ISLNK(found.st_mode) or stat.S_ISREG(found.st_mode)):
+            raise HandoffError(
+                f"{path} is a folder or a special file, where vivibox mounts a file of its own",
+                "delete it and try again",
+            )
+        if found:
+            os.unlink(path.name, dir_fd=folder)
+        try:  # a file of its own, or nothing: whatever came in between is not taken for one
+            os.close(os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | FLAGS, 0o644, dir_fd=folder))
+        except OSError as e:
+            raise HandoffError(f"vivibox could not make {path}: {e.strerror}", "try again") from e
+    finally:
+        os.close(folder)
 
 
 def copy_file(src: Path, path: Path) -> None:

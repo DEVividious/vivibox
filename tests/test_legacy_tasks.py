@@ -19,7 +19,7 @@ from vivibox.pod import Pod
 from vivibox.task import TaskLayoutError, find_task
 
 EARLIER = ("no version", "an older version")
-# true is 1 to Python, and this vivibox's version is 1: it must still not read as one.
+# true is 1 to Python, the version of an earlier layout: it must still not read as one.
 NEWER = ("a newer version", "a version that is not a number", "true as a version")
 EARLIER_SAYS = "created by an earlier vivibox"
 NEWER_SAYS = "created by a newer vivibox"

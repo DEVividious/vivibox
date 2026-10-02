@@ -140,8 +140,18 @@ def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path, sl
     return GitTimeout(_unanswered(list(args), seconds, clone, slow))
 
 
+def shown(text: str) -> str:
+    """A name from the clone, which the agent chose, as text to read: a control character, a line
+    break or a backslash as its escape, so none of it reaches a terminal as anything but text."""
+    return "".join(
+        c if c.isprintable() and c != "\\" else c.encode("unicode_escape").decode("ascii") for c in text
+    )
+
+
 def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") -> str:
-    """What timed out, why it likely did, and what to do, in a sentence."""
+    """What timed out, why it likely did, and what to do, in words. Never a command to paste: the
+    names are the agent's, and a shell would run what a name says ($(…), ;) or delete a file of
+    yours by a path that is the clone's (.git/packed-refs)."""
     i = 0
     while i < len(args) - 1 and args[i].startswith("-"):
         i += 2 if args[i] in ("-c", "-C") else 1
@@ -149,37 +159,47 @@ def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") ->
     found = special_files(clone)[:3]
     if not found and slow:
         return (
-            f"{command} did not finish in {seconds:g} s in {clone}: {slow} can take this long, and "
-            "nothing where git reads its settings or refs is a named pipe; try again"
+            f"{command} did not finish in {seconds:g} s in {shown(str(clone))}: {slow} can take this long, "
+            "and nothing where git reads its settings or refs is a named pipe; try again"
         )
     what = f"{command} did not answer in {seconds:g} s"
     if not found:
         return (
-            f"{what} in {clone}; a named pipe (FIFO) where git reads its settings or refs (.gitignore, "
-            ".gitattributes, .git/info/exclude, .git/packed-refs) makes git wait like this"
+            f"{what} in {shown(str(clone))}; a named pipe (FIFO) where git reads its settings or refs "
+            "(.gitignore, .gitattributes, .git/info/exclude, .git/packed-refs) makes git wait like this"
         )
-    # The path first: a notification cut short loses the explanation, not the file.
-    named = ", ".join(f"{clone / path} is {kind}" for path, kind in found)
+    # The file from the clone's root first, said to be the clone's: a notification cut short keeps it.
+    named = ", ".join(f"{shown(path)} is {kind}" for path, kind in found)
     committed = [path for path, _ in found if _committed(clone, path)]
     gone = [path for path, _ in found if path not in committed]
     todo = []
     if gone:  # git never had it: nothing to put back
-        which = ("it" if len(gone) == 1 else "them") if not committed else ", ".join(gone)
-        todo.append(f"delete {which}: rm {' '.join(str(clone / p) for p in gone)}")
+        todo.append("delete " + (("it" if len(gone) == 1 else "them") if not committed else _listed(gone)))
     if committed:  # deleted, it would be an uncommitted change, and a round of the writer's
-        which = ("it" if len(committed) == 1 else "them") if not gone else ", ".join(committed)
-        todo.append(f"restore {which} from the commits: git -C {clone} checkout -- {' '.join(committed)}")
-    return f"{what}: {named}, which git waits on forever; {'; '.join(todo)}"
+        which = ("it" if len(committed) == 1 else "them") if not gone else _listed(committed)
+        todo.append(f"restore {which} from the commits")
+    return (
+        f"{what}: in the task's clone, {named}, which git waits on forever; {'; '.join(todo)}; "
+        f"the clone is {shown(str(clone))}"
+    )
+
+
+def _listed(paths: list[str]) -> str:
+    return ", ".join(shown(p) for p in paths)
 
 
 def _committed(clone: Path, path: str) -> bool:
     """Whether the clone's index has path, as committed files are; False when git cannot say in a
-    few seconds (its index may be the special file), and what is in .git never is."""
+    few seconds (its index may be the special file), and what is in .git never is. The path is a
+    name, never a pattern: a folder named * matches nothing but itself."""
     if path.split("/")[0] == ".git":
         return False
     try:
         listed = subprocess.run(
-            ["git", "ls-files", "-z", "--", path], cwd=clone, capture_output=True, timeout=5
+            ["git", "--literal-pathspecs", "ls-files", "-z", "--", path],
+            cwd=clone,
+            capture_output=True,
+            timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False

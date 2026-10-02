@@ -46,6 +46,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   "verification could not run", the file named and no round spent. Bringing the work back, and
   closing a box (whose git is stopped in its pod, your shell left in it), stop with the same
   reason instead of hanging. A file the commits have is to be restored from them, not deleted.
+  The reason names the file in the task's clone as text, its control characters escaped, and
+  never as part of a command to paste: the names are the agent's.
 - The verification's and the reviewer's own clones of the task's clone, and the verification's
   fetch of its submodules, no longer wait forever on such a file: past ten minutes their
   container goes down, and the verification waits for you, or the review stops on an error that

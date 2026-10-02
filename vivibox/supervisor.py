@@ -702,7 +702,7 @@ class Supervisor(ReviewRound):
     def _briefly(self, environment: str) -> str:
         """For a notification: the task's own files by their place in it, so the sentence fits;
         vivibox status gives the whole path."""
-        said = environment.replace(f"{self.task.meta}/", "").replace(f"{self.task.repo}/", "")
+        said = environment.replace(f"{self.task.meta}/", "")  # the clone's are said to be its: kept whole
         return said if len(said) <= 150 else said[:150].rsplit(" ", 1)[0] + "…"  # never in a word
 
     def _whole_build_holds(self, st: TaskState) -> bool:

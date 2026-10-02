@@ -188,12 +188,17 @@ class LocalPod:
         return p
 
 
-def a_box(task, monkeypatch):
+def a_box_pod(task, monkeypatch):
+    """The box's pod, here: its git as the pod's, its limit the tests'."""
     monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
     for who in ("AUTHOR", "COMMITTER"):  # the pod's gitconfig, which is not here
         monkeypatch.setenv(f"GIT_{who}_NAME", "You")
         monkeypatch.setenv(f"GIT_{who}_EMAIL", "you@example.com")
     monkeypatch.setattr(actions, "task_pod", lambda task_id: LocalPod(task.repo))
+
+
+def a_box(task, monkeypatch):
+    a_box_pod(task, monkeypatch)
     task.set_box()
     task.transition(State.CHECKPOINT_PLAN)
     task.transition(State.IMPLEMENT)
@@ -296,22 +301,68 @@ def test_no_git_process_is_left_after_a_timeout(task, tmp_path, monkeypatch):
 def test_the_reason_says_what_timed_out_and_what_to_do(task):
     fifo(task.repo, ".gitattributes")
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
-    assert said.startswith(f"git status did not answer in {LIMIT} s: ")
-    assert f"{task.repo / '.gitattributes'} is a named pipe (FIFO)" in said
-    assert said.endswith(f"delete it: rm {task.repo / '.gitattributes'}")
+    assert said.startswith(f"git status did not answer in {LIMIT} s: in the task's clone, ")
+    assert ".gitattributes is a named pipe (FIFO)" in said
+    assert said.endswith(f"delete it; the clone is {task.repo}")
+
+
+def commit_file(clone: Path, rel: str, text: str) -> None:
+    (clone / rel).parent.mkdir(parents=True, exist_ok=True)
+    (clone / rel).write_text(text)
+    subprocess.run(["git", "add", "--", rel], cwd=clone, check=True)
+    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "Add a file"],
+                   cwd=clone, check=True)  # fmt: skip
 
 
 def test_a_file_the_commits_have_is_restored_not_deleted(task):
     """Deleted, a committed .gitattributes is an uncommitted change, and the next verification
     spends a round of the writer's on it. (A committed .gitignore git reads from its index.)"""
-    (task.repo / ".gitattributes").write_text("* text=auto\n")
-    subprocess.run(["git", "add", ".gitattributes"], cwd=task.repo, check=True)
-    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "Line endings"],
-                   cwd=task.repo, check=True)  # fmt: skip
+    commit_file(task.repo, ".gitattributes", "* text=auto\n")
     fifo(task.repo, ".gitattributes")
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
-    assert said.endswith(f"restore it from the commits: git -C {task.repo} checkout -- .gitattributes")
-    assert "rm " not in said
+    assert said.endswith(f"restore it from the commits; the clone is {task.repo}")
+    assert "delete" not in said
+
+
+# A name the agent chose, which a shell pasting it would run: no message suggests a command with it.
+PWNED = "$(touch {marker}/PWNED) x; y"
+COMMANDS = ("rm ", "git -C", "checkout --", "$ ")
+
+
+@pytest.mark.parametrize("variant", ["restore", "delete"])
+def test_a_name_the_agent_chose_is_never_part_of_a_command_to_paste(task, tmp_path, variant):
+    folder = PWNED.format(marker=tmp_path)
+    if variant == "restore":
+        commit_file(task.repo, f"{folder}/.gitattributes", "* text=auto\n")
+        commit_file(task.repo, f"{folder}/f.txt", "one\n")
+        (task.repo / folder / "f.txt").write_text("two\n")  # a change there: git diff reads its attributes
+        fifo(task.repo, f"{folder}/.gitattributes")
+        said = str(in_time(lambda: list(gate.added_lines(task.repo, _base(task)))))
+    else:
+        fifo(task.repo, f"{folder}/.gitignore")
+        said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    assert "did not answer" in said, said
+    assert not [c for c in COMMANDS if c in said], f"a command to paste: {said}"
+    assert f"in the task's clone, {folder}/.git" in said, "the name as text, whole"
+    assert ("restore it from the commits" if variant == "restore" else "delete it") in said
+    assert not (tmp_path / "PWNED").exists()
+
+
+def test_control_characters_in_a_name_reach_no_terminal(task):
+    folder = "sub\x1b[31mRED\x1b[0m\nFAKE LINE"
+    fifo(task.repo, f"{folder}/.gitignore")
+    said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    assert not [c for c in said if ord(c) < 0x20 or ord(c) == 0x7F], repr(said)
+    assert "sub\\x1b[31mRED\\x1b[0m\\nFAKE LINE/.gitignore is a named pipe" in said
+
+
+def test_whether_the_commits_have_a_file_is_asked_of_its_name_alone(task):
+    """A folder named * is no pattern: the committed a/.gitattributes does not make its file one."""
+    commit_file(task.repo, "a/.gitattributes", "* text=auto\n")
+    fifo(task.repo, "*/.gitattributes")
+    said = str(repo.timed_out(["status"], LIMIT, task.repo))
+    assert "*/.gitattributes is a named pipe (FIFO)" in said
+    assert "delete it" in said and "restore" not in said
 
 
 def test_the_reason_without_a_special_file_found_names_where_to_look(task, tmp_path, monkeypatch):
@@ -381,16 +432,16 @@ def test_the_supervisor_asks_where_the_work_stands_within_the_limit(env, monkeyp
     assert ".git/packed-refs" in str(said)
 
 
-def test_the_notification_names_the_file_from_the_clones_root_whole(tmp_path, monkeypatch):
-    """Under a long tasks folder the clone's own path would take the notification's whole length."""
+def notified(tmp_path, monkeypatch, rel: str, tasks: str = "tasks"):
+    """The notification and the status of a verification git did not answer in, rel a FIFO."""
     source = make_repo(tmp_path / "source")
-    t = create_task(tmp_path / ("a-long-folder-for-tasks-" * 3) / "tasks", "demo", "goal", PLAN)
+    t = create_task(tmp_path / tasks, "demo", "goal", PLAN)
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
     Approvals(t.meta, t.repo).approve()
     monkeypatch.setattr(repo, "CLONE_TIMEOUT", LIMIT, raising=False)
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         t.transition(s)
-    fifo(t.repo, "src/main/resources/.gitignore")
+    fifo(t.repo, rel)
     notes = []
     ports = supervisor.Ports(
         run_gate=lambda x: gate.run_gate(x, FakePod(), ["make test"], []),
@@ -401,12 +452,32 @@ def test_the_notification_names_the_file_from_the_clones_root_whole(tmp_path, mo
     sup = supervisor.Supervisor(t, FakeHarness(t), ports, max_rounds=3, project_verify=["make test"])
     sup.step()  # implement
     in_time(sup.step)  # verify
-    assert "src/main/resources/.gitignore is a named pipe (FIFO)" in notes[-1]
-    assert str(t.repo) not in notes[-1] and "press g" in notes[-1]
-    said = notes[-1].removeprefix("verification could not run: ").split("; fix it, then press g")[0]
-    whole = ui.environment_problem(t).replace(f"{t.repo}/", "")
+    return t, notes[-1], ui.environment_problem(t)
+
+
+def test_the_notification_names_the_file_from_the_clones_root_whole(tmp_path, monkeypatch):
+    """Under a long tasks folder the clone's own path would take the notification's whole length."""
+    t, note, whole = notified(tmp_path, monkeypatch, "src/main/resources/.gitignore", "a-long-folder-" * 6)
+    assert "in the task's clone, src/main/resources/.gitignore is a named pipe (FIFO)" in note
+    assert "press g" in note
+    said = note.removeprefix("verification could not run: ").split("; fix it, then press g")[0]
     cut = said.removesuffix("…")
     assert said == whole or (said.endswith("…") and whole[len(cut)] == " "), "never cut in a word"
+
+
+def test_the_notification_suggests_nothing_to_run_in_your_repository(tmp_path, monkeypatch):
+    """rm .git/packed-refs, pasted where you work, would delete your branches."""
+    t, note, whole = notified(tmp_path, monkeypatch, ".git/packed-refs")
+    assert "in the task's clone, .git/packed-refs is a named pipe (FIFO)" in note
+    assert not [c for c in COMMANDS if c in note], note
+    assert f"the clone is {t.repo}" in whole, "the whole path, in the status"
+
+
+def test_control_characters_reach_neither_the_notification_nor_the_status(tmp_path, monkeypatch):
+    t, note, whole = notified(tmp_path, monkeypatch, "x\x1b]0;title\x07\nFAKE/.gitignore")
+    for shown in (note, whole):
+        assert not [c for c in shown if ord(c) < 0x20 or ord(c) == 0x7F], repr(shown)
+        assert "x\\x1b]0;title\\x07\\nFAKE/.gitignore" in shown
 
 
 class BlockingDocker:
@@ -515,3 +586,20 @@ def test_a_copy_that_did_not_finish_without_a_special_file_is_not_blamed_on_one(
     assert result.environment.startswith(f"git clone did not finish in {LIMIT} s in {task.repo}: ")
     assert "very large repository" in result.environment and "submodules" in result.environment
     assert "named pipe (FIFO) where" not in result.environment and not result.passed
+
+
+def test_control_characters_reach_no_terminal_in_the_command_lines_error(env, monkeypatch, capsys):
+    """vivibox accept on an open box closes it; its git waits on a FIFO the agent named."""
+    from vivibox.cli import main
+
+    monkeypatch.setattr(actions, "start_box", lambda task_id: None)
+    monkeypatch.setattr(box, "start_box", lambda task_id: None)
+    t = actions.open_box("demo")
+    a_box_pod(t, monkeypatch)
+    (t.repo / "work.txt").write_text("by hand\n")
+    fifo(t.repo, "x\x1b[2J\nFAKE/.gitignore")
+    assert in_time(lambda: main(["accept", t.id])) == 1
+    said = capsys.readouterr().err
+    assert said.startswith("vivibox: the box could not close: git ")
+    assert not [c for c in said.rstrip("\n") if ord(c) < 0x20 or ord(c) == 0x7F], repr(said)
+    assert "x\\x1b[2J\\nFAKE/.gitignore is a named pipe (FIFO)" in said

@@ -40,6 +40,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An agent can no longer make git on your machine run a program, or read objects from elsewhere,
+  through what git follows from the task's clone besides its config and hooks: `commondir`,
+  `gitdir`, alternates, `config.worktree`, `HEAD` as a link, a submodule's `.git`, a repository
+  it adds to the index, or a hook rewritten under its old name. vivibox records all of them when
+  it makes the clone and runs no git there, nor copies it for the verification or the review,
+  once any differs; the reason names what changed. Alternates are read-only in the pod, and a
+  named pipe in those places no longer hangs that check. A link the agent puts in place of a git
+  file is no longer mounted into the pod as what it leads to on your machine.
 - A file name or a line of a risky file that holds a control or an invisible character (ESC, a
   carriage return, a bidi override, a zero-width space) can no longer hide lines or draw text of
   its own in the details panel, in `vivibox risky` and in the messages that name the file: each

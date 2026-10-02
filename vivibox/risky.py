@@ -17,11 +17,11 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import baseline, clone_read, display
+from . import repo as git_repo
 
 # Pattern forms: "name" matches a file name at any depth, "dir/**" everything under a directory with
 # that name at any depth, anything else the whole path relative to the repo root.
@@ -251,11 +251,9 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
 def untracked(repo: Path, folder: Path) -> bool:
     """Whether git tracks nothing under folder; False when git cannot say."""
     try:
-        listed = subprocess.run(
-            ["git", "ls-files", "--", folder.relative_to(repo).as_posix()],
-            cwd=repo, capture_output=True, text=True, timeout=30,
-        )  # fmt: skip
-    except (OSError, subprocess.TimeoutExpired):
+        listed = git_repo.in_clone(repo, "ls-files", "--", folder.relative_to(repo).as_posix(), check=False,
+                                   timeout=30)  # fmt: skip
+    except (OSError, git_repo.GitTimeout):
         return False
     return listed.returncode == 0 and not listed.stdout.strip()
 
@@ -264,11 +262,9 @@ def ignored(repo: Path) -> set[str]:
     """What git ignores and does not track, as paths from the root, a folder with a trailing /:
     a build's output, which the commits never carry to your checkout. Nothing when git cannot say."""
     try:
-        listed = subprocess.run(
-            ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
-            cwd=repo, capture_output=True, text=True, timeout=30,
-        )  # fmt: skip
-    except (OSError, subprocess.TimeoutExpired):
+        listed = git_repo.in_clone(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
+                                   "--directory", check=False, timeout=30)  # fmt: skip
+    except (OSError, git_repo.GitTimeout):
         return set()
     return set(filter(None, listed.stdout.split("\0"))) if listed.returncode == 0 else set()
 

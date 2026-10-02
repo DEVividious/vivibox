@@ -1,16 +1,16 @@
 """The task's own clone of your repository, and bringing its work back.
 
-The agent commits in the clone, so it writes to .git. Git on the host (yours, or IntelliJ in the
-background) runs commands from .git/config (core.fsmonitor, filters, hooksPath) and from .git/hooks.
-Those files are written here, from an allowlist, and mounted read-only into the agent container;
-.git itself is a separate mount so the agent cannot swap it for a directory of its own.
+The agent commits in the clone, so it writes to .git. Git on the host runs commands from
+.git/config (core.fsmonitor, filters, hooksPath) and from .git/hooks. Those files are written here,
+from an allowlist, and mounted read-only into the agent container; .git itself is a separate mount so
+the agent cannot swap it for a directory of its own. What else git follows from the clone (commondir,
+alternates, a submodule's .git) is recorded with them (protection), and git on the host runs in the
+clone only through in_clone, which compares it with the record first.
 """
 
 from __future__ import annotations
 
 import contextlib
-import hashlib
-import json
 import os
 import signal
 import stat
@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import display
+from . import display, protection
 from .podspec import Mount
 
 # Settings a fresh clone needs; everything else in the source repo's local config is dropped.
@@ -36,7 +36,7 @@ CONFIG_ALLOWLIST = (
     "remote.origin.fetch",
 )
 SUBMODULE_KEYS = (".url", ".active")
-PROTECTION_RECORD = "git-protection.json"
+PROTECTION_RECORD = protection.RECORD
 
 
 class RepoError(Exception):
@@ -78,19 +78,31 @@ def git(
 
 
 def in_clone(
-    clone: Path, *args: str, check: bool = True, cwd: Path | None = None
+    clone: Path, *args: str, check: bool = True, cwd: Path | None = None, timeout: float | None = None
 ) -> subprocess.CompletedProcess:
-    """git on the task's clone, or reading it from cwd, within CLONE_TIMEOUT."""
-    return git(*args, cwd=cwd or clone, check=check, timeout=CLONE_TIMEOUT, clone=clone)
+    """git on the task's clone, or reading it from cwd, within CLONE_TIMEOUT (or timeout); only
+    once guard found the clone as recorded."""
+    guard(clone)
+    return git(*args, cwd=cwd or clone, check=check, timeout=timeout or CLONE_TIMEOUT, clone=clone)
+
+
+def guard(clone: Path) -> None:
+    """check_protection, before git on the host reads the clone at clone: a task's clone is
+    <task>/repo beside <task>/.task, which holds its record. Your checkout is no task's clone."""
+    meta = clone.parent / ".task"
+    if meta.is_dir():
+        check_protection(clone, meta)
 
 
 def _bounded(
     command: list[str], cwd: Path | None, timeout: float, clone: Path
 ) -> subprocess.CompletedProcess:
-    """git in a session of its own, so that on a timeout it goes down with every process it started."""
+    """git in a session of its own, so that on a timeout it goes down with every process it started.
+    Without optional locks: git status would write the clone's index in the form your settings ask
+    for (a split one), which protection could not read."""
     p = subprocess.Popen(
         command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, start_new_session=True,
+        text=True, start_new_session=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
     )  # fmt: skip
     try:
         out, err = p.communicate(timeout=timeout)
@@ -193,6 +205,10 @@ def _committed(clone: Path, path: str) -> bool:
     if path.split("/")[0] == ".git":
         return False
     try:
+        guard(clone)
+    except RepoError:
+        return False
+    try:
         listed = subprocess.run(
             ["git", "--literal-pathspecs", "ls-files", "-z", "--", path],
             cwd=clone,
@@ -229,11 +245,8 @@ def identity(source: Path) -> Identity:
 
 
 def git_dirs(repo: Path) -> list[Path]:
-    """The repository's git dir and the git dirs of its submodules."""
-    top = repo / ".git"
-    modules = top / "modules"
-    nested = sorted(p.parent for p in modules.rglob("config")) if modules.is_dir() else []
-    return [top, *(d for d in nested if (d / "HEAD").exists())]
+    """The repository's git dir and the git dirs of its submodules, found without a link."""
+    return [repo / d for d in protection.git_dirs(repo)[0]]
 
 
 def _sanitize(git_dir: Path) -> None:
@@ -252,15 +265,6 @@ def _sanitize(git_dir: Path) -> None:
         for p in sorted(hooks.rglob("*"), reverse=True):
             p.rmdir() if p.is_dir() else p.unlink()
     hooks.mkdir(exist_ok=True)
-
-
-def _fingerprint(repo: Path) -> dict[str, str]:
-    result = {}
-    for d in git_dirs(repo):
-        rel = d.relative_to(repo).as_posix()
-        result[f"{rel}/config"] = hashlib.sha256((d / "config").read_bytes()).hexdigest()
-        result[f"{rel}/hooks"] = ",".join(sorted(p.name for p in (d / "hooks").iterdir()))
-    return result
 
 
 def branches(source: Path) -> list[tuple[str, str]]:
@@ -315,12 +319,14 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = 
         git("remote", "remove", "origin", cwd=repo)
     for d in git_dirs(repo):
         _sanitize(d)
+        for name in protection.ALTERNATES:  # empty, for the pod to mount read-only over
+            protection.make_empty(repo, f"{d.relative_to(repo).as_posix()}/{name}")
     # What tools in the pod write into the repository and nobody means to commit: Serena's project
     # file and caches. Here, not in the project's .gitignore, which is yours.
     (repo / ".git" / "info").mkdir(exist_ok=True)
     with (repo / ".git" / "info" / "exclude").open("a") as f:
         f.write("\n# vivibox: written by tools in the task's pod\n.serena/\n")
-    (meta / PROTECTION_RECORD).write_text(json.dumps(_fingerprint(repo), indent=2) + "\n")
+    record_protection(repo, meta)
     who = identity(source)
     (meta / "gitconfig").write_text(
         f"[user]\n\tname = {who.name}\n\temail = {who.email}\n[init]\n\tdefaultBranch = main\n"
@@ -328,18 +334,39 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = 
     return base
 
 
+def record_protection(repo: Path, meta: Path) -> None:
+    """What git follows from the clone as it is now, for check_protection to compare with."""
+    try:
+        protection.write(meta, protection.record(repo))
+    except OSError as e:
+        raise RepoError(str(e)) from None
+
+
 def check_protection(repo: Path, meta: Path) -> None:
-    """Refuses to go on if protected git files changed; run before any git command on the host."""
-    expected = json.loads((meta / PROTECTION_RECORD).read_text())
-    if _fingerprint(repo) != expected:
-        raise RepoError(f"protected git files in {repo} changed; not touching it from the host")
+    """Refuses to go on if what git follows from the clone changed since prepare: git on the host
+    would run what the agent put there (a hook, a config through commondir) or read its objects."""
+    if not (meta / PROTECTION_RECORD).is_file():
+        raise RepoError(
+            "the task's clone has no record of its git files, so vivibox runs no git in it: delete the task"
+        )
+    try:
+        changed = protection.check(repo, meta)
+    except (OSError, ValueError) as e:  # the clone gone, or a record vivibox cannot read
+        raise RepoError(f"vivibox could not check the task's clone, so it runs no git in it: {e}") from None
+    if changed:
+        more = f" and {len(changed) - 3} more" if len(changed) > 3 else ""
+        raise RepoError(
+            f"git files in the task's clone changed that would make git on your machine run a program "
+            f"or read another repository: {'; '.join(changed[:3])}{more}. vivibox runs no git in the "
+            "clone now, so its work can be neither verified nor brought back: see what the agent did "
+            "in its log, and delete the task"
+        )
 
 
 def agent_mounts(repo: Path, meta: Path) -> list[Mount]:
     mounts = [Mount(str(repo / ".git"), str(repo / ".git"))]
-    for d in git_dirs(repo):
-        for name in ("config", "hooks"):
-            mounts.append(Mount(str(d / name), str(d / name), read_only=True))
+    for rel, read_only in protection.mount_points(repo, meta):
+        mounts.append(Mount(str(repo / rel), str(repo / rel), read_only=read_only))
     mounts.append(Mount(str(meta / "gitconfig"), "/config/.gitconfig", read_only=True))
     return mounts
 

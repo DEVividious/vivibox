@@ -234,10 +234,11 @@ def test_the_risky_check_scans_everything_when_git_cannot_say_what_it_ignores(ta
     (task.repo / ".gitignore").write_text("pom.xml\n")
     (task.repo / "pom.xml").write_text("<project/>\n")
 
-    def timed_out(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+    def timed_out(command, cwd, seconds, clone):
+        assert seconds == 30
+        raise repo.GitTimeout(f"git ls-files did not answer in {seconds} s")
 
-    monkeypatch.setattr(risky.subprocess, "run", timed_out)
+    monkeypatch.setattr(repo, "_bounded", timed_out)
     assert "pom.xml" in [c.path for c in Approvals(task.meta, task.repo).changes()]
 
 

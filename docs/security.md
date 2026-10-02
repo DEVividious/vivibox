@@ -56,12 +56,21 @@ Deleting a task never touches it.
 The task's clone is a real `git clone`, so your repository's `.git` never enters the pod. In the
 clone, `.git/config` and `.git/hooks/` are read-only for the agent, and the project's own hooks reach
 git through `core.hooksPath` in the agent's global config, not through files the agent can edit.
+Git follows more of a `.git` than those two to other configs, hooks and object stores (`commondir`,
+`gitdir`, alternates, `config.worktree`, `HEAD` as a link, a submodule's `.git`, a repository listed
+in the index). vivibox records them when it makes the clone, and before every git command it runs
+on your machine in the clone, and before the verification's and the review's copies of it, checks
+that each is as recorded; when one is not, it runs no git there. Alternates are read-only in the pod.
 
 ## Limits of the boundary
 
 Sysbox containers share the host kernel; they are not virtual machines. The firewall blocks
 host and private-network access except explicitly allowed services, but DNS and public internet
 access remain open. The agent can read credentials passed to its build in `pass_env`.
+
+The check of the task's clone guards the git vivibox runs, at the moment it runs it. Git you run
+yourself in the clone, or an IDE you open on it, is not checked: open the review copy instead, which
+holds only what was committed.
 
 The gate checks the accepted checklist and whether changed test files are named in `red.md`;
 it does not independently prove that each criterion is satisfied or that the recorded test

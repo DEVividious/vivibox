@@ -162,7 +162,9 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     ) -> subprocess.CompletedProcess:
         """A docker exec of git that reads the task's clone, which the agent writes (a named pipe
         there makes git wait forever): past repo.COPY_TIMEOUT the container is taken down, and
-        git in it with it, and GitTimeout says why. Any runner: nothing waits on its time limit."""
+        git in it with it, and GitTimeout says why. Any runner: nothing waits on its time limit.
+        Only once the clone is as recorded: commondir or alternates would aim the copy elsewhere."""
+        repo.guard(self.repo)
         expired = threading.Event()
 
         def expire() -> None:

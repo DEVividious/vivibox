@@ -49,7 +49,7 @@ class AskVerify(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.heading, classes="wrap")
+            yield Label(self.heading, classes="wrap", markup=False)  # it may quote the writer's command
             yield Input(" && ".join(self.verify), id="command", compact=True)
             if self.modules:
                 command = " && ".join(self.verify)

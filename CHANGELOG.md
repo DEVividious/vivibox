@@ -58,6 +58,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - The logs under `l` open in less with `-+R -+r`, whatever your `LESS` says, and the
   verification's log under `w` is shown as text: what the agent's code printed can no longer
   hide lines, make links or move the cursor there.
+- A pager other than less (`cat`, `more`, and the `more` vivibox falls back on) reads an escaped
+  copy of the log; the files to commit after `a`, the writer's command in its dialog and its
+  notification are shown as text, never as markup (`[/b]` in a name no longer breaks the dialog);
+  a line break in a message is indented in the supervisor's window; no empty block stands where
+  there is no verification feedback.
 - A risky file the task adds or changes that is not text vivibox can show you (bytes that are not
   UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
   longer be approved after the word "(binary)": `p` refuses it, and the writer can take its

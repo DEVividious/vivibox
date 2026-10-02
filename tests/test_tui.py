@@ -3437,7 +3437,10 @@ def test_l_opens_the_newest_verification_log_in_the_pager(env, monkeypatch):
     assert panel.pager_command(newest, at_end=True) == ["less", "-R", "-+R", "-+r", "+G", str(newest)]
     assert panel.pager_command(newest, follow=True) == ["less", "-R", "-+R", "-+r", "+F", str(newest)]
     monkeypatch.setenv("PAGER", "more")
-    assert panel.pager_command(newest, follow=True) == ["more", str(newest)], "only less knows the flags"
+    from vivibox import display
+
+    copy = str(display.terminal_copy(newest))  # more passes escape sequences on: an escaped copy
+    assert panel.pager_command(newest, follow=True) == ["more", copy], "only less knows the flags"
     monkeypatch.setenv("PAGER", "less -R")
     assert panel.log_command(task, task.read_state(), running=False) == [
         "less",

@@ -60,7 +60,8 @@ def notify(task_id: str, message: str, desktop: bool = True, actions: Sequence[A
     What the agent wrote in it reaches neither as anything but text: no control character to the
     terminal, no markup to the desktop's notifications, which read <b> and &amp; in the body."""
     message = display.terminal(message)
-    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+    # A next line indented under the time: never a [hh:mm:ss] line the message draws of its own.
+    print(f"[{time.strftime('%H:%M:%S')}] {message}".replace("\n", "\n    "), flush=True)
     if not desktop or not shutil.which("notify-send"):
         return
     command = ["notify-send", "--app-name=vivibox", f"vivibox {task_id}", html.escape(message, quote=False)]

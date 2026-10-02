@@ -279,6 +279,8 @@ def pager_command(path: Path, follow: bool = False, at_end: bool = False, colour
     if Path(command[0]).name == "less":
         command += [] if colours else ["-+R", "-+r"]
         command += ["+F"] if follow else ["+G"] if at_end else []
+    elif not colours:  # cat, more: every escape sequence passes, so they read an escaped copy
+        path = display.terminal_copy(path)
     return [*command, str(path)]
 
 

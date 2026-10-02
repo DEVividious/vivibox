@@ -25,7 +25,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from . import actions, ide, look, version
+from . import actions, display, ide, look, version
 from .browse import FOLDER, Browse, shown_path
 from .config import by_modules
 from .verify_ui import AskVerify
@@ -508,7 +508,10 @@ class CommitWork(Dialog):
             yield Label(
                 f"{self.done.task_id} is done. Its work is uncommitted in {self.done.source}:", classes="wrap"
             )
-            yield Label(self.done.status.rstrip() or "(no changes)", classes="files")
+            # git's names of the agent's files: text, never markup ([/b] in one), no escape sequence.
+            yield Label(
+                display.terminal(self.done.status.rstrip()) or "(no changes)", classes="files", markup=False
+            )
             # A row apart from the files above it: the form starts here.
             with Horizontal(classes="row spaced"):
                 yield Label("Branch", classes="key")

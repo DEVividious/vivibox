@@ -269,7 +269,7 @@ def report_finished(done: actions.Finished) -> None:
     else:
         branch = actions.current_branch(done.source)
         print(f"{done.task_id} is done ({done.cost}). Uncommitted in {done.source} ({branch}):")
-        print(done.status, end="")
+        print(display.terminal(done.status), end="")  # git's names of the agent's files
         offer_commit(done)
 
 

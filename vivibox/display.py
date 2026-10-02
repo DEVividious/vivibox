@@ -9,9 +9,14 @@ What is shown only: digests, approvals and comparisons are of the original bytes
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
+import tempfile
 import unicodedata
 from collections.abc import Iterable
+from pathlib import Path
 
 OPEN, CLOSE = "‹", "›"
 # Unicode's categories of what has nothing to see: controls (C0, DEL, C1), format characters (bidi
@@ -79,9 +84,33 @@ def terminal(text: str, keep: str = "\n\t") -> str:
     return _escape(text, keep, markers=False)
 
 
+def terminal_copy(path: Path) -> Path:
+    """path's text escaped (terminal), for a pager that passes every escape sequence on (cat,
+    more): in a folder of yours alone under the temporary one, named by the path's digest, so the
+    next copy of the same file takes its place. A file vivibox cannot read is said so there."""
+    folder = Path(tempfile.gettempdir()) / f"vivibox-{os.getuid()}"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    found = folder.lstat()
+    if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid() or found.st_mode & 0o077:
+        raise OSError(f"{folder} is not a folder of yours alone")
+    try:  # never through a link, never waiting on a FIFO
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as file:
+            if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+                raise OSError(f"{path} is not a plain file")
+            text = terminal(file.read().decode("utf-8", "surrogateescape"))
+    except OSError as e:
+        text = f"vivibox could not read {name(str(path))}: {name(e.strerror or str(e))}\n"
+    copy = folder / f"{hashlib.sha256(str(path).encode('utf-8', 'surrogateescape')).hexdigest()}.txt"
+    copy.write_text(text, encoding="utf-8")
+    return copy
+
+
 def fenced(text: str, info: str = "") -> str:
     """text as a markdown code block, read as it is: its fence longer than any run of backticks in
-    it, so no line of it closes the block and what follows is never read as markdown."""
+    it, so no line of it closes the block and what follows is never read as markdown. Nothing for
+    no text: an empty block says nothing."""
+    if not text.strip():
+        return ""
     ticks = "`" * max(3, 1 + max((len(run) for run in re.findall("`+", text)), default=0))
     return f"{ticks}{info}\n{text}\n{ticks}"
 

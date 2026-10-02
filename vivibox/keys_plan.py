@@ -8,7 +8,7 @@ import contextlib
 import shutil
 import subprocess
 
-from . import actions, gate, manual, proposal
+from . import actions, display, gate, manual, proposal
 from .panel import edit_in_editor, planned_by_you
 from .plan import PlanError, parse_plan
 from .states import State
@@ -129,7 +129,8 @@ class PlanKeys:
             except Exception as e:
                 self.fail(e)
                 return
-            self.notify(f"{project.name} is verified with `{choice['verify'][0]}` from now on")
+            said = display.terminal(choice["verify"][0], "")
+            self.notify(f"{project.name} is verified with `{said}` from now on", markup=False)
             self.go_on(task, "Command kept")
             self.reload()
 

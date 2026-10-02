@@ -11,8 +11,8 @@ ROOT = Path(__file__).parent.parent
 def test_no_module_is_past_the_limit():
     package = Path(__file__).parent.parent / "vivibox"
     big = {
-        path.name: lines
-        for path in sorted(package.glob("*.py"))
+        str(path.relative_to(package)): lines
+        for path in sorted(package.rglob("*.py"))
         if (lines := len(path.read_text().splitlines())) > LIMIT
     }
     assert not big, f"split before adding to it: {big}"

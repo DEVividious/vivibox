@@ -126,12 +126,19 @@ class PodEgress:
     def apply_firewall(self) -> None:
         helper(self.runner, "apply-policy", self.task_id, json.dumps(self.policy()))
 
-    def remove_firewall(self) -> None:
-        """The task's rules gone, for every role it may have had a network for. A task id that is
-        not one has none."""
+    def remove_firewall(self) -> str:
+        """The task's rules gone, for every role it may have had a network for; "" when they are,
+        else what the helper said. A task id that is not one has none."""
         try:
             nets = [{"role": r, "bridge": names.bridge(self.task_id, r)} for r in names.ROLES]
         except ValueError:
-            return
+            return ""
         gone = json.dumps({"state": "absent", "networks": nets})
-        self.runner(["sudo", "-n", HELPER, "apply-policy", self.task_id, gone])
+        p = self.runner(["sudo", "-n", HELPER, "apply-policy", self.task_id, gone])
+        if p.returncode == 0:
+            return ""
+        said = (p.stderr or p.stdout).strip()[-400:]
+        return (
+            f"this machine's rules for {self.task_id}'s network were not removed: {said}. They hold no "
+            "network now; host/setup.sh installs the helper if it is missing"
+        )

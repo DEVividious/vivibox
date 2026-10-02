@@ -603,13 +603,15 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
         cli_usage.count(task, "conversation")
         remember_removed(task, project)
     archive(task)
-    pod_of(task, project).remove()
+    left = pod_of(task, project).remove()  # said once the rest is gone too
     secrets.remove(task.id)
     reviewing.forget(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)
     repo.drop_review_ref(project.repo, task.id)
     # Plain file removal: no git runs in the clone on the host.
     shutil.rmtree(task.root)
+    if left:
+        raise PodError(f"deleted {task.id}, but {left}")
     return worktree
 
 

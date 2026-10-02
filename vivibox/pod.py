@@ -255,6 +255,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
                 # docker start would run the script it was made with; its data is in volumes.
                 state = self._sidecar_gone()
         net = self.ensure_network() if state is None else self.recorded_network()
+        self.check_bridge(net)
         # The host's rules for the task's bridges, before anything of the pod sends a packet, and
         # again at every start: they follow the uplink of the moment (a VPN on or off).
         self.apply_firewall()
@@ -421,15 +422,17 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         """The review container as a harness talks to it."""
         return ContainerSide(self, self.review)
 
-    def remove(self) -> None:
-        """Removes containers and the task's volumes. Shared caches stay."""
+    def remove(self) -> str:
+        """Removes containers, the task's volumes and network, and the host's rules for it. Shared
+        caches stay. Returns what the host kept (its rules, when the helper refused), "" else."""
         self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
         self._run(
             "docker", "volume", "rm", *self.volumes.values(), f"vivibox-{self.task_id}-config", check=False
         )
         # The host's rules go before the bridge: one left without them is refused outright.
-        self.remove_firewall()
+        left = self.remove_firewall()
         self._run("docker", "network", "rm", self.network, check=False)
+        return left
 
     # --- inside the pod ---------------------------------------------------------------------
 

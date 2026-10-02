@@ -99,10 +99,14 @@ exit 1
 def no_real_hostd(request, monkeypatch, tmp_path_factory):
     """No test starts the host's DNS forwarder but one marked real_hostd or docker: a pod's start
     asks for it (hostd.ensure), and it would outlive the test. Nor takes its locks in your
-    runtime folder: every test has one of its own."""
+    runtime folder, nor reads your /sys/class/net: every test has its own."""
     if "docker" in request.keywords:
         return
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("run")))
+    # The kernel's interfaces as a folder of the test's own: a fake Docker makes its bridges there.
+    from vivibox import pod_network
+
+    monkeypatch.setattr(pod_network, "SYS_NET", tmp_path_factory.mktemp("sys-class-net"))
     if "real_hostd" in request.keywords:
         return
     from vivibox.egress import hostd
@@ -125,6 +129,8 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     from vivibox.pod import Pod
 
     def nothing_there(cmd, timeout=None):
+        if list(cmd)[:1] == ["sudo"] and '"absent"' in cmd[-1]:
+            return subprocess.CompletedProcess(list(cmd), 0, "", "")  # no rules: none to remove
         return subprocess.CompletedProcess(list(cmd), 1, "", "Error: No such object")
 
     monkeypatch.setattr(actions, "Pod", partial(Pod, runner=nothing_there))

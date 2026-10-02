@@ -377,8 +377,8 @@ def cmd_pod(args: argparse.Namespace) -> int:
         print(f"{pod.agent} running")
     elif args.action == "down":
         pod.down()
-    elif args.action == "rm":
-        pod.remove()
+    elif args.action == "rm" and (left := pod.remove()):
+        raise PodError(left)
     elif args.action == "shell":
         os.execvp("docker", ["docker", "exec", "-it", pod.agent, "bash"])
     return 0

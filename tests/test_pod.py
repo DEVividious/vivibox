@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vivibox import pod as pod_module
-from vivibox import toolchain
+from vivibox import pod_network, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
 from vivibox.probe import Listener
@@ -40,6 +40,7 @@ class FakeDocker:
         self.labels: dict[str, dict[str, str]] = {}
         self.subnets = ""
         self.networks: set[str] = set()  # the networks it has made, by name
+        self.sys_net: Path | None = None  # where it makes their bridges, a /sys/class/net of the test's
         self.proc_net_tcp = ""
         self.leftovers = ""  # what the agent container has listening: pid, port in hex, command
         self.alive = False
@@ -91,6 +92,10 @@ class FakeDocker:
             out = "net1\n" if self.subnets else ""
         elif cmd[:3] == ["docker", "network", "create"]:
             self.networks.add(cmd[-1])
+            named = [a for a in cmd if a.startswith("com.docker.network.bridge.name=")]
+            where = self.sys_net or pod_network.SYS_NET  # the kernel's view of what Docker made
+            if named and where != Path("/sys/class/net"):
+                (where / named[0].partition("=")[2] / "bridge").mkdir(parents=True, exist_ok=True)
         elif cmd[:3] == ["docker", "network", "rm"]:
             self.networks.discard(cmd[-1])
         elif cmd[:3] == ["docker", "network", "inspect"] and cmd[-1] in self.networks:
@@ -109,11 +114,19 @@ def applied_policy(pod) -> dict:
 
 
 @pytest.fixture
-def pod(tmp_path: Path):
+def sys_net() -> Path:
+    """The kernel's interfaces, as /sys/class/net shows them: a folder of the test's own (conftest)."""
+    return pod_network.SYS_NET
+
+
+@pytest.fixture
+def pod(tmp_path: Path, sys_net: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
+    docker = FakeDocker()
+    docker.sys_net = sys_net
     return Pod(
-        "shop-1", repo, "vivibox-agent:abc", [HostService("host.docker.internal", 5432)], runner=FakeDocker()
+        "shop-1", repo, "vivibox-agent:abc", [HostService("host.docker.internal", 5432)], runner=docker
     )
 
 
@@ -880,3 +893,53 @@ def test_a_network_docker_refuses_for_another_reason_says_so(pod):
     pod.runner = refusing
     with pytest.raises(PodError, match="permission denied"):
         pod.ensure_network()
+
+
+def test_a_network_that_is_not_on_its_bridge_is_refused(pod, tmp_path):
+    """The rules hold for the bridge vivibox names; a network of that name made another way (by
+    hand, by a script of someone else's) is on a bridge they do not know. The kernel says which."""
+    pod.allocation = tmp_path / "network.json"
+    pod.allocation.write_text(json.dumps({"networks": [{"role": "w", "subnet": "198.51.100.0/28"}]}))
+    pod.runner.networks.add("vivibox-shop-1-net")  # there, and not on vbx-shop-1-w
+    with pytest.raises(PodError, match="not on the bridge vbx-shop-1-w") as e:
+        pod.up()
+    assert "docker network rm vivibox-shop-1-net" in str(e.value)
+    assert not pod.runner.find("docker", "run"), "no container of the pod"
+
+
+def test_a_removal_the_host_refused_is_said_and_the_rest_still_goes(pod):
+    real = pod.runner
+
+    def refusing(cmd):
+        if list(cmd)[:1] == ["sudo"]:
+            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="sudo: a password is required")
+        return real(cmd)
+
+    pod.runner = refusing
+    said = pod.remove()
+    assert "a password is required" in said and "rules" in said
+    assert real.find("docker", "network", "rm", "vivibox-shop-1-net"), "the network goes all the same"
+    pod.runner = real
+    assert pod.remove() == ""
+
+
+def test_deleting_a_task_says_what_the_host_kept(env, monkeypatch, capsys):
+    from functools import partial
+
+    from vivibox import actions
+    from vivibox.cli import main
+
+    def refusing(cmd, timeout=None):
+        if list(cmd)[:1] == ["sudo"]:
+            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="sudo: a password is required")
+        return subprocess.CompletedProcess(list(cmd), 0, stdout="", stderr="")
+
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=refusing))
+    assert main(["delete", "demo-1", "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "deleted demo-1, but" in err and "a password is required" in err
+    assert not (env / "tasks" / "demo-1").exists(), "the rest of the task went"
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    assert main(["pod", "rm", "demo-2"]) == 1
+    assert "a password is required" in capsys.readouterr().err

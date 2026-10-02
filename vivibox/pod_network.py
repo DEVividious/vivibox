@@ -11,9 +11,13 @@ import ipaddress
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import names
 from .config import TASK_NETWORK_BITS
+
+# The kernel's interfaces: whether a bridge of that name is there is asked of it, not of Docker.
+SYS_NET = Path("/sys/class/net")
 
 
 class PodError(Exception):
@@ -130,3 +134,14 @@ class PodNetwork:
             if "overlap" not in said.lower():
                 raise PodError(f"docker network create {self.network}: {said}")
         raise PodError(f"docker network create {self.network}: {said}")
+
+    def check_bridge(self, net: RoleNetwork) -> None:
+        """The network is on the bridge the host's rules are keyed by, as the kernel has it: one of
+        its name made another way (by hand, by someone else's script) is on a bridge they do not
+        know, and the pod would run without them."""
+        if not (SYS_NET / net.bridge / "bridge").is_dir():
+            raise PodError(
+                f"the network {self.network} is not on the bridge {net.bridge} that this machine's "
+                f"rules for the task are keyed by, so they would not hold; remove it "
+                f"(docker network rm {self.network}) and start the task again"
+            )

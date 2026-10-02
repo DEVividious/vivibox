@@ -195,6 +195,10 @@ def _unknown(base: baseline.Baseline) -> str:
     )
 
 
+# What you can do about a change vivibox could not show you as text and you want (a new wrapper jar).
+YOURSELF = "if you want the change, make it yourself in your repository once you accept the rest of the task"
+
+
 def _undo(path: str, base: baseline.Baseline) -> str:
     """What the writer does to take its change to path back: never anything to a file of yours."""
     if base.problem:
@@ -433,9 +437,10 @@ class Approvals:
         self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
     ) -> tuple[str, bool]:
         """change's diff, and whether you could read what it is: a new or changed file, or what a
-        link inside the repository points to, is shown, or copied for you whole, and what was
-        shown or copied is what the digest an approval records says; one that could not be, for
-        its size or the budget, or that changed meanwhile, is no approval's."""
+        link inside the repository points to, is shown, or copied for you whole, as text, and what
+        was shown or copied is what the digest an approval records says; one that could not be, for
+        its size, the budget or not being text (clone_read.Text), or that changed meanwhile, is no
+        approval's. What was approved before need not be text: the new content is shown whole."""
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
@@ -455,7 +460,7 @@ class Approvals:
             self.copy_for_you(change.path).unlink(missing_ok=True)
         changed = "it changed while vivibox read it"
         try:  # through a link only while it stays inside the repository
-            raw = clone_read.read_bytes(self.repo, new, budget=budget)
+            raw = clone_read.read_bytes(self.repo, new, clone_read.CHECK_LIMIT, budget)
         except clone_read.Refused as e:
             if e.kind == clone_read.OVER_BUDGET:
                 return f"{linked}{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
@@ -470,12 +475,19 @@ class Approvals:
         if want is not None and hashlib.sha256(raw).hexdigest() != want:
             return f"{linked}{head}: not shown: {self._unseen(change.path, changed)}\n", False
         try:
-            b = raw.decode().splitlines(keepends=True)
-            a = old.read_text().splitlines(keepends=True) if old.exists() else []
-        except UnicodeDecodeError:
-            return f"{linked}{change.path}: {change.kind} (binary)\n", True
+            b = clone_read.as_text(raw).splitlines(keepends=True)
+        except clone_read.NotText as e:
+            return f"{linked}{head}: not shown: {self._not_text(change.path, e)}\n", False
+        note = ""
+        try:
+            a = clone_read.as_text(old.read_bytes()).splitlines(keepends=True) if old.exists() else []
+        except clone_read.NotText as e:
+            if change.kind == "removed":
+                return f"{linked}{head} (what was approved before is not text: {e.why})\n", True
+            before = f"what was approved before is not text ({e.why})"
+            a, note = [], f"{head}: {before}, so the new content is shown whole\n"
         diff = difflib.unified_diff(a, b, f"approved/{change.path}", f"task/{change.path}")
-        return linked + "".join(diff), True
+        return linked + note + "".join(diff), True
 
     def _unseen(self, path: str, why: str = "") -> str:
         """Why the task's change to path cannot be approved when you could not read it, and what
@@ -490,6 +502,10 @@ class Approvals:
             f"{_undo(path, base)}{_unknown(base)}"
         )
 
+    def _not_text(self, path: str, e: clone_read.NotText) -> str:
+        """Why the task's change to path, not text, cannot be approved, and what you can do."""
+        return f"{self._unseen(path, f'it is {e}')}; {YOURSELF}"
+
     def copy_for_you(self, path: str) -> Path:
         """Where _view copies a risky file of path: the task's metadata, which no container writes."""
         return self.dir / "view" / path
@@ -498,16 +514,21 @@ class Approvals:
         self, path: str, budget: clone_read.Budget | None = None, want: str | None = None
     ) -> tuple[str, bool]:
         """Where to read a risky file too large for the panel, before you approve it: a copy in the
-        task's metadata, where no link of the agent's can be, read as text. Opened in your IDE, a
+        task's metadata, where no link of the agent's can be, read as text, and only text (it is
+        deleted when it turns out not to be, and the change is not seen). Opened in your IDE, a
         build file is imported, which is what approving it is there for. The agent names the
         folders on the way, so the command is quoted, and less runs no LESSOPEN unpacker (-L)."""
         view = self.copy_for_you(path)
         said = "vivibox checks whether it changes, not what it says"
         try:
             view.parent.mkdir(parents=True, exist_ok=True)
-            copied = clone_read.copy(self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget, True)
+            copied = clone_read.copy(
+                self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget, follow=True, text=True
+            )
             if want is not None and copied != want:  # not what an approval would take
                 raise OSError("it changed while vivibox copied it")
+        except clone_read.NotText as e:  # the copy is gone already
+            return f"{said}, and could not copy it for you to read: {self._not_text(path, e)}", False
         except OSError as e:
             with contextlib.suppress(OSError):
                 view.unlink(missing_ok=True)

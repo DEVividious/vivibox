@@ -40,6 +40,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A risky file the task adds or changes that is not text vivibox can show you (bytes that are no
+  UTF-8, such as a build file in another encoding, or a binary file such as a wrapper jar) can no
+  longer be approved after the word "(binary)": `p` refuses it, and the writer can take its
+  change back when you reply; a change you want, you make yourself once you accept the rest.
+  A large one is read as text as it is copied for you, and a copy that is not text is deleted.
+  Your files that the task did not change are not affected, and text that replaces a binary file
+  is shown whole.
 - A named pipe an agent puts where git reads its settings or refs in the task's clone
   (`.gitignore`, `.gitattributes`, `.git/info/exclude`, `.git/packed-refs`) no longer hangs the
   verification with no word: git there gets a minute, and then the task waits for you with

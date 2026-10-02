@@ -810,3 +810,38 @@ def test_an_index_refused_is_not_read_again_until_it_changes(cloned, monkeypatch
     with pytest.raises(r.RepoError, match="an index vivibox cannot read"):
         r.check_protection(repo, meta)
     assert len(parsed) == 2
+
+
+def test_an_index_of_endless_extensions_is_refused_at_once(cloned):
+    """Extensions are walked by their sizes: one of size 0 every 8 bytes would make a walk of 128
+    MiB, and the agent can make every check walk it again (chmod changes the index's ctime)."""
+    import struct
+
+    from vivibox import protection
+
+    _, repo, meta, _ = cloned
+    index = repo / ".git" / "index"
+    with index.open("wb") as f:  # no entries, then zeros to the limit: sparse, no disk for the test
+        f.write(b"DIRC" + struct.pack(">II", 2, 0))
+        f.truncate(protection.INDEX_LIMIT)
+    said, took = timed(lambda: r.check_protection(repo, meta), 10)
+    assert isinstance(said, r.RepoError), said
+    assert f".git/index holds more than {protection.MAX_EXTENSIONS} extensions" in str(said)
+    assert took < 0.1, f"{took:.2f} s"
+
+
+def test_an_index_of_too_many_submodules_says_so(cloned):
+    import struct
+
+    from vivibox import protection
+
+    _, repo, meta, _ = cloned
+    link = b"\0" * 24 + struct.pack(">I", 0o160000) + b"\0" * 32 + struct.pack(">H", 1)
+    count = protection.MAX_GITLINKS + 1
+    # Each name strips the one before whole (a version-4 prefix length), so no name grows.
+    entries = b"".join(
+        link + bytes([len(f"m{n - 1}") if n else 0]) + f"m{n}".encode() + b"\0" for n in range(count)
+    )
+    (repo / ".git" / "index").write_bytes(b"DIRC" + struct.pack(">II", 4, count) + entries + b"\0" * 20)
+    said = refused(repo, meta)
+    assert f".git/index holds more than {protection.MAX_GITLINKS:,} submodules" in said

@@ -48,6 +48,8 @@ MAX_NAME = 4096
 VARINT = 10
 # Submodules in one index: far above any repository's; each costs a name to copy.
 MAX_GITLINKS = 10_000
+# Extensions of one index: git writes a handful (TREE, REUC, UNTR, FSMN, EOIE, IEOT, link, sdir).
+MAX_EXTENSIONS = 64
 # Entries of .git/modules and of hooks looked at in one pass, whatever the agent put there.
 MAX_ENTRIES = 10_000
 # Folders .git/modules may hold one in another: submodules of submodules, names with a / in them.
@@ -306,80 +308,119 @@ def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
 
 
 def _listed(f: int, size: int, hash_length: int, index: str) -> list[str] | str:
-    """The submodules the index open at f lists; why not, never reading past INDEX_LIMIT."""
-    too_large = f"{index} is larger than {INDEX_LIMIT >> 20} MiB"
+    """The submodules the index open at f lists; why not. Its first megabyte is read, and the rest
+    only when the entries go on past it, never past INDEX_LIMIT; its extensions are walked by
+    their headers alone, which costs nothing whatever their sizes."""
     if size > INDEX_LIMIT:
-        return too_large
-    chunks, read = [], 0
-    while read <= INDEX_LIMIT and (chunk := os.read(f, min(1 << 24, INDEX_LIMIT + 1 - read))):
-        chunks.append(chunk)
-        read += len(chunk)
-    if read > INDEX_LIMIT:  # it grew since its size was looked at
-        return too_large
+        return f"{index} is larger than {INDEX_LIMIT >> 20} MiB"
+    header = lambda at: os.pread(f, 8, at)  # noqa: E731
     try:
-        return gitlinks(b"".join(chunks), hash_length)
-    except ValueError:
+        try:
+            return gitlinks(_pread(f, min(size, 1 << 20)), hash_length, size, header)
+        except _Short:
+            return gitlinks(_pread(f, size), hash_length, size, header)
+    except (ValueError, _Short) as e:
+        if str(e).startswith("more than "):
+            return f"{index} holds {e}"
         return f"{index} is an index vivibox cannot read"
 
 
-def gitlinks(data: bytes, hash_length: int = 20) -> list[str]:
+def _pread(f: int, size: int) -> bytes:
+    """The first size bytes of the file open at f; fewer when it shrank since."""
+    chunks, read = [], 0
+    while read < size and (chunk := os.pread(f, min(1 << 24, size - read), read)):
+        chunks.append(chunk)
+        read += len(chunk)
+    return b"".join(chunks)
+
+
+def gitlinks(
+    data: bytes | bytearray, hash_length: int = 20, size: int | None = None,
+    header: Callable[[int], bytes] | None = None,
+) -> list[str]:  # fmt: skip
     """The paths of the submodules (mode 160000) in an index file's content. ValueError for one
     vivibox cannot read, whatever is wrong with it: the agent writes every byte. A split index or
-    a sparse one keeps entries elsewhere, and is one too."""
-    try:
-        return _gitlinks_of(data, hash_length)
-    except ValueError:
-        raise
-    except Exception as e:  # a name or a size past the end (IndexError, struct.error), or anything else
-        raise ValueError(f"an index vivibox cannot read: {e!r}") from None
+    a sparse one keeps entries elsewhere, and is one too. size: the whole index's, when data is
+    only its start (_Short when the entries go on past it), and header reads its extensions'."""
+    size = len(data) if size is None else size
+    found, pos = _entries(data, hash_length, complete=len(data) >= size)
+    _extensions(header or (lambda at: bytes(data[at : at + 8])), pos, size - hash_length)
+    return found
+
+
+class _Short(Exception):
+    """The entries go on past what was read of the index."""
 
 
 _MODE, _FLAGS, _SIZES = struct.Struct(">I"), struct.Struct(">H"), struct.Struct(">4sI")
 
 
-def _gitlinks_of(data: bytes, hash_length: int) -> list[str]:
-    """One pass over data, each byte looked at a bounded number of times: a name, a prefix's
-    length and the submodules are bounded too, whatever the agent wrote."""
+def _entries(data: bytes | bytearray, hash_length: int, complete: bool) -> tuple[list[str], int]:
+    """The submodules data's entries list, and where the entries end, in one pass over data, each
+    byte looked at a bounded number of times: a name, a prefix's length and the submodules are
+    bounded too, whatever the agent wrote. _Short when the entries go on past data and it is not
+    the whole index; ValueError for one vivibox cannot read."""
     if data[:4] != b"DIRC":
         raise ValueError("no index")
-    version, count = struct.unpack_from(">II", data, 4)
-    if version not in (2, 3, 4):
-        raise ValueError(f"index version {version}")
-    fixed, pos, previous, found = 40 + hash_length, 12, bytearray(), []
-    mode_of, flags_of, find = _MODE.unpack_from, _FLAGS.unpack_from, data.find
-    for _ in range(count):
-        mode = mode_of(data, pos + 24)[0]
-        head = fixed + (4 if flags_of(data, pos + fixed)[0] & 0x4000 else 2)
-        start = pos + head
-        if version == 4:
-            strip, start = _varint(data, start)
-            if strip > len(previous):
-                raise ValueError("a name that strips more than the one before")
-            end = find(b"\0", start, start + MAX_NAME + 1)
-            if end < 0:
-                raise ValueError("a name past its limit, or not ended")
-            del previous[len(previous) - strip :]
-            previous += data[start:end]
-            if len(previous) > MAX_NAME:
-                raise ValueError("a name past its limit")
-            pos = end + 1
-            path = previous
-        else:
-            end = find(b"\0", start, start + MAX_NAME + 1)
-            if end < 0:
-                raise ValueError("a name past its limit, or not ended")
-            path = data[start:end]
-            pos += (head + end - start + 8) & ~7
-        if mode == 0o160000:
-            if len(found) >= MAX_GITLINKS:
-                raise ValueError(f"more than {MAX_GITLINKS} submodules")
-            found.append(os.fsdecode(bytes(path)))
-    while pos + 8 <= len(data) - hash_length:
-        signature, size = _SIZES.unpack_from(data, pos)
+    pos = 12
+    try:
+        version, count = struct.unpack_from(">II", data, 4)
+        if version not in (2, 3, 4):
+            raise ValueError(f"index version {version}")
+        fixed, previous, found = 40 + hash_length, bytearray(), []
+        mode_of, flags_of, find, end_of = _MODE.unpack_from, _FLAGS.unpack_from, data.find, len(data)
+        for _ in range(count):
+            mode = mode_of(data, pos + 24)[0]
+            head = fixed + (4 if flags_of(data, pos + fixed)[0] & 0x4000 else 2)
+            start = pos + head
+            if version == 4:
+                strip, start = _varint(data, start)
+                if strip > len(previous):
+                    raise ValueError("a name that strips more than the one before")
+                end = find(b"\0", start, start + MAX_NAME + 1)
+                if end < 0:
+                    raise IndexError("a name past its limit, or not ended")
+                del previous[len(previous) - strip :]
+                previous += data[start:end]
+                if len(previous) > MAX_NAME:
+                    raise ValueError("a name past its limit")
+                path, next_pos = previous, end + 1
+            else:
+                end = find(b"\0", start, start + MAX_NAME + 1)
+                if end < 0:
+                    raise IndexError("a name past its limit, or not ended")
+                path, next_pos = data[start:end], pos + ((head + end - start + 8) & ~7)
+            if next_pos > end_of:
+                raise IndexError("an entry past the end")
+            pos = next_pos
+            if mode == 0o160000:
+                if len(found) >= MAX_GITLINKS:
+                    raise ValueError(f"more than {MAX_GITLINKS:,} submodules")
+                found.append(os.fsdecode(bytes(path)))
+        return found, pos
+    except ValueError:
+        raise
+    except Exception as e:  # a name or a size past the end (IndexError, struct.error), or anything else
+        # Within an entry's largest size of the end, the rest of the index may hold what is missing.
+        if not complete and pos + 64 + VARINT + MAX_NAME >= len(data):
+            raise _Short from None
+        raise ValueError(f"an index vivibox cannot read: {e!r}") from None
+
+
+def _extensions(header: Callable[[int], bytes], pos: int, end: int) -> None:
+    """Walks the extensions from pos to end by their headers (header(at): the 8 bytes at at).
+    ValueError for a split or sparse index, or more than MAX_EXTENSIONS: real ones have a few."""
+    for _ in range(MAX_EXTENSIONS + 1):
+        if pos + 8 > end:
+            return
+        found = header(pos)
+        if len(found) < 8:
+            raise ValueError("an extension past the end")
+        signature, size = _SIZES.unpack(found)
         if signature in (b"link", b"sdir"):
             raise ValueError("a split or sparse index")
         pos += 8 + size
-    return found
+    raise ValueError(f"more than {MAX_EXTENSIONS} extensions")
 
 
 def _varint(data: bytes, pos: int) -> tuple[int, int]:

@@ -159,6 +159,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- `host/vivibox-host`, the root helper that will replace `vivibox-netns`: a closed list of
+  operations (`prepare-engine host`, `apply-policy`), every value of its JSON checked before
+  anything runs as root, and the host's nft rules written by itself; `--dry-run` prints them.
+  `names.bridge` names a task network's bridge, which those rules are keyed by.
 - The timeline `l` opens is written to a folder of yours under the temporary one, not into the
   task: looking at a task writes nothing in it.
 - The tests reach no Docker but in a test marked `docker`: a `docker` first on PATH answers as an

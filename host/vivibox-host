@@ -1,0 +1,504 @@
+#!/usr/bin/python3 -I
+"""vivibox-host: the only code vivibox runs as root. Installed root-owned to
+/usr/local/libexec/vivibox-host by host/setup.sh and allowed through one sudo rule.
+
+    vivibox-host --version
+    vivibox-host [--dry-run] prepare-engine host <json>
+        {"host_address": "<ipv4>/32", "pool": "<ipv4 network>"}
+        The host's services address on a dummy interface of its own (vivibox0), and the nft
+        table inet vivibox with its base chains. Refuses, changing nothing, when the address is
+        another interface's, a route through another interface covers it, or it is in the pool.
+    vivibox-host [--dry-run] apply-policy <task id> <json>
+        {"state": "present", "networks": [{"role", "bridge", "subnet", "policy"}, ...],
+         "pool", "mtu", "hostsvc": ["<ipv4>:<port>", ...], "dns": "<ipv4>", "dns_port"}
+        {"state": "absent", "networks": [{"role", "bridge"}, ...]}
+        A task's egress rules, keyed by the bridges of its role networks, loaded with one nft -f:
+        one transaction, so the rules before it stay whole until the new ones replace them.
+
+--dry-run prints what would be loaded and run, and needs no root.
+
+What it is given is checked whole before anything runs: a closed list of operations, every value
+parsed to what it must be (addresses, networks, ports, names by pattern), no shell, no input from
+the environment, and the nft rules written here from that structure, never taken as text. vivibox
+gives it only what it allocated itself and what the host resolved; nothing from Docker's output.
+"""
+
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+
+VERSION = "1"
+ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
+TABLE = "vivibox"
+DUMMY = "vivibox0"
+# Every task bridge starts so (vivibox/names.py); one without a policy is refused outright.
+BRIDGE_PREFIX = "vbx"
+ROLES = ("w", "r", "p")
+POLICIES = ("open",)
+TASK_ID = re.compile(r"[a-z0-9][a-z0-9-]*-[0-9]+")
+TASK_ID_MAX = 64
+BRIDGE = re.compile(r"vbx(-[a-z0-9-]+|[0-9a-f]{10})-[wrp]")
+IFNAME_MAX = 15
+HASH_LENGTH = 10
+MAX_JSON = 16384
+MAX_HOSTSVC = 64
+TEXT = re.compile(r"[\x21-\x7e]+")
+# Never reached from a pod but through a host service: this network, private ranges, loopback,
+# carrier-grade NAT, link-local, multicast and what is reserved above it.
+REFUSED = (
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "224.0.0.0/3",
+)
+# One map per hook from a bridge's name to its chain: a task's rules never touch another's.
+KINDS = ("out", "back", "host", "dns")
+REJECT = "reject with icmpx admin-prohibited"
+TCP_RESET = "meta l4proto tcp reject with tcp reset"
+
+
+class Refused(Exception):
+    pass
+
+
+class Usage(Exception):
+    pass
+
+
+# --- reading what it is given --------------------------------------------------------------------
+
+
+def load(text):
+    if not isinstance(text, str) or len(text.encode("utf-8", "replace")) > MAX_JSON:
+        raise Refused(f"the JSON argument is past {MAX_JSON} bytes")
+
+    def pairs(items):
+        found = {}
+        for key, value in items:
+            if key in found:
+                raise Refused(f"{key!r} given twice")
+            found[key] = value
+        return found
+
+    def constant(name):
+        raise Refused(f"not a number JSON has: {name}")
+
+    try:
+        return json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+    except ValueError as e:
+        raise Refused(f"not JSON: {e}") from None
+
+
+def fields(obj, wanted, where):
+    if not isinstance(obj, dict):
+        raise Refused(f"{where} must be an object")
+    if extra := sorted(set(obj) - set(wanted)):
+        raise Refused(f"{where}: unknown field {extra[0]!r}")
+    if missing := [k for k in wanted if k not in obj]:
+        raise Refused(f"{where}: missing field {missing[0]!r}")
+    return obj
+
+
+def text(value, where, longest):
+    if not isinstance(value, str) or not 0 < len(value) <= longest or not TEXT.fullmatch(value):
+        raise Refused(f"{where}: not a value it takes: {value!r:.80}")
+    return value
+
+
+def number(value, where, low, high):
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise Refused(f"{where}: not a number from {low} to {high}: {value!r:.40}")
+    return value
+
+
+def address(value, where):
+    """An IPv4 address, written as Python writes it: no leading zeros, nothing around it."""
+    found = text(value, where, 15)
+    try:
+        parsed = ipaddress.IPv4Address(found)
+    except ValueError:
+        raise Refused(f"{where}: not an IPv4 address: {found!r}") from None
+    if str(parsed) != found:
+        raise Refused(f"{where}: not an IPv4 address: {found!r}")
+    if parsed.is_multicast or parsed.is_unspecified or parsed.is_reserved:
+        raise Refused(f"{where}: not an address a host has: {found}")
+    return parsed
+
+
+def network(value, where, shortest=8, longest=30):
+    found = text(value, where, 18)
+    try:
+        parsed = ipaddress.IPv4Network(found, strict=True)
+    except ValueError:
+        raise Refused(f"{where}: not an IPv4 network: {found!r}") from None
+    if "/" not in found or str(parsed) != found or not shortest <= parsed.prefixlen <= longest:
+        raise Refused(f"{where}: not an IPv4 network from /{shortest} to /{longest}: {found!r}")
+    return parsed
+
+
+def bridge(task_id, role):
+    """The bridge vivibox names a task's role network (vivibox/names.py, the same rule)."""
+    readable = f"{BRIDGE_PREFIX}-{task_id}-{role}"
+    if len(readable) <= IFNAME_MAX:
+        return readable
+    return f"{BRIDGE_PREFIX}{hashlib.sha256(task_id.encode()).hexdigest()[:HASH_LENGTH]}-{role}"
+
+
+def task(value):
+    if not isinstance(value, str) or len(value) > TASK_ID_MAX or not TASK_ID.fullmatch(value):
+        raise Refused(f"not a task id: {value!r:.80}")
+    return value
+
+
+def role_network(task_id, given, where, present):
+    wanted = ("role", "bridge", "subnet", "policy") if present else ("role", "bridge")
+    fields(given, wanted, where)
+    role = given["role"]
+    if role not in ROLES:
+        raise Refused(f"{where}: not a role: {role!r:.20}")
+    name = text(given["bridge"], f"{where}.bridge", IFNAME_MAX)
+    if not BRIDGE.fullmatch(name) or name != bridge(task_id, role):
+        raise Refused(f"{where}: {name} is not the bridge of {task_id}'s role {role}")
+    found = {"role": role, "bridge": name}
+    if present:
+        found["subnet"] = network(given["subnet"], f"{where}.subnet", 16, 30)
+        if given["policy"] not in POLICIES:
+            raise Refused(f"{where}: not a policy: {given['policy']!r:.20}")
+        found["policy"] = given["policy"]
+    return found
+
+
+def parse_policy(task_id, raw):
+    """The policy a task's JSON asks for, checked whole; Refused on anything else."""
+    task(task_id)
+    data = load(raw)
+    if not isinstance(data, dict) or data.get("state") not in ("present", "absent"):
+        raise Refused('state must be "present" or "absent"')
+    present = data["state"] == "present"
+    wanted = ("state", "networks") + (("pool", "mtu", "hostsvc", "dns", "dns_port") if present else ())
+    fields(data, wanted, "the policy")
+    given = data["networks"]
+    if not isinstance(given, list) or not 1 <= len(given) <= len(ROLES):
+        raise Refused(f"networks must be a list of 1 to {len(ROLES)}")
+    nets = [role_network(task_id, n, f"networks[{i}]", present) for i, n in enumerate(given)]
+    if len({n["role"] for n in nets}) != len(nets):
+        raise Refused("networks: a role twice")
+    nets.sort(key=lambda n: ROLES.index(n["role"]))
+    policy = {"state": data["state"], "networks": nets}
+    if not present:
+        return policy
+    pool = network(data["pool"], "pool", 8, 28)
+    for i, n in enumerate(nets):
+        if not n["subnet"].subnet_of(pool):
+            raise Refused(f"networks[{i}].subnet {n['subnet']} is outside the pool {pool}")
+        if any(n["subnet"].overlaps(m["subnet"]) for m in nets[:i]):
+            raise Refused(f"networks[{i}].subnet {n['subnet']} overlaps another of the task's")
+    gateways = {n["subnet"].network_address + 1 for n in nets}
+    services = data["hostsvc"]
+    if not isinstance(services, list) or len(services) > MAX_HOSTSVC:
+        raise Refused(f"hostsvc must be a list of at most {MAX_HOSTSVC}")
+    hostsvc = []
+    for i, entry in enumerate(services):
+        where = f"hostsvc[{i}]"
+        ip, sep, port = text(entry, where, 21).rpartition(":")
+        if not sep or not port.isdigit() or port != str(int(port)):
+            raise Refused(f"{where}: not <ipv4>:<port>: {entry!r}")
+        parsed = (address(ip, where), number(int(port), where, 1, 65535))
+        if parsed[0] in pool and parsed[0] not in gateways:
+            raise Refused(f"{where}: {entry} is in the task pool and not one of the task's gateways")
+        if parsed in hostsvc:
+            raise Refused(f"{where}: {entry} given twice")
+        hostsvc.append(parsed)
+    dns = address(data["dns"], "dns")
+    if dns in pool or dns.is_loopback:
+        raise Refused(f"dns: {dns} cannot be the forwarder's address")
+    policy.update(
+        pool=pool,
+        mtu=number(data["mtu"], "mtu", 576, 65535),
+        hostsvc=hostsvc,
+        dns=dns,
+        dns_port=number(data["dns_port"], "dns_port", 1024, 65535),
+    )
+    return policy
+
+
+def parse_engine(raw):
+    data = fields(load(raw), ("host_address", "pool"), "the engine")
+    given = text(data["host_address"], "host_address", 18)
+    try:
+        found = ipaddress.IPv4Interface(given)
+    except ValueError:
+        raise Refused(f"network.host_address: not an IPv4 address: {given!r}") from None
+    if not given.endswith("/32") or str(found) != given:
+        raise Refused(f"network.host_address must be one address, <ipv4>/32: {given!r}")
+    ip = address(str(found.ip), "network.host_address")
+    if ip.is_loopback:
+        raise Refused(f"network.host_address {ip} is a loopback address")
+    pool = network(data["pool"], "network.pool", 8, 28)
+    if ip in pool:
+        raise Refused(
+            f"network.host_address {ip} is in network.pool {pool}; set either in config.toml "
+            "so that they do not meet"
+        )
+    return {"host_address": ip, "pool": pool}
+
+
+# --- the rules -----------------------------------------------------------------------------------
+
+
+def chain(kind, name):
+    return f"{kind}_{name.replace('-', '_')}"
+
+
+def declarations():
+    return [f"add table inet {TABLE}"] + [
+        f"add map inet {TABLE} {kind}_by_bridge {{ type ifname : verdict; }}" for kind in KINDS
+    ]
+
+
+def base():
+    """The table's own chains: before Docker's filter (priority 0) and its DNAT (-100), each
+    handing a packet to the chain of the bridge it comes in on, and refusing one from a task
+    bridge that has none. Written whole every time, in the same transaction as a task's rules."""
+    t = f"inet {TABLE}"
+    return [
+        *declarations(),
+        f"add chain {t} forward {{ type filter hook forward priority -10; policy accept; }}",
+        f"add chain {t} input {{ type filter hook input priority -10; policy accept; }}",
+        f"add chain {t} prerouting {{ type nat hook prerouting priority -110; policy accept; }}",
+        f"flush chain {t} forward",
+        f"flush chain {t} input",
+        f"flush chain {t} prerouting",
+        f"add rule {t} forward iifname vmap @out_by_bridge",
+        f"add rule {t} forward oifname vmap @back_by_bridge",
+        f'add rule {t} forward iifname "{BRIDGE_PREFIX}*" {REJECT}',
+        f"add rule {t} input iifname vmap @host_by_bridge",
+        f'add rule {t} input iifname "{BRIDGE_PREFIX}*" {REJECT}',
+        f"add rule {t} prerouting iifname vmap @dns_by_bridge",
+    ]
+
+
+def refused_ranges(pool):
+    """The ranges refused at once, merged: nft refuses a set of overlapping intervals, and a pool
+    may lie in a private range."""
+    nets = [ipaddress.IPv4Network(n) for n in REFUSED] + [pool]
+    return ", ".join(str(n) for n in ipaddress.collapse_addresses(nets))
+
+
+def clamp(mtu):
+    """The TCP MSS clamp: the route's MTU, or the uplink's when it is smaller than Ethernet's (a
+    VPN tunnel the route does not show). nft only ever lowers the option."""
+    size = "rt mtu" if mtu >= 1500 else str(mtu - 40)
+    return f"tcp flags & (syn | rst) == syn tcp option maxseg size set {size}"
+
+
+def network_rules(net, policy):
+    name, subnet = net["bridge"], net["subnet"]
+    t = f"inet {TABLE}"
+    out, back, host, dns = (chain(kind, name) for kind in KINDS)
+    services = [f"ip daddr {ip} tcp dport {port} accept" for ip, port in policy["hostsvc"]]
+    others = [n["subnet"] for n in policy["networks"] if n is not net]
+    to_forwarder = (policy["dns"], policy["dns_port"])
+    lines = [f"# {net['role']}: {name}, {subnet}, policy {net['policy']}"]
+    lines += [f"add chain {t} {c}" for c in (out, back, host, dns)]
+    lines += [f"flush chain {t} {c}" for c in (out, back, host, dns)]
+    rules = {
+        out: [
+            clamp(policy["mtu"]),
+            "ct state established,related accept",
+            f"meta nfproto ipv6 {REJECT}",
+            f"ip saddr != {subnet} {REJECT}",
+            *services,
+            *(r for other in others for r in (f"ip daddr {other} {TCP_RESET}", f"ip daddr {other} {REJECT}")),
+            f"ip daddr {{ {refused_ranges(policy['pool'])} }} {TCP_RESET}",
+            f"ip daddr {{ {refused_ranges(policy['pool'])} }} {REJECT}",
+            # DNS reaches the forwarder through the DNAT, to the host: any UDP forwarded is other.
+            f"meta l4proto udp {REJECT}",
+            "accept",
+        ],
+        back: [clamp(policy["mtu"])],
+        host: [
+            "ct state established,related accept",
+            f"meta nfproto ipv6 {REJECT}",
+            f"ip saddr != {subnet} {REJECT}",
+            f"ip daddr {to_forwarder[0]} udp dport {to_forwarder[1]} accept",
+            f"ip daddr {to_forwarder[0]} tcp dport {to_forwarder[1]} accept",
+            *services,
+            TCP_RESET,
+            REJECT,
+        ],
+        dns: [
+            f"udp dport 53 dnat ip to {to_forwarder[0]}:{to_forwarder[1]}",
+            f"tcp dport 53 dnat ip to {to_forwarder[0]}:{to_forwarder[1]}",
+        ],
+    }
+    for c, body in rules.items():
+        lines += [f"add rule {t} {c} {rule}" for rule in body]
+    lines += [f'add element {t} {kind}_by_bridge {{ "{name}" : jump {chain(kind, name)} }}' for kind in KINDS]
+    return lines
+
+
+def removal(net):
+    """A bridge's chains gone, whether they were there or not: added first, so that none of the
+    deletes can fail, all in the one transaction."""
+    name, t = net["bridge"], f"inet {TABLE}"
+    chains = [chain(kind, name) for kind in KINDS]
+    return [
+        f"# {net['role']}: {name}, removed",
+        *(f"add chain {t} {c}" for c in chains),
+        *(f'add element {t} {kind}_by_bridge {{ "{name}" : jump {chain(kind, name)} }}' for kind in KINDS),
+        *(f'delete element {t} {kind}_by_bridge {{ "{name}" }}' for kind in KINDS),
+        *(f"flush chain {t} {c}" for c in chains),
+        *(f"delete chain {t} {c}" for c in chains),
+    ]
+
+
+def policy_file(task_id, policy):
+    head = [f"# vivibox-host apply-policy {task_id}: {policy['state']}"]
+    if policy["state"] == "absent":
+        body = declarations() + [line for net in policy["networks"] for line in removal(net)]
+    else:
+        body = base() + [line for net in policy["networks"] for line in network_rules(net, policy)]
+    return "\n".join(head + body) + "\n"
+
+
+def engine_file():
+    return "\n".join(["# vivibox-host prepare-engine host", *base()]) + "\n"
+
+
+# --- the machine ---------------------------------------------------------------------------------
+
+
+def run(cmd, input=None):
+    return subprocess.run(cmd, input=input, capture_output=True, text=True, env=ENV, timeout=60)
+
+
+def read_json(runner, cmd):
+    done = runner(cmd)
+    if done.returncode != 0:
+        raise Refused(f"{' '.join(cmd)}: {(done.stderr or done.stdout).strip()[:400]}")
+    try:
+        found = json.loads(done.stdout or "[]")
+    except ValueError:
+        raise Refused(f"{' '.join(cmd)} did not print JSON") from None
+    return found if isinstance(found, list) else []
+
+
+def conflicts(links, routes, ip):
+    """Why the host's address cannot be vivibox0's: another interface has it, a route through
+    another interface covers it, or an interface of that name is someone else's."""
+    found = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        name = str(link.get("ifname", ""))
+        kind = (link.get("linkinfo") or {}).get("info_kind", "")
+        if name == DUMMY and kind != "dummy":
+            found.append(f"an interface named {DUMMY} that is not vivibox's ({kind or 'no kind'}) is there")
+        for a in link.get("addr_info") or []:
+            if a.get("family") == "inet" and a.get("local") == str(ip) and name != DUMMY:
+                found.append(f"network.host_address {ip} is already an address of {name}")
+    for route in routes:
+        if not isinstance(route, dict) or route.get("type", "unicast") in ("local", "broadcast", "multicast"):
+            continue
+        dst = str(route.get("dst", ""))
+        try:
+            net = ipaddress.IPv4Network(dst, strict=False)
+        except ValueError:
+            continue  # default, or not IPv4
+        # A half of the internet (/0, /1) is how a full tunnel claims everything, not a range in use.
+        if net.prefixlen >= 8 and ip in net and route.get("dev") != DUMMY:
+            through = route.get("dev") or f"no interface ({route.get('type', 'unicast')})"
+            found.append(f"a route to {dst} through {through} covers network.host_address {ip}")
+    return found
+
+
+def prepare_engine(spec, runner, dry):
+    ip = spec["host_address"]
+    links = read_json(runner, ["ip", "-j", "-d", "addr", "show"])
+    routes = read_json(runner, ["ip", "-j", "-4", "route", "show", "table", "all"])
+    if found := conflicts(links, routes, ip):
+        raise Refused(
+            "; ".join(found) + ". Nothing was changed: set network.host_address in config.toml to "
+            "an address nothing on this machine uses"
+        )
+    mine = next((link for link in links if isinstance(link, dict) and link.get("ifname") == DUMMY), None)
+    steps = []
+    if mine is None:
+        steps.append(["ip", "link", "add", DUMMY, "type", "dummy"])
+    held = [a for a in (mine or {}).get("addr_info") or [] if a.get("family") == "inet"]
+    for a in held:
+        if a.get("local") != str(ip):
+            old = ipaddress.IPv4Interface(f"{a.get('local')}/{a.get('prefixlen')}")
+            steps.append(["ip", "addr", "del", str(old), "dev", DUMMY])
+    if not any(a.get("local") == str(ip) for a in held):
+        steps.append(["ip", "addr", "add", f"{ip}/32", "dev", DUMMY])
+    if mine is None or "UP" not in (mine.get("flags") or []):
+        steps.append(["ip", "link", "set", DUMMY, "up"])
+    if dry:
+        print("\n".join(f"# would run: {' '.join(step)}" for step in steps))
+        print(engine_file(), end="")
+        return
+    for step in steps:
+        must(runner, step)
+    must(runner, ["nft", "-f", "-"], engine_file())
+
+
+def must(runner, cmd, input=None):
+    done = runner(cmd, input=input) if input is not None else runner(cmd)
+    if done.returncode != 0:
+        raise Refused(f"{' '.join(cmd)} failed: {(done.stderr or done.stdout).strip()[:2000]}")
+
+
+def main(argv, run=run, euid=None):
+    euid = os.geteuid() if euid is None else euid
+    try:
+        if argv == ["--version"]:
+            print(f"vivibox-host {VERSION}")
+            return 0
+        dry = argv[:1] == ["--dry-run"]
+        args = argv[1:] if dry else argv
+        if len(args) != 3 or args[0] not in ("prepare-engine", "apply-policy"):
+            raise Usage()
+        op, target, raw = args
+        if op == "prepare-engine":
+            if target != "host":
+                raise Usage()
+            spec = parse_engine(raw)
+        else:
+            policy = parse_policy(target, raw)
+        if not dry and euid != 0:
+            raise Refused("must run as root (sudo)")
+        if op == "prepare-engine":
+            prepare_engine(spec, run, dry)
+        elif dry:
+            print(policy_file(target, policy), end="")
+        else:
+            must(run, ["nft", "-f", "-"], policy_file(target, policy))
+        return 0
+    except Usage:
+        print(
+            "usage: vivibox-host --version\n"
+            "       vivibox-host [--dry-run] prepare-engine host <json>\n"
+            "       vivibox-host [--dry-run] apply-policy <task id> <json>",
+            file=sys.stderr,
+        )
+        return 2
+    except Refused as e:
+        print(f"vivibox-host: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    os.environ.clear()
+    os.environ.update(ENV)
+    os.umask(0o077)
+    sys.exit(main(sys.argv[1:]))

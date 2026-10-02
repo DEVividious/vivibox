@@ -50,6 +50,8 @@ packages = ["vivibox"]
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+# The root helper is Python without the extension (host/setup.sh installs it as a command).
+extend-include = ["host/vivibox-host"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]

@@ -168,13 +168,46 @@ def test_every_dns_client_in_the_pod_asks_the_hosts_forwarder(env):
 
 
 def test_root_in_a_nested_container_cannot_remove_the_rules(env):
-    """H10: a privileged container in the pod, on the sidecar's network, flushes all it sees."""
-    flush = "apk add -q --no-cache nftables iptables && nft flush ruleset; iptables -F; echo done"
-    out = agent(env, f"docker run --rm --privileged --network host alpine:3 sh -c '{flush}'", check=False)
-    assert "done" in out.stdout, out
-    gw, no = env["pod"].gateway(), env["denied"]
-    assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{gw}:{no}/", check=False).returncode != 0
-    assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{lan_ip()}:22/", check=False).returncode != 0
+    """H10: a privileged container in the pod, on the sidecar's network, flushes all it sees. The
+    host's rules are not among them. What is, it puts back as it found it, and the test checks
+    that it did: the flush takes Docker's turn of 127.0.0.11 to its resolver and the nested
+    daemon's own chains with it, and the pod resolves no name and pulls nothing until a restart
+    makes them again; the tests after this one need both. Every rule in that namespace was made
+    by iptables, so iptables-save and iptables-restore are the pair that keeps them (nft lists
+    their targets as xt expressions, which nft -f does not load)."""
+    pod = env["pod"]
+    nested = "docker exec h10 sh -c"
+    agent(env, "docker rm -f h10", check=False)
+    agent(env, "docker run -d --privileged --network host --name h10 --tmpfs /tmp alpine:3 sleep 600")
+    try:
+        keep = (
+            "apk add -q --no-cache nftables iptables && iptables-save > /tmp/v4"
+            " && (ip6tables-save > /tmp/v6 2>/dev/null || :) && echo kept"
+        )
+        kept = agent(env, f"{nested} '{keep}'", check=False)
+        assert "kept" in kept.stdout, kept
+        flushed = agent(env, f"{nested} 'nft flush ruleset; iptables -F; echo done'", check=False)
+        assert "done" in flushed.stdout, flushed
+        gw, no = pod.gateway(), env["denied"]
+        assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{gw}:{no}/", check=False).returncode != 0
+        assert agent(env, f"curl -fsS -m 5 -o /dev/null http://{lan_ip()}:22/", check=False).returncode != 0
+        back = "iptables-restore < /tmp/v4 && (ip6tables-restore < /tmp/v6 2>/dev/null || :) && echo back"
+        restored = agent(env, f"{nested} '{back}'", check=False)
+        assert "back" in restored.stdout, restored
+    finally:
+        agent(env, "docker rm -f h10", check=False)
+    assert agent(env, "getent hosts example.com", check=False).returncode == 0, "the pod resolves names again"
+    pulled = agent(env, "docker run --rm --pull always alpine:3 true", check=False)
+    assert pulled.returncode == 0, f"and its daemon pulls again: {pulled.stderr[-500:]}"
+    # A published port is the nested daemon's own chains, which the flush took as well.
+    published = agent(env, "docker run -d --rm --name h10port -p 18081:80 nginx:alpine", check=False)
+    try:
+        assert published.returncode == 0, f"and publishes a port again: {published.stderr[-500:]}"
+        got = agent(env, "for i in $(seq 20); do curl -fsS -o /dev/null http://localhost:18081/ && exit 0;"
+                    " sleep 0.5; done; exit 1", check=False)  # fmt: skip
+        assert got.returncode == 0, "the port it published answers"
+    finally:
+        agent(env, "docker rm -f h10port", check=False)
 
 
 def test_internet_is_reachable(env):

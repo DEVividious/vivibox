@@ -19,6 +19,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the containers' limits are checked against and the CPUs each gets, not a limit on the slice
   yet. A scratch tmpfs (`/tmp`, the verification's and the reviewer's `/config`) is half of its
   container's memory, 2 GiB for the agent by default, instead of a fixed 4 GB.
+- Every task has a disk of its own: a sparse XFS image `disk.img` in the task's folder, attached
+  by the root helper when the task starts and mounted at `<task>/disk`, which holds what the pod
+  writes outside the clone (its Docker's data, the agent's home, what a build installs, the
+  verification's and the reviewer's clones), each a directory there instead of a Docker volume;
+  only the Docker socket stays in a volume. Its size, `disk` under `[limits]` (20 GiB), is the
+  most the task can write there, and a full disk is the task's, never the machine's. Deleting
+  the task detaches the disk and deletes the image; one the helper could not detach is kept and
+  said. The clone stays beside the image, outside it. Tasks created before this change are from
+  an earlier vivibox: delete them and create them again.
 
 ### Changed
 

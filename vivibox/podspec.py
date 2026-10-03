@@ -297,7 +297,7 @@ def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
     mounts = [
         Mount(pod.volumes["socket"], SOCKET_DIR),
         Mount(str(pod.repo), str(pod.repo)),
-        Mount(f"vivibox-{pod.task_id}-config", "/config"),
+        Mount(pod.volumes["config"], "/config"),
         *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
         Mount(pod.volumes["installed"], INSTALLED),
         *ca_mounts,

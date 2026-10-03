@@ -88,7 +88,7 @@ from .demo import (  # noqa: F401
 from .orchestration import mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
-from .pod import Mount, Pod, PodError, RulesLeft, prepare_host
+from .pod import DISK_MOUNT, Mount, Pod, PodError, RulesLeft, prepare_host
 from .projects import (  # noqa: F401
     GROUNDWORK,
     broken_projects,
@@ -232,11 +232,13 @@ def pod_of(task: Task, project: Project) -> Pod:
     config = load_config()
     # The mirror is reached as a service of the host's, through the pod's firewall.
     through = [HostService(config.host_ip, config.hub_mirror_port)] if config.hub_mirror else []
+    disk = task.root / DISK_MOUNT
     return Pod(
         task.id, task.repo, ref, [*project.host_services, *through], mounts, env, project.pass_env,
-        gate_dir=task.root / "gate", review_dir=task.root / ".review", allocation=task.meta / "network.json",
+        gate_dir=disk / "gate", review_dir=disk / "review", allocation=task.meta / "network.json",
         network_pool=config.network_pool, host_address=config.host_address,
         hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",
+        limits=config.limits, folder=task.root,
     )  # fmt: skip
 
 

@@ -49,12 +49,13 @@ class FakeDocker:
         self.route = ""  # what `ip route get` says; nothing, and the host is taken for Ethernet
         self.links = ""  # what `ip -o link` says
         self.refuses = ""  # what the root helper says when it refuses; "" and it does its job
+        self.refuses_only = ""  # the one operation it refuses, when not every one
 
     def __call__(self, cmd):
         cmd = list(cmd)
         self.calls.append(cmd)
         out, rc = "", 0
-        if cmd[:1] == ["sudo"] and self.refuses:
+        if cmd[:1] == ["sudo"] and self.refuses and cmd[3] == (self.refuses_only or cmd[3]):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=self.refuses)
         if cmd[:2] == ["docker", "inspect"]:
             state = self.states.get(cmd[-1])
@@ -130,8 +131,9 @@ def pod(tmp_path: Path, sys_net: Path):
     docker = FakeDocker()
     docker.sys_net = sys_net
     return Pod(
-        "shop-1", repo, "vivibox-agent:abc", [HostService("host.docker.internal", 5432)], runner=docker
-    )
+        "shop-1", repo, "vivibox-agent:abc", [HostService("host.docker.internal", 5432)], runner=docker,
+        folder=tmp_path,
+    )  # fmt: skip
 
 
 def test_agent_container_is_unprivileged(pod):
@@ -181,13 +183,12 @@ def test_the_gate_reuses_only_what_it_built_itself(pod, tmp_path):
     later attempt of the same task may reuse: a volume of its own, kept between verifications."""
     pod.gate_dir = tmp_path / "gate"
     gate = pod.gate_command()
-    assert "vivibox-shop-1-gate-build-cache:/cache/build-cache" in gate
+    assert f"{pod.disk}/gate-build-cache:/cache/build-cache" in gate
     assert not any(arg.startswith("vivibox-cache-build-cache:") for arg in gate)
     pod.ensure_network()
+    (pod.disk / "gate-build-cache" / "kept").mkdir(parents=True)
     pod.gate_up()
-    assert not any("vivibox-shop-1-gate-build-cache" in c for c in pod.runner.find("docker", "volume", "rm"))
-    pod.remove()
-    assert "vivibox-shop-1-gate-build-cache" in pod.runner.find("docker", "volume", "rm")[-1]
+    assert (pod.disk / "gate-build-cache" / "kept").is_dir(), "kept between verifications"
 
 
 def test_agent_gets_repo_rw_caches_and_extra_mounts(pod):
@@ -216,6 +217,7 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
     ]
     assert steps == [
         "prepare-engine",
+        "attach-disk",
         "network",
         "apply-policy",
         "vivibox-shop-1-dind",
@@ -224,7 +226,7 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
     prepare = pod.runner.find("sudo")[0]
     assert prepare[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "prepare-engine", "host"]
     assert json.loads(prepare[5]) == {"host_address": "203.0.113.1/32", "pool": DEFAULT_NETWORK_POOL}
-    applied = pod.runner.find("sudo")[1]
+    applied = pod.runner.find("sudo")[2]
     assert applied[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "apply-policy", "shop-1"]
     assert json.loads(applied[5]) == {
         "state": "present",
@@ -342,7 +344,7 @@ def test_up_with_running_pod_only_reapplies_firewall(pod):
     pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up()
     assert not pod.runner.find("docker", "run")
-    assert [c[3] for c in pod.runner.find("sudo")] == ["prepare-engine", "apply-policy"]
+    assert [c[3] for c in pod.runner.find("sudo")] == ["prepare-engine", "attach-disk", "apply-policy"]
 
 
 def test_a_running_sidecar_from_before_the_hosts_certificates_changed_is_made_again(pod):
@@ -374,7 +376,7 @@ def test_restarted_sidecar_gets_a_new_agent(pod):
         for c in pod.runner.calls
         if c[:2] == ["docker", "start"] or c[0] == "sudo"
     ]
-    assert steps == ["prepare-engine", "apply-policy", "start"], "the rules before it starts again"
+    assert steps == ["prepare-engine", "attach-disk", "apply-policy", "start"], "the rules before it starts"
 
 
 def test_a_task_started_again_passes_what_its_project_passes_now(env, tmp_path, monkeypatch):
@@ -466,25 +468,108 @@ def test_up_requires_repo(tmp_path):
 
 def test_remove_keeps_shared_caches(pod):
     pod.remove()
-    removed = pod.runner.find("docker", "volume", "rm")[0]
-    assert "vivibox-shop-1-docker" in removed and "vivibox-shop-1-config" in removed
-    assert not any(v.startswith("vivibox-cache-") for v in removed)
+    removed = pod.runner.find("docker", "volume", "rm")
+    assert removed == [["docker", "volume", "rm", "vivibox-shop-1-socket"]], "the one volume left to a task"
+    assert not any(v.startswith("vivibox-cache-") for c in removed for v in c)
 
 
-def test_what_a_task_installs_stays_in_a_volume_of_its_own(pod, tmp_path):
+def test_what_a_task_installs_stays_in_a_directory_of_its_disk(pod, tmp_path):
     """Modules one task installs, its unfinished work in them, never reach another task's build;
-    the gate starts from an empty one every time, and both go with the task."""
+    the gate starts from an empty one every time, and both go with the task's disk."""
     pod.gate_dir = tmp_path / "gate"
-    assert "vivibox-shop-1-installed:/cache/m2/installed" in pod.agent_command()
-    assert "vivibox-shop-1-gate-installed:/cache/m2/installed" in pod.gate_command()
+    assert f"{pod.disk}/installed:/cache/m2/installed" in pod.agent_command()
+    assert f"{pod.disk}/gate-installed:/cache/m2/installed" in pod.gate_command()
     pod.ensure_network()
+    left = pod.disk / "gate-installed" / "com" / "example"
+    left.mkdir(parents=True)
     pod.gate_up()
-    calls = pod.runner.calls
-    emptied = calls.index(["docker", "volume", "rm", "-f", "vivibox-shop-1-gate-installed"])
-    assert emptied < calls.index(pod.runner.find("docker", "run", "-d", "--name", pod.gate)[0])
-    pod.remove()
-    removed = pod.runner.find("docker", "volume", "rm")[-1]
-    assert "vivibox-shop-1-installed" in removed and "vivibox-shop-1-gate-installed" in removed
+    assert (pod.disk / "gate-installed").is_dir() and not left.exists(), "emptied before the gate runs"
+    assert not pod.runner.find("docker", "volume", "rm"), "no volume to remove"
+
+
+def test_the_tasks_volumes_are_directories_of_its_disk_but_the_socket(pod, tmp_path):
+    """What a task writes outside its clone lives on its disk image, whose size bounds it: the
+    pod's Docker data, the agent's home, what Maven installs, the gate's own. The Docker socket
+    stays in a volume the pair shares and never on the host."""
+    pod.gate_dir = tmp_path / "gate"
+    disk = str(pod.disk)
+    assert disk == str(pod.folder / "disk") and pod.disk_image == pod.folder / "disk.img"
+    assert f"{disk}/docker:/var/lib/docker" in binds(pod.sidecar_command())
+    assert f"{disk}/config:/config" in binds(pod.agent_command())
+    assert "vivibox-shop-1-socket:/run/vivibox-docker" in binds(pod.sidecar_command())
+    assert "vivibox-shop-1-socket:/run/vivibox-docker" in binds(pod.agent_command())
+    assert [b for b in binds(pod.gate_command()) if b.startswith("vivibox-shop-1-")] == [
+        "vivibox-shop-1-socket:/run/vivibox-docker"
+    ], "no volume of the task's but the socket"
+    assert set(pod.volumes) == {"docker", "socket", "installed", "gate-installed", "gate-build-cache",
+                               "config"}  # fmt: skip
+
+
+def test_up_attaches_the_tasks_disk_after_the_host_and_before_any_container(pod):
+    """The disk first: the sidecar's data and the agent's home are on it. The helper is given the
+    task's own folder and the configured size, nothing from Docker's output."""
+    pod.up()
+    steps = [
+        c[4] if c[:2] == ["docker", "run"] else c[3] if c[0] == "sudo" else "network"
+        for c in pod.runner.calls
+        if c[:4] == ["docker", "run", "-d", "--name"]
+        or c[0] == "sudo"
+        or c[:3] == ["docker", "network", "create"]
+    ]
+    assert steps == [
+        "prepare-engine", "attach-disk", "network", "apply-policy", "vivibox-shop-1-dind",
+        "vivibox-shop-1-agent",
+    ]  # fmt: skip
+    attached = pod.runner.find("sudo")[1]
+    assert attached[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "attach-disk", "shop-1"]
+    assert json.loads(attached[5]) == {"dir": str(pod.folder), "size": "20g"}
+
+
+def test_a_disk_that_cannot_be_attached_stops_the_pod_before_any_container(pod):
+    pod.runner.refuses = "vivibox-host: mkfs.xfs -q /srv/vivibox/shop-1/disk.img failed: not found"
+    pod.runner.refuses_only = "attach-disk"
+    with pytest.raises(PodError) as refused:
+        pod.up()
+    said = str(refused.value)
+    assert said.startswith("the task's disk could not be attached: vivibox-host: mkfs.xfs")
+    assert "host/setup.sh" in said, "what to do"
+    assert not pod.runner.find("docker", "run"), "no container of the pod"
+
+
+def test_remove_detaches_the_disk_deletes_its_image_then_the_rules_and_the_network(pod):
+    pod.up()
+    pod.disk_image.write_bytes(b"")
+    pod.disk.mkdir(exist_ok=True)
+    before = len(pod.runner.calls)
+    assert pod.remove() == ""
+    steps = [
+        c[1] if c[:2] == ["docker", "rm"] else c[3]
+        for c in pod.runner.calls[before:]
+        if c[:2] == ["docker", "rm"] or c[0] == "sudo" or c[:3] == ["docker", "network", "rm"]
+    ]
+    assert steps == ["rm", "detach-disk", "apply-policy", "vivibox-shop-1-net"]
+    detached = next(c for c in pod.runner.calls[before:] if c[0] == "sudo" and c[3] == "detach-disk")
+    assert json.loads(detached[5]) == {"dir": str(pod.folder)}
+    assert not pod.disk_image.exists() and not pod.disk.exists(), "the image goes with the task"
+
+
+def test_a_detach_the_host_refused_keeps_the_image_and_is_said(pod):
+    pod.up()
+    pod.disk_image.write_bytes(b"")
+    pod.runner.refuses = "vivibox-host: umount /srv/vivibox/shop-1/disk failed: target is busy"
+    pod.runner.refuses_only = "detach-disk"
+    said = pod.remove()
+    assert "the task's disk" in said and "target is busy" in said
+    assert pod.disk_image.exists(), "a mounted image is never deleted"
+    assert pod.runner.find("docker", "network", "rm", "vivibox-shop-1-net"), "the network goes all the same"
+
+
+def test_deleting_a_task_that_never_had_a_disk_tolerates_the_helpers_answer(pod):
+    """A task from before there were disks has no image: the helper says the disk is detached
+    already, and the removal goes on."""
+    assert not pod.disk_image.exists()
+    assert pod.remove() == ""
+    assert [c[3] for c in pod.runner.find("sudo")] == ["detach-disk", "apply-policy"]
 
 
 def test_the_preparation_runs_in_the_clone_and_outlives_the_exec_that_started_it(pod):
@@ -723,7 +808,7 @@ def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_pa
     made_now(again, state="exited")
     again.up(timeout=1)
     assert not again.runner.find("docker", "network", "create"), "the network is there: started, not made"
-    assert json.loads(again.runner.find("sudo")[1][5])["networks"][0]["subnet"] == "198.51.100.0/28"
+    assert json.loads(again.runner.find("sudo")[2][5])["networks"][0]["subnet"] == "198.51.100.0/28"
 
 
 def test_an_allocation_outside_the_pool_now_is_made_again(pod, tmp_path):
@@ -790,7 +875,7 @@ def test_listening_ports_are_read_from_the_kernel(pod):
 def test_removing_a_task_takes_its_network_and_its_rules_with_it(pod):
     pod.remove()
     calls = pod.runner.calls
-    gone = next(i for i, c in enumerate(calls) if c[:1] == ["sudo"])
+    gone = next(i for i, c in enumerate(calls) if c[:1] == ["sudo"] and c[3] == "apply-policy")
     assert calls.index(["docker", "network", "rm", "vivibox-shop-1-net"]) > gone, "the rules first"
     assert calls[gone][3:5] == ["apply-policy", "shop-1"]
     assert json.loads(calls[gone][5]) == {

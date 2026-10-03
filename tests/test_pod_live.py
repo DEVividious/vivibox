@@ -49,6 +49,19 @@ def lan_ip() -> str:
     return out[out.index("src") + 1]
 
 
+def own_folder(task_id: str) -> Path:
+    """A task's folder, one level under the tasks directory and named by its id: the root helper
+    attaches a disk there and nowhere else. Removed by the test that made it."""
+    folder = TASKS_ROOT / task_id
+    folder.mkdir()
+    return folder
+
+
+def check_id(kind: str) -> str:
+    """An id of the task id's pattern that no earlier run left behind."""
+    return f"{kind}{secrets.token_hex(3)}-{random.randint(1, 9999)}"
+
+
 @pytest.fixture(scope="module")
 def env():
     if not TASKS_ROOT.is_dir():
@@ -56,9 +69,9 @@ def env():
     if why := helper_missing():
         pytest.skip(why)
     allowed, denied = serve(), serve()
-    tasks_dir = TASKS_ROOT / f".pytest-{secrets.token_hex(4)}"
-    task_id = f"podcheck-{random.randint(1000, 9999)}"
-    repo = tasks_dir / task_id / "repo"
+    task_id = check_id("podcheck")
+    folder = own_folder(task_id)
+    repo = folder / "repo"
     shutil.copytree(FIXTURE, repo)
     marker = secrets.token_hex(8)
     index = repo / "www" / "index.html"
@@ -74,7 +87,8 @@ def env():
     cfg = load_config()  # the host's address and the pool this machine was set up with
     pod = Pod(
         task_id, repo, ref, [HostService("host.docker.internal", allowed.server_address[1])],
-        gate_dir=tasks_dir / task_id / "gate", host_address=cfg.host_address, network_pool=cfg.network_pool,
+        gate_dir=folder / "disk" / "gate", host_address=cfg.host_address, network_pool=cfg.network_pool,
+        limits=cfg.limits, folder=folder,
     )  # fmt: skip
     try:
         pod.up()
@@ -87,7 +101,7 @@ def env():
         }
     finally:
         pod.remove()
-        shutil.rmtree(tasks_dir, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
         allowed.shutdown()
         denied.shutdown()
 
@@ -464,7 +478,9 @@ def test_a_project_jdk_still_beats_the_image_default(env):
     ref = image.build()[0]
     # Built the way actions.py builds it: the project JDK reaches the containers through this env.
     where = toolchain.agent_env("17", image.env(ref))
-    pod = Pod(f"jdkcheck-{random.randint(1000, 9999)}", env["repo"], ref, [], agent_env=where)
+    task_id = check_id("jdkcheck")
+    folder = own_folder(task_id)
+    pod = Pod(task_id, env["repo"], ref, [], agent_env=where, folder=folder)
     try:
         pod.up()
         toolchain.ensure(pod, "17")
@@ -472,6 +488,7 @@ def test_a_project_jdk_still_beats_the_image_default(env):
         assert "17." in got, f"the project JDK has to come first on PATH: {got}"
     finally:
         pod.remove()
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_a_fifo_in_the_clone_ends_the_gates_clone_in_time_and_takes_the_gate_down(env, monkeypatch):
@@ -551,7 +568,9 @@ def replies(env):
     from vivibox import comments
     from vivibox.pod import Mount
 
-    meta = env["repo"].parent.parent / "replies" / ".task"
+    task_id = check_id("repliescheck")
+    folder = own_folder(task_id)
+    meta = folder / ".task"
     (meta / "handoff").mkdir(parents=True)
     (meta / "comments.md").write_text("\n## 2026-10-02 10:00\n\nKeep the tests.\n")
     mounts = [
@@ -560,12 +579,13 @@ def replies(env):
         comments.mount(meta),
     ]
     ref = image.build()[0]
-    pod = Pod(f"repliescheck-{random.randint(1000, 9999)}", env["repo"], ref, [], agent_mounts=mounts)
+    pod = Pod(task_id, env["repo"], ref, [], agent_mounts=mounts, folder=folder)
     try:
         pod.up()
         yield pod, meta
     finally:
         pod.remove()
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def in_agent(pod, script: str) -> subprocess.CompletedProcess:

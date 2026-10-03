@@ -1,24 +1,27 @@
 """What the live tasks' pods use now: CPU and memory of each container from one `docker stats
---no-stream`, the size of each task's volumes from one `docker system df -v`, and its folder from
-`du`. Seconds of Docker's time, so only the u screen asks, in a thread of its own, while it is
-open; the list never does.
+--no-stream`, the size of each task's disk from statvfs of its mount and the volume it has
+left from one `docker system df -v`, and its folder from `du`. Seconds of Docker's time, so only
+the u screen asks, in a thread of its own, while it is open; the list never does.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .pod import CACHES
+from .pod import CACHES, DISK_IMAGE, DISK_MOUNT
 
-# The containers of a task's pod, by the ending of their names (pod.Pod).
-ROLES = ("agent", "dind", "gate", "review")
-# The volumes of a task (pod.Pod.volumes), with its opencode configuration.
+# The containers of a task's pod, by the ending of their names (pod.Pod): the agent's, its
+# Docker sidecar, the verification's, the reviewer's and the planner's control container.
+ROLES = ("agent", "dind", "gate", "review", "control")
+# The volumes a task may have (pod.Pod.volumes): the Docker socket today; the rest were volumes
+# before they were directories of the task's disk.
 VOLUMES = ("docker", "socket", "installed", "gate-installed", "gate-build-cache", "config")
 SECONDS = 30
 UNITS = {"b": 1, "kb": 10**3, "mb": 10**6, "gb": 10**9, "tb": 10**12,
@@ -43,8 +46,11 @@ class Resources:
     containers: list[Container] = field(default_factory=list)
     # Bytes per volume, by its name in pod.Pod.volumes ("docker" is the pod's own image store).
     volumes: dict[str, int] = field(default_factory=dict)
-    # Bytes of the task's folder: the clone and the task's files.
+    # Bytes of the task's folder: the clone and the task's files, its disk left out.
     files: int = 0
+    # Of the task's disk image, mounted: bytes used and its size; both 0 while it is not mounted.
+    disk_used: int = 0
+    disk_size: int = 0
 
     @property
     def cpu(self) -> float:
@@ -56,7 +62,7 @@ class Resources:
 
     @property
     def disk(self) -> int:
-        return sum(self.volumes.values()) + self.files
+        return sum(self.volumes.values()) + self.files + self.disk_used
 
 
 def parse_size(text: str) -> int:
@@ -86,15 +92,26 @@ def owner(name: str, task_ids: list[str], endings: tuple[str, ...]) -> tuple[str
     return None
 
 
+def is_mount(path: Path) -> bool:
+    """Whether a disk is mounted there: a mount point is on another device than its parent."""
+    try:
+        return path.stat().st_dev != path.parent.stat().st_dev
+    except OSError:
+        return False
+
+
 def sample(
     roots: dict[str, Path],
     run: Callable[[list[str]], str] | None = None,
     problems: list[str] | None = None,
     shared_caches: dict[str, int] | None = None,
+    statvfs: Callable[[Path], os.statvfs_result] = os.statvfs,
+    is_mount: Callable[[Path], bool] = is_mount,
 ) -> dict[str, Resources]:
     """roots: each live task's folder, by its id. {} when Docker does not answer, with why in
     problems, when given: a screen of dashes alone would read as pods doing nothing.
-    Shared caches are measured once, separately, including when roots is empty."""
+    Shared caches are measured once, separately, including when roots is empty. A task's disk
+    is read from its mount, no Docker asked."""
     if shared_caches is not None:
         shared_caches.clear()
     run = run or default_run
@@ -129,7 +146,15 @@ def sample(
             found[mine[0]].volumes[mine[1]] = parse_size(volume.get("Size", ""))
     for task_id, root in roots.items():
         with contextlib.suppress(Unavailable, ValueError, IndexError):
-            found[task_id].files = int(run(["du", "-sk", str(root)]).split()[0]) * 1024
+            # Its own filesystem only, and not the sparse image: the disk is counted from its mount.
+            du = run(["du", "-sk", "-x", f"--exclude={DISK_IMAGE}", str(root)])
+            found[task_id].files = int(du.split()[0]) * 1024
+        disk = root / DISK_MOUNT
+        if is_mount(disk):
+            with contextlib.suppress(OSError):
+                st = statvfs(disk)
+                found[task_id].disk_size = st.f_blocks * st.f_frsize
+                found[task_id].disk_used = (st.f_blocks - st.f_bfree) * st.f_frsize
     return found
 
 
@@ -152,4 +177,6 @@ def as_dict(found: Resources) -> dict:
         ],
         "volumes": found.volumes,
         "files": found.files,
+        "disk_used": found.disk_used,
+        "disk_size": found.disk_size,
     }

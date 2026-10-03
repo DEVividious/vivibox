@@ -45,13 +45,14 @@ def uplink_mtu(runner: Runner = run) -> int:
     return min(mtus, default=ETHERNET_MTU)
 
 
-def helper(runner: Runner, *args: str) -> None:
+def helper(runner: Runner, *args: str, what: str = "this machine's rules for pods could not be set") -> None:
+    """The root helper on an operation; PodError, saying what could not be done, on a refusal."""
     p = runner(["sudo", "-n", HELPER, *args])
     if p.returncode != 0:
         said = (p.stderr or p.stdout).strip()[-600:]
         raise PodError(
-            f"this machine's rules for pods could not be set: {said}. If the helper or its sudo rule "
-            "is missing (sudo asks for a password, or the file is not there), run host/setup.sh"
+            f"{what}: {said}. If the helper or its sudo rule is missing (sudo asks for a password, or "
+            "the file is not there, or it is older than this vivibox), run host/setup.sh"
         )
 
 

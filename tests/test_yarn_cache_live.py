@@ -1,6 +1,7 @@
 """Downloaded Yarn packages survive a fresh verification; installed files never do."""
 
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -97,7 +98,12 @@ def test_deleting_one_pod_keeps_shared_cache_and_another_live_pod(env):
     from vivibox.pod import Pod
 
     parent = env["pod"]
-    pod = Pod("delete-" + parent.task_id, parent.repo, parent.image, [], gate_dir=parent.gate_dir / "delete")
+    folder = parent.folder.parent / f"delete-{parent.task_id}"  # its own, named by its id, for its disk
+    folder.mkdir()
+    pod = Pod(
+        f"delete-{parent.task_id}", parent.repo, parent.image, [], gate_dir=folder / "disk" / "gate",
+        folder=folder, limits=parent.limits,
+    )  # fmt: skip
     marker = f"/cache/yarn/{pod.task_id}"
     try:
         pod.up()
@@ -105,17 +111,19 @@ def test_deleting_one_pod_keeps_shared_cache_and_another_live_pod(env):
         pod.gate_exec("touch", marker)
         pod.gate_exec("touch", "/cache/m2/installed/from-this-verification")
         pod.gate_exec("touch", "/cache/build-cache/from-this-verification")
-        pod.remove()
+        assert pod.remove() == ""
         for kind, names in (
             ("container", [pod.agent, pod.sidecar, pod.gate, pod.review]),
-            ("volume", [*pod.volumes.values(), f"vivibox-{pod.task_id}-config"]),
+            ("volume", [pod.volumes["socket"]]),
             ("network", [pod.network]),
         ):
             for name in names:
                 result = subprocess.run(["docker", kind, "inspect", name], capture_output=True)
                 assert result.returncode != 0, f"{kind} {name} left behind"
+        assert not pod.disk_image.exists() and not pod.disk.exists(), "its disk went with it"
         assert parent.exec("test", "-f", marker).returncode == 0
         assert parent.exec("docker", "info").returncode == 0, "the other pod still works"
     finally:
         pod.remove()
+        shutil.rmtree(folder, ignore_errors=True)
         parent.exec("rm", "-f", marker, check=False)

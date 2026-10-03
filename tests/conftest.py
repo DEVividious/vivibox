@@ -131,8 +131,9 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     from vivibox.pod import Pod
 
     def nothing_there(cmd, timeout=None):
-        if list(cmd)[:1] == ["sudo"] and '"absent"' in cmd[-1]:
-            return subprocess.CompletedProcess(list(cmd), 0, "", "")  # no rules: none to remove
+        if list(cmd)[:1] == ["sudo"] and ('"absent"' in cmd[-1] or cmd[3] == "detach-disk"):
+            # No rules: none to remove; no disk: detached already, as the helper says of one.
+            return subprocess.CompletedProcess(list(cmd), 0, "", "")
         return subprocess.CompletedProcess(list(cmd), 1, "", "Error: No such object")
 
     monkeypatch.setattr(actions, "Pod", partial(Pod, runner=nothing_there))

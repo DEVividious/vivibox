@@ -3,6 +3,8 @@
 The agent reaches the daemon only through a unix socket on a volume shared by the pair, and sees
 ports published by compose or Testcontainers on localhost. The sidecar mounts the task repo
 read-only: under Sysbox, root in a nested container would otherwise write to it as host root.
+What the pod writes outside the clone (the daemon's data, the agent's home, what a build
+installs, the gate's and the reviewer's clones) is on the task's disk image (pod_disk).
 """
 
 from __future__ import annotations
@@ -22,6 +24,10 @@ from . import display, handoff, podspec, repo
 from .config import DEFAULT_HOST_ADDRESS, DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
+from .pod_disk import DISK_DIRS as DISK_DIRS
+from .pod_disk import DISK_IMAGE as DISK_IMAGE
+from .pod_disk import DISK_MOUNT as DISK_MOUNT
+from .pod_disk import PodDisk
 from .pod_egress import ETHERNET_MTU as ETHERNET_MTU
 from .pod_egress import HELPER as HELPER
 from .pod_egress import LINK as LINK
@@ -88,7 +94,7 @@ COPYING_IS_SLOW = "a very large repository, or a slow fetch of its submodules ov
 
 
 @dataclass
-class Pod(PodNetwork, PodDemo, PodEgress):
+class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     task_id: str
     repo: Path
     image: str
@@ -114,10 +120,17 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     hub_mirror: str = ""
     # What its containers may use (config.toml's [limits], with the task's own over them).
     limits: Limits = field(default_factory=Limits)
+    # The task's folder, <tasks_dir>/<id>, where its disk image lives and its clone beside it:
+    # the clone's parent unless given (task.py: the clone is <folder>/repo).
+    folder: Path | None = None
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
     _in_memory: dict = field(default_factory=dict, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.folder is None:
+            self.folder = self.repo.parent
 
     @property
     def sidecar(self) -> str:
@@ -149,14 +162,20 @@ class Pod(PodNetwork, PodDemo, PodEgress):
 
     @property
     def volumes(self) -> dict[str, str]:
+        """What the pod binds of the task's own, by name: directories of its disk (pod_disk),
+        bounded by the image's size, but for the Docker socket, in a volume the sidecar and the
+        agent share and never on the host."""
+        disk = self.disk
         return {
-            "docker": f"vivibox-{self.task_id}-docker",
+            "docker": str(disk / "docker"),
             "socket": f"vivibox-{self.task_id}-socket",
             # What Maven installs, the task's own modules; kept apart from the shared downloads.
-            "installed": f"vivibox-{self.task_id}-installed",
-            "gate-installed": f"vivibox-{self.task_id}-gate-installed",
+            "installed": str(disk / "installed"),
+            "gate-installed": str(disk / "gate-installed"),
             # The gate's own build cache: what it built from committed work, for its next attempt.
-            "gate-build-cache": f"vivibox-{self.task_id}-gate-build-cache",
+            "gate-build-cache": str(disk / "gate-build-cache"),
+            # The agent's home: its tools' configuration and state.
+            "config": str(disk / "config"),
         }
 
     def _run(
@@ -243,6 +262,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         if not self.repo.is_dir():
             raise PodError(f"task repo {self.repo} does not exist")
         prepare_host(self.host_address, self.network_pool, self.runner)
+        # The disk before anything of the pod: the daemon's data and the agent's home are on it.
+        self.attach_disk()
         state = self._state(self.sidecar)
         if state == "running" and self._stale_ca():
             # Its daemon read the host's authorities at its start and would go on failing TLS
@@ -361,7 +382,9 @@ class Pod(PodNetwork, PodDemo, PodEgress):
             raise PodError("the pod has no gate directory")
         self.gate_down()
         # Nothing a gate before it installed: the gate builds the whole reactor from its clone.
-        self._run("docker", "volume", "rm", "-f", self.volumes["gate-installed"], check=False)
+        installed = Path(self.volumes["gate-installed"])
+        shutil.rmtree(installed, ignore_errors=True)
+        installed.mkdir(parents=True, exist_ok=True)
         shutil.rmtree(self.gate_dir, ignore_errors=True)
         self.gate_dir.mkdir(parents=True)
         self._rules_before("the verification")
@@ -441,16 +464,16 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         return ContainerSide(self, self.review)
 
     def remove(self) -> str:
-        """Removes containers, the task's volumes and network, and the host's rules for it. Shared
-        caches stay. Returns what the host kept (its rules, when the helper refused), "" else."""
+        """Removes containers, the task's disk (detached, then its image deleted) and socket
+        volume, the host's rules for it and its network. Shared caches stay. Returns what the
+        host kept (a disk the helper did not detach, its rules), "" else."""
         self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
-        self._run(
-            "docker", "volume", "rm", *self.volumes.values(), f"vivibox-{self.task_id}-config", check=False
-        )
+        kept = [self.remove_disk()]
+        self._run("docker", "volume", "rm", self.volumes["socket"], check=False)
         # The host's rules go before the bridge: one left without them is refused outright.
-        left = self.remove_firewall()
+        kept.append(self.remove_firewall())
         self._run("docker", "network", "rm", self.network, check=False)
-        return left
+        return "; ".join(filter(None, kept))
 
     # --- inside the pod ---------------------------------------------------------------------
 

@@ -247,7 +247,8 @@ def test_a_task_from_before_the_host_held_its_rules_is_deleted_with_its_network(
     monkeypatch.setattr(actions, "Pod", partial(Pod, runner=docker))
     assert main(["delete", "demo-1", "--yes"]) == 0
     assert docker.find("docker", "network", "rm", "vivibox-demo-1-net")
-    [gone] = docker.find("sudo")
+    detached, gone = docker.find("sudo")
+    assert detached[3:5] == ["detach-disk", "demo-1"], "a disk it never had: the helper says so, harmless"
     assert gone[3:5] == ["apply-policy", "demo-1"] and json.loads(gone[5])["state"] == "absent"
 
 
@@ -462,3 +463,10 @@ def test_the_tests_reach_no_docker():
     answer = subprocess.run(["docker", "inspect", "vivibox-demo-1-dind"], capture_output=True, text=True)
     assert answer.returncode == 1 and "reach no Docker" in answer.stderr
     assert Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).read_text() == "inspect vivibox-demo-1-dind\n"
+
+
+def test_a_task_from_before_the_disk_image_is_from_an_earlier_vivibox():
+    """4: the task's volumes are directories of a disk image of its own; a task created under 3
+    has none, and is not carried over: deleted and created again."""
+    assert task_module.TASK_SCHEMA_VERSION == 4
+    assert task_module.classify(3) == task_module.EARLIER

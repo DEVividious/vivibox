@@ -92,3 +92,38 @@ def test_shared_caches_are_measured_once_even_without_live_tasks(tmp_path):
     assert found["demo-1"].disk == 1_520_500_000
     assert found["demo-12"].disk == 9_000_000_000
     assert sum(shared.values()) == 369_800_000
+
+
+def test_the_tasks_disk_is_measured_from_its_mount_and_its_folder_without_it(tmp_path):
+    """The task's volumes are on its disk image: used and size come from statvfs of the mount,
+    no Docker asked; the folder's du leaves the mount and the image out, so neither is counted
+    twice. A task whose disk is not mounted (never started) has no disk figures."""
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        if command[:2] == ["docker", "stats"]:
+            return STATS
+        if command[:3] == ["docker", "system", "df"]:
+            return DF
+        return f"{4096}\t{command[-1]}\n"
+
+    class Stat:
+        f_frsize, f_blocks, f_bfree, f_bavail = 4096, 5_000_000, 4_000_000, 3_999_000
+
+    def statvfs(path):
+        assert path == tmp_path / "demo-1" / "disk"
+        return Stat()
+
+    mounted = {str(tmp_path / "demo-1" / "disk")}
+    found = resources.sample(
+        {"demo-1": tmp_path / "demo-1", "demo-12": tmp_path / "demo-12"}, run=run,
+        statvfs=statvfs, is_mount=lambda p: str(p) in mounted,
+    )  # fmt: skip
+    one = found["demo-1"]
+    assert one.disk_used == 1_000_000 * 4096 and one.disk_size == 5_000_000 * 4096
+    assert one.disk == one.disk_used + one.files + sum(one.volumes.values())
+    assert found["demo-12"].disk_used == 0 and found["demo-12"].disk_size == 0
+    du = next(c for c in calls if c[:1] == ["du"])
+    assert "-x" in du and "--exclude=disk.img" in du
+    assert resources.as_dict(one)["disk_used"] == one.disk_used and resources.ROLES[-1] == "control"

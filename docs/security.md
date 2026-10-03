@@ -8,6 +8,11 @@ on your machine until you have approved it.
   starts cannot reach your host. The pod cannot reach your host or LAN, except services you list.
   The reviewer reads the work from a network of its own, which the pod cannot reach and which
   cannot reach the pod.
+- **The writer cannot change what the planner remembers.** Where a flow has a planner other than
+  the writer, the planner (in the Supervisor ⇄ Worker flow, the same conversation reviews the
+  work) runs in a container and a network of its own: its conversation store, its server, its
+  password and its key are there and nowhere the writer's container, or a container the writer
+  starts, mounts or reaches.
 - **Nothing the agent writes runs on your host without your approval.** The task clone's
   `.git/config` and hooks are read-only for the agent, so git on your host, run by you or by your
   IDE, cannot execute agent-written commands. Files that run code on IDE import or in your
@@ -28,9 +33,12 @@ on your machine until you have approved it.
   outside its clone is on a disk image of its own, whose size bounds it, so a full disk is the
   task's and not your machine's. The pod's total memory and processes are a budget the
   containers' limits are checked against, not a limit of the slice itself.
-- **Keys stay out of images, volumes and `docker inspect`.** The agent pod gets the provider keys needed by its configured roles and enabled MCP secrets,
-  mounted as read-only files on tmpfs. The separate review container gets the reviewer's provider
-  key and enabled MCP secrets. These files are readable by the agents that use them.
+- **Keys stay out of images, volumes and `docker inspect`.** Each container gets the keys of the
+  role that runs in it, mounted as read-only files on tmpfs: the agent's container the writer's
+  provider key and enabled MCP secrets, the planner's control container the planner's, the
+  review container the reviewer's. A Single agent task has the planner's and the writer's in the
+  agent's container. A provider two roles use is in both their containers. These files are
+  readable by the agents that use them.
 
 ## How the pod is built
 
@@ -39,8 +47,8 @@ under [Sysbox](https://github.com/nestybox/sysbox). The agent container runs as 
 capability dropped, `no-new-privileges` and a read-only root filesystem; it writes only to the task's
 clone, its home and `/tmp`, and `/tmp` is a tmpfs of half the container's memory limit (2 GiB by
 default), so what an agent leaves there cannot take the host's memory. Your replies to the agent are mounted read-only from the task's own folder,
-where they are read (`/task/handoff/comments.md`), in the agent's container and the reviewer's, so the agent
-cannot change what you told it. The Docker socket lives in a volume the two share and never on your host.
+where they are read (`/task/handoff/comments.md`), in the agent's container, the planner's and the
+reviewer's, so the agent cannot change what you told it. The Docker socket lives in a volume the two share and never on your host.
 Each container of the pod is bounded by its cgroup: memory with swap bounded to the same figure
 (`--memory`, `--memory-swap`), processes (`--pids-limit`) and the pod's CPUs, all under the task's
 slice (`--cgroup-parent`), never with the OOM killer turned off; `[limits]` in `config.toml` and
@@ -106,6 +114,38 @@ the reviewer reaches none of your machine's services. Its DNS goes to the forwar
 pod's, `host.docker.internal` there is its own network's gateway, and its internet is open like
 the writer's (it reaches its provider over TLS); nothing narrows it until names are allowed by
 policy.
+
+Where a flow has a planner other than the writer (Planner → Executor, Planner → Writer →
+Reviewer, Supervisor ⇄ Worker), the planner runs in a control container of its own,
+`vivibox-<id>-control`, for the whole task; in the Supervisor ⇄ Worker flow the same conversation
+reviews the work there. It is made like the reviewer's: your UID, no capability, a read-only
+root, no Docker socket, none of the build's caches and nothing a build installed, under the
+task's slice with the `control_*` limits. What is its own: a home on the task's disk, where its
+harness keeps the conversation from turn to turn; an opencode server on the localhost of its own
+network namespace, with a password of its own; a directory of secrets with its provider's key and
+its MCP servers' secrets; its harness files; and a third network of the task's, the planner's, on
+a bridge of its own with rules of its own on your host, which refuse the writer's range and the
+reviewer's as theirs refuse its, and let through none of your machine's services. The agent's
+container mounts neither that home nor those secrets, and nothing on the writer's network (the
+agent, the sidecar, the verification, a nested container with any capability) has a route to the
+planner's container or sees its packets; vivibox talks to it through `docker exec`. So the writer,
+a process it left running between turns included, cannot write a message into the planner's
+conversation, call the planner's server, or read its password or, when the two use different
+providers, its key. The planner reads the work in a copy of the task's commits that vivibox makes
+on your host, from the clone once it is as recorded, into a directory of the task's disk mounted
+read-only in the control container at the path the writer has its clone; the writer's clone itself
+is not mounted there, so git in the planner's container never reads a `.git` the writer can
+write, and uncommitted work is not what the planner reads. The task's review folder, where the planner or the reviewer writes its review and vivibox
+reads it, is read-only in the agent's container in the flows where another agent than the
+writer's reviews. A Single agent task has no control container and no planner's network: one
+agent plans and writes in one conversation.
+
+What the planner and the writer still share is the handoff folder (`/task/handoff`), which both
+write: the writer, or a process it left running, can replace the planner's `plan-draft.md` or
+`question.md` before vivibox reads it. That is not the planner's history, and the draft comes to
+you to read at the plan's checkpoint; it is a known limit. The planner also reads the
+repository, which is the writer's work: what a file there says is data to it, by its brief, not
+by enforcement.
 
 With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
 pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not

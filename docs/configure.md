@@ -108,7 +108,7 @@ agent_memory = "4g"      # the agent's container; agent_pids = 2048
 gate_memory = "4g"       # the verification's; gate_pids = 4096
 sidecar_memory = "2g"    # the pod's own Docker; sidecar_pids = 4096
 review_memory = "1536m"  # the reviewer's; review_pids = 1024
-control_memory = "1536m" # the planner's control container; control_pids = 1024
+control_memory = "1536m" # the planner's control container, in flows with a planner of its own; control_pids = 1024
 pod_memory = "6g"        # the pod's budget: a container's limit past it is refused by name
 pod_cpus = 6             # what each container may use: the machine's count when it has fewer, never past it
 pod_pids = 8192
@@ -121,6 +121,11 @@ Maven project (spring-petclinic, `mvn package` with its tests), a verification t
 on the disk against 52–55 s on Docker volumes, roughly 1.3×. That cost is accepted for this
 release; a backend on the filesystem's own project quotas is a possible later optimisation, not
 planned.
+
+The planner's control container is a container of the task's like the others: it runs, under the
+task's slice with the `control_*` limits, in every flow but Single agent, from the task's start
+to its stop, with the planner's opencode server in it (a second server beside the writer's), and
+its home and its copy of the task's commits are directories of the task's disk.
 
 What is enforced is each container's memory, its processes and its CPUs, and the disk's size.
 `pod_memory` and `pod_pids` are a budget the containers' limits are checked against and the
@@ -336,7 +341,8 @@ host_address = "203.0.113.1/32"    # your machine's address for the pods, on viv
 ```
 
 A task takes 32 addresses of the pool, one /27 block: the writer's network is its first /28, the
-reviewer's the /29 after it, and the last /29 is kept for the planner. The default `/24` holds 8
+reviewer's the /29 after it, and the last /29 is the planner's (its network is made in the flows
+where the planner has a container of its own; in a Single agent task the range stays reserved). The default `/24` holds 8
 tasks at once; a task holds its block until you delete it. When every block is in use, a task does
 not start, and the error names the pool and its room in tasks, what a task takes, and that deleting
 tasks you have finished with frees their ranges; a wider `pool` holds more, and one smaller than a

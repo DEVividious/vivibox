@@ -256,8 +256,9 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   (`review-N-reply.md`) read first. No blocking notes, and the work comes to you, the notes with
   it. Without `[roles.reviewer]` the reviewer runs on the writer's model.
 - **The supervisor** of `supervisor_worker` is the planner: after a green gate it reads the
-  worker's work in the same pod, on the same clone, with the plan still in its conversation, and
-  writes the same `review-N.md`; it changes nothing and commits nothing. The rounds go as the
+  worker's work in its own container, in a read-only copy of the task's commits, with the plan
+  still in its conversation, and writes the same `review-N.md`; it changes nothing and commits
+  nothing. The rounds go as the
   reviewer's do: blocking notes back to the worker, the gate again, the supervisor again, until it
   accepts or the rounds are out. Nothing the gate would catch reaches it: a red gate goes back to
   the worker by itself. What differs from `planner_writer_reviewer` is who reviews and where, not

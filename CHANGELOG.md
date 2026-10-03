@@ -48,26 +48,27 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 ### Changed
 
 - A task whose flow has a planner other than the writer (Planner → Executor, Planner → Writer →
-  Reviewer, Supervisor ⇄ Worker) has a container for the planner, `vivibox-<id>-control`, made
-  at the task's start after the agent's and kept for the whole task: the reviewer's kind (its
-  root read-only, no capability, no Docker socket, no build cache), with a home of its own on
-  the task's disk and secrets of its own, under the task's slice with the `control_*` limits.
-  It reads the work in a copy of the task's commits that vivibox makes on the task's disk and
-  mounts read-only where the writer has its clone; the writer's clone itself is not mounted
-  there. The planner's conversation, in the Supervisor ⇄ Worker flow its reviews too, runs
-  there instead of in the agent's container: its own opencode server with its own password, its
-  own conversation store, its provider's key and its MCP servers' secrets in a directory of its
-  own (`m` on the planner changes that container's files at the next start), so nothing the
-  writer runs can read or change what the planner takes for its own history, reach its server
-  or use its key; `w` on the planner's conversation opens it there. The agent's container holds
-  the writer's key alone (a provider both use is in both). Where a reviewer or the planner
-  reads the work, the agent's container no longer writes the task's review folder, where
-  vivibox reads the verdict. It runs in a third network, the planner's, `vivibox-<id>-p`, on a
+  Reviewer, Supervisor ⇄ Worker) runs the planner in a container of its own,
+  `vivibox-<id>-control`, made at the task's start after the agent's and kept for the whole
+  task, instead of in the agent's container; in the Supervisor ⇄ Worker flow the same
+  conversation reviews the work there. The container is the reviewer's kind (its root
+  read-only, no capability, no Docker socket, no build cache), under the task's slice with the
+  `control_*` limits, in a third network of the task's, the planner's, `vivibox-<id>-p`, on a
   bridge of its own with rules of its own on your machine, made and checked with the writer's
-  and the reviewer's at every start; it reaches none of your machine's services. `vivibox stop`
-  stops it, and `vivibox delete` removes it with its network, its home and its secrets. A
-  Single agent task has neither: its planner's range stays reserved. Tasks created before this
-  change are from an earlier vivibox: delete them and create them again.
+  and the reviewer's at every start; it reaches none of your machine's services. Its own, and
+  nowhere the writer's container mounts or reaches: a home on the task's disk with its
+  conversation store, an opencode server with its own password, and a directory with its
+  provider's key and its MCP servers' secrets (`m` on the planner changes that container's
+  files at the next start). So nothing the writer runs can change what the planner takes for
+  its own history, reach its server or use its key. `w` on the planner's conversation opens it
+  there. The planner reads the work in a copy of the task's commits that vivibox makes on the
+  task's disk and mounts read-only where the writer has its clone; the writer's clone itself is
+  not mounted there. The agent's container holds the writer's key alone (a provider both use is
+  in both), and, where a reviewer or the planner reads the work, no longer writes the task's
+  review folder, where vivibox reads the verdict. `vivibox stop` stops the control container,
+  and `vivibox delete` removes it with its network, its home and its secrets. A Single agent
+  task has neither the container nor the network: its planner's range stays reserved. Tasks
+  created before this change are from an earlier vivibox: delete them and create them again.
 - A task has a network per role instead of one: the writer's, which the sidecar, the
   verification and the pod's own containers share, and the reviewer's, `vivibox-<id>-r`, of its
   own, each on a bridge of its own with rules of its own on your machine, which refuse each

@@ -283,6 +283,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- Your decisions on a task (`accept_plan`, `accept_command`, `plan_prompt`, `import_plan`,
+  `save_verify`, `reply`, `verify_again`, `risky_target`, `risky_diffs`, `approve_risky`) moved from
+  `actions.py` to `vivibox/decisions.py`, re-exported from `actions` as before.
 - `host/vivibox-host` 2 attaches, detaches and grows a task's disk: `attach-disk <id>
   {"dir", "size"}` makes a sparse XFS image `<dir>/disk.img`, formatted once and never over
   a file that holds no filesystem, on a loop device mounted `discard,nosuid,nodev` at

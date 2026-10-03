@@ -2,6 +2,7 @@
 (vivibox hostd). Without root: the forwarder listens on localhost here, and a stub resolver of the
 test's own stands for the host's."""
 
+import contextlib
 import os
 import signal
 import socket
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -173,11 +175,51 @@ def test_a_probe_query_says_whether_it_is_answered(stub):
 # --- vivibox hostd ------------------------------------------------------------------------------------
 
 
+# The pids of every forwarder the test under way started, for the teardown of runtime.
+STARTED: list[int] = []
+
+
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    STARTED.clear()
+    start = hostd.start
+    monkeypatch.setattr(hostd, "start", lambda *a, **kw: STARTED.append(start(*a, **kw)) or STARTED[-1])
     yield tmp_path / "run" / "vivibox"
-    hostd.stop()
+    reap(STARTED)
+
+
+def reap(started: list[int]) -> None:
+    """No forwarder left on the machine by a test: the one the pid file names, when it is one, and
+    every one the test started, ended and waited for here, whether or not hostd.stop() works in
+    the code under test (a mutant that broke it once left two behind)."""
+    with contextlib.suppress(Exception):
+        hostd.stop()
+    if (pid := hostd.recorded()) is not None and pid not in started:
+        with contextlib.suppress(OSError):
+            if b"hostd" in Path(f"/proc/{pid}/cmdline").read_bytes():
+                started.append(pid)
+    for pid in started:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+        with contextlib.suppress(ChildProcessError):
+            os.waitpid(pid, 0)
+    with contextlib.suppress(OSError):
+        hostd.pid_file().unlink()
+
+
+def test_the_fixture_leaves_no_forwarder_behind_even_when_stop_is_broken(runtime, stub, monkeypatch):
+    """A reviewer's mutation run once left two forwarders on the machine: the mutant had broken
+    hostd.stop(), and the fixture's teardown was that call. The teardown ends what the pid file
+    names and every forwarder a test started, on its own, whatever the code under test does."""
+    port = free_port()
+    hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+    pid = hostd.running()
+    monkeypatch.setattr(hostd, "stop", lambda: False)
+    reap(STARTED)
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert not (runtime / "hostd.pid").exists()
 
 
 def free_port() -> int:

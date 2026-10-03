@@ -5,9 +5,12 @@ on the host, are here because pod_egress and pod both need them and pod imports 
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,16 +50,167 @@ INSTALLED = "/cache/m2/installed"
 # JVM dies. The gate keeps its cache: it holds whole verifications only (ADR-0023). Every Maven a
 # wrapper may fetch reads MAVEN_OPTS, and the extension reads system properties.
 AGENT_MAVEN_OPTS = "-Dmaven.repo.local=/cache/m2 -Dmaven.build.cache.enabled=false"
-# The most a scratch tmpfs (/tmp, and the gate's and reviewer's fresh home) may take of the host's
-# memory. Without a size it grows to half of it: an agent that cloned the project twice into /tmp
-# to try an install held 5 GB. Real work lives in the clone and the caches, which are on disk.
-TMP_SIZE = "4g"
 HOST_GATEWAY = "host.docker.internal"
 # The sidecar carries the digest of the bundle it started with: its daemon reads the authorities
 # once, at its start, so a bundle changed since (a VPN client installing a new one) is not seen
 # until the sidecar is made again.
 CA_LABEL = "vivibox.ca"
+# And the digest of the limits it was made with: docker start keeps a container's flags, so a
+# limit raised since arrives only when the sidecar is made again.
+LIMITS_LABEL = "vivibox.limits"
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
+
+# --- limits ------------------------------------------------------------------------------------
+
+GIB = 2**30
+UNITS = {"k": 2**10, "m": 2**20, "g": 2**30, "t": 2**40}
+SIZE = re.compile(r"^(\d+(?:\.\d+)?)\s*([kmgt])(?:i?b)?$", re.IGNORECASE)
+# The containers a task's limits name, by the key of config.toml's [limits] (<role>_memory,
+# <role>_pids): the agent's, the gate's, the sidecar's (the pod's own Docker), the reviewer's and
+# the planner's control container.
+ROLES = ("agent", "gate", "sidecar", "review", "control")
+DEFAULT_MEMORY = {
+    "agent": 4 * GIB, "gate": 4 * GIB, "sidecar": 2 * GIB, "review": 3 * GIB // 2, "control": 3 * GIB // 2,
+}  # fmt: skip
+DEFAULT_PIDS = {"agent": 2048, "gate": 4096, "sidecar": 4096, "review": 1024, "control": 1024}
+DEFAULT_POD_MEMORY, DEFAULT_POD_CPUS, DEFAULT_POD_PIDS, DEFAULT_DISK = 6 * GIB, 6.0, 8192, 20 * GIB
+# The smallest and the largest disk image the root helper makes (host/vivibox-host: the same).
+DISK_SMALLEST, DISK_LARGEST = GIB, 2 * 2**40
+# Every key of [limits] that is one of these, in the order the panel and `vivibox limits` say them.
+LIMIT_KEYS = (
+    "pod_memory", "pod_cpus", "pod_pids",
+    *(f"{role}_{kind}" for role in ROLES for kind in ("memory", "pids")),
+    "disk",
+)  # fmt: skip
+
+
+def parse_size(text) -> int:
+    """Bytes of a size as a person writes it: 4g, 1536m, 2T, 512MiB; a whole number of them."""
+    if not isinstance(text, str) or not (m := SIZE.match(text.strip())):
+        raise ValueError(f'not a size, e.g. "4g" or "1536m": {text!r}')
+    found = int(float(m.group(1)) * UNITS[m.group(2).lower()])
+    if found <= 0:
+        raise ValueError(f"not a size above zero: {text!r}")
+    return found
+
+
+def size_text(n: int) -> str:
+    """A size in the units a person writes them in: 4 GiB, 1.5 GiB, 512 MiB."""
+    for unit, scale in (("TiB", 2**40), ("GiB", 2**30), ("MiB", 2**20), ("kiB", 2**10)):
+        if n >= scale:
+            value = n / scale
+            return f"{value:.1f} {unit}".replace(".0 ", " ")
+    return f"{n} B"
+
+
+def size_option(n: int) -> str:
+    """A size as an option of `vivibox limits` takes it, whole units where there are: 6g, 1536m."""
+    for unit, scale in (("t", 2**40), ("g", 2**30), ("m", 2**20), ("k", 2**10)):
+        if n >= scale and n % scale == 0:
+            return f"{n // scale}{unit}"
+    return str(n)
+
+
+def slice_of(task_id: str) -> str:
+    """The cgroup slice every container of the task runs under: a dash in a slice's name nests it
+    in systemd (a-b.slice under a.slice), so the id's dashes are underscores there."""
+    return f"vivibox-{task_id.replace('-', '_')}.slice"
+
+
+def _count(value, key: str, most: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= most:
+        raise ValueError(f"{key} must be a whole number from 1 to {most}")
+    return value
+
+
+@dataclass(frozen=True)
+class Limits:
+    """What a task's containers may use: memory and processes per container, enforced by their
+    cgroup; the pod's figures, a budget the per-container ones are checked against (and the CPU
+    each container gets) until the slice itself is limited; and the size of the task's disk."""
+
+    pod_memory: int = DEFAULT_POD_MEMORY
+    pod_cpus: float = DEFAULT_POD_CPUS
+    pod_pids: int = DEFAULT_POD_PIDS
+    memory: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_MEMORY))
+    pids: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_PIDS))
+    disk: int = DEFAULT_DISK
+
+    def memory_of(self, role: str) -> int:
+        return self.memory[role]
+
+    def pids_of(self, role: str) -> int:
+        return self.pids[role]
+
+    def tmpfs_size(self, role: str) -> int:
+        """Half of the container's memory: its scratch tmpfs and its processes never pass the limit."""
+        return self.memory_of(role) // 2
+
+    def flags(self, role: str, task_id: str) -> list[str]:
+        """The docker run flags of a container of the task in this role, never --oom-kill-disable:
+        memory with swap equal to it (a container may not swap past its limit), the pod's CPUs,
+        its processes, under the task's slice."""
+        memory = str(self.memory_of(role))
+        return [
+            "--memory", memory, "--memory-swap", memory, "--cpus", f"{self.pod_cpus:g}",
+            "--pids-limit", str(self.pids_of(role)), "--cgroup-parent", slice_of(task_id),
+        ]  # fmt: skip
+
+    def values(self) -> dict:
+        """Every limit by its key in [limits], sizes as a person writes them."""
+        found = {"pod_memory": size_option(self.pod_memory), "pod_cpus": self.pod_cpus}
+        found["pod_pids"] = self.pod_pids
+        for role in ROLES:
+            found[f"{role}_memory"] = size_option(self.memory[role])
+            found[f"{role}_pids"] = self.pids[role]
+        found["disk"] = size_option(self.disk)
+        return found
+
+    def digest(self) -> str:
+        return hashlib.sha256(json.dumps(self.values(), sort_keys=True).encode()).hexdigest()[:16]
+
+    def with_values(self, values: dict) -> Limits:
+        """These limits with the given keys of [limits] over them, each checked: a size as a
+        person writes it, a count, the pod's CPUs; a container's limit at most the pod's. ValueError
+        names the key."""
+        memory, pids = dict(self.memory), dict(self.pids)
+        pod_memory, pod_cpus, pod_pids, disk = self.pod_memory, self.pod_cpus, self.pod_pids, self.disk
+        for key, value in values.items():
+            if key not in LIMIT_KEYS:
+                raise ValueError(f"limits.{key} is not a limit; the limits are {', '.join(LIMIT_KEYS)}")
+            try:
+                if key == "pod_cpus":
+                    a_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+                    if not a_number or not 0 < value <= 1024:
+                        raise ValueError("limits.pod_cpus must be a number of CPUs above 0, e.g. 6 or 2.5")
+                    pod_cpus = float(value)
+                elif key == "pod_pids":
+                    pod_pids = _count(value, "limits.pod_pids", 4_194_304)
+                elif key == "pod_memory":
+                    pod_memory = parse_size(value)
+                elif key == "disk":
+                    disk = parse_size(value)
+                    if not DISK_SMALLEST <= disk <= DISK_LARGEST:
+                        smallest, largest = size_option(DISK_SMALLEST), size_option(DISK_LARGEST)
+                        raise ValueError(f"limits.disk must be from {smallest} to {largest}")
+                elif key.endswith("_memory"):
+                    memory[key[: -len("_memory")]] = parse_size(value)
+                else:
+                    pids[key[: -len("_pids")]] = _count(value, f"limits.{key}", 4_194_304)
+            except ValueError as e:
+                said = str(e) if str(e).startswith("limits.") else f"limits.{key}: {e}"
+                raise ValueError(said) from None
+        for role in ROLES:
+            if memory[role] > pod_memory:
+                raise ValueError(
+                    f"limits.{role}_memory ({size_text(memory[role])}) is past the pod's limits.pod_memory "
+                    f"({size_text(pod_memory)})"
+                )
+            if pids[role] > pod_pids:
+                raise ValueError(
+                    f"limits.{role}_pids ({pids[role]}) is past the pod's limits.pod_pids ({pod_pids})"
+                )
+        return Limits(pod_memory, pod_cpus, pod_pids, memory, pids, disk)
 
 
 def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:
@@ -93,9 +247,10 @@ def sidecar_command(
     # Docker 29 refuses API versions below 1.40, and Testcontainers before 1.21 speaks 1.32: it
     # would find no Docker at all while `docker version` works. 1.24 is the oldest it still knows.
     mirror = f"--registry-mirror={pod.hub_mirror} " if pod.hub_mirror else ""
+    # The daemon writes to the container's output, which Docker keeps in three files of 10 MB.
     daemon = (
         f"rm -f {SOCKET}; DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} "
-        f"{mirror}>/var/log/dockerd.log 2>&1 & "
+        f"{mirror}& "
         'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
         f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
     )
@@ -107,6 +262,9 @@ def sidecar_command(
         "docker", "run", "-d", "--name", pod.sidecar, "--runtime=sysbox-runc",
         "--label", f"vivibox.task={pod.task_id}",
         *(("--label", f"{CA_LABEL}={digest}") if digest else ()),
+        "--label", f"{LIMITS_LABEL}={pod.limits.digest()}",
+        "--log-driver", "json-file", "--log-opt", "max-size=10m", "--log-opt", "max-file=3",
+        *pod.limits.flags("sidecar", pod.task_id),
         # Pinned rather than left to Docker: this address goes into your configuration files, so
         # it has to be the same one after every restart. The host is the bridge's gateway.
         "--network", pod.network,
@@ -150,7 +308,8 @@ def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
         "--label", f"vivibox.task={pod.task_id}",
         "--network", f"container:{pod.sidecar}",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
+        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('agent')}",
+        *pod.limits.flags("agent", pod.task_id),
         *pod.docker_env(),
         # Hook installers (husky in npm "prepare") would try to change the read-only .git/config.
         "-e", "HUSKY=0",
@@ -182,8 +341,9 @@ def gate_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
         "--label", f"vivibox.task={pod.task_id}",
         "--network", f"container:{pod.sidecar}",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
-        "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
+        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('gate')}",
+        "--tmpfs", f"/config:exec,mode=1777,size={pod.limits.tmpfs_size('gate')}",
+        *pod.limits.flags("gate", pod.task_id),
         *pod.docker_env(),
         "-e", "HUSKY=0",
         *(arg for k, v in pod.agent_env.items() for arg in ("-e", f"{k}={v}")),
@@ -209,8 +369,9 @@ def review_command(pod: Pod, mounts: list[Mount], env: dict[str, str], ca_mounts
         "--label", f"vivibox.task={pod.task_id}",
         "--network", f"container:{pod.sidecar}",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={TMP_SIZE}",
-        "--tmpfs", f"/config:exec,mode=1777,size={TMP_SIZE}",
+        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('review')}",
+        "--tmpfs", f"/config:exec,mode=1777,size={pod.limits.tmpfs_size('review')}",
+        *pod.limits.flags("review", pod.task_id),
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
         "-w", pod.review_src,

@@ -272,3 +272,49 @@ def test_rejects_a_mirror_setting_that_is_not_one(tmp_path, line):
     base = write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[network]\n{line}\n' + ROLES)
     with pytest.raises(ConfigError, match="network.hub_mirror"):
         load_config(base)
+
+
+def test_limits_on_the_pod_have_defaults_and_are_read_as_sizes(tmp_path):
+    """What a task's containers may use, per machine: the defaults without a [limits] section,
+    and sizes as a person writes them (4g, 1536m)."""
+    config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
+    limits = config.limits
+    assert limits.pod_memory == 6 * 2**30 and limits.pod_cpus == 6 and limits.pod_pids == 8192
+    assert limits.memory_of("agent") == 4 * 2**30 and limits.pids_of("agent") == 2048
+    assert limits.memory_of("gate") == 4 * 2**30 and limits.pids_of("gate") == 4096
+    assert limits.memory_of("sidecar") == 2 * 2**30 and limits.pids_of("sidecar") == 4096
+    assert limits.memory_of("review") == 3 * 2**29 and limits.pids_of("review") == 1024
+    assert limits.memory_of("control") == 3 * 2**29 and limits.pids_of("control") == 1024
+    assert limits.disk == 20 * 2**30
+    text = (
+        'tasks_dir = "/t"\n[limits]\nagent_memory = "6g"\nreview_memory = "1536m"\n'
+        'pod_memory = "8G"\npod_cpus = 2.5\nagent_pids = 100\ndisk = "40g"\n' + ROLES
+    )
+    limits = load_config(write(tmp_path / "config.toml", text)).limits
+    assert limits.memory_of("agent") == 6 * 2**30 and limits.memory_of("review") == 3 * 2**29
+    assert limits.pod_memory == 8 * 2**30 and limits.pod_cpus == 2.5 and limits.pids_of("agent") == 100
+    assert limits.disk == 40 * 2**30 and limits.memory_of("gate") == 4 * 2**30, "the rest as before"
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ('agent_memory = "four"', "limits.agent_memory"),
+        ('agent_memory = "0g"', "limits.agent_memory"),
+        ("agent_memory = 4", "limits.agent_memory"),
+        ('agent_memory = "8g"', "limits.agent_memory"),  # past the pod's 6 GiB
+        ('sidecar_memory = "7g"', "limits.sidecar_memory"),
+        ("gate_pids = 9000", "limits.gate_pids"),  # past the pod's 8192
+        ("gate_pids = 0", "limits.gate_pids"),
+        ("gate_pids = true", "limits.gate_pids"),
+        ("pod_cpus = 0", "limits.pod_cpus"),
+        ('pod_cpus = "6"', "limits.pod_cpus"),
+        ('disk = "500m"', "limits.disk"),  # below the smallest disk the helper makes
+        ("bogus = 1", "limits.bogus"),
+    ],
+)
+def test_rejects_a_limit_that_is_not_a_size_or_is_past_the_pods(tmp_path, line, key):
+    text = 'tasks_dir = "/t"\n[limits]\n' + line + "\n" + ROLES
+    with pytest.raises(ConfigError) as e:
+        load_config(write(tmp_path / "config.toml", text))
+    assert key in str(e.value), str(e.value)

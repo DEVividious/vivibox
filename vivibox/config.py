@@ -9,6 +9,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .podspec import LIMIT_KEYS, Limits
+
 # manual: you plan in a chat of your own and vivibox takes the plan you paste (see manual.py).
 HARNESSES = ("opencode", "claude-code", "manual")
 # TEST-NET-2 (RFC 5737): reserved for documentation, so no real network and no product uses it.
@@ -202,6 +204,8 @@ class Config:
     ntfy: str = ""
     ntfy_server: str = DEFAULT_NTFY_SERVER
     ntfy_events: str = "decisions"
+    # What a task's containers may use, and the size of its disk (the rest of [limits]).
+    limits: Limits = field(default_factory=Limits)
 
     @property
     def host_ip(self) -> str:
@@ -310,6 +314,7 @@ def load_config(base: Path | None = None) -> Config:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise ConfigError(f"{path}: limits.{name} is dollars per task, e.g. 2.5; 0 for none")
         costs[name] = float(value)
+    pod_limits = _limits(limits, path)
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -410,7 +415,27 @@ def load_config(base: Path | None = None) -> Config:
         hub_mirror=hub_mirror,
         hub_mirror_port=hub_mirror_port,
         host_address=host_address,
+        limits=pod_limits,
     )
+
+
+# The keys of [limits] that are not the containers' limits: read above, and left to it.
+OTHER_LIMITS = ("max_rounds", "max_iterations", "max_reviews", "whole_build_before_review", "verify_timeout",
+                "cost_warning", "cost_limit")  # fmt: skip
+
+
+def _limits(section: dict, path: Path) -> Limits:
+    """What the task's containers may use, from [limits]: the defaults with the file's keys over
+    them, each checked by Limits (a size, a count, at most the pod's), the error naming the key."""
+    given = {k: v for k, v in section.items() if k not in OTHER_LIMITS}
+    if unknown := [k for k in given if k not in LIMIT_KEYS]:
+        raise ConfigError(
+            f"{path}: limits.{unknown[0]} is not a setting; the limits are {', '.join(LIMIT_KEYS)}"
+        )
+    try:
+        return Limits().with_values(given)
+    except ValueError as e:
+        raise ConfigError(f"{path}: {e}") from None
 
 
 def _host_address(value, pool: ipaddress.IPv4Network, path: Path) -> str:

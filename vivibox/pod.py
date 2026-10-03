@@ -37,10 +37,11 @@ from .podspec import CACHES as CACHES
 from .podspec import DIND_IMAGE as DIND_IMAGE
 from .podspec import HOST_GATEWAY as HOST_GATEWAY
 from .podspec import INSTALLED as INSTALLED
+from .podspec import LIMITS_LABEL as LIMITS_LABEL
 from .podspec import RYUK_IMAGE as RYUK_IMAGE
 from .podspec import SOCKET as SOCKET
 from .podspec import SOCKET_DIR as SOCKET_DIR
-from .podspec import TMP_SIZE as TMP_SIZE
+from .podspec import Limits as Limits
 from .podspec import Mount as Mount
 from .podspec import Runner as Runner
 from .podspec import binds as binds
@@ -111,6 +112,8 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     allocation: Path | None = None
     # Where the daemon pulls Docker Hub's images through, "" for Docker Hub itself (mirror.py).
     hub_mirror: str = ""
+    # What its containers may use (config.toml's [limits], with the task's own over them).
+    limits: Limits = field(default_factory=Limits)
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
@@ -302,9 +305,9 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         return made is not None and (made.get("labels") or {}).get(CA_LABEL, "") != ca_digest()
 
     def _outdated_sidecar(self) -> bool:
-        """Whether the sidecar was made with another script, other mounts or another CA bundle
-        than this vivibox would give it: docker start keeps all three, so a change would never
-        arrive."""
+        """Whether the sidecar was made with another script, other mounts, another CA bundle or
+        other limits than this vivibox would give it: docker start keeps all four, so a change
+        would never arrive."""
         made = self._made_with()
         wanted = self.sidecar_command()
         try:
@@ -312,6 +315,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
                 made["cmd"][-1] != wanted[-1]
                 or set(made["binds"] or []) != set(binds(wanted))
                 or (made.get("labels") or {}).get(CA_LABEL, "") != ca_digest()
+                or (made.get("labels") or {}).get(LIMITS_LABEL, "") != self.limits.digest()
             )
         except (KeyError, IndexError, TypeError):
             return True
@@ -322,8 +326,9 @@ class Pod(PodNetwork, PodDemo, PodEgress):
             if self.sidecar_docker("info", check=False).returncode == 0:
                 return
             time.sleep(0.5)
-        log = self._run("docker", "exec", self.sidecar, "tail", "-20", "/var/log/dockerd.log", check=False)
-        raise PodError(f"Docker in {self.sidecar} did not start:\n{log.stdout}")
+        # The daemon's output is the container's, which Docker keeps (stderr apart, as it wrote it).
+        log = self._run("docker", "logs", "--tail", "20", self.sidecar, check=False)
+        raise PodError(f"Docker in {self.sidecar} did not start:\n{log.stdout}{log.stderr}")
 
     def down(self) -> None:
         """Stops the pod and keeps its data. A review or a verification under way is lost with it:

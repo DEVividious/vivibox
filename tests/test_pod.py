@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import pod as pod_module
 from vivibox import pod_network, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
@@ -20,13 +19,15 @@ def binds(cmd):
 
 def made_now(pod, state="exited"):
     """A sidecar as this vivibox would make it today: script, mounts and CA bundle all current."""
-    from vivibox.pod import CA_LABEL, ca_digest
+    from vivibox.pod import CA_LABEL, LIMITS_LABEL, ca_digest
 
     cmd = pod.sidecar_command()
     pod.runner.states[pod.sidecar] = state
     pod.runner.cmds[pod.sidecar] = ["-c", cmd[-1]]
     pod.runner.binds[pod.sidecar] = binds(cmd)
-    pod.runner.labels[pod.sidecar] = {"vivibox.task": pod.task_id, CA_LABEL: ca_digest()}
+    pod.runner.labels[pod.sidecar] = {
+        "vivibox.task": pod.task_id, CA_LABEL: ca_digest(), LIMITS_LABEL: pod.limits.digest()
+    }  # fmt: skip
 
 
 class FakeDocker:
@@ -905,14 +906,109 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     assert any(pod.review in c for c in pod.runner.find("docker", "rm", "-f")), "gone with the pod"
 
 
-def test_every_tmpfs_has_a_size_so_scratch_files_cannot_take_the_hosts_memory(pod, tmp_path):
-    """A tmpfs without a size grows to half the host's memory: an agent that cloned itself twice
-    into /tmp to test an install held 5 GB of RAM. Each scratch mount stops at TMP_SIZE."""
+def flag(cmd, name) -> str:
+    """The value of a docker run flag given once, as `--flag value`."""
+    found = [cmd[i + 1] for i, a in enumerate(cmd) if a == name]
+    assert len(found) == 1, f"{name} given {len(found)} times"
+    return found[0]
+
+
+def commands_of(pod, tmp_path) -> dict[str, list[str]]:
     pod.gate_dir = tmp_path / "gate"
-    for cmd in (pod.agent_command(), pod.gate_command(), pod.review_command([], {})):
+    return {
+        "sidecar": pod.sidecar_command(),
+        "agent": pod.agent_command(),
+        "gate": pod.gate_command(),
+        "review": pod.review_command([], {}),
+    }
+
+
+def test_every_tmpfs_is_half_of_its_containers_memory_limit(pod, tmp_path):
+    """A tmpfs without a size grows to half the host's memory: an agent that cloned itself twice
+    into /tmp to test an install held 5 GB of RAM. Each scratch mount stops at half of what its
+    container may hold, so the two together never pass the container's limit."""
+    commands = commands_of(pod, tmp_path)
+    for role in ("agent", "gate", "review"):
+        cmd = commands[role]
         mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tmpfs"]
-        assert mounts and all(f"size={pod_module.TMP_SIZE}" in m for m in mounts), mounts
+        half = pod.limits.memory_of(role) // 2
+        assert mounts and all(f"size={half}" in m for m in mounts), (role, mounts)
         assert all(m.split(":")[0] in ("/tmp", "/config") for m in mounts)
+    assert pod.limits.memory_of("agent") == 4 * 2**30, "the default: half of 4 GiB"
+
+
+def test_every_container_of_the_pod_runs_under_the_tasks_slice_with_its_limits(pod, tmp_path):
+    """Memory, CPU and processes are bounded per container, all of them under one cgroup slice
+    of the task's (a dash in the id nests a slice, so it is an underscore there), which counts
+    every container and what the pod's own Docker runs in them."""
+    commands = commands_of(pod, tmp_path)
+    for role, cmd in commands.items():
+        assert flag(cmd, "--cgroup-parent") == "vivibox-shop_1.slice", role
+        assert flag(cmd, "--cpus") == "6", role
+        assert cmd.index("--cgroup-parent") < cmd.index(pod.image if role != "sidecar" else "--entrypoint")
+    assert flag(commands["agent"], "--memory") == str(4 * 2**30)
+    assert flag(commands["gate"], "--memory") == str(4 * 2**30)
+    assert flag(commands["sidecar"], "--memory") == str(2 * 2**30)
+    assert flag(commands["review"], "--memory") == str(3 * 2**29)
+    assert [flag(commands[r], "--pids-limit") for r in ("agent", "gate", "sidecar", "review")] == [
+        "2048", "4096", "4096", "1024",
+    ]  # fmt: skip
+    assert not any("--oom-kill-disable" in cmd for cmd in commands.values())
+
+
+def test_memory_swap_equals_memory_so_a_container_cannot_swap_past_its_limit(pod, tmp_path):
+    """--memory alone lets a container swap as much again: the limit would hold nothing on a
+    host with swap."""
+    for role, cmd in commands_of(pod, tmp_path).items():
+        assert flag(cmd, "--memory-swap") == flag(cmd, "--memory"), role
+
+
+def test_a_tasks_own_limits_reach_the_flags(pod, tmp_path):
+    pod.limits = pod.limits.with_values({"agent_memory": "6g", "agent_pids": 3000, "pod_cpus": 2.5})
+    commands = commands_of(pod, tmp_path)
+    assert flag(commands["agent"], "--memory") == str(6 * 2**30)
+    assert flag(commands["agent"], "--pids-limit") == "3000"
+    assert flag(commands["agent"], "--cpus") == "2.5" and flag(commands["gate"], "--cpus") == "2.5"
+    assert flag(commands["gate"], "--memory") == str(4 * 2**30), "the others as before"
+
+
+def test_the_sidecars_logs_rotate_and_say_why_its_daemon_did_not_start(pod):
+    """dockerd writes to the container's output, kept by Docker in three files of 10 MB, not to a
+    file in the container that grows for as long as the task lives; a daemon that did not start is
+    quoted from there."""
+    cmd = pod.sidecar_command()
+    assert flag(cmd, "--log-driver") == "json-file"
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--log-opt"] == ["max-size=10m", "max-file=3"]
+    assert "/var/log/dockerd.log" not in cmd[-1] and ">" not in cmd[-1]
+    real = pod.runner
+
+    def never_up(c):
+        c = list(c)
+        if c[:2] == ["docker", "exec"] and "info" in c:
+            return subprocess.CompletedProcess(c, 1, "", "Cannot connect")
+        if c[:2] == ["docker", "logs"]:
+            real.calls.append(c)
+            return subprocess.CompletedProcess(c, 0, "", "failed to start daemon: no space")
+        return real(c)
+
+    pod.runner = never_up
+    with pytest.raises(PodError, match="did not start") as e:
+        pod._wait_for_daemon(timeout=0)
+    assert "failed to start daemon: no space" in str(e.value)
+    assert real.find("docker", "logs") == [["docker", "logs", "--tail", "20", "vivibox-shop-1-dind"]]
+    assert not real.find("docker", "exec", "vivibox-shop-1-dind", "tail")
+
+
+def test_a_stopped_sidecar_made_with_other_limits_is_made_again(pod):
+    """docker start keeps the flags a container was made with: a limit raised under vivibox
+    limits would never arrive. The sidecar carries its limits in a label, and a stopped one with
+    other limits is made again, its data in the task's disk."""
+    made_now(pod)
+    pod.limits = pod.limits.with_values({"sidecar_memory": "3g"})
+    pod.up()
+    assert pod.runner.find("docker", "rm", "-f", pod.sidecar), "made again"
+    made = pod.runner.find("docker", "run", "-d", "--name", pod.sidecar)
+    assert made and flag(made[0], "--memory") == str(3 * 2**30)
 
 
 def test_yarn_downloads_are_shared_but_gate_results_stay_private(pod):

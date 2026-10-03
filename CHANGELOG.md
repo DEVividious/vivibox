@@ -8,8 +8,24 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+### Added
+
+- Every container of a task's pod runs with limits of its own, under one cgroup slice of the
+  task's (`vivibox-<id>.slice`): memory, with swap bounded to the same figure, processes, and the
+  pod's CPUs, never with the kernel's OOM killer turned off. `[limits]` in `config.toml` sets them
+  per machine, sizes as you write them (`agent_memory = "4g"`, `gate_memory`, `sidecar_memory`,
+  `review_memory`, `control_memory`, the `_pids` of each, `pod_memory`, `pod_cpus`, `pod_pids`,
+  `disk`); a container's limit past the pod's is refused by name. The pod's figures are a budget
+  the containers' limits are checked against and the CPUs each gets, not a limit on the slice
+  yet. A scratch tmpfs (`/tmp`, the verification's and the reviewer's `/config`) is half of its
+  container's memory, 2 GiB for the agent by default, instead of a fixed 4 GB.
+
 ### Changed
 
+- The sidecar's Docker daemon writes to the container's output, which Docker keeps in three files
+  of 10 MB, instead of a file in the container that grew for as long as the task lived; a daemon
+  that did not start is quoted from there. A stopped sidecar made with other limits is made again
+  at the task's next start, so a raised limit arrives.
 - A pod's DNS queries to port 53, UDP or TCP, whatever server they name, go to a forwarder on your
   machine, which passes them to your machine's resolver unchanged; DNS over TLS (port 853) is
   refused. DNS over HTTPS looks like any HTTPS and is not stopped yet. One pod holds at most a

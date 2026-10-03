@@ -460,6 +460,24 @@ def test_the_planner_reads_a_copy_of_the_commits_that_the_host_keeps_up_to_date(
     assert "return a / b" in (copy / "calc.py").read_text(), "the commits again, whatever was there"
 
 
+def test_the_copy_is_checked_out_without_your_git_lfs_fetching_anything(reading, tmp_path, monkeypatch):
+    """A filter of your own git configuration (git-lfs: required, and asking a remote the copy
+    does not have) would stop the checkout; the copy holds what the commits hold, the pointer."""
+    task, pod = reading
+    yours = tmp_path / "gitconfig"
+    yours.write_text(
+        "[user]\n\tname = T\n\temail = t@example.com\n"
+        '[filter "lfs"]\n\tsmudge = false\n\tprocess = false\n\trequired = true\n'
+    )
+    (task.repo / ".gitattributes").write_text("*.bin filter=lfs\n")
+    (task.repo / "model.bin").write_text("version https://git-lfs.github.com/spec/v1\n")
+    subprocess.run(["git", "-C", str(task.repo), "add", "."], check=True)
+    git(task.repo, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "Add model")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(yours))
+    control.refresh(task, pod)
+    assert (pod.control_src / "model.bin").read_text().startswith("version https://git-lfs")
+
+
 def planted(task, tmp: Path) -> Path:
     """What a writer can leave in its clone for the next git there: a commondir whose config
     names a command for git diff. Returns the file the command would write."""

@@ -24,6 +24,9 @@ from .task import Task
 HARNESS = "harness-control"
 ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR}
 PLANNERS = ("planner",)
+# The copy is checked out as the commits have it: git-lfs of your own configuration, where it is
+# required, would ask a remote the copy does not have and stop the checkout.
+NO_LFS = ("-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false")
 
 
 def secrets_id(task_id: str) -> str:
@@ -102,7 +105,7 @@ def refresh(task: Task, pod: Pod) -> None:
         raise repo.GitTimeout(
             f"the planner's copy of the work could not be brought up to date: {e}"
         ) from None
-    repo.git("reset", "--quiet", "--hard", "FETCH_HEAD", cwd=src)
+    repo.git(*NO_LFS, "reset", "--quiet", "--hard", "FETCH_HEAD", cwd=src)
 
 
 class Reader:

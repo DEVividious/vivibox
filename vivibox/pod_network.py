@@ -181,7 +181,8 @@ class PodNetwork:
             return recorded
         for role in MADE_ROLES:
             # Made before its range was vivibox's to keep, or the pool moved: nothing is on it, as
-            # this runs only for a pod without its sidecar.
+            # a task without ranges recorded reaches here only at up(), before its sidecar is
+            # made (up removes one whose range is not recorded first), never from a review.
             if self._network_there(role):
                 self._run("docker", "network", "rm", self.network_name(role), check=False)
         # Tasks started at once can each find the same block free; Docker gives it to one, and the

@@ -59,28 +59,38 @@ def helper(runner: Runner, *args: str, what: str = "this machine's rules for pod
         )
 
 
+def other_version(runner: Runner = run) -> str:
+    """Why the root helper that answers is not the one this vivibox speaks to, "" when it is or
+    when none answers (then its first operation says what is missing): another version takes
+    another policy, so a task stops here, before anything of the host is touched."""
+    p = runner(["sudo", "-n", HELPER, "--version"])
+    wanted = f"vivibox-host {HELPER_VERSION}"
+    if p.returncode != 0 or (found := p.stdout.strip()) == wanted:
+        return ""
+    return (
+        f"this machine's root helper is another version ({found}; this vivibox needs {wanted}): "
+        "run host/setup.sh"
+    )
+
+
 def helper_missing(runner: Runner = run) -> str:
     """Why the root helper does not run without a password, or is not the one this vivibox
     speaks to; "" when it is. For the live tests, which skip without it."""
-    p = runner(["sudo", "-n", HELPER, "--version"])
-    if p.returncode != 0:
+    if runner(["sudo", "-n", HELPER, "--version"]).returncode != 0:
         return f"the root helper {HELPER} is not installed, or sudo does not allow it; run host/setup.sh"
-    wanted = f"vivibox-host {HELPER_VERSION}"
-    if (found := p.stdout.strip()) != wanted:
-        return (
-            f"the root helper {HELPER} is older than this vivibox ({found}; it needs {wanted}); "
-            "run host/setup.sh"
-        )
-    return ""
+    return other_version(runner)
 
 
 def prepare_host(host_address: str, pool: str, runner: Runner = run) -> None:
     """This machine ready for any pod: the host's services address on vivibox0 and the base of
     the rules (the helper refuses, naming it, an address another interface or route holds), and
-    the DNS forwarder answering there. No pod starts without it: its DNS would go nowhere."""
+    the DNS forwarder answering there. No pod starts without it: its DNS would go nowhere; nor
+    with a helper of another version, which takes another policy."""
     try:
         # One at a time: two pods starting at once would both make vivibox0, and one would fail.
         with hostd.locked("host.lock"):
+            if why := other_version(runner):
+                raise PodError(why)
             helper(runner, "prepare-engine", "host", json.dumps({"host_address": host_address, "pool": pool}))
         hostd.ensure(host_address.partition("/")[0])
     except hostd.HostdError as e:

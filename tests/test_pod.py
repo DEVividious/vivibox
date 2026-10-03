@@ -10,6 +10,7 @@ from vivibox import pod_network, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import HELPER as HELPER_PATH
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
+from vivibox.pod_egress import HELPER_VERSION
 from vivibox.probe import Listener
 
 
@@ -51,11 +52,16 @@ class FakeDocker:
         self.links = ""  # what `ip -o link` says
         self.refuses = ""  # what the root helper says when it refuses; "" and it does its job
         self.refuses_only = ""  # the one operation it refuses, when not every one
+        self.helper_version = HELPER_VERSION  # what the root helper answers --version with
 
     def __call__(self, cmd):
         cmd = list(cmd)
         self.calls.append(cmd)
         out, rc = "", 0
+        if cmd[:1] == ["sudo"] and cmd[-1] == "--version":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=f"vivibox-host {self.helper_version}\n", stderr=""
+            )
         if cmd[:1] == ["sudo"] and self.refuses and cmd[3] == (self.refuses_only or cmd[3]):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=self.refuses)
         if cmd[:2] == ["docker", "inspect"]:
@@ -225,6 +231,7 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
         or c[:3] == ["docker", "network", "create"]
     ]
     assert steps == [
+        "--version",
         "prepare-engine",
         "attach-disk",
         "network",
@@ -233,10 +240,10 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
         "vivibox-shop-1-dind",
         "vivibox-shop-1-agent",
     ]
-    prepare = pod.runner.find("sudo")[0]
+    prepare = pod.runner.find("sudo")[1]
     assert prepare[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "prepare-engine", "host"]
     assert json.loads(prepare[5]) == {"host_address": "203.0.113.1/32", "pool": DEFAULT_NETWORK_POOL}
-    applied = pod.runner.find("sudo")[2]
+    applied = pod.runner.find("sudo")[3]
     assert applied[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "apply-policy", "shop-1"]
     assert json.loads(applied[5]) == {
         "state": "present",
@@ -407,7 +414,12 @@ def test_up_with_running_pod_only_reapplies_firewall(pod):
     pod.runner.states["vivibox-shop-1-agent"] = "running"
     pod.up()
     assert not pod.runner.find("docker", "run")
-    assert [c[3] for c in pod.runner.find("sudo")] == ["prepare-engine", "attach-disk", "apply-policy"]
+    assert [c[3] for c in pod.runner.find("sudo")] == [
+        "--version",
+        "prepare-engine",
+        "attach-disk",
+        "apply-policy",
+    ]
 
 
 def test_a_running_sidecar_from_before_the_hosts_certificates_changed_is_made_again(pod):
@@ -439,7 +451,9 @@ def test_restarted_sidecar_gets_a_new_agent(pod):
         for c in pod.runner.calls
         if c[:2] == ["docker", "start"] or c[0] == "sudo"
     ]
-    assert steps == ["prepare-engine", "attach-disk", "apply-policy", "start"], "the rules before it starts"
+    assert steps == ["--version", "prepare-engine", "attach-disk", "apply-policy", "start"], (
+        "the rules before it starts"
+    )
 
 
 def test_a_task_started_again_passes_what_its_project_passes_now(env, tmp_path, monkeypatch):
@@ -589,10 +603,10 @@ def test_up_attaches_the_tasks_disk_after_the_host_and_before_any_container(pod)
         or c[:3] == ["docker", "network", "create"]
     ]
     assert steps == [
-        "prepare-engine", "attach-disk", "network", "network", "apply-policy", "vivibox-shop-1-dind",
-        "vivibox-shop-1-agent",
+        "--version", "prepare-engine", "attach-disk", "network", "network", "apply-policy",
+        "vivibox-shop-1-dind", "vivibox-shop-1-agent",
     ]  # fmt: skip
-    attached = pod.runner.find("sudo")[1]
+    attached = pod.runner.find("sudo")[2]
     assert attached[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "attach-disk", "shop-1"]
     assert json.loads(attached[5]) == {"dir": str(pod.folder), "size": "20g"}
 
@@ -977,7 +991,7 @@ def test_the_policy_holds_nothing_from_dockers_output(pod):
 
     pod.runner = lying
     pod.up()
-    sent = [c[5] for c in real.find("sudo")]
+    sent = [c[5] for c in real.find("sudo") if len(c) > 5]  # every operation; --version has no JSON
     assert sent and not any("6.6.6" in s or "evil" in s for s in sent)
     policy = json.loads(sent[-1])
     assert policy["networks"][0]["subnet"] == "198.51.100.0/28"
@@ -1005,9 +1019,22 @@ def test_an_older_root_helper_is_said_with_what_to_run():
 
     assert helper_missing(answering("vivibox-host 3\n")) == ""
     said = helper_missing(answering("vivibox-host 2\n"))
-    assert "older than this vivibox" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
+    assert "another version" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
     assert "host/setup.sh" in said
     assert "not installed" in helper_missing(answering("", rc=1))
+
+
+def test_a_root_helper_of_another_version_stops_the_start_before_anything(pod):
+    """The helper this vivibox speaks to is one version; another takes another policy. A task's
+    start asks it first and stops, naming both and what to run, before the host is prepared."""
+    pod.runner.helper_version = "2"
+    with pytest.raises(PodError) as stopped:
+        pod.up()
+    said = str(stopped.value)
+    assert "another version" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
+    assert "host/setup.sh" in said
+    assert [c[3] for c in pod.runner.find("sudo")] == ["--version"], "nothing else of the host"
+    assert not pod.runner.find("docker", "run") and not pod.runner.find("docker", "network", "create")
 
 
 def test_the_gateway_is_the_allocations(pod):
@@ -1036,7 +1063,7 @@ def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_pa
     made_now(again, state="exited")
     again.up(timeout=1)
     assert not again.runner.find("docker", "network", "create"), "the network is there: started, not made"
-    assert json.loads(again.runner.find("sudo")[2][5])["networks"][0]["subnet"] == "198.51.100.0/28"
+    assert json.loads(again.runner.find("sudo")[3][5])["networks"][0]["subnet"] == "198.51.100.0/28"
 
 
 def test_an_allocation_outside_the_pool_now_is_made_again(pod, tmp_path):
@@ -1268,22 +1295,16 @@ def test_the_reviewer_runs_in_a_network_of_its_own_at_its_pinned_address(pod, tm
 
 
 def test_a_review_does_not_start_without_the_reviewers_network(pod, tmp_path):
-    """Fail-closed: a reviewer that cannot have its own network is not started on the writer's."""
-    real = pod.runner
-
-    def refusing(cmd):
-        if list(cmd)[:3] == ["docker", "network", "create"]:
-            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="permission denied")
-        return real(cmd)
-
-    pod.runner = refusing
+    """Fail-closed: a reviewer that cannot have its own network is not started on the writer's,
+    and a review allocates nothing: a task with no network is one to start first."""
     pod.review_dir = tmp_path / "review"
     pod.review_fresh()
-    with pytest.raises(
-        PodError, match="the review could not start: docker network create .*permission denied"
-    ):
+    with pytest.raises(PodError, match="the review could not start: shop-1 has no network allocated"):
         pod.review_start([], {})
-    assert not real.find("docker", "run") and not real.find("sudo"), "no container of the review, no rules"
+    assert not pod.runner.find("docker", "run"), "no container of the review"
+    assert not pod.runner.find("docker", "network") and not pod.runner.find("sudo"), (
+        "nothing allocated, no rules"
+    )
 
 
 def test_a_review_remakes_the_reviewers_network_gone_between_rounds(pod, tmp_path):
@@ -1585,7 +1606,8 @@ def test_pods_starting_at_once_prepare_the_host_one_at_a_time():
         most.append(len(inside))
         time.sleep(0.2)
         inside.pop()
-        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+        answer = f"vivibox-host {HELPER_VERSION}\n" if cmd[-1] == "--version" else ""
+        return subprocess.CompletedProcess(list(cmd), 0, answer, "")
 
     starts = [
         threading.Thread(target=prepare_host, args=("203.0.113.1/32", DEFAULT_NETWORK_POOL, helper))
@@ -1595,7 +1617,7 @@ def test_pods_starting_at_once_prepare_the_host_one_at_a_time():
         t.start()
     for t in starts:
         t.join()
-    assert len(most) == 3 and max(most) == 1, "one prepare-engine at a time"
+    assert len(most) == 6 and max(most) == 1, "the version asked and the host prepared, one pod at a time"
 
 
 def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):

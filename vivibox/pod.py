@@ -499,9 +499,12 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         """The reviewer's container, with a fresh clone of the task branch in it. Its network
         first, as at up: nothing is on it between rounds, so a prune of Docker's takes it, and
         it is made again on its recorded range; one made another way, on a bridge the host's
-        rules are not keyed by, starts no reviewer."""
+        rules are not keyed by, starts no reviewer. A review allocates nothing and removes no
+        network: a task with none is one to start first."""
         self._placeholders(mounts)
         try:
+            if not self.made_networks():
+                raise PodError(f"{self.task_id} has no network allocated yet; start it first")
             for net in self.ensure_networks():
                 self.check_bridge(net)
         except PodError as e:

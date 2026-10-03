@@ -76,11 +76,12 @@ desktop = false
 # ide = "idea {path}"
 
 [network]
-# Addresses task pods are given, one /27 block per task (a /28 for the writer's network, a /29 for
-# the reviewer's, a /29 kept for the planner; 8 tasks in a /24), so each task has its own addresses
-# and its ports collide with no other task. The default is TEST-NET-2, which RFC 5737 reserves for documentation:
-# no real network and no product may use it, so nothing on your machine collides with it. Change it
-# only if something here already routes this range; host/setup.sh --check says so if it does.
+# Addresses task pods are given, one /27 block per task (a /28 for the writer's network, a /29
+# for the reviewer's, a /29 kept for the planner; 8 tasks in a /24), so each task has its own
+# addresses and its ports collide with no other task. The default is TEST-NET-2, which RFC 5737
+# reserves for documentation: no real network and no product may use it, so nothing on your
+# machine collides with it. Change it only if something here already routes this range;
+# host/setup.sh --check says so if it does.
 # pool = "198.51.100.0/24"
 # Docker Hub's images kept once on this machine: a pull-through cache in a container of its own,
 # vivibox-mirror, that every pod's Docker pulls through, so the second task that needs mysql does not

@@ -56,7 +56,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   other; its DNS goes to the forwarder on your machine like the pod's, `host.docker.internal`
   is its own gateway, its internet is open like the writer's, and a project's `host_services`
   are let through for the writer's network alone (the reviewer reaches no service of your
-  machine's). A task takes one
+  machine's). Before each round of review the reviewer's network is checked again as at the
+  task's start: one gone meanwhile (a prune of Docker's, nothing being on it between rounds)
+  is made again on its range, and one not on its bridge refuses the review, naming the
+  remedy. A task takes one
   /27 block of `[network] pool` (the writer's /28, the reviewer's /29, and a /29 reserved for
   the planner), so the default `198.51.100.0/24` holds 8 tasks, and a pool smaller than a /27
   is refused by name; when every block is in use, the error names the pool, its room in tasks,
@@ -335,8 +338,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   pool no narrower than a /27, as `config.toml` does. `tests/fixtures/host-policy-roles.nft` is
   the reviewed rule file for two role networks of one task.
 - `host/vivibox-host` 3: a policy's host services are each network's own (`networks[i].hostsvc`,
-  none without the key) instead of one list for the task; a helper that answers another
-  version is said to be older than this vivibox, with `host/setup.sh` to run.
+  none without the key) instead of one list for the task. A task's start asks the helper its
+  version first and stops on another than this vivibox's, naming both and `host/setup.sh`,
+  before anything of your machine is touched; the live tests skip for the same reason.
 - The `gate-installed` directory of a task's disk is gone: the gate's Maven installs under the
   gate's own repository in its directory, fresh for every verification, so nothing of the gate's
   is mounted over the shared repository's `installed/` any more. The root helper makes six

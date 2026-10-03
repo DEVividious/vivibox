@@ -421,7 +421,7 @@ def test_the_gate_does_not_run_what_the_writer_put_in_a_cache(env):
                     continue
                 got = gate(env, f"touch {path}/{marker}", check=False)
                 assert got.returncode != 0 and "Read-only file system" in got.stderr, f"{path}: {got.stderr}"
-            gate(env, f"touch /cache/build-cache/{marker} /cache/m2/installed/{marker}")
+            gate(env, f"touch /cache/build-cache/{marker}")
             assert gate(env, f"touch {pod.gate_dir}/caches/m2/{marker}", check=False).returncode == 0, (
                 "its own"
             )

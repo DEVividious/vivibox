@@ -53,10 +53,11 @@ def test_yarn_in_the_gate_downloads_into_its_own_cache_and_again_after_a_fresh_g
         gate(env, "yarn install")
         lock = gate(env, "cat yarn.lock").stdout
         assert gate(env, "node -e 'console.log(require(\"is-number\")(42))'").stdout.strip() == "true"
-        gate(env, "touch node_modules/first-build /cache/m2/installed/first-build")
+        installed = f"{pod.gate_dir}/caches/m2/installed"
+        gate(env, f"mkdir -p {installed} && touch node_modules/first-build {installed}/first-build")
         gate(env, "touch /cache/build-cache/first-build")
         assert agent(env, "test -e /cache/build-cache/first-build", check=False).returncode != 0
-        assert agent(env, "test -e /cache/m2/installed/first-build", check=False).returncode != 0
+        assert agent(env, f"test -e {installed}/first-build", check=False).returncode != 0
         # Only the lockfile, never node_modules, is part of the next verification's commit.
         (repo / "yarn.lock").write_text(lock)
         subprocess.run(["git", "add", "yarn.lock"], cwd=repo, check=True, capture_output=True)
@@ -66,7 +67,7 @@ def test_yarn_in_the_gate_downloads_into_its_own_cache_and_again_after_a_fresh_g
         assert gate(env, f"find {own} -type f | head -1").stdout.strip(), "downloaded into the gate's own"
         pod.gate_up()
         assert gate(env, "test -e node_modules", check=False).returncode != 0
-        assert gate(env, "test -e /cache/m2/installed/first-build", check=False).returncode != 0
+        assert gate(env, f"test -e {installed}/first-build", check=False).returncode != 0
         assert gate(env, "test -e /cache/build-cache/first-build", check=False).returncode == 0
         assert not gate(env, f"find {own} -type f | head -1").stdout.strip(), "a fresh gate starts cold"
         offline = (
@@ -116,7 +117,7 @@ def test_deleting_one_pod_keeps_shared_cache_and_another_live_pod(env):
         pod.up()
         pod.exec("touch", marker)  # the agent's: the shared cache is read-only for the gate
         pod.gate_up()
-        pod.gate_exec("touch", "/cache/m2/installed/from-this-verification")
+        pod.gate_exec("touch", f"{pod.gate_dir}/caches/m2/from-this-verification")
         pod.gate_exec("touch", "/cache/build-cache/from-this-verification")
         assert pod.remove() == ""
         for kind, names in (

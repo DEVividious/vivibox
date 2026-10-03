@@ -61,7 +61,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   that cache read-only and linked under the gate's home; a tool a project brings (`tools`, its
   `mise.toml`) is installed by the gate into a mise data directory of its own, never into the
   shared one, and the gate's mise never installs java; it runs `mise install` only for a checkout
-  that pins a tool in a file of mise's.
+  that pins a tool in a file of mise's. Yarn Classic's cache in the gate is a user-level `.yarnrc`
+  under its home, which a project's own `cache-folder` outranks, as for the agent.
 - Python 3.13 and uv are the image's own, like Node: a CPython of uv's in the image's root
   filesystem, `python3` and `python` in `/usr/local/bin`, uv 0.12. Nothing is pinned for mise by
   default any more (`/etc/mise/config.toml` is gone): Python, uv and Java 21 come from the image,
@@ -306,6 +307,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The `gate-installed` directory of a task's disk is gone: the gate's Maven installs under the
+  gate's own repository in its directory, fresh for every verification, so nothing of the gate's
+  is mounted over the shared repository's `installed/` any more. The root helper makes six
+  directories on a task's disk instead of seven; a disk made with seven keeps the extra one.
 - Your decisions on a task (`accept_plan`, `accept_command`, `plan_prompt`, `import_plan`,
   `save_verify`, `reply`, `verify_again`, `risky_target`, `risky_diffs`, `approve_risky`) moved from
   `actions.py` to `vivibox/decisions.py`, re-exported from `actions` as before.

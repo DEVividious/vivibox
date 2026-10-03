@@ -481,15 +481,19 @@ def test_remove_keeps_shared_caches(pod):
 
 def test_what_a_task_installs_stays_in_a_directory_of_its_disk(pod, tmp_path):
     """Modules one task installs, its unfinished work in them, never reach another task's build;
-    the gate starts from an empty one every time, and both go with the task's disk."""
+    the gate's go under its own repository in its directory, fresh every time, and the shared
+    repository's installed/ is the read-only, empty one of the volume. No directory of the
+    disk is set aside for the gate's any more (it was `gate-installed`)."""
+    from vivibox.pod import DISK_DIRS
+
     pod.gate_dir = tmp_path / "gate"
     assert f"{pod.disk}/installed:/cache/m2/installed" in pod.agent_command()
-    assert f"{pod.disk}/gate-installed:/cache/m2/installed" in pod.gate_command()
+    assert not any("/cache/m2/installed" in m for m in binds(pod.gate_command())), "nothing of its own there"
+    assert "gate-installed" not in pod.volumes and "gate-installed" not in DISK_DIRS
+    assert set(DISK_DIRS) == {"docker", "config", "installed", "gate-build-cache", "gate", "review"}
+    assert {Path(v).name for k, v in pod.volumes.items() if k != "socket"} <= set(DISK_DIRS), "the helper's"
     pod.ensure_network()
-    left = pod.disk / "gate-installed" / "com" / "example"
-    left.mkdir(parents=True)
     pod.gate_up()
-    assert (pod.disk / "gate-installed").is_dir() and not left.exists(), "emptied before the gate runs"
     assert not pod.runner.find("docker", "volume", "rm"), "no volume to remove"
 
 
@@ -507,8 +511,7 @@ def test_the_tasks_volumes_are_directories_of_its_disk_but_the_socket(pod, tmp_p
     assert [b for b in binds(pod.gate_command()) if b.startswith("vivibox-shop-1-")] == [
         "vivibox-shop-1-socket:/run/vivibox-docker"
     ], "no volume of the task's but the socket"
-    assert set(pod.volumes) == {"docker", "socket", "installed", "gate-installed", "gate-build-cache",
-                               "config"}  # fmt: skip
+    assert set(pod.volumes) == {"docker", "socket", "installed", "gate-build-cache", "config"}
 
 
 def test_up_attaches_the_tasks_disk_after_the_host_and_before_any_container(pod):
@@ -650,7 +653,7 @@ def test_the_gate_reads_the_shared_caches_and_writes_only_its_own(pod, tmp_path)
     for name, path in shared.items():
         assert f"vivibox-cache-{name}:{path}:ro" in mounts, f"{name} is writable in the gate"
     assert f"{pod.disk}/gate-build-cache:/cache/build-cache" in mounts, "the gate's own, writable"
-    assert f"{pod.disk}/gate-installed:/cache/m2/installed" in mounts, "the gate's own, writable"
+    assert not any("gate-installed" in m for m in mounts), "Maven installs under the gate's own repository"
     assert f"{pod.gate_dir}/settings.xml:/config/.m2/settings.xml:ro" in mounts, "Maven's settings"
     env = environment(gate)
     caches = f"{pod.gate_dir}/caches"
@@ -669,8 +672,12 @@ def test_the_gate_reads_the_shared_caches_and_writes_only_its_own(pod, tmp_path)
     assert env["GRADLE_USER_HOME"] == f"{caches}/gradle"
     assert env["GRADLE_RO_DEP_CACHE"] == "/cache/gradle/caches", "the directory with modules-2, read-only"
     assert env["MISE_DATA_DIR"] == f"{caches}/mise" and env["MISE_DISABLE_TOOLS"] == "java"
+    # Yarn Classic's default is a user-level .yarnrc (gate_up), as the image's is the installation's
+    # yarnrc: a project's own cache-folder outranks both, and YARN_CACHE_FOLDER would outrank the
+    # project's (Berry reads it as cacheFolder too).
+    assert "YARN_CACHE_FOLDER" not in env
     for name, value in (
-        ("npm_config_cache", f"{caches}/npm"), ("YARN_CACHE_FOLDER", f"{caches}/yarn/classic"),
+        ("npm_config_cache", f"{caches}/npm"),
         ("YARN_GLOBAL_FOLDER", f"{caches}/yarn/berry"), ("COREPACK_HOME", f"{caches}/corepack"),
         ("UV_CACHE_DIR", f"{caches}/uv"), ("UV_PYTHON_INSTALL_DIR", f"{caches}/uv/python"),
         ("GOMODCACHE", f"{caches}/go/mod"), ("GOCACHE", f"{caches}/go/build"),
@@ -698,9 +705,15 @@ def test_the_gates_caches_are_made_fresh_and_the_shared_ones_are_left_alone(pod,
     assert "<url>file:///cache/m2/cached</url>" in settings, "the shared downloads, as a repository"
     assert settings.count("file:///cache/m2/cached") == 2, "for plugins too"
     assert "<activeProfile>" in settings
+    yarnrc = (pod.gate_dir / "yarnrc").read_text()
+    assert yarnrc == f'cache-folder "{pod.gate_dir}/caches/yarn/classic"\n'
     execs = pod.runner.find("docker", "exec")
     assert not [c for c in execs if "rm" in c], "nothing of the shared caches is removed"
-    assert [c for c in execs if "git" in c and "clone" in c], "the clone is made"
+    copied = [c for c in execs if "cp" in c]
+    where = ["docker", "exec", "-w", str(pod.gate_dir), pod.gate]
+    assert copied == [[*where, "cp", f"{pod.gate_dir}/yarnrc", "/config/.yarnrc"]], "the user-level default"
+    cloned = [c for c in execs if "git" in c and "clone" in c]
+    assert cloned and execs.index(cloned[0]) > execs.index(copied[0]), "the clone is made, after it"
 
 
 class FakeProcess:

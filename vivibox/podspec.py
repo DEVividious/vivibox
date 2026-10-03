@@ -59,6 +59,12 @@ GATE_CACHE_DIRS = (
 MAVEN_SETTINGS = "settings.xml"
 MAVEN_SETTINGS_TEMPLATE = "maven-settings.xml"
 MAVEN_SETTINGS_HOME = "/config/.m2/settings.xml"
+# Yarn Classic's cache for the gate, as a user-level .yarnrc under its home (gate_up copies it
+# there): a project's own cache-folder outranks it, as it outranks the image's installation-level
+# yarnrc for the agent, where YARN_CACHE_FOLDER would outrank the project's choice (and Berry
+# reads that variable as its cacheFolder). Berry's global cache is YARN_GLOBAL_FOLDER, as in the image.
+YARNRC = "yarnrc"
+YARNRC_HOME = "/config/.yarnrc"
 # The image's Maven options (vivibox/images/agent/Dockerfile: the same words), for the gate with
 # its own repository in place of the shared one: the split (downloads under cached/, installs
 # under installed/), the file locks, and the build cache restored whole.
@@ -386,7 +392,6 @@ def gate_tool_env(gate_dir) -> dict[str, str]:
         "GRADLE_USER_HOME": f"{caches}/gradle",
         "GRADLE_RO_DEP_CACHE": f"{CACHES['gradle']}/caches",
         "npm_config_cache": f"{caches}/npm",
-        "YARN_CACHE_FOLDER": f"{caches}/yarn/classic",
         "YARN_GLOBAL_FOLDER": f"{caches}/yarn/berry",
         "COREPACK_HOME": f"{caches}/corepack",
         "UV_CACHE_DIR": f"{caches}/uv",
@@ -396,6 +401,10 @@ def gate_tool_env(gate_dir) -> dict[str, str]:
         "CARGO_HOME": f"{caches}/cargo",
         "RUSTUP_HOME": f"{caches}/rustup",
     }
+
+
+def yarnrc(gate_dir) -> str:
+    return f'cache-folder "{gate_caches(gate_dir)}/yarn/classic"\n'
 
 
 def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[str]:
@@ -416,7 +425,6 @@ def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[
             if name != "build-cache"
         ),
         Mount(pod.volumes["gate-build-cache"], CACHES["build-cache"]),
-        Mount(pod.volumes["gate-installed"], INSTALLED),
         *ca_mounts,
     ]
     return [

@@ -639,7 +639,7 @@ def test_attach_makes_a_sparse_xfs_image_mounts_it_and_makes_the_pods_directorie
     )
     assert re.fullmatch(r"/proc/self/fd/\d+", mount[5]), "the mount point as a directory fd, not a path"
     assert len(host.privileged()) == 3
-    for name in ("docker", "config", "installed", "gate-installed", "gate-build-cache", "gate", "review"):
+    for name in ("docker", "config", "installed", "gate-build-cache", "gate", "review"):
         found = os.lstat(tasks / "shop-1" / "disk" / name)
         assert stat.S_ISDIR(found.st_mode) and stat.S_IMODE(found.st_mode) == 0o755, name
         assert found.st_uid == (tasks / "shop-1").stat().st_uid

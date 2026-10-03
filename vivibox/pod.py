@@ -195,7 +195,6 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             "socket": f"vivibox-{self.task_id}-socket",
             # What Maven installs, the task's own modules; kept apart from the shared downloads.
             "installed": str(disk / "installed"),
-            "gate-installed": str(disk / "gate-installed"),
             # The gate's own build cache: what it built from committed work, for its next attempt.
             "gate-build-cache": str(disk / "gate-build-cache"),
             # The agent's home: its tools' configuration and state.
@@ -417,10 +416,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         if self.gate_dir is None:
             raise PodError("the pod has no gate directory")
         self.gate_down()
-        # Nothing a gate before it installed: the gate builds the whole reactor from its clone.
-        installed = Path(self.volumes["gate-installed"])
-        shutil.rmtree(installed, ignore_errors=True)
-        installed.mkdir(parents=True, exist_ok=True)
+        # Nothing a gate before it installed or fetched: its Maven repository, installed modules
+        # included, is under its directory, emptied here.
         shutil.rmtree(self.gate_dir, ignore_errors=True)
         self.gate_dir.mkdir(parents=True)
         # The build tools' own caches, cold (podspec.GATE_CACHE_DIRS), and Maven's settings: the
@@ -430,8 +427,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         (self.gate_dir / podspec.MAVEN_SETTINGS).write_text(
             files("vivibox").joinpath("templates", podspec.MAVEN_SETTINGS_TEMPLATE).read_text()
         )
+        (self.gate_dir / podspec.YARNRC).write_text(podspec.yarnrc(self.gate_dir))
         self._rules_before("the verification")
         self._run(*self.gate_command())
+        # Copied, not mounted: Yarn Classic writes into the user's .yarnrc (its update check).
+        self.gate_exec(
+            "cp", f"{self.gate_dir}/{podspec.YARNRC}", podspec.YARNRC_HOME, workdir=str(self.gate_dir)
+        )
         self.gate_exec("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.gate_src,
                        workdir=str(self.gate_dir))  # fmt: skip
 

@@ -18,7 +18,7 @@ from .podspec import size_option
 DISK_IMAGE = "disk.img"
 DISK_MOUNT = "disk"
 # What the helper makes on the disk, owned by the task's owner (host/vivibox-host: the same).
-DISK_DIRS = ("docker", "config", "installed", "gate-installed", "gate-build-cache", "gate", "review")
+DISK_DIRS = ("docker", "config", "installed", "gate-build-cache", "gate", "review")
 
 
 class PodDisk:

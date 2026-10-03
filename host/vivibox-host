@@ -87,7 +87,7 @@ PATH_MAX = 4096
 # A task's disk: its image and its mount point in the task's directory, and the directories in
 # it the pod binds (vivibox/pod.py: the same), owned by the task's owner.
 DISK_IMAGE, DISK_MOUNT = "disk.img", "disk"
-DISK_DIRS = ("docker", "config", "installed", "gate-installed", "gate-build-cache", "gate", "review")
+DISK_DIRS = ("docker", "config", "installed", "gate-build-cache", "gate", "review")
 DISK_SIZE = re.compile(r"([1-9][0-9]*)([kmgt])", re.IGNORECASE)
 DISK_UNITS = {"k": 2**10, "m": 2**20, "g": 2**30, "t": 2**40}
 # From a gigabyte to two terabytes; vivibox/podspec.py takes the same (a test holds them equal).

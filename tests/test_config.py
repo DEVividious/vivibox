@@ -318,3 +318,19 @@ def test_rejects_a_limit_that_is_not_a_size_or_is_past_the_pods(tmp_path, line, 
     with pytest.raises(ConfigError) as e:
         load_config(write(tmp_path / "config.toml", text))
     assert key in str(e.value), str(e.value)
+
+
+def test_the_pods_cpus_default_to_the_machines_up_to_six_and_never_past_them(tmp_path, monkeypatch):
+    """Docker refuses --cpus past the machine's count ("range of CPUs is from 0.01 to 4.00"):
+    the default config would not start a pod on a four-core laptop, and nothing named the key."""
+    import os
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
+    assert config.limits.pod_cpus == 4
+    with pytest.raises(ConfigError) as e:
+        load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[limits]\npod_cpus = 8\n' + ROLES))
+    assert "limits.pod_cpus" in str(e.value) and "4 CPUs" in str(e.value)
+    assert load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[limits]\npod_cpus = 4\n' + ROLES))
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    assert load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES)).limits.pod_cpus == 6

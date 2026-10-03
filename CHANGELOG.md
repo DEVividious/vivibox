@@ -47,6 +47,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- `pod_cpus`, the CPUs each container of a pod may use, defaults to the machine's count when it
+  has fewer than six, and a value past the machine's count is refused by name (Docker refuses
+  such a `--cpus`, and the default would not have started a pod on a four-core machine).
 - The sidecar's Docker daemon writes to the container's output, which Docker keeps in three files
   of 10 MB, instead of a file in the container that grew for as long as the task lived; a daemon
   that did not start is quoted from there. A stopped sidecar made with other limits is made again

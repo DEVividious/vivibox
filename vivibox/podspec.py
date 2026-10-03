@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable, Sequence
@@ -73,7 +74,20 @@ DEFAULT_MEMORY = {
     "agent": 4 * GIB, "gate": 4 * GIB, "sidecar": 2 * GIB, "review": 3 * GIB // 2, "control": 3 * GIB // 2,
 }  # fmt: skip
 DEFAULT_PIDS = {"agent": 2048, "gate": 4096, "sidecar": 4096, "review": 1024, "control": 1024}
-DEFAULT_POD_MEMORY, DEFAULT_POD_CPUS, DEFAULT_POD_PIDS, DEFAULT_DISK = 6 * GIB, 6.0, 8192, 20 * GIB
+DEFAULT_POD_MEMORY, DEFAULT_POD_PIDS, DEFAULT_DISK = 6 * GIB, 8192, 20 * GIB
+# The CPUs each container may use: six, or the machine's when it has fewer (Docker refuses
+# --cpus past the machine's count, and the default must start a pod on a four-core laptop).
+MOST_DEFAULT_CPUS = 6
+
+
+def machine_cpus() -> int:
+    return os.cpu_count() or MOST_DEFAULT_CPUS
+
+
+def default_cpus() -> float:
+    return float(min(MOST_DEFAULT_CPUS, machine_cpus()))
+
+
 # The smallest and the largest disk image the root helper makes (host/vivibox-host: the same).
 DISK_SMALLEST, DISK_LARGEST = GIB, 2 * 2**40
 # Every key of [limits] that is one of these, in the order the panel and `vivibox limits` say them.
@@ -130,7 +144,7 @@ class Limits:
     each container gets) until the slice itself is limited; and the size of the task's disk."""
 
     pod_memory: int = DEFAULT_POD_MEMORY
-    pod_cpus: float = DEFAULT_POD_CPUS
+    pod_cpus: float = field(default_factory=default_cpus)
     pod_pids: int = DEFAULT_POD_PIDS
     memory: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_MEMORY))
     pids: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_PIDS))
@@ -183,6 +197,11 @@ class Limits:
                     a_number = isinstance(value, (int, float)) and not isinstance(value, bool)
                     if not a_number or not 0 < value <= 1024:
                         raise ValueError("limits.pod_cpus must be a number of CPUs above 0, e.g. 6 or 2.5")
+                    if value > (available := machine_cpus()):
+                        raise ValueError(
+                            f"limits.pod_cpus ({value:g}) is past this machine's {available} CPUs, "
+                            "which Docker refuses"
+                        )
                     pod_cpus = float(value)
                 elif key == "pod_pids":
                     pod_pids = _count(value, "limits.pod_pids", 4_194_304)

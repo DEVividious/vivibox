@@ -1248,3 +1248,13 @@ def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):
     assert pod.scopes() == {"agent": "a" * 64, "sidecar": "b" * 64}
     [asked] = real.find("docker", "inspect", "-f")
     assert asked[4:] == [pod.agent, pod.sidecar, pod.gate, pod.review], "one question for all"
+
+
+def test_every_container_gets_the_machines_cpus_when_it_has_fewer_than_six(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    pod = Pod("shop-1", repo, "img", runner=FakeDocker(), folder=tmp_path)
+    assert flag(pod.agent_command(), "--cpus") == "4" and flag(pod.sidecar_command(), "--cpus") == "4"

@@ -110,7 +110,7 @@ sidecar_memory = "2g"    # the pod's own Docker; sidecar_pids = 4096
 review_memory = "1536m"  # the reviewer's; review_pids = 1024
 control_memory = "1536m" # the planner's control container; control_pids = 1024
 pod_memory = "6g"        # the pod's budget: a container's limit past it is refused by name
-pod_cpus = 6             # what each container may use
+pod_cpus = 6             # what each container may use: the machine's count when it has fewer, never past it
 pod_pids = 8192
 disk = "20g"             # a new task's disk, from 1g to 2t
 ```

@@ -86,8 +86,24 @@ console.log("appended");
 """
 
 
+class Failed(Exception):
+    """A command of the test's own that ended badly, with what it said."""
+
+
 def sh(*cmd: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, check=check, cwd=cwd)
+    """A command on the host; one that fails says why: its own words go into the error."""
+    done = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    if check and done.returncode != 0:
+        said = (done.stderr or done.stdout).strip()[-2000:]
+        raise Failed(f"{shlex.join(cmd)}{f' (in {cwd})' if cwd else ''}: exit {done.returncode}: {said}")
+    return done
+
+
+def restore(clone: Path, commit: str) -> None:
+    """The clone back on the commit, on the branch it is on, with nothing in it that the commit
+    does not hold: whatever a harness that worked there changed, added or left ignored."""
+    sh("git", "reset", "-q", "--hard", commit, cwd=clone)
+    sh("git", "clean", "-ffdxq", cwd=clone)
 
 
 def a_task(kind: str) -> SimpleNamespace:
@@ -471,6 +487,10 @@ def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_wri
     control.refresh(task, pod)
 
 
+# The paths a harness reads its project's configuration from, as the test commits them.
+HARNESS_CONFIGURATION = ("opencode.json", ".opencode", ".claude", ".mcp.json")
+
+
 def committed_harness_configuration(task) -> dict[str, Path]:
     """What a writer can commit for a harness to load from its working directory and run: an
     opencode.json with a local MCP command, .opencode/ plugins, a .claude/settings.json with
@@ -512,30 +532,36 @@ def test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner
     the same commit as the working directory of the writer's harnesses in the agent's container
     does write them, so the method can tell."""
     task, pod, planner = live.task, live.pod, live.planner
-    marks = committed_harness_configuration(task)
-    control.refresh(task, pod)
-    there = shlex.quote(str(pod.repo))
-    assert bash(planner, f"test -f {there}/opencode.json -a -f {there}/.claude/settings.json").returncode == 0
-    assert bash(planner, "pwd").stdout.strip() == "/work" and bash(planner, "ls -A /work").stdout.split() == [
-        ".git"
-    ]
-    assert bash(planner, "cd /work && git log --oneline | wc -l").stdout.strip() == "1", (
-        "the host's one empty commit"
-    )
-    assert bash(planner, "touch /work/opencode.json").returncode != 0, "nobody writes its working directory"
-    harness = opencode.OpenCode(planner, MOCK_MODEL)
-    provider_up(planner)
-    harness.restart_server()  # a server reads its configuration at its start
-    turn(harness, "Planner: read the work.")
-    turn(claudecode.ClaudeCode(planner, CLAUDE_MODEL, ()), "Planner on Claude: read the work.")
-    time.sleep(2)
-    assert [name for name, mark in marks.items() if mark.exists()] == [], "the writer's command ran in P"
-    cwds = bash(
-        planner,
-        "for p in /proc/[0-9]*; do grep -qa 'opencode' $p/cmdline 2>/dev/null && readlink $p/cwd; done",
-    )
-    assert set(cwds.stdout.split()) <= {"/work"}, f"a harness process of the planner's works in {cwds.stdout}"
+    branch = sh("git", "branch", "--show-current", cwd=task.repo).stdout.strip()
+    before = sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip()
     try:
+        marks = committed_harness_configuration(task)
+        control.refresh(task, pod)
+        there = shlex.quote(str(pod.repo))
+        committed = f"test -f {there}/opencode.json -a -f {there}/.claude/settings.json"
+        assert bash(planner, committed).returncode == 0, "the configuration is in the planner's copy"
+        assert bash(planner, "pwd").stdout.strip() == "/work"
+        assert bash(planner, "ls -A /work").stdout.split() == [".git"]
+        assert bash(planner, "cd /work && git log --oneline | wc -l").stdout.strip() == "1", (
+            "the host's one empty commit"
+        )
+        assert bash(planner, "touch /work/opencode.json").returncode != 0, (
+            "nobody writes its working directory"
+        )
+        harness = opencode.OpenCode(planner, MOCK_MODEL)
+        provider_up(planner)
+        harness.restart_server()  # a server reads its configuration at its start
+        turn(harness, "Planner: read the work.")
+        turn(claudecode.ClaudeCode(planner, CLAUDE_MODEL, ()), "Planner on Claude: read the work.")
+        time.sleep(2)
+        assert [name for name, mark in marks.items() if mark.exists()] == [], "the writer's command ran in P"
+        cwds = bash(
+            planner,
+            "for p in /proc/[0-9]*; do grep -qa 'opencode' $p/cmdline 2>/dev/null && readlink $p/cwd; done",
+        )
+        assert set(cwds.stdout.split()) <= {"/work"}, (
+            f"a harness process of the planner's works in {cwds.stdout}"
+        )
         writer = opencode.OpenCode(pod, MOCK_MODEL)
         provider_up(pod)
         writer.restart_server()
@@ -546,12 +572,20 @@ def test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner
         assert "mcp" in ran and "plugin" in ran, f"opencode in the clone ran {ran}: the method"
         assert "hook" in ran, f"Claude Code in the clone ran {ran}: the method"
     finally:
-        sh("git", "rm", "-rq", "opencode.json", ".opencode", ".claude", ".mcp.json", cwd=task.repo)
-        sh("git", "commit", "-q", "-m", "Remove harness configuration", cwd=task.repo)
-        for mark in marks.values():
+        # The clone as it was before the configuration, whatever the writer's harnesses, which
+        # worked in it, changed or added there since (a tracked file rewritten, files of their
+        # own beside it): the tests after this one share the pod and its clone.
+        restore(task.repo, before)
+        for mark in (task.meta / "handoff").glob("ran-*"):
             mark.unlink(missing_ok=True)
-        opencode.OpenCode(pod, MOCK_MODEL).restart_server()
+        opencode.OpenCode(pod, MOCK_MODEL).restart_server()  # without the configuration it had loaded
         control.refresh(task, pod)
+    assert sh("git", "status", "--porcelain", "--ignored", cwd=task.repo).stdout == "", "a clean clone"
+    assert sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip() == before
+    assert sh("git", "branch", "--show-current", cwd=task.repo).stdout.strip() == branch, "on its branch"
+    for name in HARNESS_CONFIGURATION:
+        assert not (task.repo / name).exists(), f"{name} left in the clone"
+        assert bash(planner, f"test -e {there}/{name}").returncode != 0, f"{name} left in the planner's copy"
 
 
 def test_the_control_container_runs_under_the_tasks_slice_with_its_limits(live, planned, capsys):

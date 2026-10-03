@@ -40,7 +40,13 @@ project that needs another Ryuk passes the variable in `pass_env`.
 Rules on your host, keyed by the bridge of the task's network and loaded before the pod's first
 packet, refuse your host, every private network, other tasks' ranges, IPv6 and UDP other than DNS,
 except the services you list per project; the internet is open. Root in the pod cannot remove them:
-they are not in its network namespace. Every DNS query to port 53, UDP or TCP, whatever server it
+they are not in its network namespace. Every operation of vivibox that starts a container of a
+pod applies them first and does not start it when the root helper refuses: the pod at `vivibox
+start` and `resume`, the gate's container before a verification and the reviewer's before a
+review. The rules and `vivibox0` do not survive a restart of your machine, and no pod container
+starts by itself after one. A pod container you start by hand with `docker start` after a restart
+runs on a bridge Docker made again, with no rules of vivibox's until the task's next `vivibox
+start`: do not start pod containers by hand. Every DNS query to port 53, UDP or TCP, whatever server it
 names, goes to a forwarder on your host, which passes it to your host's resolver; while it is down,
 the pod resolves nothing that way. DNS over TLS (port 853) is refused. DNS over HTTPS is HTTPS to
 the rules, and is not prevented until names are allowed by policy. When the host

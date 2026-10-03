@@ -118,6 +118,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The root helper refuses a task's disk whose mount point, image or any directory of the disk
+  is a symbolic link, a special file or someone else's, before anything runs: a link at
+  `<task>/disk` put there by the person's own uid would have had the disk mounted, and its
+  owner changed, wherever the link pointed. The image is made by the helper itself (never
+  through a link), the mount point is given to `mount` and `umount` as a directory descriptor,
+  and the disk's directories are made and owned through descriptors, 0755 whatever the umask.
+  A loop device left by a mount that failed is used again, not doubled.
 - A task's disk counts as full, and the task stops with `out of disk space`, when less than
   64 MiB (1 % on a large disk) is left, not only at no block at all: a write that failed with
   "No space left on device" leaves XFS a few blocks free, and the task went on as if it had room.

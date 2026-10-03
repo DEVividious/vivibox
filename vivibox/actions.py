@@ -23,6 +23,7 @@ from . import (
     code,
     comments,
     context,
+    control,
     firstrun,
     gate,  # noqa: F401  # a test reaches GateError as actions.gate.GateError
     ide,
@@ -99,7 +100,7 @@ from .demo import (  # noqa: F401
     use_instruction,
     write_instruction,
 )
-from .orchestration import mode_of
+from .orchestration import has_control, mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
 from .pod import DISK_MOUNT, Mount, Pod, PodError, RulesLeft, prepare_host
@@ -221,6 +222,7 @@ def task_pod(task_id: str) -> Pod:
 
 
 def pod_of(task: Task, project: Project) -> Pod:
+    config = load_config()
     # Mount sources must exist, or Docker creates them as root-owned directories.
     runtime = secrets.runtime_dir(task.id)
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -244,7 +246,6 @@ def pod_of(task: Task, project: Project) -> Pod:
         "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR,
         **toolchain.agent_env(project.java, image_env),
     }
-    config = load_config()
     # The mirror is reached as a service of the host's, through the pod's firewall.
     through = [HostService(config.host_ip, config.hub_mirror_port)] if config.hub_mirror else []
     disk = task.root / DISK_MOUNT
@@ -259,6 +260,9 @@ def pod_of(task: Task, project: Project) -> Pod:
         network_pool=config.network_pool, host_address=config.host_address,
         hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",
         limits=task_limits, folder=task.root,
+        # The planner's own container, where the flow has a planner other than the writer.
+        control_mounts=control.mounts(task) if has_control(task, config) else None,
+        control_env=dict(control.ENV),
     )  # fmt: skip
 
 

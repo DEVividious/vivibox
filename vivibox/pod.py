@@ -187,6 +187,15 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return f"{self.review_dir}/src"
 
     @property
+    def control(self) -> str:
+        return f"vivibox-{self.task_id}-control"
+
+    @property
+    def control_home(self) -> Path:
+        """The planner's home, a directory of the task's disk that no other container mounts."""
+        return self.disk / podspec.CONTROL_HOME
+
+    @property
     def has_control(self) -> bool:
         """Whether the task's planner runs in a control container of its own, in its own network."""
         return self.control_mounts is not None
@@ -287,10 +296,22 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             raise PodError(f"{self.task_id} has no network allocated yet; start it first")
         return podspec.review_command(self, mounts, env, ca_mounts(), net)
 
+    def control_command(self) -> list[str]:
+        """The control container in the planner's network; none without it (never the writer's)."""
+        if not self.has_control:
+            raise PodError(self._no_control())
+        net = self.recorded_network("p")
+        if net is None:
+            raise PodError(f"{self.task_id} has no network allocated yet; start it first")
+        return podspec.control_command(self, ca_mounts(), net)
+
     def scopes(self) -> dict[str, str]:
         """The id of each container of the pod that is there, by its limits role (config.toml's
         [limits]): for limits.py, a label for the container's cgroup scope under the task's slice."""
-        names = {"agent": self.agent, "sidecar": self.sidecar, "gate": self.gate, "review": self.review}
+        names = {
+            "agent": self.agent, "sidecar": self.sidecar, "gate": self.gate, "review": self.review,
+            "control": self.control,
+        }  # fmt: skip
         found = container_ids(list(names.values()), self.runner)
         return {role: found[name] for role, name in names.items() if name in found}
 
@@ -352,6 +373,36 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             self._run("docker", "rm", "-f", self.agent, check=False)
             self._placeholders(self.agent_mounts)
             self._run(*self.agent_command())
+        self._control_up()
+
+    def _control_up(self) -> None:
+        """The planner's control container, after the sidecar and the agent (it is in neither's
+        namespace), on the network up() has just made, checked and loaded the rules for. A pod
+        without one keeps none from a flow the task had before."""
+        if not self.has_control:
+            self._run("docker", "rm", "-f", self.control, check=False)
+            return
+        if self._state(self.control) == "running":
+            return
+        self._run("docker", "rm", "-f", self.control, check=False)
+        try:
+            self.control_home.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise PodError(f"the planner's home {self.control_home} could not be made: {e}") from None
+        if self.control_home.is_symlink():
+            raise PodError(f"the planner's home {self.control_home} is a link; it is not mounted")
+        self._placeholders(self.control_mounts)
+        self._run(*self.control_command())
+
+    def control_side(self) -> ContainerSide:
+        """The control container as a harness talks to it; none for a pod without one: the
+        planner is never given the writer's container in its place."""
+        if not self.has_control:
+            raise PodError(self._no_control())
+        return ContainerSide(self, self.control)
+
+    def _no_control(self) -> str:
+        return f"{self.task_id} has no container for the planner: its flow has no planner of its own"
 
     def _sidecar_gone(self) -> None:
         self._run("docker", "rm", "-f", self.agent, check=False)
@@ -410,17 +461,18 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         raise PodError(f"Docker in {self.sidecar} did not start:\n{log.stdout}{log.stderr}")
 
     def down(self) -> None:
-        """Stops the pod and keeps its data. A review or a verification under way is lost with it:
+        """Stops the pod and keeps its data, the planner's conversation in its home included. A
+        review or a verification under way is lost with it:
         their containers are made anew for every round. The gate shares the sidecar's network
         namespace; left behind, it would hang without a network once the sidecar stops."""
         self.review_down()
         self.gate_down()
-        for name in (self.agent, self.sidecar):
+        for name in (self.agent, self.control, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
     def kill(self) -> None:
         """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
-        self._run("docker", "kill", self.agent, self.sidecar, check=False)
+        self._run("docker", "kill", self.agent, self.sidecar, self.control, check=False)
         self.review_down()
         self.gate_down()
 
@@ -540,10 +592,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return ContainerSide(self, self.review)
 
     def remove(self) -> str:
-        """Removes containers, the task's disk (detached, then its image deleted) and socket
-        volume, the host's rules for it and its networks. Shared caches stay. Returns what the
-        host kept (a disk the helper did not detach, its rules), "" else."""
-        self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
+        """Removes containers, the task's disk (detached, then its image deleted: the planner's
+        home is a directory of it) and socket volume, the host's rules for it and its networks.
+        Shared caches stay. Returns what the host kept (a disk the helper did not detach, its
+        rules), "" else."""
+        self._run(
+            "docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, self.control, check=False
+        )
         kept = [self.remove_disk()]
         self._run("docker", "volume", "rm", self.volumes["socket"], check=False)
         # The volumes a task had before its data was on its disk (layout 3), by their old names:

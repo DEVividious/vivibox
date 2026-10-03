@@ -1,7 +1,8 @@
 """What a pod's containers are made of: the images, the mounts, the caches, and the commands that
-start the sidecar, the agent, the gate and the reviewer. Plain functions of the pod they are for;
-the host's CA bundle comes in as an argument, read by pod.py. `run` and `Runner`, which run a process
-on the host, are here because pod_egress and pod both need them and pod imports pod_egress."""
+start the sidecar, the agent, the gate, the reviewer and the planner's control container. Plain
+functions of the pod they are for; the host's CA bundle comes in as an argument, read by pod.py.
+`run` and `Runner`, which run a process on the host, are here because pod_egress and pod both
+need them and pod imports pod_egress."""
 
 from __future__ import annotations
 
@@ -478,5 +479,41 @@ def review_command(
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
         "-w", pod.review_src,
+        pod.image, "sleep", "infinity",
+    ]  # fmt: skip
+
+
+# The planner's home in its control container: a directory of the task's disk, its own.
+CONTROL_HOME = "config-control"
+
+
+def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[str]:
+    """The planner's control container, for the whole life of the task: the reviewer's recipe (the
+    writer's tree read-only, no Docker socket, no build caches, nothing a build installed, no
+    variables of the build, a network of its own), with a home of its own on the task's disk in
+    place of a tmpfs, since the planner's conversation is carried on from turn to turn. Nothing
+    the writer's container mounts is that home or its secrets, and the host's rules refuse the
+    writer's range and the reviewer's on its bridge, and its range on theirs. git reads the
+    writer's clone without writing to it (no index refresh)."""
+    all_mounts = [
+        Mount(str(pod.repo), str(pod.repo), read_only=True),
+        Mount(str(pod.control_home), "/config"),
+        *ca_mounts,
+        *(pod.control_mounts or []),
+    ]
+    env = {"GIT_OPTIONAL_LOCKS": "0", **pod.control_env}
+    return [
+        "docker", "run", "-d", "--name", pod.control,
+        "--label", f"vivibox.task={pod.task_id}",
+        # Pinned to the address allocated for it, on its own bridge, as the reviewer's.
+        "--network", pod.network_name(net.role), "--ip", net.address,
+        "--add-host", f"{HOST_GATEWAY}:{net.gateway}",
+        "--dns", pod.host_ip, "--dns-search", ".",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('control')}",
+        *pod.limits.flags("control", pod.task_id),
+        *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
+        *(arg for m in all_mounts for arg in ("-v", m.arg())),
+        "-w", str(pod.repo),
         pod.image, "sleep", "infinity",
     ]  # fmt: skip

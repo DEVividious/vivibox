@@ -1632,7 +1632,12 @@ def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):
         if cmd[:3] == ["docker", "inspect", "-f"] and "{{.Id}}" in cmd[3]:
             real.calls.append(cmd)
             found = "\n".join(
-                [f"/{pod.agent} {'a' * 64}", f"/{pod.sidecar} {'b' * 64}", f"/{pod.gate} nonsense"]
+                [
+                    f"/{pod.agent} {'a' * 64}",
+                    f"/{pod.sidecar} {'b' * 64}",
+                    f"/{pod.gate} nonsense",
+                    f"/{pod.control} {'c' * 64}",
+                ]  # fmt: skip
             )
             return subprocess.CompletedProcess(
                 cmd, 1, found + "\n", "Error: No such object: vivibox-shop-1-review"
@@ -1640,9 +1645,9 @@ def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):
         return real(cmd)
 
     pod.runner = inspecting
-    assert pod.scopes() == {"agent": "a" * 64, "sidecar": "b" * 64}
+    assert pod.scopes() == {"agent": "a" * 64, "sidecar": "b" * 64, "control": "c" * 64}
     [asked] = real.find("docker", "inspect", "-f")
-    assert asked[4:] == [pod.agent, pod.sidecar, pod.gate, pod.review], "one question for all"
+    assert asked[4:] == [pod.agent, pod.sidecar, pod.gate, pod.review, pod.control], "one question for all"
 
 
 def test_every_container_gets_the_machines_cpus_when_it_has_fewer_than_six(tmp_path, monkeypatch):

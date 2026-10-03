@@ -20,7 +20,8 @@ STARTER = re.compile(
 # Where one may be composed, how many, and why: the pod's own, and containers that are not of a pod.
 STARTERS = {
     "pod.py": 1,  # docker start of the sidecar; the runs of its containers come from podspec
-    "podspec.py": 4,  # the argv of the sidecar, the agent, the gate and the review, built only here
+    # the argv of the sidecar, the agent, the gate, the review and the control, built only here
+    "podspec.py": 5,
     "mirror.py": 2,  # the Docker Hub mirror, a container of your Docker, not of any pod
     "image.py": 1,  # the image's checks, a throwaway container on no network
     "roles.py": 2,  # a throwaway container that lists an agent CLI's models
@@ -28,10 +29,10 @@ STARTERS = {
 }
 # The builders of a pod container's argv (podspec, and Pod's methods over them): public, and a
 # ready argv to anyone who calls one; so nobody outside the pod does.
-BUILDER = re.compile(r"\b(?:sidecar|agent|gate|review)_command\b")
+BUILDER = re.compile(r"\b(?:sidecar|agent|gate|review|control)_command\b")
 BUILDERS = {
-    "podspec.py": 4,  # defined here
-    "pod.py": 13,  # Pod's methods over them, and their only callers: up, gate_up, review_start
+    "podspec.py": 5,  # defined here
+    "pod.py": 16,  # Pod's methods over them, and their only callers: up, gate_up, review_start
     "keys_plan.py": 2,  # the view's own review_command: the `review the command` decision, no pod in it
     "tui.py": 1,  # the same, called
 }

@@ -64,7 +64,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   that pins a tool in a file of mise's, wherever mise reads one (`mise.toml`, `.tool-versions`,
   `conf.d`, the `mise.<env>.toml` and local variants, `.mise/` and `.config/mise/`). A shim of
   mise's for a tool with no version set hands over to the next program on PATH, so the agent
-  gets the image's Python and uv until a project pins others. Yarn Classic's cache in the gate is a user-level `.yarnrc`
+  gets the image's Python and uv until a project pins others. A JDK in `tools` (`java@17`) is
+  refused at load, pointing at `java = "17"`: the gate would download it for every verification.
+  Yarn Classic's cache in the gate is a user-level `.yarnrc`
   under its home, which a project's own `cache-folder` outranks, as for the agent.
 - Python 3.13 and uv are the image's own, like Node: a CPython of uv's in the image's root
   filesystem, `python3` and `python` in `/usr/local/bin`, uv 0.12. Nothing is pinned for mise by

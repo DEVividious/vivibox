@@ -418,8 +418,8 @@ def test_the_gate_does_not_run_what_the_writer_put_in_a_cache(env):
         f" && printf 'println(\"{marker}\")\\n' > /cache/gradle/init.d/x.gradle"
         f" && printf 'org.gradle.jvmargs=-D{marker}\\n' > /cache/gradle/gradle.properties"
     )
-    agent(env, plant)
     try:
+        agent(env, plant)  # inside: a plant that fails half-way is still cleaned up
         assert marker in agent(env, "git --version").stdout, "the writer's own git is the planted one"
         pod.gate_up()
         try:

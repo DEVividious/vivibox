@@ -261,7 +261,8 @@ installed again for the verification. The verification's tools are the image's (
 pin one, which the verification then installs for itself and runs instead: the project's choice,
 from a file you approve. A JDK pinned only in the checkout's `mise.toml` is the agent's, not the
 verification's, which takes `java` from the project's settings or the image's Java 21: set `java`
-in the project for a JDK the verification must build with.
+in the project for a JDK the verification must build with. A JDK is never a `tools` entry
+(`tools = ["java@17"]` is refused): the verification would download it for every run.
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the

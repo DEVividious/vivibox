@@ -43,6 +43,17 @@ def test_java_setting_is_validated(tmp_path, value):
         load_project("p", tmp_path)
 
 
+@pytest.mark.parametrize("pinned", ['["java@17"]', '["go@1.25.3", "java@corretto-17"]', '["java"]'])
+def test_a_jdk_is_the_java_setting_never_a_tool(tmp_path, pinned):
+    """`tools = ["java@17"]` would make the gate's own mise download a JDK for every verification
+    (its data directory is cold and java is disabled there): a project's JDK is `java = "17"`,
+    which the gate finds in the shared cache. Refused by name, pointing at the setting."""
+    (tmp_path / "projects").mkdir()
+    (tmp_path / "projects" / "p.toml").write_text(f'repo = "/r"\nverify = ["x"]\ntools = {pinned}\n')
+    with pytest.raises(ConfigError, match=r'p\.toml: tools: a JDK is java = "17", not a tool'):
+        load_project("p", tmp_path)
+
+
 def test_tools_are_mise_versions_and_nothing_else(tmp_path):
     (tmp_path / "projects").mkdir()
     path = tmp_path / "projects" / "p.toml"

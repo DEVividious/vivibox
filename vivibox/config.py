@@ -497,6 +497,12 @@ def load_project(name: str, base: Path | None = None) -> Project:
     if reserved := sorted(set(pass_env) & RESERVED_ENV):
         raise ConfigError(f"{path}: pass_env: vivibox sets {', '.join(reserved)} in the pod itself")
     tools = data.get("tools", [])
+    if isinstance(tools, list) and any(
+        isinstance(t, str) and (t == "java" or t.startswith("java@")) for t in tools
+    ):
+        # The verification's mise is cold and installs no java: a JDK in tools would be downloaded
+        # for every verification; `java` is found in the shared cache instead.
+        raise ConfigError(f'{path}: tools: a JDK is java = "17", not a tool')
     if not isinstance(tools, list) or not all(isinstance(t, str) and TOOL.match(t) for t in tools):
         raise ConfigError(f'{path}: tools must be a list of mise versions, e.g. ["go@1.25.3"]')
     verify_timeout = data.get("verify_timeout", 0)

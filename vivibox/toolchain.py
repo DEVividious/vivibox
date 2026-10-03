@@ -20,7 +20,8 @@ if TYPE_CHECKING:
     from .pod import Pod
 
 JDK_LINK = "/config/jdk"
-# Where mise reads a project's configuration (its documented list): the plain files, the
+# Where mise reads a project's configuration (its documented list, as of mise 2026.9.11, the
+# image's): the plain files, the
 # fragments under conf.d, and the environment-specific (`mise.<env>.toml`) and local variants of
 # each; globs, as a checkout's files are read on the host, not through mise (which would be one
 # more exec in the gate and would answer for its own home too).

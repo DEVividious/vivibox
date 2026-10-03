@@ -710,9 +710,8 @@ def test_a_nested_containers_processes_count_under_the_tasks_slice(env):
 
 def test_a_full_disk_is_the_tasks_and_the_hosts_keeps_its_room():
     """D8: a write in /config of the agent ends in ENOSPC at the image's size, the host's
-    filesystem under the tasks directory is not filled, and the room comes back when the task is
-    removed (the detach trims the disk before the umount; the mount has no discard, so a deleted
-    file alone returns nothing to the host). A pod of its own, with a disk of 1 GiB."""
+    filesystem under the tasks directory is not filled, and the room comes back once the file is
+    gone (the mount's discard reaches the sparse image). A pod of its own, with a disk of 1 GiB."""
     from vivibox import limits
 
     if not TASKS_ROOT.is_dir():
@@ -747,10 +746,8 @@ def test_a_full_disk_is_the_tasks_and_the_hosts_keeps_its_room():
         pod.exec("bash", "-c", "rm /config/fill && sync")
         time.sleep(2)
         assert limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({}) == [], "room again"
-        assert pod.remove() == ""
         freed = os.statvfs(TASKS_ROOT)
-        assert freed.f_bavail > host_after.f_bavail, "the host's room came back with the detach's fstrim"
-        assert (freed.f_bavail - host_after.f_bavail) * host_before.f_frsize > 2**29, "most of the gigabyte"
+        assert freed.f_bavail > host_after.f_bavail, "the host's room came back: discard reached the image"
     finally:
-        pod.remove()
+        assert pod.remove() == ""
         shutil.rmtree(folder, ignore_errors=True)

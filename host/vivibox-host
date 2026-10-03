@@ -16,13 +16,12 @@
         one transaction, so the rules before it stay whole until the new ones replace them.
     vivibox-host [--dry-run] attach-disk <task id> {"dir": "<tasks dir>/<task id>", "size": "20g"}
         The task's disk: a sparse image <dir>/disk.img with an XFS filesystem, made once, on a
-        loop device, mounted nosuid,nodev at <dir>/disk, with the directories the pod
+        loop device, mounted discard,nosuid,nodev at <dir>/disk, with the directories the pod
         binds, owned by the owner of <dir>. Of a mounted disk a no-op; of an image without a
         filesystem a refusal, never a format over it.
     vivibox-host [--dry-run] detach-disk <task id> {"dir": "<tasks dir>/<task id>"}
-        Trims it (the room its deleted files took goes back to the host here, not as they are
-        deleted), unmounts it (umount2 on the task's directory held open) and frees its loop
-        device; never deletes the image (the caller does, after).
+        Unmounts it (umount2 on the task's directory held open) and frees its loop device; never
+        deletes the image (the caller does, after).
     vivibox-host [--dry-run] grow-disk <task id> {"dir": "<tasks dir>/<task id>", "size": "40g"}
         A larger image, loop device and filesystem; refuses to shrink.
         <dir> is one level under the tasks directory of /etc/vivibox/host.json (root's, written
@@ -93,9 +92,7 @@ DISK_SIZE = re.compile(r"([1-9][0-9]*)([kmgt])", re.IGNORECASE)
 DISK_UNITS = {"k": 2**10, "m": 2**20, "g": 2**30, "t": 2**40}
 # From a gigabyte to two terabytes; vivibox/podspec.py takes the same (a test holds them equal).
 DISK_SMALLEST, DISK_LARGEST = 2**30, 2 * 2**40
-# No discard: online discards cost the pod's builds a quarter more time on the loop device;
-# the room a task's files took goes back to the host when the disk is detached (fstrim).
-DISK_OPTIONS = "nosuid,nodev"
+DISK_OPTIONS = "discard,nosuid,nodev"
 # umount2(2): the target is not followed when it is a link (linux/fs.h).
 UMOUNT_NOFOLLOW = 8
 LOOP = re.compile(r"/dev/loop[0-9]+")
@@ -541,20 +538,11 @@ def detach_disk(spec, runner, dry):
         # and the mounted directory itself cannot be renamed or exchanged (busy). Not a
         # descriptor of the mounted root: that is a reference on the mount, and umount2 is EBUSY.
         if dry:
-            print(f"# would run: fstrim /proc/self/fd/N/{DISK_MOUNT}")
             print(f"# would run: umount2 /proc/self/fd/N/{DISK_MOUNT} UMOUNT_NOFOLLOW")
         else:
             parent = open_dir(where)
             try:
-                target = f"{fd_path(parent)}/{DISK_MOUNT}"
-                # The mount has no discard: this is where the host gets its room back. fstrim
-                # reads the link back to the path and trims what is mounted there; a trim that
-                # fails returns no room, which is no security matter, so it is said, not fatal.
-                trimmed = runner(["fstrim", target], pass_fds=(parent,))
-                if trimmed.returncode != 0:
-                    said = (trimmed.stderr or trimmed.stdout).strip()[:400]
-                    print(f"notice: the room {mountpoint} took is not returned to the host: {said}")
-                steps.umount2(target.encode(), UMOUNT_NOFOLLOW)
+                steps.umount2(f"{fd_path(parent)}/{DISK_MOUNT}".encode(), UMOUNT_NOFOLLOW)
             finally:
                 os.close(parent)
             if mounted(runner, mountpoint):

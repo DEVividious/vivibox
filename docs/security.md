@@ -44,8 +44,8 @@ Each container of the pod is bounded by its cgroup: memory with swap bounded to 
 slice (`--cgroup-parent`), never with the OOM killer turned off; `[limits]` in `config.toml` and
 `vivibox limits` set them. The pod's Docker data, the agent's home, what a build installs and the
 verification's and the reviewer's clones are directories of a disk image of the task's (an XFS file
-in the task's folder, attached by the root helper on a loop device mounted `nosuid,nodev`, not
-`noexec`: what a build installs there, and the agent's tools, are run from it),
+in the task's folder, attached by the root helper on a loop device mounted `nosuid,nodev` with
+`discard`, not `noexec`: what a build installs there, and the agent's tools, are run from it),
 whose size is the most the task writes there; the clone is outside it.
 Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would pick
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up

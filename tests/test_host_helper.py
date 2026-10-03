@@ -576,24 +576,19 @@ class Disks(Host):
     """The machine's loop devices and mounts as the helper asks about them: findmnt, blkid and
     losetup -j answer from what the test set; the commands that change something are recorded."""
 
-    def __init__(
-        self, mounted=(), loops=None, fstype=None, grows_fail=False, mount_fails=0, trim_fails=False
-    ):
+    def __init__(self, mounted=(), loops=None, fstype=None, grows_fail=False, mount_fails=0):
         super().__init__()
         self.mounted = set(mounted)
         self.loops = dict(loops or {})
         self.fstype = dict(fstype or {})
         self.grows_fail = grows_fail
         self.mount_fails = mount_fails  # how many mounts fail before one works
-        self.trim_fails = trim_fails
 
     def __call__(self, cmd, input=None, pass_fds=()):
         self.calls.append(list(cmd))
         self.inputs.append(input)
         out, rc, err = "", 0, ""
-        if cmd[:1] == ["fstrim"] and self.trim_fails:
-            rc, err = 1, "fstrim: /srv/vivibox/shop-1/disk: FITRIM ioctl failed: Operation not supported"
-        elif cmd[:1] == ["mount"] and self.mount_fails:
+        if cmd[:1] == ["mount"] and self.mount_fails:
             self.mount_fails -= 1
             rc, err = 1, "mount: /srv/vivibox/shop-1/disk: unknown filesystem type 'xfs'"
         elif cmd[:1] == ["findmnt"]:
@@ -639,7 +634,7 @@ def test_attach_makes_a_sparse_xfs_image_mounts_it_and_makes_the_pods_directorie
     assert made.st_size == 20 * 2**30 and made.st_blocks == 0, "sparse: made by the helper, never written"
     assert host.privileged()[:2] == [["mkfs.xfs", "-q", img], ["losetup", "--find", "--show", img]]
     [mount] = [c for c in host.privileged() if c[:1] == ["mount"]]
-    assert mount[:5] == ["mount", "--no-canonicalize", "-o", "nosuid,nodev", "/dev/loop7"], (
+    assert mount[:5] == ["mount", "--no-canonicalize", "-o", "discard,nosuid,nodev", "/dev/loop7"], (
         "without --no-canonicalize mount(8) reads the link back to a path and mount(2) resolves it anew"
     )
     assert re.fullmatch(r"/proc/self/fd/\d+", mount[5]), "the mount point as a directory fd, not a path"
@@ -703,12 +698,7 @@ def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(t
         "the syscall itself, on the task's directory held open and the last component resolved in it: "
         "a descriptor of the mounted root would be a reference on the mount, and umount2 EBUSY"
     )
-    trim, freed = host.privileged()
-    assert trim[0] == "fstrim" and re.fullmatch(r"/proc/self/fd/\d+/disk", trim[1]), (
-        "the room the task's files took goes back to the host here, not as files are deleted (no discard)"
-    )
-    assert host.calls.index(trim) < len(host.calls), "trimmed before the umount"
-    assert freed == ["losetup", "-d", "/dev/loop3"], "no umount command"
+    assert host.privileged() == [["losetup", "-d", "/dev/loop3"]], "no umount command"
     assert (tasks / "shop-1" / "disk.img").exists(), "the caller deletes it, after a detach that worked"
 
 
@@ -737,7 +727,7 @@ def test_a_detach_that_leaves_the_mount_is_refused_with_the_reason(tasks, capsys
     host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
     unmounting(host, works=False)
     code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
-    assert code == 1 and [c[0] for c in host.privileged()] == ["fstrim"], "the loop device stays"
+    assert code == 1 and host.privileged() == [], "the loop device stays with a mount still there"
     assert "still mounted" in capsys.readouterr().err
 
 
@@ -757,9 +747,8 @@ def test_the_dry_run_of_a_detach_says_the_syscall(tasks, capsys):
     code = helper.main(["--dry-run", "detach-disk", "shop-1", disk_only(tasks)], run=host, euid=1000)
     assert code == 0 and unmounted == [] and host.privileged() == []
     out = capsys.readouterr().out
-    assert "# would run: fstrim /proc/self/fd/N/disk" in out
     assert "# would run: umount2 /proc/self/fd/N/disk UMOUNT_NOFOLLOW" in out
-    assert out.index("fstrim") < out.index("umount2") and "losetup -d /dev/loop3" in out
+    assert "losetup -d /dev/loop3" in out
 
 
 def test_detach_of_a_detached_disk_does_nothing_and_says_so(tasks, capsys):
@@ -868,7 +857,7 @@ def test_the_disk_dry_run_prints_the_steps_and_runs_nothing(tasks, capsys):
     assert code == 0 and host.privileged() == []
     out = capsys.readouterr().out
     assert "# would make" in out and "sparse" in out and "# would run: mkfs.xfs" in out
-    assert "mount --no-canonicalize -o nosuid,nodev" in out
+    assert "mount --no-canonicalize -o discard" in out
     assert not (tasks / "shop-1" / "disk").exists(), "nothing made"
     assert not (tasks / "shop-1" / "disk.img").exists(), "no image either"
 
@@ -1025,17 +1014,3 @@ def test_a_mount_point_swapped_after_the_check_is_not_grown(tasks, capsys):
     assert code == 1
     assert [c[0] for c in host.privileged()] == ["losetup"], "the loop grew, xfs_growfs did not run"
     assert "changed while the helper worked" in capsys.readouterr().err
-
-
-def test_a_trim_that_fails_is_said_and_the_disk_is_detached_all_the_same(tasks, capsys):
-    """Room not returned to the host is not a security matter: the detach goes on, and says it."""
-    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
-    (tasks / "shop-1" / "disk.img").write_bytes(b"")
-    (tasks / "shop-1" / "disk").mkdir()
-    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"}, trim_fails=True)
-    unmounted = unmounting(host)
-    code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
-    assert code == 0 and len(unmounted) == 1
-    assert [c[0] for c in host.privileged()] == ["fstrim", "losetup"]
-    said = capsys.readouterr()
-    assert "not returned" in said.out + said.err and "FITRIM" in said.out + said.err

@@ -3,6 +3,7 @@ made of, and what the writer's container no longer holds."""
 
 import json
 import shutil
+import subprocess
 from functools import partial
 from pathlib import Path
 
@@ -173,10 +174,12 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
     assert SOCKET_DIR not in joined and "vivibox-cache-" not in joined and "DOCKER_HOST" not in joined
     assert not any(path in joined for path in CACHES.values()), "none of the build's caches"
     assert "installed" not in joined, "nothing a build installed"
-    assert f"{task.repo}:{task.repo}:ro" in mounted
-    assert [m for m in mounted if m.startswith(str(task.repo))] == [f"{task.repo}:{task.repo}:ro"]
+    copy = f"{task.root}/disk/control-src:{task.repo}:ro"
+    assert copy in mounted, "its own copy of the commits, read-only, where the writer has its clone"
+    assert [m for m in mounted if str(task.repo) in m] == [copy], "the writer's clone is not mounted"
     assert f"{task.root}/disk/config-control:/config" in mounted
-    assert (task.root / "disk" / "config-control").is_dir(), "made by vivibox, on the task's disk"
+    for made_here in ("config-control", "control-src"):
+        assert (task.root / "disk" / made_here).is_dir(), "made by vivibox, on the task's disk"
     handoff = f"{task.meta / 'handoff'}:/task/handoff"
     replies = f"{task.meta / 'comments.md'}:/task/handoff/comments.md:ro"
     assert mounted.index(f"{task.meta}:/task:ro") < mounted.index(handoff) < mounted.index(replies)
@@ -210,6 +213,7 @@ def test_the_agents_container_mounts_nothing_of_the_planners(docker, mode, has_o
     sidecar = " ".join(made(docker, f"vivibox-{task.id}-dind"))
     for argv in (agent, sidecar):
         assert "config-control" not in argv and f"{task.id}-control" not in argv
+        assert "control-src" not in argv, "nor the planner's copy of the work"
     assert f"{task.root}/disk/config:/config" in agent, "its own home, as before"
 
 
@@ -388,7 +392,132 @@ def test_mounts_are_made_before_docker_could_make_them_roots(tmp_path, monkeypat
     task = create_task(tmp_path / "tasks", "demo", "Reset view", "# Goal\n")
     found = control.mounts(task)
     assert all(isinstance(m, Mount) for m in found)
-    for m in found:
-        if m.target != "/config/.gitconfig":  # written when the clone is made (repo.prepare)
-            assert Path(m.source).exists(), m.source
+    assert all(Path(m.source).exists() for m in found)
     assert (secrets.runtime_dir(f"{task.id}-control").stat().st_mode & 0o777) == 0o700
+
+
+# --- what the planner reads ---------------------------------------------------------------------
+
+
+def git(where: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(where), *args], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def commit(clone: Path, name: str, text: str) -> str:
+    (clone / name).write_text(text)
+    git(clone, "add", name)
+    git(clone, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", f"Add {name}")
+    return git(clone, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def reading(docker):
+    """A supervisor_worker task whose pod is up: the planner's copy has its folder."""
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    pod = actions.task_pod(task.id)
+    pod.up(timeout=1)
+    return task, pod
+
+
+def test_the_planner_reads_a_copy_of_the_commits_that_the_host_keeps_up_to_date(reading):
+    """git diff <base>..HEAD and git log work there, on the task's branch, at the writer's last
+    commit after each refresh; what the writer has not committed is not there; and reading
+    leaves the writer's clone as it was."""
+    task, pod = reading
+    base = task.read_state().base_commit
+    control.refresh(task, pod)
+    copy = pod.control_src
+    assert git(copy, "rev-parse", "HEAD") == base
+    assert git(copy, "branch", "--show-current") == f"vivibox/{task.id}"
+    head = commit(task.repo, "calc.py", "def divide(a, b):\n    return a / b\n")
+    (task.repo / "scratch.txt").write_text("not committed\n")
+    before = git(task.repo, "status", "--porcelain")
+    kept = sorted(p.name for p in (task.repo / ".git").iterdir())
+    control.refresh(task, pod)
+    assert git(copy, "rev-parse", "HEAD") == head
+    assert "calc.py" in git(copy, "diff", "--stat", f"{base}..HEAD")
+    assert "Add calc.py" in git(copy, "log", "--oneline")
+    assert not (copy / "scratch.txt").exists(), "only what is committed"
+    assert git(task.repo, "status", "--porcelain") == before
+    assert sorted(p.name for p in (task.repo / ".git").iterdir()) == kept, "nothing written into the clone"
+    (copy / "calc.py").write_text("changed in the copy\n")  # the mount is read-only; were it not
+    control.refresh(task, pod)
+    assert "return a / b" in (copy / "calc.py").read_text(), "the commits again, whatever was there"
+
+
+def planted(task, tmp: Path) -> Path:
+    """What a writer can leave in its clone for the next git there: a commondir whose config
+    names a command for git diff. Returns the file the command would write."""
+    ran, evil = tmp / "ran", tmp / "evil"
+    script = tmp / "run.sh"
+    script.write_text(f"#!/bin/sh\necho ran >> {ran}\n")
+    script.chmod(0o755)
+    shutil.copytree(task.repo / ".git", evil)
+    subprocess.run(["git", f"--git-dir={evil}", "config", "diff.external", str(script)], check=True)
+    (task.repo / ".git" / "commondir").write_text(f"{evil}\n")
+    return ran
+
+
+def test_git_in_the_writers_clone_would_run_what_the_writer_planted(reading, tmp_path):
+    """Why the control container does not mount the writer's clone, read-only or not: git there
+    follows the clone's commondir to a config, and git diff runs the command it names."""
+    task, _ = reading
+    base = task.read_state().base_commit
+    commit(task.repo, "calc.py", "x = 1\n")
+    ran = planted(task, tmp_path)
+    subprocess.run(["git", "-C", str(task.repo), "diff", f"{base}..HEAD"], capture_output=True)
+    assert ran.exists(), "the reader of the clone ran the writer's command"
+
+
+def test_git_in_the_planners_copy_runs_nothing_the_writer_planted(reading, tmp_path, monkeypatch):
+    """The refresh refuses a clone that is not as recorded; and past the check (a file planted
+    in the moment after it), the copy has the commits and a .git of the host's making: git diff
+    there runs no command of the writer's."""
+    from vivibox import repo
+
+    task, pod = reading
+    base = task.read_state().base_commit
+    control.refresh(task, pod)
+    head = commit(task.repo, "calc.py", "x = 1\n")
+    ran = planted(task, tmp_path)
+    with pytest.raises(repo.RepoError, match="commondir"):
+        control.refresh(task, pod)
+    assert git(pod.control_src, "rev-parse", "HEAD") == base, "nothing taken from a clone not as recorded"
+    monkeypatch.setattr(repo, "guard", lambda clone: None)  # the race: planted after the check
+    control.refresh(task, pod)
+    assert git(pod.control_src, "rev-parse", "HEAD") == head
+    assert "calc.py" in git(pod.control_src, "diff", "--stat", f"{base}..HEAD")
+    git(pod.control_src, "diff", f"{base}..HEAD")
+    assert not (pod.control_src / ".git" / "commondir").exists()
+    assert not ran.exists(), "no command of the writer's ran, on the host or for the planner"
+
+
+def test_a_copy_without_its_folder_is_not_made_elsewhere(docker):
+    """Its folder is the pod's to make, on the task's disk: a refresh before the pod is up, or
+    with a link in the folder's place, copies nothing."""
+    from vivibox import repo
+
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    pod = actions.task_pod(task.id)
+    with pytest.raises(repo.RepoError, match="start the task again"):
+        control.refresh(task, pod)
+
+
+def test_the_planners_harness_reads_the_work_as_it_is_before_each_turn():
+    class Harness:
+        name, manual = "opencode", False
+
+        def __init__(self):
+            self.turns = []
+
+        def turn(self, prompt, session="", title="", on_step=None):
+            self.turns.append((prompt, session, title, on_step, list(order)))
+            return "turn"
+
+    order: list[str] = []
+    inner = Harness()
+    reader = control.Reader(inner, lambda: order.append("refreshed"))
+    assert reader.turn("Review.", session="ses_1", title="t") == "turn"
+    assert inner.turns == [("Review.", "ses_1", "t", None, ["refreshed"])], "first the copy, then the turn"
+    assert reader.name == "opencode" and reader.manual is False, "the rest is the harness's own"

@@ -483,24 +483,30 @@ def review_command(
     ]  # fmt: skip
 
 
-# The planner's home in its control container: a directory of the task's disk, its own.
+# On the task's disk, made by the pod itself and mounted in no container but the planner's: its
+# home, and its copy of the committed work, which the host writes and it only reads.
 CONTROL_HOME = "config-control"
+CONTROL_SRC = "control-src"
 
 
 def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[str]:
-    """The planner's control container, for the whole life of the task: the reviewer's recipe (the
-    writer's tree read-only, no Docker socket, no build caches, nothing a build installed, no
-    variables of the build, a network of its own), with a home of its own on the task's disk in
-    place of a tmpfs, since the planner's conversation is carried on from turn to turn. Nothing
-    the writer's container mounts is that home or its secrets, and the host's rules refuse the
-    writer's range and the reviewer's on its bridge, and its range on theirs. git reads the
-    writer's clone without writing to it (no index refresh)."""
+    """The planner's control container, for the whole life of the task: the reviewer's recipe (no
+    Docker socket, no build caches, nothing a build installed, no variables of the build, a
+    network of its own), with a home of its own on the task's disk in place of a tmpfs, since
+    the planner's conversation is carried on from turn to turn. It reads the work in a copy of
+    the commits that the host makes (control.refresh), read-only, at the path the clone has
+    for the writer: the writer's clone itself is not mounted, so git here never follows what
+    the writer left in its .git (a commondir, a config of its choosing), and nothing the planner
+    does reaches the writer's tree. Nothing the writer's container mounts is that home, that
+    copy or its secrets, and the host's rules refuse the writer's range and the reviewer's on
+    its bridge, and its range on theirs."""
     all_mounts = [
-        Mount(str(pod.repo), str(pod.repo), read_only=True),
+        Mount(str(pod.control_src), str(pod.repo), read_only=True),
         Mount(str(pod.control_home), "/config"),
         *ca_mounts,
         *(pod.control_mounts or []),
     ]
+    # git reads a tree it cannot write: no index refresh, no lock.
     env = {"GIT_OPTIONAL_LOCKS": "0", **pod.control_env}
     return [
         "docker", "run", "-d", "--name", pod.control,

@@ -196,6 +196,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return self.disk / podspec.CONTROL_HOME
 
     @property
+    def control_src(self) -> Path:
+        """The planner's copy of the committed work: the host writes it, the planner reads it."""
+        return self.disk / podspec.CONTROL_SRC
+
+    @property
     def has_control(self) -> bool:
         """Whether the task's planner runs in a control container of its own, in its own network."""
         return self.control_mounts is not None
@@ -385,12 +390,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         if self._state(self.control) == "running":
             return
         self._run("docker", "rm", "-f", self.control, check=False)
-        try:
-            self.control_home.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            raise PodError(f"the planner's home {self.control_home} could not be made: {e}") from None
-        if self.control_home.is_symlink():
-            raise PodError(f"the planner's home {self.control_home} is a link; it is not mounted")
+        for folder in (self.control_home, self.control_src):
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise PodError(f"the planner's folder {folder} could not be made: {e}") from None
+            if folder.is_symlink():
+                raise PodError(f"the planner's folder {folder} is a link; it is not mounted")
         self._placeholders(self.control_mounts)
         self._run(*self.control_command())
 

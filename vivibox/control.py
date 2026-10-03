@@ -43,11 +43,10 @@ def harness_dir(task: Task) -> Path:
 
 
 def mounts(task: Task) -> list[Mount]:
-    """What the control container mounts of the task's, besides the clone and its home (the
-    pod's own): the task's files to read, the handoff to write its draft and its question, your
-    replies read-only over it, the folder its review goes to, its own harness files and secrets,
-    and the task's git identity. Mount sources are made here: missing, Docker would make them
-    folders of root's."""
+    """What the control container mounts of the task's, besides its copy of the work and its home
+    (the pod's own): the task's files to read, the handoff to write its draft and its question,
+    your replies read-only over it, the folder its review goes to, and its own harness files and
+    secrets. Mount sources are made here: missing, Docker would make them folders of root's."""
     runtime = secrets.runtime_dir(secrets_id(task.id))
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
     harness_dir(task).mkdir(exist_ok=True)
@@ -60,7 +59,6 @@ def mounts(task: Task) -> list[Mount]:
         Mount(str(harness_dir(task)), opencode.HARNESS_MOUNT, read_only=True),
         Mount(str(task.meta / "review"), reviewing.MOUNT),
         Mount(str(runtime), secrets.MOUNT, read_only=True),
-        Mount(str(task.meta / "gitconfig"), "/config/.gitconfig", read_only=True),
     ]
 
 
@@ -82,6 +80,46 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     else:
         (d / "opencode.json").unlink(missing_ok=True)
     return before != {p.name: p.read_text() for p in d.iterdir()}
+
+
+def refresh(task: Task, pod: Pod) -> None:
+    """The planner's copy of the committed work, as the task's branch is now: made by git on the
+    host, in a folder of the task's disk that only the control container mounts, read-only. The
+    writer's clone is read as every git of the host's reads it, once it is as recorded
+    (repo.guard) and within a time limit, and only its commits are taken: its .git, where the
+    writer can leave what git follows to a command, is never what the planner's git works in.
+    Before the planner's first turn and before each one after it, so a review reads the commits
+    the verification passed."""
+    src, branch = pod.control_src, repo.branch_name(task.id)
+    if not src.is_dir() or src.is_symlink():
+        raise repo.RepoError(f"the planner's copy of the work has no folder at {src}; start the task again")
+    if not (src / ".git").exists():
+        repo.git("init", "--quiet", "--initial-branch", branch, str(src))
+    try:
+        repo.in_clone(
+            task.repo, "fetch", "--quiet", "--no-tags", str(task.repo), f"refs/heads/{branch}",
+            cwd=src, timeout=repo.COPY_TIMEOUT,
+        )  # fmt: skip
+    except repo.GitTimeout as e:
+        raise repo.GitTimeout(
+            f"the planner's copy of the work could not be brought up to date: {e}"
+        ) from None
+    repo.git("reset", "--quiet", "--hard", "FETCH_HEAD", cwd=src)
+
+
+class Reader:
+    """The planner's harness in its control container, with its copy of the work brought up to
+    date before each of its turns; everything else is the harness's own."""
+
+    def __init__(self, harness, bring_up_to_date):
+        self.harness, self.bring_up_to_date = harness, bring_up_to_date
+
+    def __getattr__(self, name):
+        return getattr(self.harness, name)
+
+    def turn(self, prompt: str, session: str = "", title: str = "", on_step=None):
+        self.bring_up_to_date()
+        return self.harness.turn(prompt, session=session, title=title, on_step=on_step)
 
 
 def serve(task: Task, pod: Pod, config: Config, changed: bool) -> None:

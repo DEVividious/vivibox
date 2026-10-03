@@ -25,6 +25,8 @@ the agent image and set up on the task's repository. Its mode is auto unless you
 a task gets it when its repository has 100 or more source files in a language Serena reads, where
 finding symbols beats reading files; below that it would only add a language server's start and its
 tools' descriptions to every turn. The task's panel says whether it got Serena, and why.
+The planner in a container of its own gets the MCP servers you brought and not Serena: its
+language servers would work on the writer's commits beside the planner's key and conversation.
 
 `k` in the view opens the settings, one row each, Enter on a row changes it and the file keeps its
 comments: *Providers & MCP* first, then what each role runs on by default, the editor `o` opens

@@ -98,7 +98,7 @@ def test_the_review_state_sits_between_the_gate_and_the_final_checkpoint(tmp_pat
     after = {State.IMPLEMENT, State.VERIFY, State.APPROVAL_RISKY, State.CHECKPOINT_FINAL}
     assert TRANSITIONS[State.REVIEW] == after
     task = create_task(tmp_path, "demo", "goal", "")
-    assert task.read_state().reviews == 0 and task.read_state().orchestration == ""
+    assert task.read_state().reviews == 0
     task.set_reviews(2)
     assert task.read_state().reviews == 2
 

@@ -69,13 +69,13 @@ DEFAULT = MODES[DEFAULT_ORCHESTRATION]
 
 def recorded(task: Task | None) -> Mode | None:
     """The flow the task was created with, as its state records it; None for no task, and for
-    one whose state names none (made without actions.create)."""
+    a box, which has none (a task of any other kind without one is not run: task.layout)."""
     chosen = task.read_state().orchestration if task else ""
     return MODES.get(current_mode(chosen)) if chosen else None
 
 
 def mode_of(task: Task | None, config: Config) -> Mode:
-    """A task's flow is the one it was created with (actions.create records it), whatever
+    """A task's flow is the one it was created with (task.create_task records it), whatever
     config.toml says since: config.toml's flow is for new tasks, and for a caller without a task."""
     return recorded(task) or MODES[current_mode(config.orchestration)]
 

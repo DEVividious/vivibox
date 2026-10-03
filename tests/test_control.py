@@ -62,7 +62,7 @@ def test_a_flow_has_a_control_container_when_its_planner_is_not_its_writer(tmp_p
     is kept from the writer where the two are different agents; one agent that plans and writes
     has nothing to keep apart, and a box has no planner."""
     assert orchestration.MODES[mode].control is control
-    task = create_task(tmp_path, "demo", "Add health endpoint", TEMPLATE)
+    task = create_task(tmp_path, "demo", "Add health endpoint", TEMPLATE, orchestration=mode)
     assert orchestration.has_control(task, config(mode)) is control
     assert orchestration.has_control(None, config(mode)) is control
     st = task.read_state()
@@ -211,10 +211,14 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
     assert flag(cmd, "--tmpfs") == f"/tmp:exec,mode=1777,size={3 * 2**28}", "half of its memory"
     assert f"{task.root}/disk/control-work:/work:ro" in mounted, "its harness's working directory"
     assert set(variables(cmd)) == {
-        "GIT_OPTIONAL_LOCKS=0",
+        "GIT_OPTIONAL_LOCKS=0",  # git never writes to the tree it reads
+        f"GIT_DIR={task.repo}/.git",  # and reads the copy of the commits wherever it is run from:
+        f"GIT_WORK_TREE={task.repo}",  # the review's `git diff <base>..HEAD` is asked from /work
+        "OPENCODE_DISABLE_LSP_DOWNLOAD=true",
         "OPENCODE_CONFIG=/task/harness/opencode.json",
         "CLAUDE_CONFIG_DIR=/config/claude",
-    }, "git never writes to the clone it reads; nothing of the build's"
+    }, "nothing of the build's"
+    assert f"{task.root}/disk/control-src:{task.repo}:ro" in mounted, "what GIT_DIR names is the copy"
     assert cmd[cmd.index("-w") + 1] == "/work" and cmd[-3:] == [pod.image, "sleep", "infinity"]
 
 
@@ -690,12 +694,16 @@ def turns(docker, monkeypatch):
     return seen
 
 
+# The commit the stand-in verification says it ran on.
+VERIFIED = "c" * 40
+
+
 def supervised(mode: str, turns) -> tuple:
     task = actions.create("demo", "Add divide", orchestration=mode)
     turns.task.append(task)
     _, project = actions.load(task.id)
     sup = supervise.make_supervisor(task, project, actions.task_pod(task.id), load_config())
-    sup.ports.run_gate = lambda t: gate.GateResult(Path("/dev/null"))
+    sup.ports.run_gate = lambda t: gate.GateResult(Path("/dev/null"), commit=VERIFIED)
     sup.ports.prepare_review = lambda: None
     sup.ports.head = lambda: ""
     return task, sup
@@ -714,6 +722,7 @@ def test_the_planner_plans_again_after_your_comment_in_the_same_conversation_in_
     actions.reply(task, "Also divide by zero: return None.")
     sup.step()
     assert task.read_state().state is State.CHECKPOINT_PLAN
+    # A copy's second word is the commit it was asked to stand on: none while planning, the branch.
     assert [(where, session) for where, session, _ in turns] == [
         ("copy", ""), ("control", ""), ("copy", ""), ("control", first),
     ]  # fmt: skip
@@ -744,6 +753,10 @@ def test_the_supervisor_reviews_round_after_round_in_the_conversation_it_planned
     before_each = [turns[i - 1][0] for i, t in enumerate(turns) if t[0] == "control"]
     assert before_each == ["copy"] * 3, "the commits as they are, before every turn of the planner's"
     assert sum(1 for t in turns if t[0] == "copy") == 3, "and before none of the writer's"
+    assert st.verified_commit == VERIFIED
+    assert [commit for place, commit, _ in turns if place == "copy"] == ["", VERIFIED, VERIFIED], (
+        "planning reads the branch as it is; each review reads the commit the verification passed"
+    )
 
 
 # --- a start ------------------------------------------------------------------------------------
@@ -928,11 +941,6 @@ def test_the_planners_container_is_decided_without_reading_the_configuration_aga
     with pytest.raises(PodError, match="its pod|agent's is not given"):
         roles.container_of("planner", NotAPod(), task)
     assert roles.container_of("writer", pod, task) is pod
-    # A task whose state records no flow (not made by actions.create): the pod's word.
-    bare = create_task(load_config().tasks_dir, "demo", "Bare", TEMPLATE)
-    assert roles.container_of("planner", a_pod(bare.root, control=True), bare).agent.endswith("-control")
-    plain = a_pod(bare.root, control=False)
-    assert roles.container_of("planner", plain, bare) is plain
 
 
 def test_the_hosts_git_in_the_copy_reads_none_of_your_git_configuration(reading, tmp_path, monkeypatch):
@@ -1029,3 +1037,108 @@ def test_a_turn_that_printed_no_events_stops_the_task_as_a_failed_turn(tmp_path)
     assert st.paused and st.problem == f"agent turn failed: {opencode.NO_EVENTS}"
     assert st.state is State.PLAN and waits == [], "no plan checkpoint, and no retry"
     assert notes == [f"agent turn failed, task paused: {opencode.NO_EVENTS}"]
+
+
+# --- round 5: a reader's configuration, and a task without a flow -------------------------------
+
+
+def a_large_repository(task) -> None:
+    """Enough source files in the clone for Serena's automatic mode to say on."""
+    from vivibox import providers
+
+    for n in range(providers.SERENA_MIN_FILES):
+        (task.repo / f"module_{n}.py").write_text("x = 1\n")
+    assert providers.serena_for(task.repo)[0], "a repository Serena is on for"
+
+
+def test_the_planners_configuration_is_a_readers_no_language_server_and_no_serena(docker):
+    """In its control container the planner reads the writer's commits beside its own key and
+    conversation, so nothing there works on the project by itself: opencode's language servers
+    are off and none is downloaded, and vivibox's own Serena, whose language servers start on
+    the project, is left out, while the MCP servers you brought yourself stay. The agent's
+    configuration is as it was: Serena where its mode says so."""
+    from vivibox import providers
+
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    a_large_repository(task)
+    yours = {
+        "type": "local",
+        "command": ["tools"],
+        "environment": {"TOKEN": "{file:/run/vivibox-secrets/mcp.tools.token}"},
+    }
+    providers._save(providers.mcp_path(), {"tools": yours})
+    keys.set_key("mcp.tools.token", "secret")
+    config = load_config()
+    opencode.prepare(task, "cheap/writes", ["true"], ["cheap"])
+    control.prepare(task, config, ["true"])
+    agents = json.loads((task.meta / "harness" / "opencode.json").read_text())
+    planners = json.loads((task.meta / "harness-control" / "opencode.json").read_text())
+    assert sorted(agents["mcp"]) == ["serena", "tools"], "the agent's: yours and Serena"
+    assert sorted(planners["mcp"]) == ["tools"], "the planner's: yours alone"
+    assert "serena" not in json.dumps(planners)
+    assert planners["lsp"] is False
+    assert "snapshot" not in planners, "off, opencode 1.18.31 prints no events of a turn's last step"
+    assert "lsp" not in agents, "the agent's is not changed"
+    needed = providers.mounted(planners)
+    assert needed == ["strong", "mcp.tools.token"] and not [n for n in needed if "serena" in n]
+    held = sorted(p.name for p in secrets.runtime_dir(f"{task.id}-control").iterdir())
+    assert held == ["mcp.tools.token", "server-password", "strong"]
+    assert control.env(task)["OPENCODE_DISABLE_LSP_DOWNLOAD"] == "true"
+    assert opencode.config("a/m", (), task.repo, reader=True)["lsp"] is False
+    assert "lsp" not in opencode.config("a/m", (), task.repo)
+    assert list(providers.task_mcp(task.repo, builtin=False)) == ["tools"]
+    assert sorted(providers.task_mcp(task.repo)) == ["serena", "tools"]
+
+
+def without_a_flow(task) -> None:
+    """The task's state as a vivibox of this layout wrote it before tasks recorded their flow."""
+    path = task.meta / "state.json"
+    state = json.loads(path.read_text())
+    state["orchestration"] = ""
+    path.write_text(json.dumps(state))
+
+
+def test_a_task_that_records_no_flow_is_not_run_and_can_be_deleted(docker, capsys):
+    """Which container its planner runs in cannot be told from such a task: it is from an
+    earlier vivibox, shown so, not opened for anything that runs it, never bound to a
+    container, and deleted like any task from before."""
+    from vivibox import ui
+    from vivibox.cli import main
+    from vivibox.task import DELETE, EARLIER, SHOW, TaskLayoutError, find_task, layout
+
+    task = actions.create("demo", "Add divide")
+    assert task.read_state().orchestration == load_config().orchestration, "every task records one"
+    without_a_flow(task)
+    st = task.read_state()
+    assert layout(st) == EARLIER
+    tasks = load_config().tasks_dir
+    with pytest.raises(TaskLayoutError, match="created by an earlier vivibox.*vivibox delete"):
+        find_task(tasks, task.id)
+    with pytest.raises(TaskLayoutError, match="created by an earlier vivibox"):
+        actions.task_pod(task.id)
+    with pytest.raises(TaskLayoutError):
+        task.set_session("planner", "ses_1")
+    assert ui.view(task, st, False, 3).status == "from an earlier vivibox"
+    assert find_task(tasks, task.id, SHOW).id == task.id and find_task(tasks, task.id, DELETE).id == task.id
+    assert main(["delete", task.id, "--yes"]) == 0
+    assert f"Deleted {task.id}" in capsys.readouterr().out and not task.root.exists()
+
+
+def test_a_task_always_records_a_flow_and_a_box_has_none(tmp_path):
+    from vivibox.config import DEFAULT_ORCHESTRATION
+    from vivibox.task import CURRENT, TaskLayoutError, layout
+
+    plain = create_task(tmp_path, "demo", "Goal", TEMPLATE)
+    assert plain.read_state().orchestration == DEFAULT_ORCHESTRATION and layout(plain.read_state()) == CURRENT
+    named = create_task(tmp_path, "demo", "Goal", TEMPLATE, orchestration="planner_maker_checker")
+    assert named.read_state().orchestration == "planner_writer_reviewer", "by its name of today"
+    with pytest.raises(TaskLayoutError):
+        plain.set_orchestration("")
+    assert plain.read_state().orchestration == DEFAULT_ORCHESTRATION, "never written without one"
+    box = create_task(tmp_path, "demo", "Box", TEMPLATE, box=True)
+    st = box.read_state()
+    assert st.box and st.orchestration == "" and layout(st) == CURRENT, "a box has no roles to share it"
+    assert (
+        orchestration.recorded_control(box) is None
+        and orchestration.has_control(box, config("supervisor_worker")) is False
+    )

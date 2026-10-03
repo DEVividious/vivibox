@@ -27,6 +27,24 @@ from .task import Task
 # where the harness reads them (opencode.HARNESS_MOUNT), over the writer's.
 HARNESS = "harness-control"
 ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR}
+
+
+def env(task: Task) -> dict[str, str]:
+    """The control container's environment. git there, wherever it is run, works on the copy of
+    the commits: the planner's harness stands in a directory of the host's (podspec.CONTROL_WORK),
+    and the review's `git diff <base>..HEAD` is asked of "the repository you are in". The copy's
+    .git is the host's and read-only there, so its hooks and configuration are the host's; what
+    a harness loads as a project's configuration follows its working directory, not git (seen
+    in the image: opencode then names the copy as its project's worktree, and still loads
+    nothing from it). And no language server is downloaded (opencode.READER_ENV)."""
+    return {
+        **ENV,
+        "GIT_DIR": str(task.repo / ".git"),
+        "GIT_WORK_TREE": str(task.repo),
+        **opencode.READER_ENV,
+    }
+
+
 PLANNERS = ("planner",)
 HEX = re.compile(r"[0-9a-f]{40,64}")
 
@@ -72,7 +90,9 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     harness files changed, which a running server has to be started again to read."""
     role = roles.role_of(task, "planner", config)
     needed = roles.provider_keys(config, task, PLANNERS)  # refuses a planner without a model
-    settings = opencode.config(role.model, (), task.repo) if role.harness == opencode.NAME else None
+    # A reader's configuration: no language server, no Serena of vivibox's (opencode.READER).
+    reads = role.harness == opencode.NAME
+    settings = opencode.config(role.model, (), task.repo, reader=True) if reads else None
     secrets.prepare(secrets_id(task.id), providers.mounted(settings) if settings else needed)
     d = harness_dir(task)
     d.mkdir(exist_ok=True)

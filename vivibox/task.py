@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import version
-from .config import current_mode
+from .config import DEFAULT_ORCHESTRATION, current_mode
 from .states import State, check_transition
 
 TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
@@ -93,8 +93,9 @@ class TaskState:
     # Fix turns the writer was sent on since the plan was accepted or you last replied: after a
     # red gate or a review with blocking notes. The first implementation is none.
     rounds: int = 0
-    # How this task is shared between the roles, and how many fix turns it gets: "" and 0 for
-    # config.toml's.
+    # How this task is shared between the roles: the flow it was created with, which says which
+    # containers its pod has, so every task records one ("" only for a box, which has no roles;
+    # a task without one is not run: layout). And how many fix turns it gets: 0 for config.toml's.
     orchestration: str = ""
     max_rounds: int = 0
     # The commit the last green verification ran on: what the review and you are shown is it.
@@ -350,9 +351,14 @@ def _iso(text: str) -> bool:
 
 
 def layout(st: TaskState) -> str:
-    """CURRENT, EARLIER (no version, or an older one) or NEWER (a higher one, or one that is not a
-    whole number, which no vivibox this one knows wrote)."""
-    return classify(st.task_schema_version)
+    """CURRENT, EARLIER (no version, or an older one, or this one's with no flow recorded) or
+    NEWER (a higher one, or one that is not a whole number, which no vivibox this one knows
+    wrote). A task that records no flow is one from before tasks recorded theirs: which
+    container its planner runs in cannot be told from it, so it is not run."""
+    found = classify(st.task_schema_version)
+    if found == CURRENT and not st.orchestration and not st.box:
+        return EARLIER
+    return found
 
 
 def classify(number) -> str:
@@ -385,8 +391,13 @@ def check_layout(task: Task, use: str) -> None:
         raise TaskLayoutError(why)
 
 
-def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, after: int = 0) -> Task:
-    """after: the highest number already used elsewhere, e.g. by branches in your repository."""
+def create_task(
+    tasks_dir: Path, project: str, goal: str, plan_template: str, after: int = 0,
+    orchestration: str = DEFAULT_ORCHESTRATION, box: bool = False,
+) -> Task:  # fmt: skip
+    """after: the highest number already used elsewhere, e.g. by branches in your repository.
+    orchestration: the flow the task is created with and keeps (config.ORCHESTRATION_MODES).
+    box: a box, which has no flow."""
     tasks_dir.mkdir(parents=True, exist_ok=True)
     # Numbers are never reused: a removed task leaves its branch vivibox/<id> in your repository.
     counter = tasks_dir / f".last-{project}"
@@ -417,6 +428,7 @@ def create_task(tasks_dir: Path, project: str, goal: str, plan_template: str, af
     task._write_state(
         TaskState(
             task.id, project, goal, State.PLAN, 0, False, ts, ts,
+            orchestration="" if box else current_mode(orchestration), box=box,
             task_schema_version=TASK_SCHEMA_VERSION, created_by_version=version.current(),
         )
     )  # fmt: skip

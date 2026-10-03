@@ -49,9 +49,25 @@ def provider_entry(provider: str) -> dict:
     return entry
 
 
-def config(model: str, used: list[str] | tuple = (), repo: Path | None = None) -> dict:
-    """used: every provider the roles in the pod run on; the writer's is always there."""
+# What the configuration of a harness that only reads the work adds (the planner's in its control
+# container): no language server, which opencode would start for a file it reads, rooted in the
+# project the file is in, and some of which run the project's own code (a build script, a
+# plugin, a configuration that is a program). LSP is off by default in opencode 1.18.31 ("all
+# LSPs are disabled" in its log); said here, it stays off whatever a later default is.
+# Not "snapshot": false, though a reader needs no undo: with it, 1.18.31's attached run ends
+# before it prints the turn's last step, and the turn's answer and cost are lost (seen in the image).
+READER = {"lsp": False}
+# And in the container's environment: no language server is downloaded, whatever the configuration.
+READER_ENV = {"OPENCODE_DISABLE_LSP_DOWNLOAD": "true"}
+
+
+def config(model: str, used: list[str] | tuple = (), repo: Path | None = None, reader: bool = False) -> dict:
+    """used: every provider the roles in the pod run on; the writer's is always there.
+    reader: for a container that reads the work and runs nothing of it: READER, and of the MCP
+    servers yours alone, never vivibox's own Serena, whose language servers work on the project
+    by themselves."""
     names = list(dict.fromkeys([provider_of(model), *used]))
+    servers = providers.task_mcp(repo, builtin=not reader)
     return {
         "$schema": "https://opencode.ai/config.json",
         "model": model,
@@ -62,8 +78,9 @@ def config(model: str, used: list[str] | tuple = (), repo: Path | None = None) -
         "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow"},
         "provider": {name: provider_entry(name) for name in names},
         # The MCP servers you brought over from opencode; their secrets are mounted like keys.
-        **({"mcp": servers} if (servers := providers.task_mcp(repo)) else {}),
+        **({"mcp": servers} if servers else {}),
         "instructions": [INSTRUCTIONS],
+        **(READER if reader else {}),
     }
 
 

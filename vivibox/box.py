@@ -51,7 +51,9 @@ def open_box(project_name: str) -> Task:
     if not (project.repo / ".git").exists():
         raise ConfigError(f"{project.repo} is not a git repository")
     plan = files("vivibox").joinpath("templates/plan.md").read_text().replace("{{kind}}", "other")
-    task = create_task(config.tasks_dir, project.name, BOX_GOAL, plan, after=actions.used_numbers(project))
+    task = create_task(
+        config.tasks_dir, project.name, BOX_GOAL, plan, after=actions.used_numbers(project), box=True
+    )
     try:
         base = repo.prepare(project.repo, task.repo, task.id, task.meta)
     except BaseException:

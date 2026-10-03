@@ -268,7 +268,7 @@ def pod_of(task: Task, project: Project) -> Pod:
         limits=task_limits, folder=task.root,
         # The planner's own container, where the flow has a planner other than the writer.
         control_mounts=control.mounts(task) if apart else None,
-        control_env=dict(control.ENV),
+        control_env=control.env(task),
     )  # fmt: skip
 
 
@@ -381,12 +381,14 @@ def create(
     elif project.by_module:
         modules = MODULES_LINE.format(command=" && ".join(project.verify))
         plan = plan.replace("\nverify = []\n", "\nverify = []\n" + modules, 1)
-    task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
-    # The flow is the task's from here on, config.toml's of this moment when none was asked for:
-    # which containers its pod has follows from it, and must not change under a task that runs.
-    task.set_orchestration(
-        orchestration or config.orchestration, max_rounds if max_rounds != config.max_rounds else 0
+    # The flow is the task's from its creation, config.toml's of this moment when none was asked
+    # for: which containers its pod has follows from it, and must not change under a task that runs.
+    flow = orchestration or config.orchestration
+    task = create_task(
+        config.tasks_dir, project.name, title, plan, after=used_numbers(project), orchestration=flow
     )
+    if max_rounds and max_rounds != config.max_rounds:
+        task.set_orchestration(flow, max_rounds)
     try:
         described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))

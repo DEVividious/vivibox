@@ -169,11 +169,12 @@ def serena_for(repo: Path | None) -> tuple[bool, str]:
     return False, f"off, {n} source files (fewer than {SERENA_MIN_FILES})"
 
 
-def task_mcp(repo: Path | None = None) -> dict[str, dict]:
+def task_mcp(repo: Path | None = None, builtin: bool = True) -> dict[str, dict]:
     """The MCP servers a task gets: yours that are on, and Serena when its mode says so for this
-    task's repository."""
+    task's repository. builtin=False: yours alone, for a container that reads the work and runs
+    nothing of it (Serena's language servers work on the project by themselves)."""
     found = {name: entry for name, entry in load_mcp().items() if enabled(MCP, name)}
-    if serena_for(repo)[0]:
+    if builtin and serena_for(repo)[0]:
         found[SERENA] = copy.deepcopy(BUILTIN_MCP[SERENA])
     return found
 

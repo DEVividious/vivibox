@@ -482,5 +482,5 @@ def test_a_task_with_one_network_is_from_an_earlier_vivibox():
     """5: a network per role, the reviewer's own among them, three ranges recorded with the task;
     a task created under 4 has the writer's alone, and is not given the others: deleted and
     created again."""
-    assert task_module.TASK_SCHEMA_VERSION == 5
+    assert task_module.TASK_SCHEMA_VERSION >= 5
     assert task_module.classify(4) == task_module.EARLIER

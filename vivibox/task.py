@@ -26,8 +26,10 @@ MAX_PROBLEM = 2000
 # 2: your replies kept where no agent writes; 3: the pod's network on a bridge of vivibox's
 # naming, its range kept with the task, its egress enforced on the host; 4: the pod's volumes
 # are directories of a disk image of the task's own, which bounds them; 5: a network per role,
-# the reviewer's own among them, the three roles' ranges recorded with the task.
-TASK_SCHEMA_VERSION = 5
+# the reviewer's own among them, the three roles' ranges recorded with the task; 6: the planner
+# in a control container of its own, with its own home on the task's disk, its own network,
+# secrets and harness files, where the flow has a planner other than the writer.
+TASK_SCHEMA_VERSION = 6
 CURRENT, EARLIER, NEWER = "current", "earlier", "newer"
 # What a task is opened for (find_task): an operation that runs, moves or opens it needs the
 # layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.

@@ -633,7 +633,9 @@ def test_remove_detaches_the_disk_deletes_its_image_then_the_rules_and_the_netwo
         for c in pod.runner.calls[before:]
         if c[:2] == ["docker", "rm"] or c[0] == "sudo" or c[:3] == ["docker", "network", "rm"]
     ]
-    assert steps == ["rm", "detach-disk", "apply-policy", "vivibox-shop-1-net", "vivibox-shop-1-r"]
+    assert steps == [
+        "rm", "detach-disk", "apply-policy", "vivibox-shop-1-net", "vivibox-shop-1-r", "vivibox-shop-1-p",
+    ]  # fmt: skip
     detached = next(c for c in pod.runner.calls[before:] if c[0] == "sudo" and c[3] == "detach-disk")
     assert json.loads(detached[5]) == {"dir": str(pod.folder)}
     assert not pod.disk_image.exists() and not pod.disk.exists(), "the image goes with the task"

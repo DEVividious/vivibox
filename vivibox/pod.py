@@ -24,6 +24,7 @@ from pathlib import Path
 
 from . import display, handoff, podspec, repo, toolchain
 from .config import DEFAULT_HOST_ADDRESS, DEFAULT_NETWORK_POOL, HostService
+from .names import ROLES as NETWORK_ROLES
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
 from .pod_disk import DISK_DIRS as DISK_DIRS
@@ -37,8 +38,8 @@ from .pod_egress import PodEgress
 from .pod_egress import RulesLeft as RulesLeft
 from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
-from .pod_network import MADE_ROLES, PodNetwork, RoleNetwork
 from .pod_network import PodError as PodError
+from .pod_network import PodNetwork, RoleNetwork
 from .podspec import AGENT_MAVEN_OPTS as AGENT_MAVEN_OPTS
 from .podspec import CA_LABEL as CA_LABEL
 from .podspec import CACHES as CACHES
@@ -132,6 +133,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     gate_dir: Path | None = None
     # Where the reviewer reads its own fresh clone, with its harness files and its review beside it.
     review_dir: Path | None = None
+    # What the planner's control container mounts besides the clone and its own home (the task's
+    # files, its own secrets and harness files; control.py); None: the task has no control
+    # container, and no planner's network.
+    control_mounts: list[Mount] | None = None
+    control_env: dict[str, str] = field(default_factory=dict)
     # The gate's PATH, JDK and mise (toolchain.gate_env); None: as for a project without a JDK.
     gate_env: dict[str, str] | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
@@ -179,6 +185,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     @property
     def review_src(self) -> str:
         return f"{self.review_dir}/src"
+
+    @property
+    def has_control(self) -> bool:
+        """Whether the task's planner runs in a control container of its own, in its own network."""
+        return self.control_mounts is not None
 
     @property
     def network(self) -> str:
@@ -322,8 +333,9 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             if state is not None and self._outdated_sidecar():
                 # docker start would run the script it was made with; its data is in volumes.
                 state = self._sidecar_gone()
-        # The writer's network and the reviewer's, each on its bridge (with the sidecar up, the
-        # ranges are recorded, and only a network gone meanwhile is made again).
+        # The writer's network and the reviewer's, and the planner's with a control container,
+        # each on its bridge (with the sidecar up, the ranges are recorded, and only a network
+        # gone meanwhile is made again).
         nets = self.ensure_networks()
         for net in nets:
             self.check_bridge(net)
@@ -540,7 +552,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         # The host's rules go before the bridges: one left without them is refused outright. Every
         # role's network by name, whether the task had it or not (one from before the reviewer's).
         kept.append(self.remove_firewall())
-        for role in MADE_ROLES:
+        for role in NETWORK_ROLES:
             self._run("docker", "network", "rm", self.network_name(role), check=False)
         return "; ".join(filter(None, kept))
 

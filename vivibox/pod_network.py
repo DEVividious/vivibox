@@ -3,7 +3,7 @@ network on this machine holds any of, split by role (the writer's /28, the revie
 planner's /29), each on a bridge of vivibox's naming (names.bridge). vivibox picks the ranges and
 their gateways and keeps them (the allocation): the host's rules, each role's pinned address and
 host.docker.internal come from there, never from what Docker says of a network (invariant 13).
-Mixed into Pod, whose _run, task_id, network, network_pool and allocation it uses."""
+Mixed into Pod, whose _run, task_id, network, network_pool, allocation and has_control it uses."""
 
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ SYS_NET = Path("/sys/class/net")
 # How a task's block is split: the writer's role first, the widest (the sidecar, the gate and the
 # nested containers are on it), then the reviewer's and the planner's, each a /29.
 ROLE_BITS = {"w": 28, "r": 29, "p": 29}
-# The roles whose Docker network vivibox makes today: the planner's range is recorded and reserved
-# with the task, and its network and bridge are made once the planner has a container of its own.
+# The roles whose Docker network every task has. The planner's is made for a task whose planner
+# runs in a control container of its own (PodNetwork.made_roles); in a task without one its range
+# stays recorded and reserved, with no network, no bridge and no rules.
 MADE_ROLES = ("w", "r")
 
 
@@ -144,10 +145,15 @@ class PodNetwork:
         """Every role network of the task that is allocated, in the roles' order."""
         return [n for role in names.ROLES if (n := self.recorded_network(role))]
 
+    def made_roles(self) -> tuple[str, ...]:
+        """The roles this task has a Docker network for: the writer's and the reviewer's, and the
+        planner's when the pod has a control container."""
+        return (*MADE_ROLES, "p") if self.has_control else MADE_ROLES
+
     def made_networks(self) -> list[RoleNetwork]:
         """The role networks that have a Docker network and a bridge, as recorded: what the host's
-        rules are keyed by. Not the planner's, whose range is only reserved (MADE_ROLES)."""
-        return [n for n in self.networks() if n.role in MADE_ROLES]
+        rules are keyed by. The planner's only with a control container (made_roles)."""
+        return [n for n in self.networks() if n.role in self.made_roles()]
 
     def network_name(self, role: str) -> str:
         """The Docker network of a role. The writer's keeps the name it had when it was the only
@@ -179,20 +185,20 @@ class PodNetwork:
                 if not self._network_there(net.role) and (said := self._make(net.role, net.subnet)):
                     raise PodError(f"docker network create {self.network_name(net.role)}: {said}")
             return recorded
-        for role in MADE_ROLES:
+        for role in self.made_roles():
             # Made before its range was vivibox's to keep, or the pool moved: nothing is on it, as
             # a task without ranges recorded reaches here only at up(), before its sidecar is
             # made (up removes one whose range is not recorded first), never from a review.
             if self._network_there(role):
                 self._run("docker", "network", "rm", self.network_name(role), check=False)
         # Tasks started at once can each find the same block free; Docker gives it to one, and the
-        # others try the next. A block is taken whole: the writer's network made and the
-        # reviewer's refused, the writer's goes too.
+        # others try the next. A block is taken whole: the writer's network made and another
+        # role's refused, the writer's goes too.
         said = ""
         for _ in range(self.NETWORK_ATTEMPTS):
             ranges = split_block(self.free_subnet())
             made = []
-            for role in MADE_ROLES:
+            for role in self.made_roles():
                 if said := self._make(role, ranges[role]):
                     for done in made:
                         self._run("docker", "network", "rm", self.network_name(done), check=False)

@@ -47,6 +47,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A task whose flow has a planner other than the writer (Planner → Executor, Planner → Writer →
+  Reviewer, Supervisor ⇄ Worker) has a third network, the planner's, `vivibox-<id>-p`, on a
+  bridge of its own with rules of its own on your machine, made and checked with the writer's
+  and the reviewer's at every start; it reaches none of your machine's services. A Single agent
+  task has none: its planner's range stays reserved. Tasks created before this change are from
+  an earlier vivibox: delete them and create them again.
 - A task has a network per role instead of one: the writer's, which the sidecar, the
   verification and the pod's own containers share, and the reviewer's, `vivibox-<id>-r`, of its
   own, each on a bridge of its own with rules of its own on your machine, which refuse each

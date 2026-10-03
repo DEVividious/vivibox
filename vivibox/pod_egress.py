@@ -137,14 +137,14 @@ class PodEgress:
         """What the helper is given for this task: its role networks, each with the host services
         it may reach, the pool (every other task's range, refused), the uplink's MTU (the MSS
         clamp follows a VPN going on or off) and where the forwarder listens. The networks are
-        those with a bridge, the writer's and the reviewer's (pod_network.MADE_ROLES): the
-        planner's range is reserved with the task and gets its rules once there is a planner's
-        network to key them by, so that no chain is loaded for a bridge nothing is on."""
+        those with a bridge (pod_network.made_roles): the writer's, the reviewer's, and the
+        planner's in a task with a control container; without one its range is only reserved,
+        and no chain is loaded for a bridge nothing is on."""
         nets = self.made_networks()
         if not nets:
             raise PodError(f"{self.task_id} has no network allocated yet")
         # The project's host services are its build's: the writer's network reaches them, on its
-        # gateway; the reviewer reads and runs nothing and reaches none of the host's.
+        # gateway; the reviewer and the planner read, run nothing, and reach none of the host's.
         services = self.firewall_targets()
         return {
             "state": "present",

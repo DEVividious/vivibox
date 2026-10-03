@@ -32,6 +32,13 @@ class Mode:
         """The brief an agent opens with: the roles it plays, planner-writer-reviewer at most."""
         return "-".join(role for role in ROLES if self.agents[role] == agent)
 
+    @property
+    def control(self) -> bool:
+        """Whether the planner is an agent other than the writer's: its conversation is then one
+        the writer must not reach, and it runs in a control container of its own, in a network
+        of its own. An agent that plans and writes in one conversation has nothing to keep apart."""
+        return self.agents["planner"] != self.agents["writer"]
+
     def reviews(self) -> bool:
         """Whether a reviewer other than the writer reads the work at all."""
         return self.separate_reviewer or self.supervisor
@@ -63,6 +70,14 @@ def mode_of(task: Task | None, config: Config) -> Mode:
     """The task's own mode when it chose one, else config.toml's."""
     chosen = task.read_state().orchestration if task else ""
     return MODES[current_mode(chosen or config.orchestration)]
+
+
+def has_control(task: Task | None, config: Config) -> bool:
+    """Whether the task has a control container and the planner's network: the one answer the
+    pod, the keys, the harnesses and the window ask. A box has no planner at all."""
+    if task is not None and task.read_state().box:
+        return False
+    return mode_of(task, config).control
 
 
 def max_rounds_of(task: Task | None, config: Config) -> int:

@@ -264,6 +264,14 @@ verification's, which takes `java` from the project's settings or the image's Ja
 in the project for a JDK the verification must build with. A JDK is never a `tools` entry
 (`tools = ["java@17"]` is refused): the verification would download it for every run.
 
+Gradle in the verification runs with a fresh Gradle home of its own and reads the shared
+dependency cache read-only, so its wrapper distribution, its transforms and its own caches are
+made again, and the first Gradle verification of a project can be noticeably slower than the
+agent's build. Measured on one project (spring-petclinic, `./gradlew build` with its tests), the
+verification took about 1.33× the agent's time cold and 1.14× on a following run: a benchmark
+result on that project, not a guarantee for every project. The trade-off is accepted for this
+release, since the verification runs nothing a writer put in a cache.
+
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the
 module it changes instead of everything. Their output is under `l`; a failure is on the task's

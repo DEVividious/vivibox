@@ -8,8 +8,15 @@ from pathlib import Path
 LIMIT = 800
 ROOT = Path(__file__).parent.parent
 
-# A docker run or docker start composed as an argument list, the only way a command is built here.
-STARTER = re.compile(r'"docker",\s*"(?:run|start)"')
+# The docker verbs that start or resume a container, as a word of an argument list ("docker",
+# "run"; "docker", "container", "start"; ["docker"] + ["run"]) or of a string split into one
+# ("docker run -d".split()).
+VERB = r"(?:run|start|restart|unpause)"
+BETWEEN = r"[\s,+*\[\]]*"
+STARTER = re.compile(
+    rf'["\']docker["\']{BETWEEN}(?:["\']container["\']{BETWEEN})?["\']{VERB}["\']'
+    rf'|["\']docker\s+(?:container\s+)?{VERB}\b'
+)
 # Where one may be composed, how many, and why: the pod's own, and containers that are not of a pod.
 STARTERS = {
     "pod.py": 1,  # docker start of the sidecar; the runs of its containers come from podspec
@@ -19,20 +26,38 @@ STARTERS = {
     "roles.py": 2,  # a throwaway container that lists an agent CLI's models
     "cli_providers.py": 1,  # a throwaway container that lists an agent CLI's providers
 }
+# The builders of a pod container's argv (podspec, and Pod's methods over them): public, and a
+# ready argv to anyone who calls one; so nobody outside the pod does.
+BUILDER = re.compile(r"\b(?:sidecar|agent|gate|review)_command\b")
+BUILDERS = {
+    "podspec.py": 4,  # defined here
+    "pod.py": 13,  # Pod's methods over them, and their only callers: up, gate_up, review_start
+    "keys_plan.py": 2,  # the view's own review_command: the `review the command` decision, no pod in it
+    "tui.py": 1,  # the same, called
+}
+
+
+def sites(pattern: re.Pattern) -> dict[str, int]:
+    package = ROOT / "vivibox"
+    return {
+        str(path.relative_to(package)): n
+        for path in sorted(package.rglob("*.py"))
+        if (n := len(pattern.findall(path.read_text())))
+    }
 
 
 def test_only_the_pod_starts_a_container_of_a_pod():
     """Every operation that can start or resume a pod's container reconciles the host's rules first,
-    fail-closed, through the pod (up, gate_up, review_start). A docker run or docker start composed
-    anywhere else would start one without them: the sites that compose one are listed here, each
-    with its reason, so a new one is a failure until it is accounted for."""
-    package = ROOT / "vivibox"
-    found = {
-        str(path.relative_to(package)): n
-        for path in sorted(package.rglob("*.py"))
-        if (n := len(STARTER.findall(path.read_text())))
-    }
-    assert found == STARTERS, "a new docker run or docker start: a pod container starts only through pod.py"
+    fail-closed, through the pod (up, gate_up, review_start). A docker run, start, restart or
+    unpause composed anywhere else would start one without them: the sites that compose one are
+    listed here, each with its reason, so a new one is a failure until it is accounted for."""
+    assert sites(STARTER) == STARTERS, "a new docker run or start: a pod container starts only through pod.py"
+
+
+def test_only_the_pod_takes_a_pod_containers_argv():
+    """The argv of a pod container is a ready docker run to whoever calls its builder: a caller
+    outside the pod would run it past _rules_before with no docker literal of its own."""
+    assert sites(BUILDER) == BUILDERS, "a pod container's argv is built and run in pod.py only"
 
 
 def test_no_module_is_past_the_limit():

@@ -32,7 +32,7 @@ import pytest
 from conftest import make_repo
 
 from vivibox import actions, control, gate, image, keys, opencode, plan, probe, prompts, supervisor, ui
-from vivibox.config import ConfigError, load_config
+from vivibox.config import ConfigError, load_config, load_project
 from vivibox.pod_egress import helper_missing
 from vivibox.secrets import MOUNT as SECRETS
 from vivibox.states import State
@@ -43,6 +43,7 @@ pytestmark = [pytest.mark.model, pytest.mark.real_start]
 
 PLANNER = os.environ.get("VIVIBOX_BEHAVIOURAL_PLANNER", "deepseek/deepseek-v4-pro")
 WRITER = os.environ.get("VIVIBOX_BEHAVIOURAL_WRITER", "deepseek/deepseek-flash")
+REVIEWER = os.environ.get("VIVIBOX_BEHAVIOURAL_REVIEWER", "deepseek/deepseek-v4-pro")
 LIMIT = float(os.environ.get("VIVIBOX_BEHAVIOURAL_LIMIT", "2"))
 # Set to keep the tasks and their pods after the run, to look at what the agent did and said.
 KEEP = bool(os.environ.get("VIVIBOX_BEHAVIOURAL_KEEP"))
@@ -119,13 +120,38 @@ def missing() -> str:
         return "Docker is not running"
     if why := helper_missing():
         return why
-    if not (keys.store() / "deepseek").exists():
-        return "no deepseek key in the key store"
+    for provider in needed_keys(PLANNER, WRITER):
+        if not (keys.store() / provider).exists():
+            return f"no {provider} key in the key store"
     try:
         load_config()
     except ConfigError as e:
         return f"this machine's config.toml cannot be read: {e}"
     return ""
+
+
+def needed_keys(*models: str) -> list[str]:
+    """The providers whose keys these models are run with."""
+    return sorted({model.split("/", 1)[0] for model in models if "/" in model})
+
+
+def copy_keys(real: Path, to: Path) -> None:
+    """The keys the run's models need, and no other of yours, in a key store of the run's own:
+    its history and archive never reach yours. Gone with forget_keys when the run ends."""
+    to.mkdir(parents=True, mode=0o700)
+    for provider in needed_keys(PLANNER, WRITER, REVIEWER):
+        if (real / provider).exists():
+            shutil.copy2(real / provider, to / provider)  # with its mode: a key is its owner's alone
+
+
+def forget_keys(tmp: Path) -> None:
+    """The run's copy of your keys, removed: pytest keeps its temporary folders for days."""
+    shutil.rmtree(tmp / "data" / "vivibox" / "keys", ignore_errors=True)
+
+
+def the_project(name: str):
+    """The project a scenario made, as vivibox loads it: by the run's own name for it."""
+    return load_project(NAMES[name])
 
 
 def leftovers(run: str) -> list[Path]:
@@ -152,10 +178,8 @@ def bench(tmp_path_factory):
     if why := missing():
         pytest.skip(why)
     machine = load_config()  # the pool and the host's address this machine was set up with
-    real_keys = keys.store()
     tmp = tmp_path_factory.mktemp("behavioural")
-    # Your keys, in a data directory of the run's own: its history and archive never reach yours.
-    shutil.copytree(real_keys, tmp / "data" / "vivibox" / "keys")
+    copy_keys(keys.store(), tmp / "data" / "vivibox" / "keys")
     # The root helper attaches a task's disk only in a folder directly under the tasks
     # directory, so the run's tasks are made there, among yours, under projects of its own name.
     run = secrets.token_hex(3)
@@ -185,6 +209,7 @@ def bench(tmp_path_factory):
             print(f"kept in {TASKS_ROOT}: {kept} (VIVIBOX_CONFIG_DIR={cfg})")
         else:
             clean_up(run)
+        forget_keys(tmp)
         NAMES.clear()
         mp.undo()
 
@@ -218,9 +243,9 @@ def project(
 
 
 def begin(name: str, goal: str, orchestration: str = ""):
-    """A task of the project a scenario named, its pod up and its supervisor built here, not in
-    a process of its own."""
-    task = actions.create(NAMES.get(name, name), goal, auto=True, orchestration=orchestration)
+    """A task of the project a scenario made (project(bench, name, …)), its pod up and its
+    supervisor built here, not in a process of its own."""
+    task = actions.create(NAMES[name], goal, auto=True, orchestration=orchestration)
     actions.start(task.id, supervise=False)
     task, proj = actions.load(task.id)
     return task, make_supervisor(task, proj, actions.task_pod(task.id), load_config())
@@ -290,7 +315,6 @@ def test_propose_the_writer_of_a_project_with_no_command_writes_the_one_it_ran(b
     """No verification command yet: the writer says what builds and tests the project, the task
     (made with --auto here) keeps it for the project, and the gate verifies the task with it."""
     from vivibox import gate, proposal
-    from vivibox.config import load_project
 
     # A second test file the task does not touch: a writer verified by its own file alone would
     # be tempted to name it, and the gate refuses such a command (gate.narrowed_proposal).
@@ -307,7 +331,7 @@ def test_propose_the_writer_of_a_project_with_no_command_writes_the_one_it_ran(b
         assert st.state is State.CHECKPOINT_FINAL, f"verified with it: {st.state}, {st.problem}"
         logs = sorted((task.meta / "log").glob("verify-*.log"))
         assert logs and command in logs[-1].read_text(), "the gate ran the proposed command"
-        assert load_project("propose").verify == [command], "an --auto task keeps a whole command itself"
+        assert the_project("propose").verify == [command], "an --auto task keeps a whole command itself"
     finally:
         finish(task)
 
@@ -513,7 +537,6 @@ def test_propose_a_pipeline_with_debug_output_is_proposed_without_it(bench):
     """The project's pipeline runs mvn -X, which the project's files hand the writer as the
     likeliest command; the command it proposes builds everything without the debug output."""
     from vivibox import proposal
-    from vivibox.config import load_project
 
     files = {**MAVEN_FILES, ".github/workflows/build.yml": DEBUG_PIPELINE}
     project(bench, "debugci", files, [])
@@ -527,7 +550,7 @@ def test_propose_a_pipeline_with_debug_output_is_proposed_without_it(bench):
         refused = [e for e in task.events() if e["type"] == "gate" and e["data"].get("narrowed")]
         print(f"\nproposed: {command!r}; refused before: {[e['data']['narrowed'] for e in refused]}")
         assert st.state is State.CHECKPOINT_FINAL, f"verified with it: {st.state}, {st.problem}"
-        assert load_project("debugci").verify == [command]
+        assert the_project("debugci").verify == [command]
     finally:
         finish(task)
 
@@ -693,9 +716,6 @@ def test_measure_tokens_per_turn_in_one_writer_session(bench):
         print(f"  turn {len(rows)} against turn 1: {last / first:.2f}x the tokens")
     finally:
         finish(task)
-
-
-REVIEWER = os.environ.get("VIVIBOX_BEHAVIOURAL_REVIEWER", "deepseek/deepseek-v4-pro")
 
 
 def plant_a_fake_test(task) -> None:

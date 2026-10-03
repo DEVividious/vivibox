@@ -487,13 +487,16 @@ def review_command(
 # home, and its copy of the committed work, which the host writes and it only reads.
 CONTROL_HOME = "config-control"
 CONTROL_SRC = "control-src"
-# The working directory of the planner's harness in its control container: an empty, read-only
-# tmpfs. A harness loads project configuration from its working directory and runs what it
-# names (opencode 1.18.31: opencode.json and .opencode/ with their MCP commands and plugins;
-# Claude Code 2.1.278: .claude/settings.json hooks and .mcp.json servers; both seen to run in
-# the image), so that directory holds nothing anyone wrote; the copy of the writer's commits is
-# data beside it, read by its path.
+# The working directory of the planner's harness in its control container, and the folder of the
+# task's disk mounted there read-only: an empty git repository of the host's making
+# (control.workdir). A harness loads project configuration from its working directory and runs
+# what it names (opencode 1.18.31: opencode.json and .opencode/ with their MCP commands and
+# plugins; Claude Code 2.1.278: .claude/settings.json hooks and .mcp.json servers; both seen to
+# run in the image), so that directory holds nothing anyone but the host wrote; the copy of the
+# writer's commits is data beside it, read by its path. A git repository, because opencode's
+# attached run prints no events for a turn in a directory that is not one (seen in the image).
 CONTROL_WORK = "/work"
+CONTROL_WORK_DIR = "control-work"
 
 
 def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[str]:
@@ -510,6 +513,7 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
     refuse the writer's range and the reviewer's on its bridge, and its range on theirs."""
     all_mounts = [
         Mount(str(pod.control_src), str(pod.repo), read_only=True),
+        Mount(str(pod.control_work), CONTROL_WORK, read_only=True),
         Mount(str(pod.control_home), "/config"),
         *ca_mounts,
         *(pod.control_mounts or []),
@@ -525,7 +529,6 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
         "--dns", pod.host_ip, "--dns-search", ".",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('control')}",
-        "--tmpfs", f"{CONTROL_WORK}:ro,mode=555,size=65536",
         *pod.limits.flags("control", pod.task_id),
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),

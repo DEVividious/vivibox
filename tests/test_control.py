@@ -192,7 +192,7 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
     assert copy in mounted, "its own copy of the commits, read-only, where the writer has its clone"
     assert [m for m in mounted if str(task.repo) in m] == [copy], "the writer's clone is not mounted"
     assert f"{task.root}/disk/config-control:/config" in mounted
-    for made_here in ("config-control", "control-src"):
+    for made_here in ("config-control", "control-src", "control-work"):
         assert (task.root / "disk" / made_here).is_dir(), "made by vivibox, on the task's disk"
     handoff = f"{task.meta / 'handoff'}:/task/handoff"
     replies = f"{task.meta / 'comments.md'}:/task/handoff/comments.md:ro"
@@ -208,17 +208,14 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
     assert flag(cmd, "--memory-swap") == flag(cmd, "--memory")
     assert flag(cmd, "--pids-limit") == "1024"
     assert flag(cmd, "--cgroup-parent") == f"vivibox-{task.id.replace('-', '_')}.slice"
-    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tmpfs"] == [
-        f"/tmp:exec,mode=1777,size={3 * 2**28}",  # half of its memory
-        "/work:ro,mode=555,size=65536",  # its harness's working directory: empty, nobody's to write
-    ]
+    assert flag(cmd, "--tmpfs") == f"/tmp:exec,mode=1777,size={3 * 2**28}", "half of its memory"
+    assert f"{task.root}/disk/control-work:/work:ro" in mounted, "its harness's working directory"
     assert set(variables(cmd)) == {
         "GIT_OPTIONAL_LOCKS=0",
         "OPENCODE_CONFIG=/task/harness/opencode.json",
         "CLAUDE_CONFIG_DIR=/config/claude",
     }, "git never writes to the clone it reads; nothing of the build's"
     assert cmd[cmd.index("-w") + 1] == "/work" and cmd[-3:] == [pod.image, "sleep", "infinity"]
-    assert not any(m.split(":")[1].startswith("/work") for m in mounted), "nothing is mounted there"
 
 
 @pytest.mark.parametrize(("mode", "has_one"), FLOWS)
@@ -239,7 +236,13 @@ def test_no_container_but_the_planners_mounts_anything_of_the_planners(docker, m
     for name, argv in runs.items():
         if name == "control":
             continue
-        for planners in ("config-control", "control-src", f"{task.id}-control", "harness-control:"):
+        for planners in (
+            "config-control",
+            "control-src",
+            "control-work",
+            f"{task.id}-control",
+            "harness-control:",
+        ):
             assert planners not in argv, f"{name} has {planners}"
     assert f"{task.root}/disk/config:/config" in runs["agent"], "its own home, as before"
 
@@ -824,7 +827,9 @@ def held(directory: str) -> list[str]:
 def test_the_planners_harness_never_works_in_the_copy_of_the_writers_commits(docker):
     """A harness loads project configuration from its working directory and runs what it names
     (an MCP command, a plugin, a hook), and the copy holds what the writer committed. The
-    control container's working directory is an empty read-only tmpfs; the planner's opencode
+    control container's working directory is a folder of the host's making, mounted read-only:
+    a git repository with one empty commit (opencode's attached run prints no events of a turn
+    outside one), no file and no hook; the planner's opencode
     server and its turns are started there, with no directory of their own; Claude Code is
     given no directory besides (it loads skills from each, and the handoff is the writer's to
     write)."""
@@ -833,10 +838,18 @@ def test_the_planners_harness_never_works_in_the_copy_of_the_writers_commits(doc
     pod.up(timeout=1)
     cmd = made(docker, f"vivibox-{task.id}-control")
     work = cmd[cmd.index("-w") + 1]
-    assert work == "/work" and f"{work}:ro,mode=555,size=65536" in cmd
-    targets = [m.split(":")[1] for m in binds(cmd)]
-    assert not any(t == work or t.startswith(work + "/") or work.startswith(t + "/") for t in targets)
-    assert str(task.repo) in targets, "the copy is there, as data, by its path"
+    mounted = {m.split(":")[1]: m for m in binds(cmd)}
+    assert work == "/work" and mounted[work] == f"{pod.control_work}:/work:ro", "the host's, read-only"
+    assert not any(t.startswith(work + "/") or work.startswith(t + "/") for t in mounted), "nothing over it"
+    assert str(task.repo) in mounted and mounted[str(task.repo)].startswith(str(pod.control_src))
+    control.refresh(task, pod)
+    assert sorted(p.name for p in pod.control_work.iterdir()) == [".git"], "nothing of anyone's but git's own"
+    assert not (pod.control_work / ".git" / "hooks").exists(), "no hook, not even a sample"
+    assert git(pod.control_work, "rev-list", "--count", "HEAD") == "1"
+    assert git(pod.control_work, "ls-tree", "-r", "HEAD") == "", "one empty commit"
+    root = git(pod.control_work, "rev-parse", "HEAD")
+    control.refresh(task, pod)
+    assert git(pod.control_work, "rev-parse", "HEAD") == root, "made once: the same project every turn"
     planner = actions.harness_for("planner", pod, task)
     planner.ensure_server()
     planner.turn("Plan.", session="ses_1")
@@ -974,3 +987,45 @@ def test_a_review_reads_the_commit_that_was_verified_not_the_branch_as_it_is_now
     with pytest.raises(repo.RepoError, match="not a commit"):
         control.refresh(task, pod, "--upload-pack=x")
     assert git(pod.control_src, "rev-parse", "HEAD") == verified, "left as it was"
+
+
+def test_the_planners_working_directory_is_not_made_through_a_link_or_without_its_folder(docker, tmp_path):
+    from vivibox import repo
+
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    pod = actions.task_pod(task.id)
+    with pytest.raises(repo.RepoError, match="working directory has no folder"):
+        control.workdir(pod)
+    pod.disk.mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    pod.control_work.symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(repo.RepoError, match="working directory has no folder"):
+        control.workdir(pod)
+    assert not list((tmp_path / "elsewhere").iterdir())
+
+
+def test_a_turn_that_printed_no_events_stops_the_task_as_a_failed_turn(tmp_path):
+    """opencode ending well with nothing printed is no turn: the supervisor is told it failed,
+    does not wait and try again (nothing about it passes with time), and the task stops for
+    you with the reason, instead of going on as if the agent had worked."""
+    from test_supervisor import TEMPLATE as PLAN_TEMPLATE
+    from test_supervisor import make
+
+    class Silent:
+        agent, task_id = "vivibox-demo-1-control", "demo-1"
+
+        def exec(self, *cmd, check=True):
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    harness = opencode.OpenCode(Silent(), "a/m")
+    done = harness.turn("Plan.", session="ses_1")
+    assert not done.ok and done.error == opencode.NO_EVENTS
+    task = create_task(tmp_path, "demo", "Add health endpoint", PLAN_TEMPLATE)
+    waits = []
+    sup, notes = make(task, harness)
+    sup.ports.sleep = waits.append
+    sup.step()
+    st = task.read_state()
+    assert st.paused and st.problem == f"agent turn failed: {opencode.NO_EVENTS}"
+    assert st.state is State.PLAN and waits == [], "no plan checkpoint, and no retry"
+    assert notes == [f"agent turn failed, task paused: {opencode.NO_EVENTS}"]

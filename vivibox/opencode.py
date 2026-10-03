@@ -137,6 +137,8 @@ def parse_events(output: str) -> Turn:
     return turn
 
 
+# What a turn is when opencode ends well and prints no event of it: a failure, never a turn.
+NO_EVENTS = "opencode printed no events of the turn"
 # How long one readiness probe of the server may take.
 PROBE_SECONDS = 10
 
@@ -229,6 +231,10 @@ class OpenCode(Harness):
         turn = parse_events(output)
         if returncode != 0 and turn.ok:
             turn.ok, turn.error = False, (stderr or output).strip()[-2000:]
+        elif turn.ok and not turn.session and not turn.transcript:
+            # Not one event of a session: nothing says a turn ran, whatever the exit code.
+            said = (stderr or output).strip()[-500:]
+            turn.ok, turn.error = False, NO_EVENTS + (f": {said}" if said else "")
         # "Unexpected server error. Check server logs for details." says nothing; the log does.
         if not turn.ok and "server logs" in turn.error and (said := self.server_error()):
             turn.error = f"{turn.error}; server log: {said}"

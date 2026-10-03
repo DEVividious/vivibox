@@ -516,7 +516,12 @@ def test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner
     control.refresh(task, pod)
     there = shlex.quote(str(pod.repo))
     assert bash(planner, f"test -f {there}/opencode.json -a -f {there}/.claude/settings.json").returncode == 0
-    assert bash(planner, "pwd").stdout.strip() == "/work" and bash(planner, "ls -A /work").stdout == ""
+    assert bash(planner, "pwd").stdout.strip() == "/work" and bash(planner, "ls -A /work").stdout.split() == [
+        ".git"
+    ]
+    assert bash(planner, "cd /work && git log --oneline | wc -l").stdout.strip() == "1", (
+        "the host's one empty commit"
+    )
     assert bash(planner, "touch /work/opencode.json").returncode != 0, "nobody writes its working directory"
     harness = opencode.OpenCode(planner, MOCK_MODEL)
     provider_up(planner)
@@ -672,6 +677,7 @@ def test_a_task_started_by_vivibox_runs_its_planner_in_the_control_container(tmp
         planners = json.loads(inspect("{{json .HostConfig.Binds}}", pod.control))
         assert f"{pod.control_src}:{task.repo}:ro" in planners and f"{pod.control_home}:/config" in planners
         assert inspect("{{.Config.WorkingDir}}", pod.control).strip() == "/work"
+        assert f"{pod.control_work}:/work:ro" in planners
         (task.meta / "mock").mkdir()
         shutil.copy(mock_provider.__file__, task.meta / "mock" / "mock_provider.py")
         planner = actions.harness_for("planner", pod, task)

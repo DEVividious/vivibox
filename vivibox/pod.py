@@ -201,6 +201,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return self.disk / podspec.CONTROL_SRC
 
     @property
+    def control_work(self) -> Path:
+        """The working directory of the planner's harness: the host's, empty, read-only there."""
+        return self.disk / podspec.CONTROL_WORK_DIR
+
+    @property
     def has_control(self) -> bool:
         """Whether the task's planner runs in a control container of its own, in its own network."""
         return self.control_mounts is not None
@@ -392,7 +397,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         if self._state(self.control) == "running":
             return
         self._run("docker", "rm", "-f", self.control, check=False)
-        for folder in (self.control_home, self.control_src):
+        for folder in (self.control_home, self.control_src, self.control_work):
             try:
                 folder.mkdir(parents=True, exist_ok=True)
             except OSError as e:

@@ -148,10 +148,11 @@ write: the writer, or a process it left running, can replace the planner's `plan
 `question.md` before vivibox reads it. That is not the planner's history, and the draft comes to
 you to read at the plan's checkpoint; it is a known limit. The planner also reads the
 repository, which is the writer's work: what a file there says is data to it, by its brief, not
-by enforcement. What is enforced is where the planner's harness works. It starts in an empty,
-read-only directory of its container, `/work`. The copy of the commits is beside it and is
-read as data, by its path; it is never the harness's working directory, and Claude Code there
-is given no directory besides its own.
+by enforcement. What is enforced is where the planner's harness works. It starts in a
+directory vivibox made, `/work`: a git repository with one empty commit and nothing else, on
+the task's disk, read-only in the container. The copy of the commits is beside it and is read
+as data, by its path; it is never the harness's working directory, and Claude Code there is
+given no directory besides its own.
 
 The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
 planner's session id in the task's state and the transcripts of its turns in the task's log.

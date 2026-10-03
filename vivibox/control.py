@@ -91,6 +91,31 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
 HOST_GIT = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
 
 
+def workdir(pod: Pod) -> None:
+    """The working directory of the planner's harness, made once: a git repository of the
+    host's with one empty commit and nothing else, no hook and no file. Mounted read-only in the
+    control container, it is where the harness looks for a project's configuration and finds
+    none; a repository with a commit, so opencode knows the directory as one project from turn
+    to turn without writing there."""
+    work = pod.control_work
+    if not work.is_dir() or work.is_symlink():
+        raise repo.RepoError(f"the planner's working directory has no folder at {work}; start the task again")
+    if (work / ".git").exists():
+        return
+    repo.git("init", "--quiet", "--template=", "--initial-branch", "main", str(work), env=HOST_GIT)
+    who = ("-c", "user.name=vivibox", "-c", "user.email=vivibox@localhost")
+    repo.git(
+        *who,
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "The planner's working directory",
+        cwd=work,
+        env=HOST_GIT,
+    )
+
+
 def reviewed_commit(task: Task) -> str:
     """The commit the planner reads: the one the verification passed while the task is in its
     review, so the supervisor reads what was verified whatever the branch points at since; ""
@@ -106,7 +131,9 @@ def refresh(task: Task, pod: Pod, commit: str = "") -> None:
     limit, and only its commits are taken: its .git, where the writer can leave what git follows
     to a command, is never what the planner's git works in. The copy stands on commit when one
     is given (the verified one, for a review; not on the task's branch, it is refused), else on
-    the task's branch as it is. Before the planner's first turn and before each one after it."""
+    the task's branch as it is. Before the planner's first turn and before each one after it;
+    the harness's working directory (workdir) is made with it."""
+    workdir(pod)
     src, branch = pod.control_src, repo.branch_name(task.id)
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"the planner's copy of the work has no folder at {src}; start the task again")

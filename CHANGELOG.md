@@ -64,13 +64,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   there. The planner reads the work in a copy of the task's commits that vivibox makes on the
   task's disk and mounts read-only where the writer has its clone; the writer's clone itself is
   not mounted there, and for a review the copy stands on the commit the verification passed.
-  The planner's harness works in an empty read-only directory, `/work`, and reads that copy as
-  data, by its path. The agent's container holds the writer's key alone (a provider both use is
-  in both), and, where a reviewer or the planner reads the work, no longer writes the task's
-  review folder, where vivibox reads the verdict. `vivibox stop` stops the control container,
-  and `vivibox delete` removes it with its network, its home and its secrets. A Single agent
-  task has neither the container nor the network: its planner's range stays reserved. Tasks
-  created before this change are from an earlier vivibox: delete them and create them again.
+  The planner's harness works in a read-only directory of vivibox's making, `/work` (a git
+  repository with one empty commit and nothing else), and reads that copy as data, by its path.
+  The agent's container holds the writer's key alone (a provider both use is in both), and,
+  where a reviewer or the planner reads the work, no longer writes the task's review folder,
+  where vivibox reads the verdict. An opencode turn that ends well and prints no event of
+  itself is a failed turn, and the task stops for you with that reason, instead of going on as
+  if the agent had worked. `vivibox stop` stops the control container, and `vivibox delete`
+  removes it with its network, its home and its secrets. A Single agent task has neither the
+  container nor the network: its planner's range stays reserved. Tasks created before this
+  change are from an earlier vivibox: delete them and create them again.
 - A task keeps the flow it was created with: `agent_orchestration_mode` in `config.toml`, and
   the Flow row under `k`, are for the tasks you create after a change, where a running task
   followed the file before. Which containers a task's pod has depends on its flow.

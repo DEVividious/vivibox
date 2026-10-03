@@ -271,20 +271,19 @@ def refused_at_once(side, url: str) -> None:
     assert time.monotonic() - started < 4, f"{url}: refused, not left to time out"
 
 
-def packets_seen(env, sniffer: str, port: int, talk) -> int:
-    """How many packets tcpdump in the nested container, on every interface of the namespace it
+def packets_seen(env, sniffer: str, port: int, talk) -> list[str]:
+    """The packets tcpdump in the nested container, on every interface of the namespace it
     shares with the sidecar (--network host of the pod's Docker), prints for the port while
-    talk() runs: at most 5, then it stops; none, and it gives up after six seconds."""
-    sniff = (
-        f"docker exec {sniffer} timeout -s INT 6 tcpdump -i any -nn -l -c 5 port {port} 2>/dev/null | wc -l"
-    )
+    talk() runs, a line each: at most 5, then it stops; none, and it gives up after six
+    seconds. The lines, so a stray packet says where it came from."""
+    sniff = f"docker exec {sniffer} timeout -s INT 6 tcpdump -i any -nn -l -c 5 port {port} 2>/dev/null"
     p = subprocess.Popen(
         ["docker", "exec", env["pod"].agent, "bash", "-c", sniff], stdout=subprocess.PIPE, text=True
     )
     time.sleep(2)  # listening before the first packet
     talk()
     out, _ = p.communicate(timeout=60)
-    return int(out.strip() or 0)
+    return [line for line in out.splitlines() if line.strip()]
 
 
 def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_the_other(env):
@@ -292,12 +291,15 @@ def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_th
     --network host and NET_RAW runs tcpdump on every interface of the sidecar's namespace, which
     the agent and the gate share: it sees the agent talking to a listener of its own (the method
     works), and nothing of the reviewer talking to a listener in its own container, the probe.
-    The reviewer cannot reach the sidecar's address and the agent cannot reach the reviewer's,
-    refused at once; the reviewer resolves names and reaches the internet (open until names are
-    allowed by policy), and host.docker.internal there is its own network's gateway."""
+    The reviewer cannot reach the sidecar's address and the agent cannot reach the reviewer's
+    (dropped by the engine), and an address of the other's range nobody holds is refused at once
+    by the host's rules; the reviewer resolves names and reaches the internet (open until names
+    are allowed by policy), and host.docker.internal there is its own network's gateway."""
     pod = env["pod"]
     review_up(pod)
-    reviewer, port, sniffer = pod.review_side(), 39418, "d1sniff"
+    # Ports nothing in the pod uses: the harness server in the writer's namespace listens on
+    # 39418, and what probes it would be seen by the sniffer as traffic of the writer's own.
+    reviewer, port, sniffer = pod.review_side(), 38427, "d1sniff"
     agent(env, f"docker rm -f {sniffer}", check=False)
     agent(env, f"docker run -d --name {sniffer} --network host --cap-add NET_RAW alpine:3 sleep 600")
     try:
@@ -306,13 +308,12 @@ def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_th
         listen(pod, port, "127.0.0.1")
         time.sleep(1)
         probe = f"for i in 1 2 3; do curl -fsS -o /dev/null http://127.0.0.1:{port}/; done"
-        assert packets_seen(env, sniffer, port, lambda: pod.exec("bash", "-c", probe)) > 0, "the method"
+        assert packets_seen(env, sniffer, port, lambda: pod.exec("bash", "-c", probe)), "the method"
         assert reviewer.exec("bash", "-c", probe, check=False).returncode == 0, (
             "the reviewer's listener answers it"
         )
-        assert packets_seen(env, sniffer, port, lambda: reviewer.exec("bash", "-c", probe)) == 0, (
-            "not one packet of the reviewer's in the writer's namespace"
-        )
+        seen = packets_seen(env, sniffer, port, lambda: reviewer.exec("bash", "-c", probe))
+        assert seen == [], f"a packet of the reviewer's in the writer's namespace: {seen}"
     finally:
         agent(env, f"docker rm -f {sniffer}", check=False)
     sidecar, own = pod.recorded_network().address, pod.recorded_network("r").address
@@ -322,18 +323,37 @@ def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_th
     assert answers(pod, f"http://{sidecar}:{port + 1}/") and answers(reviewer, f"http://{own}:{port + 1}/"), (
         "each listener is real, on its own network's address"
     )
-    refused_at_once(reviewer, f"http://{sidecar}:{port + 1}/")
-    refused_at_once(pod, f"http://{own}:{port + 1}/")
+    # A live container's address on the other bridge: the engine drops the SYN before the host's
+    # rules see it (Docker's own isolation of other networks' container addresses; observed on
+    # the host, as for a neighbouring task), so each is unreachable, refused or timed out. An
+    # address of the other range that no container holds reaches the host's rules, which refuse
+    # it at once: the W-R rule standing on its own, should the engine's drop ever go.
+    unreachable(reviewer, f"http://{sidecar}:{port + 1}/")
+    unreachable(pod, f"http://{own}:{port + 1}/")
+    refused_at_once(reviewer, f"http://{pod.recorded_network().subnet[13]}:{port + 1}/")
+    refused_at_once(pod, f"http://{pod.recorded_network('r').subnet[5]}:{port + 1}/")
     assert answers(reviewer, "https://example.com/"), "the reviewer's internet, through the host's DNS"
     found = reviewer.exec("getent", "hosts", "host.docker.internal").stdout.split()
     assert found[:1] == [pod.recorded_network("r").gateway], "its own gateway, never the writer's"
     pod.review_down()
 
 
+def unreachable(side, url: str) -> None:
+    """A connection that never succeeds: refused at once by the host's rules, or dropped before
+    them (curl's time limit, exit 28)."""
+    done = side.exec("curl", "-sS", "-m", "5", "-o", "/dev/null", url, check=False)
+    assert done.returncode != 0, f"{url}: reached"
+
+
 def test_a_neighbouring_pod_is_unreachable_from_the_writer_and_from_the_reviewer(env):
     """T13: another task's pod listens on every address of its namespace; from this task's agent
-    and from its reviewer the connection is refused at once, by the rules of each bridge, which
-    refuse the whole pool. The neighbour's own agent reaches it, so the listener is real."""
+    and from its reviewer it is never reached. Observed on the host: a SYN to a neighbour's
+    live container address leaves the bridge and nothing comes back, dropped by the engine
+    (Docker's own isolation of other networks' container addresses) before the host's rules see
+    it; so a live address is asserted unreachable, refused or timed out. An address of the
+    neighbour's block that no container holds reaches the host's rules, which refuse it at once,
+    by the pool: the rule that stands on its own should the engine's drop ever go. The
+    neighbour's own agent reaches its listener, so it is real."""
     pod = env["pod"]
     task_id = check_id("neighbour")
     folder = own_folder(task_id)
@@ -353,8 +373,12 @@ def test_a_neighbouring_pod_is_unreachable_from_the_writer_and_from_the_reviewer
         time.sleep(1)
         assert answers(other, f"http://{address}:8000/"), "its own agent reaches it"
         review_up(pod)
-        refused_at_once(pod, f"http://{address}:8000/")
-        refused_at_once(pod.review_side(), f"http://{address}:8000/")
+        reviewer = pod.review_side()
+        unreachable(pod, f"http://{address}:8000/")
+        unreachable(reviewer, f"http://{address}:8000/")
+        unheld = str(other.recorded_network().subnet[13])  # of the neighbour's block, nobody's
+        refused_at_once(pod, f"http://{unheld}:8000/")
+        refused_at_once(reviewer, f"http://{unheld}:8000/")
     finally:
         pod.review_down()
         assert other.remove() == ""

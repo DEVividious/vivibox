@@ -20,7 +20,8 @@
         binds, owned by the owner of <dir>. Of a mounted disk a no-op; of an image without a
         filesystem a refusal, never a format over it.
     vivibox-host [--dry-run] detach-disk <task id> {"dir": "<tasks dir>/<task id>"}
-        Unmounts it and frees its loop device; never deletes the image (the caller does, after).
+        Unmounts it (umount2 on the task's directory held open) and frees its loop device; never
+        deletes the image (the caller does, after).
     vivibox-host [--dry-run] grow-disk <task id> {"dir": "<tasks dir>/<task id>", "size": "40g"}
         A larger image, loop device and filesystem; refuses to shrink.
         <dir> is one level under the tasks directory of /etc/vivibox/host.json (root's, written
@@ -36,6 +37,7 @@ gives it only what it allocated itself and what the host resolved; nothing from 
 """
 
 import contextlib
+import ctypes
 import errno
 import hashlib
 import ipaddress
@@ -91,6 +93,8 @@ DISK_UNITS = {"k": 2**10, "m": 2**20, "g": 2**30, "t": 2**40}
 # From a gigabyte to two terabytes; vivibox/podspec.py takes the same (a test holds them equal).
 DISK_SMALLEST, DISK_LARGEST = 2**30, 2 * 2**40
 DISK_OPTIONS = "discard,nosuid,nodev"
+# umount2(2): the target is not followed when it is a link (linux/fs.h).
+UMOUNT_NOFOLLOW = 8
 LOOP = re.compile(r"/dev/loop[0-9]+")
 REJECT = "reject with icmpx admin-prohibited"
 TCP_RESET = "meta l4proto tcp reject with tcp reset"
@@ -415,6 +419,17 @@ class Steps:
             print(f"# would {what}")
         return not self.dry
 
+    def umount2(self, target, flags):
+        """The syscall itself, so no library resolves the target again: libc's umount2, errno
+        said by name."""
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        libc.umount2.restype = ctypes.c_int
+        if libc.umount2(target, flags) != 0:
+            code = ctypes.get_errno()
+            name = errno.errorcode.get(code, code)
+            raise Refused(f"umount2 {target.decode()} failed: {os.strerror(code)} ({name})")
+
 
 def owned(fd, uid, gid):
     """The directory the descriptor holds, the task owner's and 0755 (the helper's umask is 077):
@@ -518,14 +533,20 @@ def detach_disk(spec, runner, dry):
     if is_mounted:
         if found is None:
             raise Refused(f"{mountpoint} is mounted and not a directory of the task's")
+        # The task's directory held open, and the mount point its last component, resolved by
+        # the kernel inside it (no link followed): a rename of the directory cannot redirect it,
+        # and the mounted directory itself cannot be renamed or exchanged (busy). Not a
+        # descriptor of the mounted root: that is a reference on the mount, and umount2 is EBUSY.
         if dry:
-            steps.run(["umount", mountpoint])
+            print(f"# would run: umount2 /proc/self/fd/N/{DISK_MOUNT} UMOUNT_NOFOLLOW")
         else:
-            target = open_dir(mountpoint)
+            parent = open_dir(where)
             try:
-                steps.run(["umount", "--no-canonicalize", fd_path(target)], pass_fds=(target,))
+                steps.umount2(f"{fd_path(parent)}/{DISK_MOUNT}".encode(), UMOUNT_NOFOLLOW)
             finally:
-                os.close(target)
+                os.close(parent)
+            if mounted(runner, mountpoint):
+                raise Refused(f"{mountpoint} is still mounted after umount2; nothing more is done")
     if device is not None:
         steps.run(["losetup", "-d", device])
 

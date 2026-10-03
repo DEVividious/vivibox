@@ -690,14 +690,65 @@ def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(t
     (tasks / "shop-1" / "disk.img").write_bytes(b"")
     host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
     (tasks / "shop-1" / "disk").mkdir()
+    unmounted = unmounting(host)
     code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
     assert code == 0
-    [umount, freed] = host.privileged()
-    assert umount[:2] == ["umount", "--no-canonicalize"] and re.fullmatch(r"/proc/self/fd/\d+", umount[2]), (
-        "by its directory fd, which umount(8) must hand the kernel as it is"
+    [(target, flags)] = unmounted
+    assert re.fullmatch(rb"/proc/self/fd/\d+/disk", target) and flags == helper.UMOUNT_NOFOLLOW, (
+        "the syscall itself, on the task's directory held open and the last component resolved in it: "
+        "a descriptor of the mounted root would be a reference on the mount, and umount2 EBUSY"
     )
-    assert freed == ["losetup", "-d", "/dev/loop3"]
+    assert host.privileged() == [["losetup", "-d", "/dev/loop3"]], "no umount command"
     assert (tasks / "shop-1" / "disk.img").exists(), "the caller deletes it, after a detach that worked"
+
+
+def unmounting(host, works=True):
+    """Steps.umount2 replaced: records the call, and the fake forgets the mount when it works."""
+    calls = []
+
+    def umount2(self, target, flags):
+        calls.append((target, flags))
+        if works:
+            host.mounted.clear()
+
+    helper.Steps.umount2 = umount2
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def real_umount2(monkeypatch):
+    monkeypatch.setattr(helper.Steps, "umount2", helper.Steps.umount2)
+
+
+def test_a_detach_that_leaves_the_mount_is_refused_with_the_reason(tasks, capsys):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    (tasks / "shop-1" / "disk.img").write_bytes(b"")
+    (tasks / "shop-1" / "disk").mkdir()
+    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
+    unmounting(host, works=False)
+    code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
+    assert code == 1 and host.privileged() == [], "the loop device stays with a mount still there"
+    assert "still mounted" in capsys.readouterr().err
+
+
+def test_the_real_umount2_is_the_kernels_with_nofollow(tasks):
+    """Not a library that resolves the path again: the syscall, told not to follow a link."""
+    assert helper.UMOUNT_NOFOLLOW == 8
+    with pytest.raises(helper.Refused, match="umount2 .* failed: .*"):
+        helper.Steps(None, False).umount2(b"/proc/self/fd/9999/disk", helper.UMOUNT_NOFOLLOW)
+
+
+def test_the_dry_run_of_a_detach_says_the_syscall(tasks, capsys):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    (tasks / "shop-1" / "disk.img").write_bytes(b"")
+    (tasks / "shop-1" / "disk").mkdir()
+    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
+    unmounted = unmounting(host)
+    code = helper.main(["--dry-run", "detach-disk", "shop-1", disk_only(tasks)], run=host, euid=1000)
+    assert code == 0 and unmounted == [] and host.privileged() == []
+    out = capsys.readouterr().out
+    assert "# would run: umount2 /proc/self/fd/N/disk UMOUNT_NOFOLLOW" in out
+    assert "losetup -d /dev/loop3" in out
 
 
 def test_detach_of_a_detached_disk_does_nothing_and_says_so(tasks, capsys):
@@ -841,8 +892,9 @@ def test_a_mount_point_that_is_a_link_is_refused_before_anything_runs(tasks, tmp
     with open(tasks / "shop-1" / "disk.img", "wb") as f:
         f.truncate(2**30)
     given = disk(tasks=tasks, size="40g") if op != "detach-disk" else disk_only(tasks)
+    unmounted = unmounting(host)
     code, _ = call(op, "shop-1", given, host=host)
-    assert code == 1 and host.calls == [], op
+    assert code == 1 and host.calls == [] and unmounted == [], op
     assert "symbolic link" in capsys.readouterr().err
     assert elsewhere.stat().st_mode == elsewhere.stat().st_mode and not (elsewhere / "docker").exists()
 

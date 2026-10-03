@@ -121,6 +121,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `detach-disk` unmounts a task's disk again: the helper held the mounted root open while it
+  called `umount`, which is a reference on the mount, so every detach ended "target is busy"
+  and the disk stayed mounted after the task was deleted. It now holds the task's directory
+  open and unmounts `disk` inside it by the syscall itself (`umount2`, no link followed), and
+  refuses, saying so, when the mount is still there after.
 - The root helper gives `mount` and `umount` the mount point's descriptor with
   `--no-canonicalize`: without it they read the descriptor's link back to a path and the kernel
   resolved that path anew, so the directory held open protected nothing. `pod_cpus` counts the

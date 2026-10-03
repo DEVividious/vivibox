@@ -209,7 +209,7 @@ def planned(live):
     """The planner's first turns in its control container, on opencode and on Claude Code: two
     conversations of the planner's, each in its own store there."""
     on_opencode = turn(opencode.OpenCode(live.planner, MOCK_MODEL), "Planner turn one: outline the plan.")
-    on_claude = turn(claudecode.ClaudeCode(live.planner, CLAUDE_MODEL), "Planner turn one, on Claude.")
+    on_claude = turn(claudecode.ClaudeCode(live.planner, CLAUDE_MODEL, ()), "Planner turn one, on Claude.")
     return SimpleNamespace(opencode=on_opencode.session, claude=on_claude.session)
 
 
@@ -228,22 +228,30 @@ def test_the_planners_conversation_store_is_in_no_path_of_the_writers(live, plan
     transcript = f"{claudecode.CONFIG_DIR}/projects/*/{planned.claude}.jsonl"
     assert bash(planner, f"compgen -G '{transcript}'").returncode == 0, "and its Claude Code transcript"
     assert bash(pod, f"compgen -G '{transcript}'").returncode != 0, "no such transcript for the writer"
+    # Where the writer reads or writes: the agent's own mounts, each search bounded.
     for session in (planned.opencode, planned.claude):
-        found = bash(pod, f"grep -rlsF -- {session} /config /run /tmp {pod.repo} 2>/dev/null")
+        found = bash(pod, f"timeout 60 grep -rlsF -- {session} /config {secrets.MOUNT} /tmp {pod.repo}")
         assert found.stdout.strip() == "", f"the planner's session in the writer's files: {found.stdout}"
-    # A nested container that mounts all of the pod's root: by name wherever the pod's root
-    # reaches (the tasks directory as the sidecar has it, its Docker's data), and by the
-    # session's id in what it holds.
+        assert found.returncode in (1, 2), "the search ended by itself, within its time"
+    # A nested container with all of the pod's root: the task's folder as the sidecar has it
+    # (the clone and the verification's folder, nothing else of the disk) and the top of its
+    # Docker's data, by name and, in the task's folder, by the session's id. No search of image
+    # layers: nothing of the planner's is mounted where they are.
+    here = f"/host{live.task.root}"
     named = f"\\( -name config-control -o -name control-src -o -name '{planned.claude}.jsonl' \\)"
-    roots = f"/host{TASKS_ROOT} /host/var/lib/docker /host/tmp /host/root /host/run"
     look = (
-        f"find /host -xdev {named} 2>/dev/null; find {roots} {named} 2>/dev/null; "
-        f"grep -rlsF -- {planned.opencode} {roots} 2>/dev/null; echo looked"
+        f"timeout 60 find {here} -maxdepth 6 {named}; "
+        f"timeout 60 find /host/var/lib/docker /host/run /host/tmp -maxdepth 2 {named}; "
+        f"timeout 60 grep -rlsF -- {planned.opencode} {here}; "
+        f"ls {here}/disk 2>/dev/null | grep -v '^gate$'; echo looked"
     )
     for options in ("-v /:/host", "--privileged -v /:/host"):
+        started = time.monotonic()
         seen = nested(live, options, look)
         assert seen.stdout.strip() == "looked", f"{options}: {seen.stdout} {seen.stderr[-300:]}"
-    assert "config-control" not in " ".join(pod.agent_command() + pod.sidecar_command())
+        assert time.monotonic() - started < 200, "a bounded search"
+    for argv in (pod.agent_command(), pod.sidecar_command()):
+        assert not any(name in " ".join(argv) for name in ("config-control", "control-src"))
 
 
 def test_the_planners_server_and_password_are_out_of_the_writers_reach(live, planned):
@@ -333,7 +341,7 @@ def test_nothing_planted_from_the_writers_side_reaches_the_planners_next_request
         opencode.OpenCode(planner, MOCK_MODEL), "Planner resumes: review the work.", planned.opencode
     )
     assert resumed.session == planned.opencode
-    on_claude = turn(claudecode.ClaudeCode(planner, CLAUDE_MODEL), "Resume and proceed.", planned.claude)
+    on_claude = turn(claudecode.ClaudeCode(planner, CLAUDE_MODEL, ()), "Resume and proceed.", planned.claude)
     assert on_claude.session == planned.claude
     sent = asked(planner)[before:]
     assert sent, "the resumed turns asked the stand-in provider"
@@ -345,23 +353,36 @@ def test_nothing_planted_from_the_writers_side_reaches_the_planners_next_request
     assert any("Planner turn one, on Claude." in " ".join(mock_provider.said_by(b, "user")) for b in sent)
 
 
-def test_the_same_planting_in_the_writers_own_store_does_reach_its_next_request(live):
-    """The negative control: the store injection, aimed at the writer's own conversation in the
-    agent's container, is in the request its resumed turn sends, as a user message. The method
-    can tell a planted message; the planner's request above had none."""
+def test_each_planting_in_the_writers_own_conversation_does_reach_its_next_request(live):
+    """The negative controls: the same three plantings, aimed at the writer's own conversations
+    in the agent's container (its store, its server's API with its own password, its own Claude
+    Code transcript), are each in the request its resumed turn sends, as a user message. Each
+    method can tell a planted message; the planner's requests above had none."""
     pod = live.pod
     writer = opencode.OpenCode(pod, MOCK_MODEL)
     first = turn(writer, "Writer turn one.")
-    planted = bash(
+    in_store = bash(
         pod, f"node /task/mock/inject_store.js {OPENCODE_DB} {first.session} {shlex.quote(FORGED_STORE)}"
     )
-    assert planted.returncode == 0, planted.stderr
+    assert in_store.returncode == 0, in_store.stderr
+    by_api = bash(pod, post_message(writer.url, first.session, FORGED_API))
+    assert by_api.returncode == 0, by_api.stderr
     before = len(asked(pod))
     turn(writer, "Writer resumes.", first.session)
-    sent = asked(pod)[before:]
-    assert any(FORGED_STORE in " ".join(mock_provider.said_by(body, "user")) for body in sent), (
-        "the planted message, as the user's, in the writer's own resumed request"
+    said = [" ".join(mock_provider.said_by(body, "user")) for body in asked(pod)[before:]]
+    assert any(FORGED_STORE in text for text in said), "planted in the store: in its resumed request"
+    assert any(FORGED_API in text for text in said), "planted through the server: in its resumed request"
+    on_claude = claudecode.ClaudeCode(pod, CLAUDE_MODEL)
+    one = turn(on_claude, "Writer turn one, on Claude.")
+    transcript = f"{claudecode.CONFIG_DIR}/projects/*/{one.session}.jsonl"
+    in_file = bash(
+        pod, f"node /task/mock/inject_file.js $(compgen -G '{transcript}') {shlex.quote(FORGED_FILE)}"
     )
+    assert in_file.returncode == 0, in_file.stderr
+    before = len(asked(pod))
+    turn(on_claude, "Resume and proceed.", one.session)
+    said = [" ".join(mock_provider.said_by(body, "user")) for body in asked(pod)[before:]]
+    assert any(FORGED_FILE in text for text in said), "planted in the transcript: in its resumed request"
 
 
 def test_the_planners_traffic_is_not_on_the_writers_wire(live):
@@ -450,6 +471,84 @@ def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_wri
     control.refresh(task, pod)
 
 
+def committed_harness_configuration(task) -> dict[str, Path]:
+    """What a writer can commit for a harness to load from its working directory and run: an
+    opencode.json with a local MCP command, .opencode/ plugins, a .claude/settings.json with
+    hooks and a .mcp.json server. Each writes a marker in the handoff, which every container
+    of the task's can write. Returns the markers by what would write them."""
+    clone, ran = task.repo, "/task/handoff"
+    marks = {name: task.meta / "handoff" / f"ran-{name}" for name in ("mcp", "plugin", "hook", "claude-mcp")}
+    command = lambda name: ["sh", "-c", f"touch {ran}/ran-{name}; sleep 30"]  # noqa: E731
+    (clone / "opencode.json").write_text(
+        json.dumps({"mcp": {"planted": {"type": "local", "command": command("mcp"), "enabled": True}}})
+    )
+    plugin = (
+        f'export const Planted = async () => {{ require("fs").writeFileSync("{ran}/ran-plugin", "x"); '
+        "return {}; };\n"
+    )
+    for folder in (".opencode/plugin", ".opencode/plugins"):
+        (clone / folder).mkdir(parents=True, exist_ok=True)
+        (clone / folder / "planted.js").write_text(plugin)
+    hook = [{"hooks": [{"type": "command", "command": f"touch {ran}/ran-hook"}]}]
+    (clone / ".claude").mkdir(exist_ok=True)
+    (clone / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {"enableAllProjectMcpServers": True, "hooks": {"SessionStart": hook, "UserPromptSubmit": hook}}
+        )
+    )
+    (clone / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"planted": {"command": "sh", "args": ["-c", command("claude-mcp")[2]]}}})
+    )
+    sh("git", "add", "-A", cwd=clone)
+    sh("git", "commit", "-q", "-m", "Add harness configuration", cwd=clone)
+    return marks
+
+
+def test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner(live):
+    """The copy of the commits is data to the planner's harness, never its working directory:
+    with an opencode.json (a local MCP command), .opencode/ plugins, .claude/settings.json hooks
+    and a .mcp.json server committed by the writer and in the copy, the planner's opencode
+    server, started again, and a turn of each harness leave no marker. The positive control:
+    the same commit as the working directory of the writer's harnesses in the agent's container
+    does write them, so the method can tell."""
+    task, pod, planner = live.task, live.pod, live.planner
+    marks = committed_harness_configuration(task)
+    control.refresh(task, pod)
+    there = shlex.quote(str(pod.repo))
+    assert bash(planner, f"test -f {there}/opencode.json -a -f {there}/.claude/settings.json").returncode == 0
+    assert bash(planner, "pwd").stdout.strip() == "/work" and bash(planner, "ls -A /work").stdout == ""
+    assert bash(planner, "touch /work/opencode.json").returncode != 0, "nobody writes its working directory"
+    harness = opencode.OpenCode(planner, MOCK_MODEL)
+    provider_up(planner)
+    harness.restart_server()  # a server reads its configuration at its start
+    turn(harness, "Planner: read the work.")
+    turn(claudecode.ClaudeCode(planner, CLAUDE_MODEL, ()), "Planner on Claude: read the work.")
+    time.sleep(2)
+    assert [name for name, mark in marks.items() if mark.exists()] == [], "the writer's command ran in P"
+    cwds = bash(
+        planner,
+        "for p in /proc/[0-9]*; do grep -qa 'opencode' $p/cmdline 2>/dev/null && readlink $p/cwd; done",
+    )
+    assert set(cwds.stdout.split()) <= {"/work"}, f"a harness process of the planner's works in {cwds.stdout}"
+    try:
+        writer = opencode.OpenCode(pod, MOCK_MODEL)
+        provider_up(pod)
+        writer.restart_server()
+        turn(writer, "Writer: say hello.")
+        turn(claudecode.ClaudeCode(pod, CLAUDE_MODEL), "Writer on Claude: say hello.")
+        time.sleep(2)
+        ran = sorted(name for name, mark in marks.items() if mark.exists())
+        assert "mcp" in ran and "plugin" in ran, f"opencode in the clone ran {ran}: the method"
+        assert "hook" in ran, f"Claude Code in the clone ran {ran}: the method"
+    finally:
+        sh("git", "rm", "-rq", "opencode.json", ".opencode", ".claude", ".mcp.json", cwd=task.repo)
+        sh("git", "commit", "-q", "-m", "Remove harness configuration", cwd=task.repo)
+        for mark in marks.values():
+            mark.unlink(missing_ok=True)
+        opencode.OpenCode(pod, MOCK_MODEL).restart_server()
+        control.refresh(task, pod)
+
+
 def test_the_control_container_runs_under_the_tasks_slice_with_its_limits(live, planned, capsys):
     """Its scope is under the task's slice with the control container's memory and process
     limits; the memory its two harnesses' turns left in use is printed, for the record."""
@@ -486,7 +585,7 @@ def test_the_planners_conversation_survives_a_stop_and_a_start(live, planned):
     # The container was made again: its stand-in provider's log holds this turn's requests alone.
     said = " ".join(text for body in asked(planner) for text in mock_provider.said_by(body, "user"))
     assert "Planner turn one: outline the plan." in said and "Planner, after the restart." in said
-    on_claude = claudecode.ClaudeCode(planner, CLAUDE_MODEL)
+    on_claude = claudecode.ClaudeCode(planner, CLAUDE_MODEL, ())
     assert on_claude.session_exists(planned.claude), "nor is the Claude Code transcript gone"
 
 
@@ -518,3 +617,79 @@ def test_deleting_a_task_leaves_nothing_of_its_control_container():
     assert not Path(f"/sys/class/net/{bridge}").exists()
     assert not pod.control_home.exists() and not pod.control_src.exists() and not task.root.exists()
     assert not secrets.runtime_dir(control.secrets_id(task.id)).exists()
+
+
+@pytest.mark.real_start
+def test_a_task_started_by_vivibox_runs_its_planner_in_the_control_container(tmp_path, monkeypatch):
+    """The product's own assembly, not a pod made by hand: a task created and started by
+    actions (pod_of, the keys and harness files of each container, the copy, both servers),
+    its planner's harness from harness_for, one turn against the stand-in provider; then a
+    stop and a delete that leave nothing."""
+    from vivibox import actions, keys, providers
+
+    if not TASKS_ROOT.is_dir():
+        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
+    image.build()
+    machine = load_config()  # this machine's pool and address, before the test's own files
+    name = f"ctl{check_id('x').split('-')[0][1:]}"
+    source = tmp_path / "source"
+    source.mkdir()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.name", "T"),
+        ("config", "user.email", "t@e.c"),
+    ):
+        sh("git", *args, cwd=source)
+    (source / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    sh("git", "add", ".", cwd=source)
+    sh("git", "commit", "-q", "-m", "Base", cwd=source)
+    cfg = tmp_path / "config"
+    (cfg / "projects").mkdir(parents=True)
+    (cfg / "config.toml").write_text(
+        f'tasks_dir = "{TASKS_ROOT}"\nagent_orchestration_mode = "supervisor_worker"\n'
+        f'[roles.planner]\nharness = "opencode"\nmodel = "{MOCK_MODEL}"\n'
+        f'[roles.writer]\nharness = "opencode"\nmodel = "{MOCK_MODEL}"\n'
+        f'[network]\npool = "{machine.network_pool}"\nhost_address = "{machine.host_address}"\n'
+    )
+    (cfg / "projects" / f"{name}.toml").write_text(f'repo = "{source}"\nverify = ["true"]\n')
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    assert not keys.list_keys(), "a key store of the test's own, empty"
+    mock = dict(mock_provider.opencode_config(MOCK_PORT)["provider"][mock_provider.PROVIDER])
+    providers._save(providers.path(), {mock_provider.PROVIDER: {**mock, providers.KEYLESS: True}})
+    monkeypatch.setattr(actions, "available_models", lambda refresh=False: {})
+    task = actions.create(name, "Add divide")
+    _, project = actions.load(task.id)
+    try:
+        assert task.read_state().orchestration == "supervisor_worker"
+        actions.start(task.id, supervise=False)
+        pod = actions.task_pod(task.id)
+        inspect = lambda what, container: sh("docker", "inspect", "-f", what, container).stdout  # noqa: E731
+        agents = inspect("{{json .HostConfig.Binds}}", pod.agent)
+        assert "control" not in agents and f"{task.meta / 'review'}:/task/review" not in agents
+        planners = json.loads(inspect("{{json .HostConfig.Binds}}", pod.control))
+        assert f"{pod.control_src}:{task.repo}:ro" in planners and f"{pod.control_home}:/config" in planners
+        assert inspect("{{.Config.WorkingDir}}", pod.control).strip() == "/work"
+        (task.meta / "mock").mkdir()
+        shutil.copy(mock_provider.__file__, task.meta / "mock" / "mock_provider.py")
+        planner = actions.harness_for("planner", pod, task)
+        assert planner.pod.agent == pod.control
+        assert planner.healthy(), "its own server, started by the start"
+        done = turn(planner, "Planner: outline the plan.")
+        assert planner.session_exists(done.session)
+        assert "Planner: outline the plan." in json.dumps(asked(planner.pod))
+        writer = actions.harness_for("writer", pod, task)
+        assert writer.pod.agent == pod.agent and not writer.session_exists(done.session)
+        own = (secrets.runtime_dir(control.secrets_id(task.id)) / secrets.PASSWORD).read_text()
+        assert own != (secrets.runtime_dir(task.id) / secrets.PASSWORD).read_text()
+        assert bash(planner.pod, f"cd {shlex.quote(str(task.repo))} && git log --oneline").returncode == 0
+        actions.stop(task)
+        assert not secrets.runtime_dir(control.secrets_id(task.id)).exists()
+        assert sh("docker", "inspect", "-f", "{{.State.Status}}", pod.control).stdout.strip() == "exited"
+    finally:
+        actions.remove(task, project)
+    assert sh("docker", "inspect", pod.control, check=False).returncode != 0
+    assert sh("docker", "network", "inspect", pod.network_name("p"), check=False).returncode != 0
+    assert not task.root.exists()

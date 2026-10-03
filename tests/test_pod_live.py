@@ -276,7 +276,7 @@ def packets_seen(env, sniffer: str, port: int, talk) -> list[str]:
     shares with the sidecar (--network host of the pod's Docker), prints for the port while
     talk() runs, a line each: at most 5, then it stops; none, and it gives up after six
     seconds. The lines, so a stray packet says where it came from."""
-    sniff = f"docker exec {sniffer} timeout -s INT 6 tcpdump -i any -nn -l -c 5 port {port} 2>/dev/null"
+    sniff = f"docker exec {sniffer} timeout -s INT 6 tcpdump -i any -nn -l -c 5 dst port {port} 2>/dev/null"
     p = subprocess.Popen(
         ["docker", "exec", env["pod"].agent, "bash", "-c", sniff], stdout=subprocess.PIPE, text=True
     )
@@ -297,8 +297,10 @@ def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_th
     are allowed by policy), and host.docker.internal there is its own network's gateway."""
     pod = env["pod"]
     review_up(pod)
-    # Ports nothing in the pod uses: the harness server in the writer's namespace listens on
-    # 39418, and what probes it would be seen by the sniffer as traffic of the writer's own.
+    # Ports no harness server listens on (opencode.PORT is 39417, the writer's; REVIEW_PORT
+    # 39418, the reviewer's, not started here): a run on 39418 saw one packet in the writer's
+    # namespace, most likely a connection of the writer's own whose ephemeral source port was
+    # 39418, which "port P" matched; the filter below is on the destination port alone.
     reviewer, port, sniffer = pod.review_side(), 38427, "d1sniff"
     agent(env, f"docker rm -f {sniffer}", check=False)
     agent(env, f"docker run -d --name {sniffer} --network host --cap-add NET_RAW alpine:3 sleep 600")

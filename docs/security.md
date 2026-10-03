@@ -73,7 +73,7 @@ Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
 after a test, and the pod's daemon then loses the image another test is still pulling, at random. A
 project that needs another Ryuk passes the variable in `pass_env`.
-Rules on your host, keyed by the bridge of the task's network and loaded before the pod's first
+Rules on your host, keyed by the bridges of the task's networks and loaded before the pod's first
 packet, refuse your host, every private network, other tasks' ranges, IPv6 and UDP other than DNS,
 except the services you list per project; the internet is open. Root in the pod cannot remove them:
 they are not in its network namespace. Every operation of vivibox that starts a container of a

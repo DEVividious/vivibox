@@ -95,7 +95,8 @@ class PodNetwork:
         sizes = ", ".join(f"the {names.ROLE_NAMES[r]}'s /{bits}" for r, bits in ROLE_BITS.items())
         raise PodError(
             f"no free address range left in network.pool {pool} for {self.task_id}: a task takes one "
-            f"/{TASK_NETWORK_BITS} of it ({sizes}; room for {len(blocks)} tasks), and every one is in "
+            f"/{TASK_NETWORK_BITS} of it ({sizes}; room for {len(blocks)} "
+            f"task{'' if len(blocks) == 1 else 's'}), and every one is in "
             "use. Delete tasks you have finished with (vivibox delete <id>), which frees their "
             "ranges, or widen network.pool in config.toml"
         )

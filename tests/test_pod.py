@@ -1051,6 +1051,9 @@ def test_a_full_pool_says_what_to_do_about_it(pod):
     assert "/28" in said and "/29" in said, "what one task takes"
     assert "Delete tasks you have finished with" in said and "vivibox delete" in said
     assert "network.pool" in said and "config.toml" in said
+    pod.network_pool, pod.runner.subnets = "198.51.100.0/27", "198.51.100.0/27"
+    with pytest.raises(PodError, match=r"room for 1 task\)"):
+        pod.free_subnet()
 
 
 def test_an_allocation_of_one_network_is_from_an_earlier_vivibox_and_is_still_deleted(pod, tmp_path):

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import probe
+from vivibox import names, probe
 from vivibox.config import Config, ConfigError, HostService, load_config
 from vivibox.egress import hostd, resolver
 from vivibox.pod import HELPER, Pod
@@ -213,7 +213,7 @@ def test_a_policy_refused_half_way_leaves_the_rules_before_it(pod):
     p, net = pod["pod"], pod["net"]
     bad = p.policy()
     bad["networks"].append(
-        {"role": "r", "bridge": f"vbx-{TASK}-r", "subnet": str(net.subnet), "policy": "open"}
+        {"role": "r", "bridge": names.bridge(TASK, "r"), "subnet": str(net.subnet), "policy": "open"}
     )
     refused = sh("sudo", "-n", HELPER, "apply-policy", TASK, json.dumps(bad), check=False)
     assert refused.returncode == 1 and "overlaps" in refused.stderr

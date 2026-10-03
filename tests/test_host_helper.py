@@ -395,6 +395,20 @@ def test_a_bridge_vivibox_names_is_taken():
     assert code == 0
 
 
+def test_a_second_network_on_the_firsts_subnet_is_refused_for_the_overlap():
+    """What the live test gives the helper to see the rules before it kept: a second role network
+    on the first one's subnet. The refusal it must meet is the overlap, which it reaches only
+    with the bridge vivibox names for that role; the readable shape of a long id's bridge
+    (vbx-fwtest-1234-r, 17 characters) is refused as a name first, and the overlap is never checked."""
+    task_id = "fwtest-1234"
+    nets = [
+        {"role": role, "bridge": names.bridge(task_id, role), "subnet": "198.51.100.0/28", "policy": "open"}
+        for role in ("w", "r")
+    ]
+    done = dry("apply-policy", task_id, policy(networks=nets))
+    assert done.returncode == 1 and "networks[1].subnet 198.51.100.0/28 overlaps" in done.stderr, done.stderr
+
+
 # --- the host's own address -------------------------------------------------------------------------
 
 

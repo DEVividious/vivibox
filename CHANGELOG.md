@@ -118,6 +118,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task's disk counts as full, and the task stops with `out of disk space`, when less than
+  64 MiB (1 % on a large disk) is left, not only at no block at all: a write that failed with
+  "No space left on device" leaves XFS a few blocks free, and the task went on as if it had room.
+  The message says what is left (`statvfs: 3 MiB of 1 GiB free`); the panel's Disk line says
+  `full` by the same rule, `nearly full` from four fifths as before.
 - A pod does not start on a network of its name that is not on the bridge vivibox named, as the
   kernel lists it: this machine's rules would not hold there. Deleting a task says when this
   machine kept its rules (the helper refused), instead of saying nothing; accepting one finishes

@@ -88,8 +88,10 @@ def rows(
     used, size = disk
     if size:
         shown = f"{size_text(used)} of {size_text(size)} ({percent(used, size)} %)"
-        if used >= NEARLY_FULL * size:
-            grown = size_option(2 * size)
+        grown = size_option(2 * size)
+        if limits.disk_full(size - used, size):  # the rule the task is stopped by
+            shown += f", full: `vivibox disk grow {task_id} {grown}`"
+        elif used >= NEARLY_FULL * size:
             shown += f", nearly full: `vivibox disk grow {task_id} {grown}`"
         out.append(Row("Disk", shown))
     else:

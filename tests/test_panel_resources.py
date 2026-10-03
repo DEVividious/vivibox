@@ -66,6 +66,11 @@ def test_the_disk_is_shown_with_its_use_and_warns_at_four_fifths(env, monkeypatc
     monkeypatch.setattr(panel_resources, "disk_state", lambda folder: (2 * 2**30, 20 * 2**30))
     shown = detail(task, task.read_state(), 3, running=True)
     assert "- **Disk** · 2 GiB of 20 GiB (10 %)" in shown and "nearly full" not in shown
+    # Full by the rule the supervisor stops the task by (limits.disk_full), not by the warning's.
+    monkeypatch.setattr(panel_resources, "disk_state", lambda folder: (20 * 2**30 - 3 * 2**20, 20 * 2**30))
+    shown = detail(task, task.read_state(), 3, running=True)
+    assert "- **Disk** · 20 GiB of 20 GiB (100 %), full: `vivibox disk grow demo-1 40g`" in shown
+    assert "nearly full" not in shown
 
 
 def test_next_is_the_command_that_raises_a_limit_the_task_hit(env):

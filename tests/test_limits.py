@@ -72,13 +72,34 @@ def test_an_oom_kill_no_scope_saw_is_the_pods(tmp_path):
     assert (hit.workload, hit.limit, hit.used, hit.words) == ("pod", 6 * 2**30, 3 * 2**30, "oom_kill 1")
 
 
-def test_a_full_disk_is_said_with_its_size_and_the_kernels_count(tmp_path):
+def test_a_full_disk_is_said_with_its_size_and_what_is_left(tmp_path):
     tree(tmp_path)
     [hit] = watch(tmp_path, stat=Stat(5_000_000, 1_000, 0)).check({})
     assert (hit.kind, hit.workload) == ("disk", "pod")
     assert hit.limit == 5_000_000 * 4096 and hit.used == (5_000_000 - 1_000) * 4096
-    assert hit.words == "statvfs: 0 of 5000000 blocks free"
-    assert watch(tmp_path, stat=Stat(5_000_000, 1_000, 1)).check({}) == [], "a block left: not full"
+    assert hit.words == "statvfs: 0 B of 19.1 GiB free"
+
+
+def test_a_disk_is_full_below_a_floor_no_build_can_work_with(tmp_path):
+    """A write that failed with ENOSPC leaves XFS a few blocks free (the last extent did not fit,
+    reserved blocks): a disk the agent and the gate see as full must be reported as full. Free
+    space below max(64 MiB, 1 % of the size) counts as none; one place decides."""
+    gib, mib = 2**30, 2**20
+    tree(tmp_path)
+    blocks = lambda n: n // 4096  # noqa: E731
+
+    def check(size, free):
+        return watch(tmp_path, stat=Stat(blocks(size), blocks(free), blocks(free))).check({})
+
+    assert check(20 * gib, 2 * 20 * gib // 100) == [], "2 % free: not full"
+    [hit] = check(20 * gib, 20 * gib // 200)
+    assert hit.words == "statvfs: 102.4 MiB of 20 GiB free", "0.5 % free: full, with the real numbers"
+    [hit] = check(gib, 64 * mib - 4096)
+    assert hit.words == "statvfs: 64 MiB of 1 GiB free" and hit.used == gib - (64 * mib - 4096)
+    assert check(gib, 200 * mib) == [], "a small disk with room: not full"
+    assert check(gib, 64 * mib) == [], "at the floor: not below it"
+    assert limits.disk_floor(gib) == 64 * mib and limits.disk_floor(20 * gib) == 20 * gib // 100
+    assert limits.disk_full(3 * mib, gib) and not limits.disk_full(65 * mib, gib)
 
 
 def test_a_container_id_is_a_label_never_a_path_outside_the_slice(tmp_path):

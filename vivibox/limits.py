@@ -47,7 +47,7 @@ class Exceeded:
     workload: str  # the container's limits role, or "pod" when no scope saw the kill
     limit: int  # bytes
     used: int  # the peak of memory, or the disk's used bytes
-    words: str  # the kernel's: "oom_kill 1", "statvfs: 0 of N blocks free"
+    words: str  # the kernel's: "oom_kill 1", "statvfs: 3 MiB of 1 GiB free"
     # The OOM kill counts as read, by workload and "pod" for the slice's: the record a later
     # check compares with, so one kill is reported once.
     counts: dict[str, int] = field(default_factory=dict)
@@ -186,6 +186,27 @@ def current(task_id: str, scopes: dict[str, str], root: Path = CGROUP) -> dict[s
     return found
 
 
+# Below this much free the disk is full: a write that failed with ENOSPC leaves XFS a few blocks
+# free (the last extent did not fit; blocks the filesystem reserves), so a disk the agent and
+# the gate already see as full is never at zero. 64 MiB, or 1 % of the size on a large disk, is
+# less than any build can work with. The supervisor's stop and the panel read this one rule.
+DISK_FLOOR = 64 * 2**20
+DISK_FLOOR_SHARE = 0.01
+
+
+def disk_floor(size: int) -> int:
+    return max(DISK_FLOOR, int(size * DISK_FLOOR_SHARE))
+
+
+def disk_full(free: int, size: int) -> bool:
+    return free < disk_floor(size)
+
+
+def disk_words(free: int, size: int) -> str:
+    """statvfs's answer, in the person's sizes."""
+    return f"statvfs: {size_text(free)} of {size_text(size)} free"
+
+
 def is_mount(path: Path) -> bool:
     try:
         return path.stat().st_dev != path.parent.stat().st_dev
@@ -232,11 +253,10 @@ class Watch:
         if not self.is_mount(self.disk):
             raise Unreadable(f"the task's disk is not mounted at {self.disk} while its pod runs")
         st = self.statvfs(self.disk)
-        if st.f_bavail == 0:
-            size, used = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize
-            found.append(
-                Exceeded("disk", "pod", size, used, f"statvfs: 0 of {st.f_blocks} blocks free", counts)
-            )
+        size, free = st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
+        if disk_full(free, size):
+            used = (st.f_blocks - st.f_bfree) * st.f_frsize
+            found.append(Exceeded("disk", "pod", size, used, disk_words(free, size), counts))
         return found
 
 

@@ -742,7 +742,8 @@ def test_a_full_disk_is_the_tasks_and_the_hosts_keeps_its_room():
         taken = (host_before.f_bavail - host_after.f_bavail) * host_before.f_frsize
         assert taken <= 2**30 + 64 * 2**20, f"the image took no more than its size: {taken}"
         [hit] = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({})
-        assert hit.kind == "disk" and hit.limit <= 2**30 and hit.words.startswith("statvfs: 0 of ")
+        assert hit.kind == "disk" and hit.limit <= 2**30 and hit.words.startswith("statvfs: ")
+        assert hit.used >= hit.limit * 0.9, "ENOSPC leaves XFS a few blocks: full all the same"
         pod.exec("bash", "-c", "rm /config/fill && sync")
         time.sleep(2)
         assert limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({}) == [], "room again"

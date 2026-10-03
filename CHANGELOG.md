@@ -47,6 +47,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A task's disk is mounted without `discard`: the room its deleted files took goes back to your
+  machine when the task's pod is deleted (the helper trims the disk before it unmounts it), not as
+  the files are deleted; a trim that fails is said and stops nothing. Online discards cost a
+  build on the disk about a quarter more time.
 - `pod_cpus`, the CPUs each container of a pod may use, defaults to the machine's count when it
   has fewer than six, and a value past the machine's count is refused by name (Docker refuses
   such a `--cpus`, and the default would not have started a pod on a four-core machine).

@@ -197,10 +197,12 @@ do_pods() {
   return 0
 }
 
-# Each disk: unmounted, and the loop device its image is on freed; the image stays in the task.
+# Each disk: trimmed (its room back to the host; not fatal), unmounted, and the loop device its
+# image is on freed; the image stays in the task.
 do_disks() {
   local mnt dev
   for mnt in "${DISKS[@]}"; do
+    sudo fstrim "$mnt" || echo "the room $mnt took is not returned to the host" >&2
     sudo umount "$mnt" || die "$mnt is busy; stop what uses it (a pod) and run again"
     dev=$(losetup -j "${mnt%/disk}/disk.img" -O NAME -n 2>/dev/null | head -1)
     [[ -n $dev ]] && sudo losetup -d "$dev"

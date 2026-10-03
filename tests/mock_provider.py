@@ -6,7 +6,10 @@ body to a log, one JSON object a line: what a harness sent as the conversation i
 
 A turn that reads files: while a file `<log>.reads` is there, a path a line, a chat completion
 that offers a `read` tool is answered with a call of it for the next path the conversation has
-no result for yet, and with the text once every path was read (opencode's read tool).
+no result for yet, and with the text once every path was read (opencode's read tool). A turn
+that uses other tools: a file `<log>.calls`, a JSON object a line (`{"tool": …, "arguments":
+{…}}`), names the calls to make after the reads, in order, each asked for once the one before
+it has its result (a review's turn: read, `bash` for the diff, `write` for the review).
 
 Standard library only: it runs inside the container whose harness talks to it
 (`python3 mock_provider.py <port> <log>`), on that container's localhost.
@@ -47,6 +50,11 @@ def opencode_config(port: int) -> dict:
 def reads(log: Path | str) -> Path:
     """Where the paths a turn is to read are named, beside the log."""
     return Path(f"{log}.reads")
+
+
+def calls(log: Path | str) -> Path:
+    """Where the tool calls a turn is to make after its reads are named, beside the log."""
+    return Path(f"{log}.calls")
 
 
 def requests(log: str) -> list[dict]:
@@ -98,25 +106,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _to_read(self, body: dict) -> tuple[int, str]:
-        """The next path to ask a read of and its number, "" when there is none (left)."""
+    def _to_call(self, body: dict) -> tuple[int, str, dict]:
+        """The next tool call to ask for, its number, and its arguments; "" when there is none
+        (left), or the request does not offer that tool."""
+        wanted: list[tuple[str, dict]] = []
         try:
-            paths = [line.strip() for line in reads(self.log).read_text().splitlines() if line.strip()]
+            lines = reads(self.log).read_text().splitlines()
+            wanted += [("read", {"filePath": line.strip()}) for line in lines if line.strip()]
         except OSError:
-            return 0, ""
+            pass
+        try:
+            for line in calls(self.log).read_text().splitlines():
+                if line.strip():
+                    call = json.loads(line)
+                    wanted.append((str(call["tool"]), dict(call.get("arguments") or {})))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
         offered = [tool.get("function", {}).get("name") for tool in body.get("tools") or []]
         done = sum(1 for m in body.get("messages", []) if m.get("role") == "tool")
-        return done, paths[done] if "read" in offered and done < len(paths) else ""
+        if done < len(wanted) and wanted[done][0] in offered:
+            return done, *wanted[done]
+        return done, "", {}
 
-    def _stream(self, model: str, number: int = 0, read: str = "") -> None:
+    def _stream(self, model: str, number: int = 0, tool: str = "", arguments: dict | None = None) -> None:
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.end_headers()
         chunk = {"id": "m", "object": "chat.completion.chunk", "created": 0, "model": model}
         first = {"index": 0, "delta": {"role": "assistant", "content": ANSWER}, "finish_reason": None}
         last = {"index": 0, "delta": {}, "finish_reason": "stop"}
-        if read:
-            function = {"name": "read", "arguments": json.dumps({"filePath": read})}
+        if tool:
+            function = {"name": tool, "arguments": json.dumps(arguments or {})}
             call = {"index": 0, "id": f"call_{number}", "type": "function", "function": function}
             first = {"index": 0, "delta": {"role": "assistant", "tool_calls": [call]}, "finish_reason": None}
             last = {"index": 0, "delta": {}, "finish_reason": "tool_calls"}
@@ -132,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
         model = body.get("model", MODEL) if isinstance(body, dict) else MODEL
         if "chat/completions" in self.path:
             if body.get("stream"):
-                self._stream(model, *self._to_read(body))
+                self._stream(model, *self._to_call(body))
                 return
             message = {"role": "assistant", "content": ANSWER}
             self._json(

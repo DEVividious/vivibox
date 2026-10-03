@@ -245,9 +245,15 @@ def test_internet_is_reachable(env):
 
 
 def review_up(pod: Pod) -> None:
-    """The reviewer's container of the pod, with a fresh clone of the task's commits, as a round
-    of review starts it: the smallest set of mounts, the clone and the review directory."""
+    """The reviewer's container of the pod, as a round of review starts it, with the smallest
+    set of mounts: the working directory the host makes for its harness and, in place of a view
+    of the task's commits, another empty repository of the host's (these tests are of its
+    network, not of what it reads)."""
+    from vivibox import reading
+
     pod.review_fresh()
+    for folder in (pod.review_work, Path(pod.review_src)):
+        reading.workdir(folder, "the reviewer's")
     pod.review_start([], {})
 
 

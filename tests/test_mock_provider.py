@@ -88,3 +88,28 @@ def test_a_turn_reads_the_files_named_beside_the_log_one_a_request_then_answers(
     assert mock_provider.ANSWER in ask([user], offered=[]), "a request that offers no read is answered"
     mock_provider.reads(log).unlink()
     assert mock_provider.ANSWER in ask([user]), "and so is every request once the file is gone"
+
+
+def test_a_turn_makes_the_tool_calls_named_beside_the_log_after_its_reads(provider):
+    """A review's turn: a read, then the calls of the file, in order, each once the one before it
+    has its result; then the text. A call of a tool the request does not offer is not made."""
+    url, log = provider
+    mock_provider.reads(log).write_text("/srv/a.py\n")
+    diff = {"tool": "bash", "arguments": {"command": "git diff", "description": "the diff"}}
+    write = {"tool": "write", "arguments": {"filePath": "/task/review/review.md", "content": "## Blocking\n"}}
+    mock_provider.calls(log).write_text(json.dumps(diff) + "\n" + json.dumps(write) + "\n")
+    tools = [{"type": "function", "function": {"name": name}} for name in ("read", "bash", "write")]
+
+    def asked(results: int, offered=tools) -> dict | str:
+        messages = [{"role": "user", "content": "Review."}, *[{"role": "tool", "content": "x"}] * results]
+        body = {"model": "m", "stream": True, "tools": offered, "messages": messages}
+        said = post(f"{url}/v1/chat/completions", body)[1]
+        delta = json.loads(said.split("\n\n")[0].removeprefix("data: "))["choices"][0]["delta"]
+        made = delta.get("tool_calls")
+        return made[0]["function"] if made else delta["content"]
+
+    assert asked(0) == {"name": "read", "arguments": json.dumps({"filePath": "/srv/a.py"})}
+    assert asked(1) == {"name": "bash", "arguments": json.dumps(diff["arguments"])}
+    assert asked(2) == {"name": "write", "arguments": json.dumps(write["arguments"])}
+    assert asked(3) == mock_provider.ANSWER
+    assert asked(1, offered=tools[:1]) == mock_provider.ANSWER, "bash is not offered: no call of it"

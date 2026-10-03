@@ -4,6 +4,7 @@ of a file is never read, nor waited on. What the host reads there reaches the ag
 commands the verification runs, the risky files' approval and your review."""
 
 import contextlib
+import ipaddress
 import json
 import os
 import shlex
@@ -18,7 +19,7 @@ import pytest
 from conftest import make_repo
 from test_gate import FakePod, git
 
-from vivibox import clone_read, gate, init, repo, reviewing, risky, supervisor
+from vivibox import clone_read, gate, init, pod_network, repo, reviewing, risky, supervisor
 from vivibox.risky import Approvals, Change
 from vivibox.states import State
 from vivibox.task import create_task
@@ -1069,6 +1070,11 @@ def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch
     t = create_task(env / "tasks", "demo", "goal", PLAN)
     t.set_base_commit(repo.prepare(env / "repo", t.repo, t.id, t.meta))
     the_pod = actions.task_pod(t.id)
+    # Its networks as a start records them: the reviewer's command names its network's address.
+    ranges = pod_network.split_block(ipaddress.IPv4Network("198.51.100.0/27"))
+    (t.meta / "network.json").write_text(
+        json.dumps({"networks": [{"role": r, "subnet": str(s)} for r, s in ranges.items()]})
+    )
     reviewer = []
     monkeypatch.setattr(secrets, "prepare", lambda *a, **k: env / "runtime")
     monkeypatch.setattr(providers, "mcp_secrets", lambda: [])

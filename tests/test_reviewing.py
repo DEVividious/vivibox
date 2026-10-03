@@ -145,6 +145,10 @@ def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_wr
     assert f"{task.meta}:/task:ro" in joined and f"{harness}:{opencode.HARNESS_MOUNT}:ro" in joined
     assert f"{out}:{reviewing.MOUNT}" in joined and f"{env / 'rt'}:{secrets.MOUNT}:ro" in joined
     assert f"OPENCODE_CONFIG={opencode.CONFIG}" in run
+    # In a network of its own, not the writer's namespace; the harness still talks to it by name.
+    assert run[run.index("--network") + 1] == f"vivibox-{task.id}-r" and "container:" not in joined
+    side = pod.review_side()
+    assert isinstance(side, pods.ContainerSide) and side.agent == pod.review
 
 
 def test_the_reviewers_key_goes_with_the_tasks(tmp_path, monkeypatch):

@@ -50,7 +50,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - A task has a network per role instead of one: the writer's, which the sidecar, the
   verification and the pod's own containers share, and the reviewer's, `vivibox-<id>-r`, of its
   own, each on a bridge of its own with rules of its own on your machine, which refuse each
-  other's range at once; the reviewer's internet is open like the writer's. A task takes one
+  other's range at once. The reviewer's container runs in its network at an address allocated
+  for it, instead of in the sidecar's network namespace: nothing the writer runs, a nested
+  container with any capability included, is on the reviewer's wire, and neither reaches the
+  other; its DNS goes to the forwarder on your machine like the pod's, `host.docker.internal`
+  is its own gateway, and its internet is open like the writer's. A task takes one
   /27 block of `[network] pool` (the writer's /28, the reviewer's /29, and a /29 reserved for
   the planner), so the default `198.51.100.0/24` holds 8 tasks, and a pool smaller than a /27
   is refused by name; when every block is in use, the error names the pool, its room in tasks,

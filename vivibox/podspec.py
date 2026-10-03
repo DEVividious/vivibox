@@ -447,10 +447,15 @@ def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[
     ]  # fmt: skip
 
 
-def review_command(pod: Pod, mounts: list[Mount], env: dict[str, str], ca_mounts: list[Mount]) -> list[str]:
+def review_command(
+    pod: Pod, mounts: list[Mount], env: dict[str, str], ca_mounts: list[Mount], net: RoleNetwork
+) -> list[str]:
     """The reviewer's container: a fresh clone like the gate's, with the writer's tree read-only
     and without the build's means, since it reads and runs nothing: no Docker socket, no build
-    caches, no variables of the build. Its own secrets and harness files come as mounts."""
+    caches, no variables of the build. Its own secrets and harness files come as mounts. It is
+    in the reviewer's own network (net), not the sidecar's namespace: what the writer runs,
+    nested containers with any capability included, is not on its wire, and the host's rules
+    for its bridge refuse the writer's range and the writer's refuse its."""
     all_mounts = [
         Mount(str(pod.repo), str(pod.repo), read_only=True),
         Mount(str(pod.review_dir), str(pod.review_dir)),
@@ -460,7 +465,12 @@ def review_command(pod: Pod, mounts: list[Mount], env: dict[str, str], ca_mounts
     return [
         "docker", "run", "-d", "--name", pod.review,
         "--label", f"vivibox.task={pod.task_id}",
-        "--network", f"container:{pod.sidecar}",
+        # Pinned to the address allocated for it; its gateway is the host on its own bridge, so
+        # host.docker.internal is never the writer's. Every DNS query to the host's forwarder,
+        # no search domain of the host's, as for the sidecar.
+        "--network", pod.network_name(net.role), "--ip", net.address,
+        "--add-host", f"{HOST_GATEWAY}:{net.gateway}",
+        "--dns", pod.host_ip, "--dns-search", ".",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('review')}",
         "--tmpfs", f"/config:exec,mode=1777,size={pod.limits.tmpfs_size('review')}",

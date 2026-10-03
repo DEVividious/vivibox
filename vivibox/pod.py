@@ -270,7 +270,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return podspec.gate_command(self, ca_mounts(), env)
 
     def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
-        return podspec.review_command(self, mounts, env, ca_mounts())
+        """The reviewer's container in the reviewer's network; none without it (never the writer's)."""
+        net = self.recorded_network("r")
+        if net is None:
+            raise PodError(f"{self.task_id} has no network allocated yet; start it first")
+        return podspec.review_command(self, mounts, env, ca_mounts(), net)
 
     def scopes(self) -> dict[str, str]:
         """The id of each container of the pod that is there, by its limits role (config.toml's

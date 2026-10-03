@@ -1179,6 +1179,7 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     Its own secrets and harness files come as the mounts the caller gives."""
     pod.review_dir = tmp_path / "review"
     pod.passed_env.append("REPO_TOKEN")
+    pod.ensure_networks()
     mounts = [Mount("/srv/x/.task", "/task", read_only=True), Mount(str(tmp_path / "out"), "/task/review")]
     cmd = pod.review_command(mounts, {"OPENCODE_CONFIG": "/task/harness/opencode.json"})
     assert cmd[:5] == ["docker", "run", "-d", "--name", "vivibox-shop-1-review"]
@@ -1187,12 +1188,11 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     joined = " ".join(cmd)
     assert SOCKET_DIR not in joined and "vivibox-cache-" not in joined and "REPO_TOKEN" not in joined
     assert "OPENCODE_CONFIG=/task/harness/opencode.json" in cmd
-    assert "--read-only" in cmd and "--cap-drop" in cmd and f"container:{pod.sidecar}" in cmd
+    assert "--read-only" in cmd and "--cap-drop" in cmd
     assert cmd[cmd.index("-w") + 1] == pod.review_src, "commands run in the clone"
 
     pod.review_fresh()
     assert (pod.review_dir / "src").is_dir() and not any((pod.review_dir / "src").iterdir())
-    pod.ensure_network()
     pod.review_start(mounts, {})
     clone = pod.runner.find("docker", "exec", "-w", str(pod.review_dir), pod.review, "git", "clone")
     assert clone and clone[0][-2:] == [str(pod.repo), pod.review_src]
@@ -1211,6 +1211,32 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
     assert any(pod.review in c for c in pod.runner.find("docker", "rm", "-f")), "gone with the pod"
 
 
+def test_the_reviewer_runs_in_a_network_of_its_own_at_its_pinned_address(pod, tmp_path):
+    """Not the sidecar's network namespace: the reviewer's own network, where the writer, the
+    sidecar, the gate and the nested containers are not, at the address allocated for it, with
+    every DNS query to the host's forwarder and host.docker.internal its own gateway, never the
+    writer's. The gate stays with the sidecar: it shares its daemon."""
+    pod.review_dir = tmp_path / "review"
+    pod.ensure_networks()
+    cmd = pod.review_command([], {})
+    assert flag(cmd, "--network") == "vivibox-shop-1-r"
+    assert flag(cmd, "--ip") == "198.51.100.18"
+    assert flag(cmd, "--dns") == "203.0.113.1" and flag(cmd, "--dns-search") == "."
+    assert flag(cmd, "--add-host") == "host.docker.internal:198.51.100.17"
+    assert not any("container:" in arg for arg in cmd)
+    pod.gate_dir = tmp_path / "gate"
+    assert flag(pod.gate_command(), "--network") == f"container:{pod.sidecar}"
+
+
+def test_a_review_does_not_start_without_the_reviewers_network(pod, tmp_path):
+    """Fail-closed: a reviewer that cannot have its own network is not started on the writer's."""
+    pod.review_dir = tmp_path / "review"
+    pod.review_fresh()
+    with pytest.raises(PodError, match="the review could not start: shop-1 has no network allocated"):
+        pod.review_start([], {})
+    assert not pod.runner.find("docker", "run"), "no container of the review"
+
+
 def flag(cmd, name) -> str:
     """The value of a docker run flag given once, as `--flag value`."""
     found = [cmd[i + 1] for i, a in enumerate(cmd) if a == name]
@@ -1220,6 +1246,7 @@ def flag(cmd, name) -> str:
 
 def commands_of(pod, tmp_path) -> dict[str, list[str]]:
     pod.gate_dir = tmp_path / "gate"
+    pod.ensure_networks()  # the reviewer's command names its network's address
     return {
         "sidecar": pod.sidecar_command(),
         "agent": pod.agent_command(),

@@ -208,6 +208,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   empty daemon, and a test that asks it to change something fails.
 - The pod's container recipes, its demo commands and its network rules moved from `pod.py` to
   modules of their own (`podspec.py`, `pod_demo.py`, `pod_egress.py`); nothing changes for a person.
+- The project's panel, a finished or deleted task's, the projects the view offers and the view's
+  kept choices moved from `panel.py` to `panels.py`; nothing changes for a person.
 
 ## [0.1.0] - 2026-09-29
 

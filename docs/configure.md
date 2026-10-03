@@ -206,9 +206,9 @@ between tasks, and Python writes no `__pycache__` into the clone), and `mise` in
 toolchain a task needs. For Go and Rust, `init` reads the version from `go.mod` (its `toolchain`
 line, else its `go` line from Go 1.21 on; an older `go` line was only a floor, so the latest Go)
 or `rust-toolchain.toml`, and for bun from `packageManager` in `package.json`, else the latest,
-and writes it to the project file as `tools = ["go@1.25.3"]`: the pod installs it for the agent
-and the gate, into caches shared between tasks, with `go test ./...`, `cargo test` or
-`bun run test` as the suggested verification. Nothing is
+and writes it to the project file as `tools = ["go@1.25.3"]`: the pod installs it for the agent,
+into caches shared between tasks, and the verification installs it again into a directory of its
+own, with `go test ./...`, `cargo test` or `bun run test` as the suggested verification. Nothing is
 written into your repository. A project that wants different versions of what the image has, or
 another language, can also commit its own `mise.toml`: the agent proposes it, the gate reads it,
 and you approve it as a build file before it reaches your checkout.
@@ -249,6 +249,14 @@ from the writer, which the box then narrows), and the verification dialog (`i`, 
 as a box, "build only the modules a task changes", from two. The whole build otherwise runs once
 before the work comes to you when `whole_build_before_review` is on (under `k`, "whole build
 before review"; off by default, when the project's pipeline builds it whole after a push).
+
+The verification reads the caches shared between tasks and writes only its own: Maven and Gradle
+read the shared downloads (Maven through a file repository asked before the project's own, Gradle
+through its read-only dependency cache) and keep what they fetch in the gate's directory on the
+task's disk, fresh for every verification; npm, Yarn, uv, Go and Cargo fetch cold into that
+directory every time, so a verification of such a project takes the download's time on top of
+the build's. `java` and `tools` reach the gate too: the JDK from the shared cache, the tools
+installed again for the verification.
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the
@@ -321,14 +329,16 @@ and nothing else.
 
 ## Yarn downloads
 
-The agent and verification share downloaded Yarn packages in `/cache/yarn`; deleting a task
-keeps this cache. `node_modules` and other installed project files stay in the task's clone,
-and verification installs them again in a fresh clone.
+The agent's tasks share downloaded Yarn packages in `/cache/yarn`; deleting a task keeps this
+cache. The verification reads nothing from it: it downloads into a cache of its own, fresh every
+time. `node_modules` and other installed project files stay in the task's clone, and verification
+installs them again in a fresh clone.
 
-Yarn Classic defaults to `/cache/yarn/classic` through `/usr/local/etc/yarnrc` in the image. Your own
+Yarn Classic defaults to `/cache/yarn/classic` through `/usr/local/etc/yarnrc` in the image
+(`YARN_CACHE_FOLDER` in the verification, under its own directory). Your own
 `cache-folder`, CLI flag or `YARN_CACHE_FOLDER` can override it. Yarn 2 and later use
-`YARN_GLOBAL_FOLDER=/cache/yarn/berry` for the global cache or the download mirror of a local
-cache. vivibox leaves `enableGlobalCache`, `cacheFolder` and `enableMirror` to the project,
+`YARN_GLOBAL_FOLDER=/cache/yarn/berry` (the verification's own in the gate) for the global cache
+or the download mirror of a local cache. vivibox leaves `enableGlobalCache`, `cacheFolder` and `enableMirror` to the project,
 so checked-in caches and zero-installs keep working. A project that chooses a local cache and
 disables its mirror will still download again unless those archives are committed.
 

@@ -47,6 +47,23 @@ verification's and the reviewer's clones are directories of a disk image of the 
 in the task's folder, attached by the root helper on a loop device mounted `nosuid,nodev` with
 `discard`, not `noexec`: what a build installs there, and the agent's tools, are run from it),
 whose size is the most the task writes there; the clone is outside it.
+The dependency caches the tasks share (`/cache/m2`, `/cache/gradle`, `/cache/npm`, `/cache/yarn`,
+`/cache/mise`, `/cache/corepack`, `/cache/uv`, `/cache/go`, `/cache/cargo`, `/cache/rustup`) are
+writable for the agent and mounted read-only in the gate's container: the verification runs nothing
+from them and writes nothing into them. Its `PATH` is the image's without mise's shims from the
+shared cache (a program the agent put there would otherwise be its `git`, its `python`); its
+`git`, `mvn`, `node` and `uv` are the image's; its Gradle home, Maven repository, npm, Yarn,
+corepack, uv, Go and Cargo caches are directories of its own under the gate's directory on the
+task's disk, made fresh for every verification, so no init script, JVM option or configuration the
+agent left in a shared cache is read. What a tool can read from the shared cache without writing it
+reads: Maven asks a file repository of the shared downloads before the project's repositories,
+Gradle reads the shared dependency cache through its read-only cache; the rest is fetched again.
+A tool a project brings through mise (`tools`, its own `mise.toml`) is installed by the gate into a
+mise data directory of its own. One residual risk stays, and is accepted for now: a
+project JDK (`java` in the project's settings) is the one the agent's mise installed into the shared
+cache, found there read-only by `mise where` and run by the gate through `JAVA_HOME`, so a writer
+who replaced that JDK's binaries is run by the verifications of every task that pins the same JDK,
+a risk shared between tasks of one trust level; a cache per trust level closes it later.
 Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would pick
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
 after a test, and the pod's daemon then loses the image another test is still pulling, at random. A

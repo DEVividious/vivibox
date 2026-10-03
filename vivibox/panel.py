@@ -76,6 +76,9 @@ class PodView:
     listening: list = field(default_factory=list)
     demo: bool = False
     log: str = ""
+    # The pod's containers' ids by their limits role, for the Resources section: a label each
+    # for a cgroup scope (limits.py), asked of Docker here, off the view's thread, never there.
+    scopes: dict = field(default_factory=dict)
 
     @property
     def reachable(self) -> list:
@@ -143,7 +146,7 @@ def pod_views(task_ids: list[str]) -> dict[str, PodView]:
             views[task_id] = PodView()
             continue
         probe = pod.probe()
-        views[task_id] = PodView(address, probe.listening, probe.demo, probe.log)
+        views[task_id] = PodView(address, probe.listening, probe.demo, probe.log, pod.scopes())
     return views
 
 
@@ -656,7 +659,7 @@ def detail(
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += [*reviewers_notes(task), *criteria_section(task)]
     body += roles_section(task, st) + cost_section(task, st)
-    body += panel_resources.section(task, st, up=bool((pod if pod is not None else pod_view(st.id)).address))
+    body += panel_resources.section(task, st, (pod if pod is not None else pod_view(st.id)).scopes)
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += plan_section(task)
     return "\n".join(head + body)

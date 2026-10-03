@@ -121,6 +121,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An OOM kill no container of the task's own saw (one the pod's Docker runs) is said as a
+  process killed in the pod, with `vivibox limits <id>` alone as the next step, not as the pod
+  running out of a budget nothing enforces. `vivibox disk grow <id> 1.5g` hands the helper the
+  size in its shape (`1536m`) and says yours back. The task's panel reads the containers' ids
+  from the pod's view, filled off the view's thread, and asks Docker nothing itself; its Disk
+  line reads free space from the field the supervisor stops the task by.
 - Deleting a task from an earlier vivibox removes the five volumes it had before a task's data
   was on its disk (its Docker's store, what Maven installed, the verification's own, the agent's
   home), which stayed behind, listed nowhere, until a `docker volume prune`.

@@ -24,7 +24,7 @@ CGROUP = Path("/sys/fs/cgroup")
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 # A task's own limits over the machine's, written by `vivibox limits`, host-owned like network.json.
 OVERRIDES = "limits.json"
-RAISING = re.compile(r"(vivibox (?:limits|disk grow) \S+ [^,]+?)(?:,| in a shell)")
+RAISING = re.compile(r"(vivibox (?:limits|disk grow) \S+(?: --[a-z-]+ \S+| [0-9]+[kmgt])?), then ")
 # How a limit is said to be raised: half as much again, in whole gigabytes.
 RAISE_BY = 1.5
 # What each workload is to a person, and the option of `vivibox limits` that raises its memory.
@@ -96,13 +96,15 @@ def problem(task_id: str, hits: list[Exceeded]) -> str:
             f"out of disk space: the task's disk is full ({size_text(hit.limit)}): {hit.words}. "
             f"Grow it: vivibox disk grow {task_id} {grown}, then vivibox start {task_id}"
         )
-    what = f"{WORKLOADS.get(hit.workload, hit.workload)} ran out of memory ({size_text(hit.limit)})"
-    option = raise_option(hit.workload, hit.limit)
-    if option:
-        todo = f"Raise it: vivibox limits {task_id} {option}, then vivibox start {task_id}"
+    if hit.workload == "pod":
+        # No scope of the task's own saw the kill: a container the pod's Docker runs, under its
+        # own limit or the sidecar's. The pod's figure is a budget, not a limit, so it is not quoted.
+        what = "the kernel killed a process in the pod for memory, in a container the pod's Docker runs"
+        todo = f"See the limits: vivibox limits {task_id}"
     else:
-        todo = f"See the limits: vivibox limits {task_id}; raise one, then vivibox start {task_id}"
-    return f"out of memory: {what}: {hit.words}. {todo}"
+        what = f"{WORKLOADS[hit.workload]} ran out of memory ({size_text(hit.limit)})"
+        todo = f"Raise it: vivibox limits {task_id} {raise_option(hit.workload, hit.limit)}"
+    return f"out of memory: {what}: {hit.words}. {todo}, then vivibox start {task_id}"
 
 
 def raising_command(problem: str) -> str:

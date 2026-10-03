@@ -28,7 +28,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
             return 1
     pod = actions.task_pod(task.id)
     try:
-        print(panel_resources.text(task, up=pod.running()))
+        print(panel_resources.text(task, scopes=pod.scopes() if pod.running() else {}))
     except ValueError as e:
         print(f"vivibox: {e}", file=sys.stderr)
         return 1
@@ -74,7 +74,7 @@ def cmd_disk(args: argparse.Namespace) -> int:
         return 1
     pod = actions.task_pod(task.id)
     try:
-        pod.grow_disk(args.size.strip())
+        pod.grow_disk(size_option(size))  # the helper takes 1536m or 40g, never 1.5g or 40GiB
     except PodError as e:
         print(f"vivibox: {e}", file=sys.stderr)
         return 1

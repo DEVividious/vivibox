@@ -231,7 +231,11 @@ def test_the_problem_has_three_parts_and_names_the_option_that_raises_the_limit(
     assert said.startswith("out of disk space: the task's disk is full (20 GiB)")
     assert "vivibox disk grow shop-1 40g" in said and "then vivibox start shop-1" in said
     pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1")
-    assert "vivibox limits shop-1" in limits.problem("shop-1", [pod])
+    said = limits.problem("shop-1", [pod])
+    assert said.startswith("out of memory: the kernel killed a process in the pod for memory")
+    assert "6 GiB" not in said, "the pod's figure is a budget, not a limit anything enforces"
+    assert "oom_kill 1" in said and "vivibox limits shop-1, then vivibox start shop-1" in said
+    assert limits.raising_command(said) == "vivibox limits shop-1", "the command alone"
 
 
 def test_the_event_carries_what_the_plan_names():

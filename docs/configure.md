@@ -119,7 +119,8 @@ What is enforced is each container's memory, its processes and its CPUs, and the
 `pod_memory` and `pod_pids` are a budget the containers' limits are checked against and the
 panel shows as the task's, not a limit on the slice itself; a container of the pod's Docker runs
 under the sidecar's limits. A scratch tmpfs (`/tmp`, the verification's and the reviewer's
-`/config`) is half of its container's memory.
+`/config`) is half of its container's memory; the verification's and the reviewer's two together
+may take their whole limit, and a build that fills both is killed by it, not the machine.
 
 The task's panel has a Resources section with each container's limits and, while the pod runs,
 what it uses; `vivibox limits <id>` prints the same. One task can have more than the machine's

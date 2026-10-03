@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import limits
 from .config import ConfigError, load_config
-from .pod import DISK_MOUNT, Pod
+from .pod import DISK_MOUNT
 from .podspec import ROLES, Limits, size_option, size_text
 from .task import Task, TaskState
 
@@ -35,21 +35,17 @@ class Row:
     use: str = ""
 
 
-def scopes_of(task_id: str, repo: Path, root: Path) -> dict[str, str]:
-    """The pod's containers' ids by their limits role, asked of Docker: labels for the scopes."""
-    return Pod(task_id, repo, "", folder=root).scopes()
-
-
-def disk_state(folder: Path) -> tuple[int, int]:
-    """(used, size) of the task's disk, from its mount; (0, 0) while it is not mounted."""
+def disk_state(folder: Path) -> tuple[int, int, int]:
+    """(used, size, free) of the task's disk, from its mount, free as the supervisor reads it
+    (f_bavail: XFS keeps blocks in reserve); (0, 0, 0) while it is not mounted."""
     disk = folder / DISK_MOUNT
     if not limits.is_mount(disk):
-        return 0, 0
+        return 0, 0, 0
     try:
         st = os.statvfs(disk)
     except OSError:
-        return 0, 0
-    return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize
+        return 0, 0, 0
+    return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
 
 
 def task_limits(task: Task) -> tuple[Limits, dict]:
@@ -85,11 +81,11 @@ def rows(
         memory, peak, pids = use["pod"]
         using = f"using {size_text(memory)} (peak {size_text(peak)}), {pids} processes"
     out.append(Row("Pod", budget, using))
-    used, size = disk
+    used, size, free = disk
     if size:
         shown = f"{size_text(used)} of {size_text(size)} ({percent(used, size)} %)"
         grown = size_option(2 * size)
-        if limits.disk_full(size - used, size):  # the rule the task is stopped by
+        if limits.disk_full(free, size):  # the rule the task is stopped by, on the same field
             shown += f", full: `vivibox disk grow {task_id} {grown}`"
         elif used >= NEARLY_FULL * size:
             shown += f", nearly full: `vivibox disk grow {task_id} {grown}`"
@@ -99,19 +95,19 @@ def rows(
     return out
 
 
-def gather(task: Task, up: bool) -> tuple[list[Row], dict, bool]:
-    """The rows, the task's own overrides, and whether use was read (the pod up)."""
+def gather(task: Task, scopes: dict[str, str]) -> tuple[list[Row], dict, bool]:
+    """The rows, the task's own overrides, and whether use was read. scopes: the pod's
+    containers' ids by limits role, from the pod's view (panel.PodView) or `Pod.scopes()`; {}
+    while the pod is down, and nothing is asked of Docker here."""
     found, own = task_limits(task)
-    use = {}
-    if up:
-        use = limits.current(task.id, scopes_of(task.id, task.repo, task.root), limits.CGROUP)
+    use = limits.current(task.id, scopes, limits.CGROUP) if scopes else {}
     return rows(task.id, found, use, disk_state(task.root)), own, bool(use)
 
 
-def section(task: Task, st: TaskState, up: bool) -> list[str]:
+def section(task: Task, st: TaskState, scopes: dict[str, str]) -> list[str]:
     """For the panel: a list, never a table (UX 7), with what cannot be read said."""
     try:
-        found, own, live = gather(task, up)
+        found, own, live = gather(task, scopes)
     except ValueError as e:
         return ["", "#### Resources", "", f"*Limits not readable: {e}*"]
     lines = ["", "#### Resources", ""]
@@ -123,9 +119,9 @@ def section(task: Task, st: TaskState, up: bool) -> list[str]:
     return [*lines, "", f"*{note}*"]
 
 
-def text(task: Task, up: bool) -> str:
+def text(task: Task, scopes: dict[str, str]) -> str:
     """For the command line: the same rows, plain."""
-    found, own, live = gather(task, up)
+    found, own, live = gather(task, scopes)
     width = max(len(r.name) for r in found)
     lines = [f"  {r.name.lower():<{width}}  {r.limit}" + (f"  ·  {r.use}" if r.use else "") for r in found]
     where = "config.toml's [limits]" + (

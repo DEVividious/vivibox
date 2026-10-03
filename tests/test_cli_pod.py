@@ -157,3 +157,14 @@ def test_cpus_past_this_machines_are_refused_for_a_task_too(task, capsys, monkey
     err = capsys.readouterr().err
     assert "limits.pod_cpus" in err and "4 CPUs" in err
     assert not (task.meta / "limits.json").exists()
+
+
+def test_disk_grow_hands_the_helper_the_size_in_its_own_shape_and_echoes_yours(task, capsys):
+    """The helper takes 1536m or 40g, never 1.5g or 40GiB; the command line takes what you
+    write, and says it back as you wrote it."""
+    assert main(["disk", "grow", "demo-1", "1.5g"]) == 0
+    assert main(["disk", "grow", "demo-1", "40GiB"]) == 0
+    sizes = [spec["size"] for op, spec in task.helper.disk_ops() if op == "grow-disk"]
+    assert sizes == ["1536m", "40g"]
+    out = capsys.readouterr().out
+    assert "1.5g" in out and "40GiB" in out

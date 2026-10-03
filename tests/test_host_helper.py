@@ -632,7 +632,10 @@ def test_attach_makes_a_sparse_xfs_image_mounts_it_and_makes_the_pods_directorie
     img = str(tasks / "shop-1" / "disk.img")
     made = os.stat(img)
     assert made.st_size == 20 * 2**30 and made.st_blocks == 0, "sparse: made by the helper, never written"
-    assert host.privileged()[:2] == [["mkfs.xfs", "-q", img], ["losetup", "--find", "--show", img]]
+    assert host.privileged()[:2] == [
+        ["mkfs.xfs", "-q", img],
+        ["losetup", "--find", "--show", "--direct-io=on", img],
+    ], "direct I/O: a loop over a file caches its blocks twice otherwise (the page cache and the device)"
     [mount] = [c for c in host.privileged() if c[:1] == ["mount"]]
     assert mount[:5] == ["mount", "--no-canonicalize", "-o", "discard,nosuid,nodev", "/dev/loop7"], (
         "without --no-canonicalize mount(8) reads the link back to a path and mount(2) resolves it anew"
@@ -857,6 +860,7 @@ def test_the_disk_dry_run_prints_the_steps_and_runs_nothing(tasks, capsys):
     assert code == 0 and host.privileged() == []
     out = capsys.readouterr().out
     assert "# would make" in out and "sparse" in out and "# would run: mkfs.xfs" in out
+    assert "# would run: losetup --find --show --direct-io=on" in out
     assert "mount --no-canonicalize -o discard" in out
     assert not (tasks / "shop-1" / "disk").exists(), "nothing made"
     assert not (tasks / "shop-1" / "disk.img").exists(), "no image either"
@@ -958,7 +962,7 @@ def test_a_mount_that_failed_leaves_one_loop_device_that_the_next_attach_uses(ta
     code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
     assert code == 1
     assert [c for c in host.privileged() if c[:2] == ["losetup", "--find"]] == [
-        ["losetup", "--find", "--show", str(tasks / "shop-1" / "disk.img")]
+        ["losetup", "--find", "--show", "--direct-io=on", str(tasks / "shop-1" / "disk.img")]
     ]
     host.fstype[str(tasks / "shop-1" / "disk.img")] = "xfs"
     code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
@@ -1014,3 +1018,25 @@ def test_a_mount_point_swapped_after_the_check_is_not_grown(tasks, capsys):
     assert code == 1
     assert [c[0] for c in host.privileged()] == ["losetup"], "the loop grew, xfs_growfs did not run"
     assert "changed while the helper worked" in capsys.readouterr().err
+
+
+def test_a_loop_device_that_refuses_direct_io_fails_the_attach_closed(tasks, capsys):
+    """No fallback to buffered I/O that nobody is told of: losetup's refusal is the attach's."""
+
+    class NoDirect(Disks):
+        def __call__(self, cmd, input=None, pass_fds=()):
+            if cmd[:2] == ["losetup", "--find"]:
+                self.calls.append(list(cmd))
+                return subprocess.CompletedProcess(
+                    cmd, 1, "", "losetup: disk.img: failed to set direct io: EINVAL"
+                )
+            return super().__call__(cmd, input, pass_fds)
+
+    host = NoDirect()
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 1
+    assert [c[0] for c in host.privileged()] == ["mkfs.xfs", "losetup"], "no mount, no second losetup"
+    assert "failed to set direct io" in capsys.readouterr().err
+    assert [
+        c for c in host.calls if c[:1] == ["losetup"] and "--direct-io=on" not in c and c[1] != "-j"
+    ] == []

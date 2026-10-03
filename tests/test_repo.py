@@ -477,10 +477,14 @@ def test_the_containers_copy_of_a_changed_clone_is_not_made(cloned, tmp_path):
         "demo-1", repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
     )
     networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
+    from vivibox import reading
+
     pod.review_fresh()
     (repo / ".git" / "commondir").write_text("../elsewhere\n")
-    with pytest.raises(r.RepoError, match="changed"):
-        pod.review_start([], {})
+    view = Path(pod.review_src)
+    with pytest.raises(r.RepoError, match="changed"):  # the reviewer's view, made on the host
+        reading.view(repo, "main", view, whose="the reviewer's")
+    assert not (view / ".git" / "FETCH_HEAD").exists(), "nothing taken from it"
     with pytest.raises(r.RepoError, match="changed"):
         pod.gate_up()
     assert not [c for c in calls if "clone" in c]

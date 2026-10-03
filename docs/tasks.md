@@ -243,8 +243,8 @@ Every mode plans first and stops for your acceptance of the plan (`--auto` does 
   the criteria, for what the gate cannot see (a test that cannot fail, a criterion ticked on
   faith, behaviour the plan did not ask for), and to fix it. Then the gate runs. The timeline
   says `writer turn (self-review)`.
-- **The reviewer** of `planner_writer_reviewer` works in a container of its own on a fresh clone of
-  the commits, with the writer's tree read-only and only its own key, after a green gate, and
+- **The reviewer** of `planner_writer_reviewer` works in a container of its own on a fresh copy of
+  the commits, read-only, without the writer's tree and with only its own key, after a green gate, and
   writes `handoff/review-N.md`: notes under **Blocking** and **Not blocking**, each with a place
   (`path:line`), what is wrong and what would make it right, and under **Checked** what it read
   and checked, so a review with no notes says what it stands on. It looks for what keeps the

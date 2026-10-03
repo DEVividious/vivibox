@@ -451,18 +451,25 @@ def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[
 def review_command(
     pod: Pod, mounts: list[Mount], env: dict[str, str], ca_mounts: list[Mount], net: RoleNetwork
 ) -> list[str]:
-    """The reviewer's container: a fresh clone like the gate's, with the writer's tree read-only
-    and without the build's means, since it reads and runs nothing: no Docker socket, no build
-    caches, no variables of the build. Its own secrets and harness files come as mounts. It is
-    in the reviewer's own network (net), not the sidecar's namespace: what the writer runs,
-    nested containers with any capability included, is not on its wire, and the host's rules
-    for its bridge refuse the writer's range and the writer's refuse its."""
+    """The reviewer's container, made anew for every round, without the build's means, since
+    it reads and runs nothing: no Docker socket, no build caches, no variables of the build. It
+    reads the work in a view of the commits that the host makes (reviewing.up), read-only, at
+    the path the clone has for the writer: the writer's clone itself is not mounted, so git
+    here never follows what the writer left in its .git, and nothing the reviewer does reaches
+    the writer's tree. The view is data, never the harness's working directory, which is
+    READER_WORK, a folder of the host's beside it: harness configuration the writer committed
+    is read, not run. Its own secrets and harness files come as mounts. It is in the reviewer's
+    own network (net), not the sidecar's namespace: what the writer runs, nested containers
+    with any capability included, is not on its wire, and the host's rules for its bridge
+    refuse the writer's range and the writer's refuse its."""
     all_mounts = [
-        Mount(str(pod.repo), str(pod.repo), read_only=True),
-        Mount(str(pod.review_dir), str(pod.review_dir)),
+        Mount(pod.review_src, str(pod.repo), read_only=True),
+        Mount(str(pod.review_work), READER_WORK, read_only=True),
         *ca_mounts,
         *mounts,
     ]
+    # git reads a tree it cannot write: no index refresh, no lock.
+    env = {"GIT_OPTIONAL_LOCKS": "0", **env}
     return [
         "docker", "run", "-d", "--name", pod.review,
         "--label", f"vivibox.task={pod.task_id}",
@@ -478,7 +485,7 @@ def review_command(
         *pod.limits.flags("review", pod.task_id),
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
-        "-w", pod.review_src,
+        "-w", READER_WORK,
         pod.image, "sleep", "infinity",
     ]  # fmt: skip
 
@@ -487,14 +494,14 @@ def review_command(
 # home, and its copy of the committed work, which the host writes and it only reads.
 CONTROL_HOME = "config-control"
 CONTROL_SRC = "control-src"
-# The working directory of the planner's harness in its control container, and the folder of the
-# task's disk mounted there read-only: an empty git repository of the host's making
-# (control.workdir). A harness takes its working directory for the project and loads the
-# project's own configuration from it, so that directory holds nothing anyone but the host
-# wrote; the copy of the writer's commits is data beside it, read by its path. A git repository,
-# because opencode's attached run prints no events for a turn in a directory that is not one
-# (seen in the image, opencode 1.18.31).
-CONTROL_WORK = "/work"
+# The working directory of a harness that only reads the work, in its container (the planner's
+# control container, the reviewer's), where a folder of the task's disk is mounted read-only: an
+# empty git repository of the host's making (reading.workdir). A harness takes its working
+# directory for the project and loads the project's own configuration from it, so that directory
+# holds nothing anyone but the host wrote; the copy of the writer's commits is data beside it,
+# read by its path. A git repository, because opencode's attached run prints no events for a
+# turn in a directory that is not one (seen in the image, opencode 1.18.31).
+READER_WORK = "/work"
 CONTROL_WORK_DIR = "control-work"
 
 
@@ -507,12 +514,12 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
     for the writer: the writer's clone itself is not mounted, so git here never follows what
     the writer left in its .git (a commondir, a config of its choosing), and nothing the planner
     does reaches the writer's tree. The copy is data, never the harness's working directory,
-    which is CONTROL_WORK: harness configuration the writer committed is read, not run. Nothing
+    which is READER_WORK: harness configuration the writer committed is read, not run. Nothing
     the writer's container mounts is that home, that copy or its secrets, and the host's rules
     refuse the writer's range and the reviewer's on its bridge, and its range on theirs."""
     all_mounts = [
         Mount(str(pod.control_src), str(pod.repo), read_only=True),
-        Mount(str(pod.control_work), CONTROL_WORK, read_only=True),
+        Mount(str(pod.control_work), READER_WORK, read_only=True),
         Mount(str(pod.control_home), "/config"),
         *ca_mounts,
         *(pod.control_mounts or []),
@@ -531,6 +538,6 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
         *pod.limits.flags("control", pod.task_id),
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
-        "-w", CONTROL_WORK,
+        "-w", READER_WORK,
         pod.image, "sleep", "infinity",
     ]  # fmt: skip

@@ -541,10 +541,15 @@ def test_git_in_the_gate_container_that_does_not_answer_ends_the_verification(
     assert not [c for c in docker.calls if "make test" in " ".join(c)], "nothing built"
 
 
-def test_the_reviewers_clone_of_a_clone_that_does_not_answer_stops_the_round_for_you(
+def test_the_reviewers_view_of_a_clone_that_does_not_answer_stops_the_round_for_you(
     task, tmp_path, monkeypatch
 ):
+    """The host makes the reviewer's view of the commits from the clone, within the time a copy
+    may take: a clone git waits on (a FIFO made by a process the agent left, after every check)
+    stops the round with why, and no review container is made."""
     from test_supervisor import BLOCKING, reviewed
+
+    from vivibox import reviewing
 
     monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
     sup, notes, reviewer = reviewed(task, tmp_path, [BLOCKING])
@@ -553,6 +558,8 @@ def test_the_reviewers_clone_of_a_clone_that_does_not_answer_stops_the_round_for
 
     def review_up():
         pod.review_fresh()
+        fifo(task.repo, ".git/packed-refs")
+        reviewing.view(task, pod)
         pod.review_start([], {})
         return tmp_path / "review-out"
 
@@ -572,12 +579,14 @@ def test_the_reviewers_clone_of_a_clone_that_does_not_answer_stops_the_round_for
     assert isinstance(ended, Stopped), f"the round did not stop for you: {ended!r}"
     st = task.read_state()
     assert st.state is State.REVIEW and st.reviews == 0, "no review taken, empty or passing"
-    assert "git clone did not answer" in st.problem and ".git/packed-refs" in st.problem
-    assert "git clone did not answer" in notes[-1]
-    assert st.problem.startswith("stopped on an error: the review could not start: git clone")
+    assert "git fetch did not answer" in st.problem and ".git/packed-refs" in st.problem
+    assert "git fetch did not answer" in notes[-1]
+    assert st.problem.startswith(
+        "stopped on an error: the review could not start: the reviewer's copy of the work could not be"
+    )
     assert f"vivibox start {task.id}" in st.problem
     assert reviewer.prompts == [] and not (task.meta / "handoff" / "review-1.md").exists()
-    assert docker.removed_after(pod.review, "clone"), "the review container, and git in it, went down"
+    assert not [c for c in docker.calls if c[:2] == ["docker", "run"]], "no review container was made"
 
 
 def test_a_copy_that_did_not_finish_without_a_special_file_is_not_blamed_on_one(task, tmp_path, monkeypatch):

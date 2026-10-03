@@ -15,7 +15,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, cli_usage, comments, gate, handoff, opencode, providers, repo, roles, secrets
+from . import brief, cli_usage, comments, gate, handoff, opencode, providers, reading, repo, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
@@ -207,25 +207,63 @@ def forget(task_id: str) -> None:
     secrets.remove(secrets_id(task_id))
 
 
+REVIEWERS_OWN = "the reviewer's"
+
+
+def env(task: Task) -> dict[str, str]:
+    """The review container's environment: its harness's configuration, git answering for the
+    view of the commits from wherever it is run (the harness stands in a directory of the
+    host's, podspec.READER_WORK), and no language server downloaded (opencode.READER_ENV)."""
+    return {"OPENCODE_CONFIG": opencode.CONFIG, **reading.git_env(task.repo), **opencode.READER_ENV}
+
+
+def view(task: Task, pod: Pod) -> None:
+    """The round's working directory for the reviewer's harness and its view of the commits,
+    made on the host in the review directory (reading), before its container: on the commit the
+    verification passed, or the task's branch as it is for a task that records none. One that
+    cannot be made stops the review with the reason."""
+    try:
+        reading.workdir(pod.review_work, REVIEWERS_OWN)
+        reading.view(
+            task.repo,
+            repo.branch_name(task.id),
+            Path(pod.review_src),
+            task.read_state().verified_commit,
+            REVIEWERS_OWN,
+        )
+    except repo.GitTimeout as e:
+        again = f"then start the task again: vivibox start {task.id}"
+        raise repo.GitTimeout(f"the review could not start: {e}; {again}") from None
+    except repo.RepoError as e:
+        raise repo.RepoError(f"the review could not start: {e}") from None
+
+
 def up(task: Task, pod: Pod, config: Config) -> Path:
-    """The reviewer's container, ready for a turn: a fresh clone, the reviewer's own key and
-    harness files, the task's files to read, and the directory its review goes to, returned."""
+    """The reviewer's container, ready for a turn: a working directory and a view of the commits
+    that the host makes for the round, the reviewer's own key and harness files, the task's
+    files to read, and the directory its review goes to, returned. The view stands on the
+    commit the verification passed (the task's branch as it is for a task that records none).
+    The container starts only once both are made: a view that cannot be made stops the review
+    with the reason, and the reviewer is never started in the writer's tree instead."""
     # The reviewer's model where config.toml names one, else the writer's (planner_writer_reviewer
     # without [roles.reviewer]).
     role = roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
-    settings = opencode.config(role.model, (), task.repo)
+    # A reader's configuration: no language server, no Serena of vivibox's (opencode.READER).
+    settings = opencode.config(role.model, (), task.repo, reader=True)
     # Exactly what its opencode.json reads: its provider's key and its MCP servers' secrets.
     runtime = secrets.prepare(secrets_id(task.id), providers.mounted(settings))
     pod.review_fresh()
     harness = pod.review_dir / "harness"
     harness.mkdir()
     branch = repo.branch_name(task.id)
-    (harness / "instructions.md").write_text(brief.common(task.id, pod.review_src, branch))
+    # The view is at the path the writer has its clone, in the container.
+    (harness / "instructions.md").write_text(brief.common(task.id, task.repo, branch))
     (harness / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     out = pod.review_dir / "out"
     out.mkdir()
     # The mount point inside /task, which the container has read-only: it has to exist already.
     (task.meta / "review").mkdir(exist_ok=True)
+    view(task, pod)
     mounts = [
         Mount(str(task.meta), "/task", read_only=True),
         comments.mount(task.meta),  # REVIEW_PROMPT reads them; the file under /task is a mount point
@@ -233,5 +271,5 @@ def up(task: Task, pod: Pod, config: Config) -> Path:
         Mount(str(out), MOUNT),
         Mount(str(runtime), secrets.MOUNT, read_only=True),
     ]
-    pod.review_start(mounts, {"OPENCODE_CONFIG": opencode.CONFIG})
+    pod.review_start(mounts, env(task))
     return out

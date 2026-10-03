@@ -105,7 +105,8 @@ def test_the_review_state_sits_between_the_gate_and_the_final_checkpoint(tmp_pat
 
 def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_write(env, monkeypatch):
     """Only the reviewer's provider key goes to its container; the writer's stays with the writer.
-    The brief names the clone the reviewer reads, and the review is written outside the handoff."""
+    The brief names the project where the reviewer reads it, and the review is written outside
+    the handoff."""
     import json
 
     from vivibox import actions, opencode, secrets
@@ -141,15 +142,13 @@ def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_wr
     harness = task.root / "review" / "harness"
     config = json.loads((harness / "opencode.json").read_text())
     assert config["model"] == "other/strong" and list(config["provider"]) == ["other"]
-    assert pod.review_src in (harness / "instructions.md").read_text(), "the clone is the reviewer's repo"
     from vivibox import brief, repo
 
     told = (harness / "instructions.md").read_text()
-    assert told == brief.common(task.id, pod.review_src, repo.branch_name(task.id)), (
-        "the common brief, in its clone: the reviewer stands in a repository of its own"
+    assert told == brief.common(task.id, task.repo, repo.branch_name(task.id)), (
+        "the project at the path its view is mounted at in the review container"
     )
-    assert told != brief.reader(task.id, pod.review_src, repo.branch_name(task.id))
-    assert "You start in an empty directory" not in told
+    assert pod.review_src not in told, "not the folder of the host's the view is made in"
     run = next(c for c in calls if c[:3] == ["docker", "run", "-d"])
     joined = " ".join(run)
     assert f"{task.meta}:/task:ro" in joined and f"{harness}:{opencode.HARNESS_MOUNT}:ro" in joined

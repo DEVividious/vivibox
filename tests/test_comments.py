@@ -8,7 +8,7 @@ import os
 import subprocess
 
 import pytest
-from conftest import networks_up
+from conftest import networks_up, review_made
 from test_handoff import OUTSIDE, at_review, linked
 from test_pod import FakeDocker
 
@@ -169,7 +169,7 @@ def test_the_mount_point_is_left_alone_while_it_is_plain_and_empty(pod):
     with target.open() as mounted:  # a removed file keeps no name, whatever inode a new one gets
         pod.runner.states.pop(pod.agent, None)
         pod.up(timeout=1)
-        pod._copying_clone = lambda *cmd, **kw: None  # no clone to copy here
+        review_made(pod)
         pod.review_start([*pod.agent_mounts[:1], pod.agent_mounts[-1]], {})
         assert os.fstat(mounted.fileno()).st_nlink == 1, "the same file, still at its place"
 

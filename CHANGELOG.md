@@ -22,7 +22,7 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - Every task has a disk of its own: a sparse XFS image `disk.img` in the task's folder, attached
   by the root helper when the task starts and mounted at `<task>/disk`, which holds what the pod
   writes outside the clone (its Docker's data, the agent's home, what a build installs, the
-  verification's and the reviewer's clones), each a directory there instead of a Docker volume;
+  verification's clone and the reviewer's copy of the commits), each a directory there instead of a Docker volume;
   only the Docker socket stays in a volume. Its size, `disk` under `[limits]` (20 GiB), is the
   most the task can write there, and a full disk is the task's, never the machine's. Deleting
   the task detaches the disk and deletes the image; one the helper could not detach is kept and
@@ -88,6 +88,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   writer's brief, which described the writer's container. The writer's, the Single agent's and
   the reviewer's briefs are as they were. In a project with no verification command yet, their
   brief names none.
+- The reviewer's harness works in a read-only directory of vivibox's making, `/work` (a git
+  repository with one empty commit and nothing else), made for every round, and reads the work
+  as data, by its path, in a copy of the task's commits that vivibox makes on your machine for
+  the round, on the commit the verification passed, mounted read-only where the writer has its
+  clone. The writer's clone is not mounted in the reviewer's container and no git runs there
+  against it; git there answers for the copy wherever it is run from. Nothing in the reviewer's
+  container works on the project by itself: its opencode has language servers off and downloads
+  none, and it gets the MCP servers you brought and not vivibox's own Serena. A copy that
+  cannot be made (a clone that is not as recorded, a verified commit that is not on the task's
+  branch, a clone git waits on) stops the review with the reason, and no reviewer's container
+  is started. The reviewer's container is otherwise as it was: its network, its home and
+  scratch folder in memory, its secrets and its limits.
 - A task keeps the flow it was created with: `agent_orchestration_mode` in `config.toml`, and
   the Flow row under `k`, are for the tasks you create after a change, where a running task
   followed the file before. Which containers a task's pod has depends on its flow. A task that
@@ -325,10 +337,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   reason instead of hanging. A file the commits have is to be restored from them, not deleted.
   The reason names the file in the task's clone as text, its control characters escaped, and
   never as part of a command to paste: the names are the agent's.
-- The verification's and the reviewer's own clones of the task's clone, and the verification's
-  fetch of its submodules, no longer wait forever on such a file: past ten minutes their
-  container goes down, and the verification waits for you, or the review stops on an error that
-  names the file.
+- The verification's own clone of the task's clone and its fetch of its submodules, and the copy
+  of the commits made for the reviewer, no longer wait forever on such a file: past ten minutes
+  the verification's container goes down and the verification waits for you, or the review
+  stops on an error that names the file.
 - A plan brought in twice, by the supervisor from the file your CLI wrote and then by
   `vivibox plan import`, counts once: one goal, one planning in the CLI usage.
 - `vivibox init` keeps a quote that belongs to a command from the pipeline, such as the closing

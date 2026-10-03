@@ -144,6 +144,17 @@ def networks_up(pod) -> None:
         (pod_network.SYS_NET / net.bridge / "bridge").mkdir(parents=True, exist_ok=True)
 
 
+def review_made(pod) -> None:
+    """The review directory as reviewing.up leaves it before the container starts, for a test
+    that starts the review container itself: emptied, with a working directory and a view of
+    the host's making in it (stand-ins: a .git folder each, no commits)."""
+    from pathlib import Path
+
+    pod.review_fresh()
+    for folder in (pod.review_work, Path(pod.review_src)):
+        (folder / ".git").mkdir()
+
+
 @pytest.fixture(autouse=True)
 def no_real_docker(request, monkeypatch, tmp_path_factory):
     """No test but one marked docker reaches the machine's Docker, nor sudo: a docker first on PATH answers

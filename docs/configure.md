@@ -101,7 +101,7 @@ Every container of a task's pod runs with limits of its own, under one cgroup sl
 (`vivibox-<id>.slice`, a dash in the id written `_`): memory, with swap bounded to the same figure,
 a number of processes, and the pod's CPUs; the kernel's OOM killer is never turned off. What the
 task writes outside its clone (its Docker's data, the agent's home, what a build installs, the
-verification's and the reviewer's clones) is on a disk image of the task's own, whose size bounds
+verification's clone, the reviewer's copy of the commits) is on a disk image of the task's own, whose size bounds
 it; the clone stays beside the image. `[limits]` in `config.toml` sets them per machine, sizes as
 you write them:
 

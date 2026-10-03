@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import review_made
 
 from vivibox import pod_network, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
@@ -330,7 +331,7 @@ def starting_the_gate(pod, tmp_path):
 
 def starting_the_review(pod, tmp_path):
     pod.review_dir = tmp_path / "review"
-    pod.review_fresh()
+    review_made(pod)
     pod.review_start([Mount(str(tmp_path / "out"), "/task/review")], {})
 
 
@@ -1241,29 +1242,33 @@ def test_the_leftovers_script_holds_no_null_byte():
     assert parsed.returncode == 0, parsed.stderr
 
 
-def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod, tmp_path):
-    """The reviewer works where the gate works, on a clone of the commits, with the writer's tree
-    read-only, and without the build's means: no Docker socket, no caches, no build variables.
-    Its own secrets and harness files come as the mounts the caller gives."""
+def test_the_review_container_has_only_what_a_reader_needs(pod, tmp_path):
+    """The reviewer reads a view of the commits the host made, from a working directory the host
+    made, both read-only, and has none of the build's means: no Docker socket, no caches, no
+    build variables, and not the writer's clone. Its own secrets and harness files come as the
+    mounts the caller gives."""
     pod.review_dir = tmp_path / "review"
     pod.passed_env.append("REPO_TOKEN")
     pod.ensure_networks()
     mounts = [Mount("/srv/x/.task", "/task", read_only=True), Mount(str(tmp_path / "out"), "/task/review")]
     cmd = pod.review_command(mounts, {"OPENCODE_CONFIG": "/task/harness/opencode.json"})
     assert cmd[:5] == ["docker", "run", "-d", "--name", "vivibox-shop-1-review"]
-    assert f"{pod.repo}:{pod.repo}:ro" in cmd and f"{pod.review_dir}:{pod.review_dir}" in cmd
+    assert f"{pod.review_src}:{pod.repo}:ro" in cmd and f"{pod.review_work}:/work:ro" in cmd
+    assert f"{pod.repo}:{pod.repo}:ro" not in cmd and f"{pod.review_dir}:{pod.review_dir}" not in cmd
     assert "/srv/x/.task:/task:ro" in cmd and f"{tmp_path / 'out'}:/task/review" in cmd
     joined = " ".join(cmd)
     assert SOCKET_DIR not in joined and "vivibox-cache-" not in joined and "REPO_TOKEN" not in joined
     assert "OPENCODE_CONFIG=/task/harness/opencode.json" in cmd
     assert "--read-only" in cmd and "--cap-drop" in cmd
-    assert cmd[cmd.index("-w") + 1] == pod.review_src, "commands run in the clone"
+    assert cmd[cmd.index("-w") + 1] == "/work", "commands run in the host's directory, not in the work"
 
     pod.review_fresh()
-    assert (pod.review_dir / "src").is_dir() and not any((pod.review_dir / "src").iterdir())
+    for made_empty in (pod.review_dir / "src", pod.review_work):
+        assert made_empty.is_dir() and not any(made_empty.iterdir())
+    review_made(pod)
     pod.review_start(mounts, {})
-    clone = pod.runner.find("docker", "exec", "-w", str(pod.review_dir), pod.review, "git", "clone")
-    assert clone and clone[0][-2:] == [str(pod.repo), pod.review_src]
+    assert not pod.runner.find("docker", "exec", "-w", str(pod.review_dir), pod.review, "git", "clone")
+    assert not [c for c in pod.runner.calls if c[:2] == ["docker", "exec"] and "git" in c], "no git there"
     side = pod.review_side()
     assert side.agent == pod.review and side.task_id == pod.task_id
     side.exec("opencode", "--version")
@@ -1317,7 +1322,7 @@ def test_a_review_remakes_the_reviewers_network_gone_between_rounds(pod, tmp_pat
     pod.review_dir = tmp_path / "review"
     pod.runner.networks.discard("vivibox-shop-1-r")
     before = len(pod.runner.calls)
-    pod.review_fresh()
+    review_made(pod)
     pod.review_start([], {})
     after = pod.runner.calls[before:]
     made = next(i for i, c in enumerate(after) if c[:3] == ["docker", "network", "create"])
@@ -1354,7 +1359,7 @@ def flag(cmd, name) -> str:
 
 
 def commands_of(pod, tmp_path) -> dict[str, list[str]]:
-    pod.gate_dir = tmp_path / "gate"
+    pod.gate_dir, pod.review_dir = tmp_path / "gate", tmp_path / "review"
     pod.ensure_networks()  # the reviewer's command names its network's address
     return {
         "sidecar": pod.sidecar_command(),

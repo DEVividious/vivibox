@@ -8,7 +8,7 @@ that container mounts, its harness server listens in that container's network na
 password of its own, and its keys are in a directory of its own: nothing the writer runs has a
 path to any of them, so what the planner reads as its own history is what it wrote. What the
 writer does write reaches it as data only: the commits, in a copy the host makes (refresh),
-which is never its harness's working directory (podspec.CONTROL_WORK), and the handoff.
+which is never its harness's working directory (podspec.READER_WORK), and the handoff.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFI
 
 def env(task: Task) -> dict[str, str]:
     """The control container's environment. git there, wherever it is run, works on the copy of
-    the commits: the planner's harness stands in a directory of the host's (podspec.CONTROL_WORK),
+    the commits: the planner's harness stands in a directory of the host's (podspec.READER_WORK),
     and its brief says git answers for the project from any directory (the review's turn asks
     for `git diff <base>..HEAD` and names no place to run it). The copy's
     .git is the host's and read-only there, so its hooks and configuration are the host's; what

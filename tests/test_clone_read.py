@@ -1080,7 +1080,6 @@ def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch
     monkeypatch.setattr(providers, "mcp_secrets", lambda: [])
     monkeypatch.setattr(opencode, "provider_of", lambda model: "ollama")
     monkeypatch.setattr(providers, "keyless", lambda provider: True)
-    monkeypatch.setattr(the_pod, "review_fresh", lambda: the_pod.review_dir.mkdir(parents=True))
     monkeypatch.setattr(the_pod, "review_start", lambda mounts, env_: reviewer.append(mounts))
     reviewing.up(t, the_pod, load_config())
     argvs = [

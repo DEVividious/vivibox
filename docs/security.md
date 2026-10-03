@@ -53,7 +53,7 @@ Each container of the pod is bounded by its cgroup: memory with swap bounded to 
 (`--memory`, `--memory-swap`), processes (`--pids-limit`) and the pod's CPUs, all under the task's
 slice (`--cgroup-parent`), never with the OOM killer turned off; `[limits]` in `config.toml` and
 `vivibox limits` set them. The pod's Docker data, the agent's home, what a build installs and the
-verification's and the reviewer's clones are directories of a disk image of the task's (an XFS file
+verification's clone and the reviewer's copy of the commits are directories of a disk image of the task's (an XFS file
 in the task's folder, attached by the root helper on a loop device mounted `nosuid,nodev` with
 `discard`, not `noexec`: what a build installs there, and the agent's tools, are run from it),
 whose size is the most the task writes there; the clone is outside it.
@@ -161,8 +161,22 @@ home of its own. Git in the planner's container answers for the copy from wherev
 (`GIT_DIR` and `GIT_WORK_TREE` in its environment); the copy's `.git` is vivibox's and
 read-only there.
 
-The reviewer reads an untrusted repository too. Isolating its harness and its configuration
-from that repository is part of the hardening still to come before the next release.
+The reviewer reads the same work, and the same is enforced for it. Its harness starts in a
+directory vivibox made for the round, `/work`: a git repository with one empty commit and
+nothing else, on the task's disk, read-only in the review container. The work is beside it and
+is read as data, by its path, never as the harness's working directory: a copy of the task's
+commits that vivibox makes on your host for every round, from the clone once it is as recorded,
+with none of your git configuration, on the commit the verification passed, mounted read-only
+at the path the writer has its clone. The writer's clone itself is not mounted in the review
+container and no git runs there against it; git there answers for the copy from wherever it is
+run (`GIT_DIR` and `GIT_WORK_TREE` in its environment), and the copy's `.git` is vivibox's and
+read-only there. The reviewer runs on opencode, on the configuration vivibox writes for it: its
+language servers are off and none is downloaded, and it carries the MCP servers you brought and
+never vivibox's own Serena. A copy that cannot be made (a clone that is not as recorded, a
+verified commit that is not on the task's branch) stops the review with the reason, and no
+review container is started: the reviewer is never run in the writer's tree instead. Its home
+and its scratch folder are the container's own memory, new every round, and its secrets are
+mounted in that container alone.
 
 The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
 planner's session id in the task's state and the transcripts of its turns in the task's log.

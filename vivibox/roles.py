@@ -324,8 +324,9 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
         return manual.Manual()
     side = container_of(role_name, pod, task)
     if role.harness == claudecode.NAME:
-        # In the control container claude is given no directory: see ClaudeCode.add_dirs.
-        dirs = () if side is not pod else claudecode.ADD_DIRS
+        # In a container that reads the work (the control container, the reviewer's) claude is
+        # given no directory: see ClaudeCode.add_dirs.
+        dirs = claudecode.ADD_DIRS if side is pod and role_name != "reviewer" else ()
         return claudecode.ClaudeCode(side, role.model, dirs)
     if role_name == "reviewer":
         return opencode.OpenCode(side, role.model, port=opencode.REVIEW_PORT)

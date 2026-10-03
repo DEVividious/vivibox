@@ -52,9 +52,10 @@ class GitTimeout(RepoError):
 # there answers in well under a second on an ordinary repository and in seconds on a large one;
 # a named pipe where git reads its settings or refs makes git wait forever.
 CLONE_TIMEOUT = 60.0
-# Seconds git in a container may take to copy the clone (the gate's and the reviewer's clone of it,
-# the submodules): it copies every object without hard links and checks the tree out, and fetches
-# submodules over the network, which on a repository of gigabytes takes a minute or more.
+# Seconds git may take to copy the clone (the gate's clone of it in its container and the
+# submodules; on the host, a reader's view of its commits, reading.view): it copies every object
+# without hard links and checks the tree out, and fetches submodules over the network, which on a
+# repository of gigabytes takes a minute or more.
 COPY_TIMEOUT = 600.0
 
 

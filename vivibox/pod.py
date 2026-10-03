@@ -4,7 +4,8 @@ The agent reaches the daemon only through a unix socket on a volume shared by th
 ports published by compose or Testcontainers on localhost. The sidecar mounts the task repo
 read-only: under Sysbox, root in a nested container would otherwise write to it as host root.
 What the pod writes outside the clone (the daemon's data, the agent's home, what a build
-installs, the gate's and the reviewer's clones) is on the task's disk image (pod_disk).
+installs, the gate's clone, the reviewer's and the planner's views of the commits) is on the
+task's disk image (pod_disk).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
 
-from . import display, handoff, podspec, repo, toolchain
+from . import display, handoff, podspec, reading, repo, toolchain
 from .config import DEFAULT_HOST_ADDRESS, DEFAULT_NETWORK_POOL, HostService
 from .names import ROLES as NETWORK_ROLES
 from .pod_demo import PREPARE_PID as PREPARE_PID
@@ -131,7 +132,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     passed_env: list[str] = field(default_factory=list)
     # Where the gate builds a fresh clone of the committed work; outside anything the agent can write.
     gate_dir: Path | None = None
-    # Where the reviewer reads its own fresh clone, with its harness files and its review beside it.
+    # Where the reviewer's view of the commits and its harness's working directory are made for
+    # each round, with its harness files and its review beside them.
     review_dir: Path | None = None
     # What the planner's control container mounts besides the clone and its own home (the task's
     # files, its own secrets and harness files; control.py); None: the task has no control
@@ -184,7 +186,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
 
     @property
     def review_src(self) -> str:
+        """The reviewer's view of the committed work: the host writes it, the reviewer reads it."""
         return f"{self.review_dir}/src"
+
+    @property
+    def review_work(self) -> Path:
+        """The working directory of the reviewer's harness: the host's, empty, read-only there."""
+        return self.review_dir / "work"
 
     @property
     def control(self) -> str:
@@ -301,6 +309,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
 
     def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
         """The reviewer's container in the reviewer's network; none without it (never the writer's)."""
+        if self.review_dir is None:
+            raise PodError("the pod has no review directory")
         net = self.recorded_network("r")
         if net is None:
             raise PodError(f"{self.task_id} has no network allocated yet; start it first")
@@ -564,20 +574,25 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         self._run("docker", "rm", "-f", self.gate, check=False)
 
     def review_fresh(self) -> None:
-        """An empty review directory with the clone's place in it, before the caller puts the
-        reviewer's files beside it; the container from the last round, if any, goes first."""
+        """An empty review directory with the places of the reviewer's view of the commits and of
+        its harness's working directory in it, before the caller makes both there and puts the
+        reviewer's files beside them; the container from the last round, if any, goes first."""
         if self.review_dir is None:
             raise PodError("the pod has no review directory")
         self.review_down()
         shutil.rmtree(self.review_dir, ignore_errors=True)
         (self.review_dir / "src").mkdir(parents=True)
+        self.review_work.mkdir()
 
     def review_start(self, mounts: list[Mount], env: dict[str, str]) -> None:
-        """The reviewer's container, with a fresh clone of the task branch in it. Its network
-        first, as at up: nothing is on it between rounds, so a prune of Docker's takes it, and
-        it is made again on its recorded range; one made another way, on a bridge the host's
-        rules are not keyed by, starts no reviewer. A review allocates nothing and removes no
-        network: a task with none is one to start first."""
+        """The reviewer's container, on the view of the commits and the working directory the
+        host made in the review directory (reviewing.up): no git runs in it against the writer's
+        clone, which it does not mount. Its network first, as at up: nothing is on it between
+        rounds, so a prune of Docker's takes it, and it is made again on its recorded range; one
+        made another way, on a bridge the host's rules are not keyed by, starts no reviewer. A
+        review allocates nothing and removes no network: a task with none is one to start first.
+        Without its view or its working directory there is no container: a reviewer is never
+        started in a directory the host did not make."""
         self._placeholders(mounts)
         try:
             if not self.made_networks():
@@ -587,15 +602,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         except PodError as e:
             raise PodError(f"the review could not start: {e}") from None
         self._rules_before("the review")
+        for folder, what in (
+            (self.review_work, "working directory"),
+            (Path(self.review_src), "view of the work"),
+        ):
+            if not reading.made(folder):
+                raise PodError(f"the review could not start: the reviewer's {what} was not made at {folder}")
         self._run(*self.review_command(mounts, env))
-        where = ("docker", "exec", "-w", str(self.review_dir), self.review)
-        clone = ("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.review_src)
-        try:
-            self._copying_clone(self.review_down, *where, *clone)
-        except repo.GitTimeout as e:
-            raise repo.GitTimeout(
-                f"the review could not start: {e}; then start the task again: vivibox start {self.task_id}"
-            ) from None
 
     def review_down(self) -> None:
         self._run("docker", "rm", "-f", self.review, check=False)

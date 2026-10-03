@@ -301,6 +301,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   task: looking at a task writes nothing in it.
 - The tests reach no Docker but in a test marked `docker`: a `docker` first on PATH answers as an
   empty daemon, and a test that asks it to change something fails.
+- The tests send no desktop notification and post to no ntfy topic: the supervisor's notify and
+  `ntfy.post` are recorders in every test but one marked `real_notify`.
 - The pod's container recipes, its demo commands and its network rules moved from `pod.py` to
   modules of their own (`podspec.py`, `pod_demo.py`, `pod_egress.py`); nothing changes for a person.
 - The project's panel, a finished or deleted task's, the projects the view offers and the view's

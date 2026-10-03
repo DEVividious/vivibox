@@ -63,6 +63,7 @@ markers = [
     "docker: needs a Docker daemon and network access",
     "real_start: uses the real actions.start instead of the stand-in from conftest",
     "real_hostd: starts the DNS forwarder's process (vivibox hostd), which conftest otherwise stands in for",
+    "real_notify: uses the real supervisor.notify and ntfy.post instead of the recorders from conftest",
     "model: runs an agent on a real model, for money; only when asked (tests/behavioural)",
 ]
 addopts = "-m 'not docker and not model'"

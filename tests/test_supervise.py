@@ -308,3 +308,19 @@ def test_the_whole_build_before_review_runs_only_when_asked_and_only_by_module(e
     git("add", ".")
     git("commit", "-q", "-m", "Add the root build")
     assert sup.ports.run_whole_gate(task) is None, "its verification was whole already"
+
+
+def test_a_channel_made_by_a_test_posts_to_no_topic(monkeypatch, no_real_notifications):
+    """A test that loads a configuration with a topic gets a channel that records what it would
+    post and reaches no server (tests/conftest.py: no_real_notifications)."""
+    from contextlib import nullcontext
+    from dataclasses import replace
+
+    opened = []
+    monkeypatch.setattr(ntfy.urllib.request, "urlopen", lambda *a, **kw: opened.append(a) or nullcontext())
+    channel = supervise.channel_for(config(ntfy="t"), get_key=lambda n: "tk", stored=lambda: {})
+    replace(channel, spawn=lambda run: run()).decision("demo-1", "plan ready for review", waiting=True)
+    assert not opened, opened
+    assert [(url, headers["Title"], body) for url, headers, body in no_real_notifications.ntfy] == [
+        ("https://ntfy.sh/t", "vivibox demo-1", b"plan ready for review")
+    ]

@@ -164,3 +164,32 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     changing = [c for c in calls if not any(tuple(c.split()[: len(r)]) == r for r in READ_ONLY_DOCKER)]
     if changing:
         pytest.fail(f"asked Docker to change something: {changing[:5]}; fake it, or mark the test docker")
+
+
+@pytest.fixture(autouse=True)
+def no_real_notifications(request, monkeypatch):
+    """No test reaches your desktop's notifications nor an ntfy topic: the supervisor's notify
+    says what it says in its window and records what it would have shown on the desktop, and
+    ntfy.post records what it would have posted. A test marked real_notify gets the real thing,
+    and stands in for notify-send itself."""
+    from types import SimpleNamespace
+
+    from vivibox import ntfy, supervisor
+
+    quiet = SimpleNamespace(desktop=[], ntfy=[])
+    if "real_notify" in request.keywords:
+        return quiet
+    real = supervisor.notify
+
+    # Ports' default and supervise.notifier look notify up in the module at each call, so this is
+    # what they get.
+    def in_the_window_only(task_id, message, desktop=True, actions=()):
+        if desktop:
+            quiet.desktop.append((task_id, message))
+        real(task_id, message, desktop=False)
+
+    monkeypatch.setattr(supervisor, "notify", in_the_window_only)
+    # A channel takes the module's post when it is made (ntfy.Channel), so one made by
+    # supervise.channel_for from a configuration with a topic gets this.
+    monkeypatch.setattr(ntfy, "post", lambda url, headers, body: quiet.ntfy.append((url, headers, body)))
+    return quiet

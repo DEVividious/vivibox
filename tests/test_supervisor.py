@@ -323,6 +323,7 @@ def test_next_prompt_survives_a_failed_turn(task):
     assert supervisor.next_prompt(task, "default") == "default"
 
 
+@pytest.mark.real_notify  # notify-send itself is stood in for below; nothing reaches the desktop
 def test_desktop_notifications_follow_the_setting(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(supervisor.shutil, "which", lambda name: "/usr/bin/notify-send")
@@ -1679,3 +1680,24 @@ def test_the_limits_are_read_before_each_turn_and_each_verification_and_compared
     assert calls == ["begin", "found"]
     sup.step()  # the verification, then the whole build's baseline (nothing to run, nothing compared)
     assert calls == ["begin", "found", "begin", "found", "begin"]
+
+
+def test_a_supervisor_run_by_a_test_puts_nothing_on_the_desktop(
+    task, monkeypatch, capsys, no_real_notifications
+):
+    """The suite runs on a desktop. A supervisor whose caller passed no notify (Ports' default)
+    says what it says in its window and nowhere else: notify-send never runs
+    (tests/conftest.py: no_real_notifications)."""
+    ran = []
+    monkeypatch.setattr(supervisor.shutil, "which", lambda name: "/usr/bin/notify-send")
+    monkeypatch.setattr(supervisor.subprocess, "run", lambda command, **kw: ran.append(command))
+    t = create_task(task.root.parent / "quiet", "demo", "Goal", TEMPLATE)
+    t.plan_path.write_text(DRAFT)
+    t.transition(State.CHECKPOINT_PLAN)
+    supervisor.accept_plan(t, "plan accepted")
+    ports = supervisor.Ports(run_gate=lambda _: gate_result(), risky_changes=lambda: [])
+    supervisor.Supervisor(t, FakeHarness(t), ports, max_rounds=1, project_verify=[]).step()
+    said = "no command came from the writer"
+    assert not ran, ran
+    assert said in capsys.readouterr().out
+    assert [(i, m[: len(said)]) for i, m in no_real_notifications.desktop] == [(t.id, said)]

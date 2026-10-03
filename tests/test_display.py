@@ -446,6 +446,7 @@ def test_a_conflict_and_a_commit_subject_in_a_notification_are_never_markup(env,
     run(scenario, notifications=True)
 
 
+@pytest.mark.real_notify  # notify-send itself is stood in for below; nothing reaches the desktop
 def test_the_desktop_notification_is_never_markup(monkeypatch, capsys):
     from vivibox import supervisor
 

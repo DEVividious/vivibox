@@ -61,7 +61,8 @@ class Channel:
     url: str
     level: str = DECISIONS
     token: str = ""
-    post: Post = post
+    # The module's post as it is when the channel is made: a stand-in for it (a test's) counts.
+    post: Post = field(default_factory=lambda: post)
     report: Callable[[str], None] = said
     spawn: Callable[[Callable[[], None]], None] = in_background
 

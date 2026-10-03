@@ -115,6 +115,13 @@ pod_pids = 8192
 disk = "20g"             # a new task's disk, from 1g to 2t
 ```
 
+The disk is a sparse XFS image on a loop device, which gives a hard ceiling per task on any
+installation, whatever filesystem the tasks directory is on. It costs build time: measured on a
+Maven project (spring-petclinic, `mvn package` with its tests), a verification took about 68–71 s
+on the disk against 52–55 s on Docker volumes, roughly 1.3×. That cost is accepted for this
+release; a backend on the filesystem's own project quotas is a possible later optimisation, not
+planned.
+
 What is enforced is each container's memory, its processes and its CPUs, and the disk's size.
 `pod_memory` and `pod_pids` are a budget the containers' limits are checked against and the
 panel shows as the task's, not a limit on the slice itself; a container of the pod's Docker runs

@@ -449,30 +449,28 @@ SOURCES = {
     "java/src/main/java/Main.java": "class Main {}\n",
 }
 READ = ("web/main.ts", "crate/src/lib.rs", "py/app.py", "go/main.go", "java/src/main/java/Main.java")
-# What runs in the control container besides a language server, were one started: the
-# container's own sleep, the harness's server, the stand-in provider, the listeners the tests
-# before this one left to end by themselves, and the question itself.
+# What runs in the control container besides a language server, were one started: the image's
+# entrypoint (tini, the container's first process) and the sleep it keeps, the harness's server,
+# the stand-in provider, the listeners the tests before this one left to end by themselves, and
+# the question itself.
 OWN_PROCESSES = (
+    "tini -- sleep infinity",
     "sleep infinity",
     "opencode serve",
     "python3 /task/mock/mock_provider.py",
     "timeout 300 python3 -m http.server",
     "python3 -m http.server",
     "ps -eo args=",
-    "bash -c ps -eo args=",
 )
-# One of them that ended and nobody reaped (the container's first process is sleep), by its name.
-ENDED = ("opencode", "python3", "timeout", "bash", "sh", "curl", "git", "ps", "sleep")
 
 
 def not_its_own(listing: str) -> list[str]:
-    """The lines of a `ps -eo args=` in the control container that are none of OWN_PROCESSES."""
-    found = []
-    for line in filter(None, map(str.strip, listing.splitlines())):
-        ended = line.endswith("<defunct>") and line.split("]")[0].lstrip("[") in ENDED
-        if not ended and not line.startswith(OWN_PROCESSES):
-            found.append(line)
-    return found
+    """The lines of a `ps -eo args=` in the control container that are none of OWN_PROCESSES. One
+    that ended and was not reaped (`[name] <defunct>`) is among them whatever its name: tini
+    reaps what is left to it, so such a line is a child some process started and did not wait
+    for, which is worth a look."""
+    lines = filter(None, map(str.strip, listing.splitlines()))
+    return [line for line in lines if not line.startswith(OWN_PROCESSES)]
 
 
 def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_writers(live):

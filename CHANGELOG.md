@@ -326,6 +326,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- A task's allocation file (`.task/network.json`) records three ranges, one per role (`w`, `r`,
+  `p`), cut from one /27 block of the pool (`pod_network.split_block`); the policy given to the
+  root helper lists the networks that have a bridge (`pod_network.MADE_ROLES`: the writer's and
+  the reviewer's), the planner's reserved range left out until it has one. The helper takes a
+  pool no narrower than a /27, as `config.toml` does. `tests/fixtures/host-policy-roles.nft` is
+  the reviewed rule file for two role networks of one task.
 - The `gate-installed` directory of a task's disk is gone: the gate's Maven installs under the
   gate's own repository in its directory, fresh for every verification, so nothing of the gate's
   is mounted over the shared repository's `installed/` any more. The root helper makes six

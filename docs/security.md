@@ -6,6 +6,8 @@ on your machine until you have approved it.
 - **The agent is not trusted.** It runs as your UID without capabilities, on a read-only root
   filesystem, in a pod whose Docker daemon runs under Sysbox. A privileged container the agent
   starts cannot reach your host. The pod cannot reach your host or LAN, except services you list.
+  The reviewer reads the work from a network of its own, which the pod cannot reach and which
+  cannot reach the pod.
 - **Nothing the agent writes runs on your host without your approval.** The task clone's
   `.git/config` and hooks are read-only for the agent, so git on your host, run by you or by your
   IDE, cannot execute agent-written commands. Files that run code on IDE import or in your
@@ -91,6 +93,17 @@ agent's and the gate's, so a registry or a proxy behind a corporate authority wo
 it does on your host. The sidecar remembers the bundle it started with: when the host's changes,
 as it does when a VPN client installs a new corporate authority, the next start of the task makes
 the sidecar again, because its Docker daemon reads the authorities once, at its start.
+
+The reviewer's container is in a network of the task's own, apart from the writer's. The sidecar,
+the agent, the verification's container and every container the pod's Docker runs are on the
+writer's network, in the sidecar's network namespace; the reviewer is on its own bridge, at an
+address allocated for it, with rules of its own on your host, loaded before it starts. Each
+network's rules refuse the other's range, so nothing the writer runs, a nested container with
+`NET_RAW` or `NET_ADMIN` included, sees a packet of the reviewer's or reaches its container, and the
+reviewer reaches nothing of the writer's; vivibox talks to each through `docker exec`, never through
+the task's networks. The reviewer's DNS goes to the forwarder like the pod's, `host.docker.internal`
+there is its own network's gateway, and its internet is open like the writer's (it reaches its
+provider over TLS); nothing narrows it until names are allowed by policy.
 
 With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
 pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not

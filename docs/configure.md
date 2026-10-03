@@ -314,8 +314,9 @@ it.
 
 A pod reaches the internet; it does not reach your machine, your LAN, other private ranges, other
 tasks, IPv6, or UDP other than DNS. These rules are on your machine, not in the pod, keyed by the
-task network's bridge (`vbx-<task>-w`), and loaded before the pod's first packet; root in the pod
-cannot remove them. A project's `host_services` are the exceptions: `host.docker.internal:5432`
+bridges of the task's networks (`vbx-<task>-w` for the writer's, which the pod's containers share,
+`vbx-<task>-r` for the reviewer's; each refuses the other's range), and loaded before the pod's
+first packet; root in the pod cannot remove them. A project's `host_services` are the exceptions: `host.docker.internal:5432`
 is your machine, on the gateway of the task's network, so a service listening on all addresses
 answers there; a name resolves on your machine when the task starts.
 
@@ -329,9 +330,16 @@ runs; `vivibox hostd stop` stops it.
 
 ```toml
 [network]
-pool = "198.51.100.0/24"           # the ranges task networks are cut from, a /28 each
+pool = "198.51.100.0/24"           # the ranges task networks are cut from, a /27 block per task
 host_address = "203.0.113.1/32"    # your machine's address for the pods, on vivibox0
 ```
+
+A task takes 32 addresses of the pool, one /27 block: the writer's network is its first /28, the
+reviewer's the /29 after it, and the last /29 is kept for the planner. The default `/24` holds 8
+tasks at once; a task holds its block until you delete it. When every block is in use, a task does
+not start, and the error names the pool and its room in tasks, what a task takes, and that deleting
+tasks you have finished with frees their ranges; a wider `pool` holds more, and one smaller than a
+/27 is refused by name.
 
 `host_address` is one address that nothing else on your machine has or routes, outside the pool.
 Both defaults are ranges reserved for documentation (RFC 5737), which no real network uses. If

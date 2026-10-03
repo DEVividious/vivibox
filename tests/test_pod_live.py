@@ -88,8 +88,8 @@ def env():
     cfg = load_config()  # the host's address and the pool this machine was set up with
     pod = Pod(
         task_id, repo, ref, [HostService("host.docker.internal", allowed.server_address[1])],
-        gate_dir=folder / "disk" / "gate", host_address=cfg.host_address, network_pool=cfg.network_pool,
-        limits=cfg.limits, folder=folder,
+        gate_dir=folder / "disk" / "gate", review_dir=folder / "disk" / "review",
+        host_address=cfg.host_address, network_pool=cfg.network_pool, limits=cfg.limits, folder=folder,
     )  # fmt: skip
     try:
         pod.up()
@@ -242,6 +242,123 @@ def test_root_in_a_nested_container_cannot_remove_the_rules(env):
 def test_internet_is_reachable(env):
     central = "https://repo.maven.apache.org/maven2/"
     assert agent(env, f"curl -fsS -m 10 -o /dev/null {central}", check=False).returncode == 0
+
+
+def review_up(pod: Pod) -> None:
+    """The reviewer's container of the pod, with a fresh clone of the task's commits, as a round
+    of review starts it: the smallest set of mounts, the clone and the review directory."""
+    pod.review_fresh()
+    pod.review_start([], {})
+
+
+def listen(side, port: int, bind: str) -> None:
+    """A listener in a container, on every address or on loopback, gone by itself in time."""
+    side.exec_detached(
+        "timeout", "300", "python3", "-m", "http.server", str(port), "--bind", bind, "--directory", "/tmp"
+    )
+
+
+def answers(side, url: str) -> bool:
+    return side.exec("curl", "-fsS", "-m", "5", "-o", "/dev/null", url, check=False).returncode == 0
+
+
+def refused_at_once(side, url: str) -> None:
+    """A connection the host's rules refuse: curl fails at once (a reset, an ICMP refusal), not
+    by its time limit, which is exit 28."""
+    started = time.monotonic()
+    done = side.exec("curl", "-sS", "-m", "5", "-o", "/dev/null", url, check=False)
+    assert done.returncode not in (0, 28), f"{url}: {done.returncode} {done.stderr}"
+    assert time.monotonic() - started < 4, f"{url}: refused, not left to time out"
+
+
+def packets_seen(env, sniffer: str, port: int, talk) -> int:
+    """How many packets tcpdump in the nested container, on every interface of the namespace it
+    shares with the sidecar (--network host of the pod's Docker), prints for the port while
+    talk() runs: at most 5, then it stops; none, and it gives up after six seconds."""
+    sniff = (
+        f"docker exec {sniffer} timeout -s INT 6 tcpdump -i any -nn -l -c 5 port {port} 2>/dev/null | wc -l"
+    )
+    p = subprocess.Popen(
+        ["docker", "exec", env["pod"].agent, "bash", "-c", sniff], stdout=subprocess.PIPE, text=True
+    )
+    time.sleep(2)  # listening before the first packet
+    talk()
+    out, _ = p.communicate(timeout=60)
+    return int(out.strip() or 0)
+
+
+def test_the_reviewers_traffic_is_not_on_the_writers_wire_and_neither_reaches_the_other(env):
+    """D1: the reviewer in a network of its own. A nested container of the writer's with
+    --network host and NET_RAW runs tcpdump on every interface of the sidecar's namespace, which
+    the agent and the gate share: it sees the agent talking to a listener of its own (the method
+    works), and nothing of the reviewer talking to a listener in its own container, the probe.
+    The reviewer cannot reach the sidecar's address and the agent cannot reach the reviewer's,
+    refused at once; the reviewer resolves names and reaches the internet (open until names are
+    allowed by policy), and host.docker.internal there is its own network's gateway."""
+    pod = env["pod"]
+    review_up(pod)
+    reviewer, port, sniffer = pod.review_side(), 39418, "d1sniff"
+    agent(env, f"docker rm -f {sniffer}", check=False)
+    agent(env, f"docker run -d --name {sniffer} --network host --cap-add NET_RAW alpine:3 sleep 600")
+    try:
+        agent(env, f"docker exec {sniffer} apk add -q --no-cache tcpdump")
+        listen(reviewer, port, "127.0.0.1")
+        listen(pod, port, "127.0.0.1")
+        time.sleep(1)
+        probe = f"for i in 1 2 3; do curl -fsS -o /dev/null http://127.0.0.1:{port}/; done"
+        assert packets_seen(env, sniffer, port, lambda: pod.exec("bash", "-c", probe)) > 0, "the method"
+        assert reviewer.exec("bash", "-c", probe, check=False).returncode == 0, (
+            "the reviewer's listener answers it"
+        )
+        assert packets_seen(env, sniffer, port, lambda: reviewer.exec("bash", "-c", probe)) == 0, (
+            "not one packet of the reviewer's in the writer's namespace"
+        )
+    finally:
+        agent(env, f"docker rm -f {sniffer}", check=False)
+    sidecar, own = pod.recorded_network().address, pod.recorded_network("r").address
+    listen(reviewer, port + 1, "0.0.0.0")
+    listen(pod, port + 1, "0.0.0.0")
+    time.sleep(1)
+    assert answers(pod, f"http://{sidecar}:{port + 1}/") and answers(reviewer, f"http://{own}:{port + 1}/"), (
+        "each listener is real, on its own network's address"
+    )
+    refused_at_once(reviewer, f"http://{sidecar}:{port + 1}/")
+    refused_at_once(pod, f"http://{own}:{port + 1}/")
+    assert answers(reviewer, "https://example.com/"), "the reviewer's internet, through the host's DNS"
+    found = reviewer.exec("getent", "hosts", "host.docker.internal").stdout.split()
+    assert found[:1] == [pod.recorded_network("r").gateway], "its own gateway, never the writer's"
+    pod.review_down()
+
+
+def test_a_neighbouring_pod_is_unreachable_from_the_writer_and_from_the_reviewer(env):
+    """T13: another task's pod listens on every address of its namespace; from this task's agent
+    and from its reviewer the connection is refused at once, by the rules of each bridge, which
+    refuse the whole pool. The neighbour's own agent reaches it, so the listener is real."""
+    pod = env["pod"]
+    task_id = check_id("neighbour")
+    folder = own_folder(task_id)
+    repo = folder / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    cfg = load_config()
+    other = Pod(
+        task_id, repo, pod.image, [], host_address=cfg.host_address, network_pool=cfg.network_pool,
+        limits=cfg.limits, folder=folder,
+    )  # fmt: skip
+    try:
+        other.up()
+        listen(other, 8000, "0.0.0.0")
+        address = other.recorded_network().address
+        assert address != pod.recorded_network().address, "a block of its own"
+        time.sleep(1)
+        assert answers(other, f"http://{address}:8000/"), "its own agent reaches it"
+        review_up(pod)
+        refused_at_once(pod, f"http://{address}:8000/")
+        refused_at_once(pod.review_side(), f"http://{address}:8000/")
+    finally:
+        pod.review_down()
+        assert other.remove() == ""
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_parallel_maven_builds_share_a_local_repository(env):

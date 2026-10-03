@@ -10,10 +10,24 @@ from pathlib import Path
 import pytest
 from test_pod import FakeDocker, applied_policy, flag, starts
 
-from vivibox import actions, control, image, keys, orchestration, pod_network, secrets
+from vivibox import (
+    actions,
+    claudecode,
+    control,
+    gate,
+    image,
+    keys,
+    opencode,
+    orchestration,
+    pod_network,
+    secrets,
+    supervise,
+)
 from vivibox import task as task_module
 from vivibox.config import Config, HostService, Role, load_config
+from vivibox.harness import Turn
 from vivibox.pod import CACHES, SOCKET_DIR, ContainerSide, Mount, Pod, PodError
+from vivibox.states import State
 from vivibox.task import create_task
 
 TEMPLATE = "+++\n+++\n\n## Acceptance criteria\n\n- [ ] x\n"
@@ -521,3 +535,251 @@ def test_the_planners_harness_reads_the_work_as_it_is_before_each_turn():
     assert reader.turn("Review.", session="ses_1", title="t") == "turn"
     assert inner.turns == [("Review.", "ses_1", "t", None, ["refreshed"])], "first the copy, then the turn"
     assert reader.name == "opencode" and reader.manual is False, "the rest is the harness's own"
+
+
+# --- which container a role's harness talks to --------------------------------------------------
+
+
+@pytest.mark.parametrize(("mode", "has_one"), FLOWS)
+def test_the_planners_harness_is_bound_to_its_own_container_and_the_writers_to_the_agents(
+    docker, mode, has_one
+):
+    """The planner talks through a server in the control container wherever the task has one, on
+    the usual port (another network namespace than the writer's); a single agent's planner is
+    the writer's own agent. The writer's harness is the agent's container's in every flow."""
+    task = actions.create("demo", "Add divide", orchestration=mode)
+    pod = actions.task_pod(task.id)
+    planner = actions.harness_for("planner", pod, task)
+    writer = actions.harness_for("writer", pod, task)
+    wanted = f"vivibox-{task.id}-control" if has_one else f"vivibox-{task.id}-agent"
+    assert planner.pod.agent == wanted and planner.port == opencode.PORT
+    assert writer.pod is pod and writer.pod.agent == f"vivibox-{task.id}-agent"
+    assert planner.attach_command("ses_1")[:4] == ["docker", "exec", "-it", wanted]
+    planner.healthy()
+    probe = docker.find("docker", "exec", wanted, "bash", "-c")[-1][-1]
+    assert "/run/vivibox-secrets/server-password" in probe and ":39417/session" in probe
+    actions.choose_role(task, "planner", ("claude-code", "claude-opus"), load_config())
+    if mode != "single_agent":  # a single agent writes, and only opencode writes yet
+        on_claude = actions.harness_for("planner", pod, task)
+        assert isinstance(on_claude, claudecode.ClaudeCode) and on_claude.pod.agent == wanted
+        assert on_claude.attach_command("s")[:4] == ["docker", "exec", "-it", wanted]
+
+
+def test_a_planner_is_never_given_the_writers_container_in_place_of_its_own(docker):
+    """Fail-closed: a pod made without the control container, in a flow that has one, gives the
+    planner no harness at all."""
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    without = Pod(task.id, task.repo, "img", runner=docker)
+    with pytest.raises(PodError, match="no container for the planner"):
+        actions.harness_for("planner", without, task)
+    assert actions.harness_for("writer", without, task).pod is without
+
+
+def test_w_on_the_planners_conversation_enters_the_control_container(docker, monkeypatch):
+    task = actions.create("demo", "Add divide", orchestration="planner_executor")
+    task.set_session("planner", "ses_planner")
+    task.set_session("writer", "ses_writer")
+    monkeypatch.setattr(actions, "supervisor_running", lambda t: True)
+    st = task.read_state()
+    planners = actions.view_command(task, st, "planner")
+    assert planners[:4] == ["docker", "exec", "-it", f"vivibox-{task.id}-control"]
+    assert "--session 'ses_planner'" in planners[-1] and ":39417" in planners[-1]
+    writers = actions.view_command(task, st, "writer")
+    assert writers[:4] == ["docker", "exec", "-it", f"vivibox-{task.id}-agent"]
+    assert "--session 'ses_writer'" in writers[-1]
+    alone = actions.create("demo", "Other", orchestration="single_agent")
+    alone.set_session("planner", "ses_agent")
+    shown = actions.view_command(alone, alone.read_state(), "planner")
+    assert shown[:4] == ["docker", "exec", "-it", f"vivibox-{alone.id}-agent"], "one agent: the agent's"
+
+
+# The flows where another agent than the writer's reads the work: a reviewer, or the planner.
+READ_BY_ANOTHER = {"planner_writer_reviewer", "supervisor_worker"}
+
+
+@pytest.mark.parametrize(("mode", "has_one"), FLOWS)
+def test_the_writer_cannot_write_the_review_another_agent_writes(docker, mode, has_one):
+    """The host reads the verdict in the task's review folder. Where the planner or a reviewer
+    writes it from a container of its own, the agent's container has the folder read-only,
+    under /task; where the writer reviews its own work, as before."""
+    task = actions.create("demo", "Add divide", orchestration=mode)
+    actions.task_pod(task.id).up(timeout=1)
+    mounted = binds(made(docker, f"vivibox-{task.id}-agent"))
+    writable = f"{task.meta / 'review'}:/task/review"
+    assert (writable in mounted) is (mode not in READ_BY_ANOTHER)
+    assert not any(m.split(":")[1] == "/task/review" and writable != m for m in mounted)
+    assert f"{task.meta}:/task:ro" in mounted, "read-only there, with the rest of the task's files"
+    if has_one:
+        assert writable in binds(made(docker, f"vivibox-{task.id}-control")), "the planner's to write"
+
+
+# --- the planner's conversation, carried on in its own container --------------------------------
+
+PLAN = (
+    '+++\nmode = "code-only"\nsummary = "Add divide"\nverify = []\n+++\n\n# Goal\n\nAdd divide\n\n'
+    "## Acceptance criteria\n\n- [ ] divide(6, 3) returns 2\n"
+)
+BLOCKING = "## Blocking\n\n- calc.py:1 — divide(1, 0) raises\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
+CLEAN = "## Blocking\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
+
+
+class Seen(list):
+    """The turns and refreshes seen, and the task they are of."""
+
+    def __init__(self):
+        super().__init__()
+        self.task: list = []
+
+
+@pytest.fixture
+def turns(docker, monkeypatch):
+    """Every turn opencode is asked for, as (container, session, what the prompt ends with),
+    answered by writing what the state's prompt asks for; and every refresh of the planner's copy."""
+    seen = Seen()
+    reviews = [BLOCKING, CLEAN]
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        task = seen.task[0]
+        seen.append((self.pod.agent.rsplit("-", 1)[1], session, prompt.strip().splitlines()[-1]))
+        reviewing = prompt.rstrip().endswith("when the review is written.")
+        if seen[-1][0] == "control" and not reviewing:  # a planning turn
+            (task.meta / "handoff" / "plan-draft.md").write_text(PLAN)
+        if reviewing:
+            (task.meta / "review" / "review.md").write_text(reviews.pop(0))
+        return Turn(session or f"ses_{len(seen)}", True, 0.01, 10, "done")
+
+    monkeypatch.setattr(opencode.OpenCode, "turn", turn)
+    monkeypatch.setattr(opencode.OpenCode, "start_session", lambda self, title: "")
+    monkeypatch.setattr(control, "refresh", lambda task, pod: seen.append(("copy", "", "refreshed")))
+    return seen
+
+
+def supervised(mode: str, turns) -> tuple:
+    task = actions.create("demo", "Add divide", orchestration=mode)
+    turns.task.append(task)
+    _, project = actions.load(task.id)
+    sup = supervise.make_supervisor(task, project, actions.task_pod(task.id), load_config())
+    sup.ports.run_gate = lambda t: gate.GateResult(Path("/dev/null"))
+    sup.ports.prepare_review = lambda: None
+    sup.ports.head = lambda: ""
+    return task, sup
+
+
+def test_the_planner_plans_again_after_your_comment_in_the_same_conversation_in_its_container(turns):
+    """PLAN, your comment, PLAN again: the second turn resumes the session the first made, in
+    the control container, with the planner's copy brought up to date before each."""
+    task, sup = supervised("planner_executor", turns)
+    assert isinstance(sup.planner, control.Reader)
+    assert sup.planner.harness.pod.agent == f"vivibox-{task.id}-control"
+    assert sup.harness.pod.agent == f"vivibox-{task.id}-agent"
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN
+    first = task.read_state().sessions["planner"]
+    actions.reply(task, "Also divide by zero: return None.")
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_PLAN
+    assert [(where, session) for where, session, _ in turns] == [
+        ("copy", ""), ("control", ""), ("copy", ""), ("control", first),
+    ]  # fmt: skip
+    assert "updated" in turns[-1][2], "the comment's prompt, not the plan's again"
+    assert task.read_state().sessions == {"planner": first}, "one conversation, the planner's"
+
+
+def test_the_supervisor_reviews_round_after_round_in_the_conversation_it_planned_in(turns):
+    """supervisor_worker: PLAN, then a review after each green verification, all in the planner's
+    session in the control container; the writer's turns are in the agent's, in its own."""
+    task, sup = supervised("supervisor_worker", turns)
+    sup.step()  # plan
+    planned_in = task.read_state().sessions["planner"]
+    actions.accept_plan(task, actions.load(task.id)[1])
+    for _ in range(6):  # implement, verify, review (blocking), implement, verify, review (clean)
+        sup.step()
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_FINAL and st.reviews == 2
+    where = [(place, session) for place, session, _ in turns if place != "copy"]
+    assert where == [
+        ("control", ""),
+        ("agent", ""),
+        ("control", planned_in),
+        ("agent", st.sessions["writer"]),
+        ("control", planned_in),
+    ]
+    assert st.sessions["planner"] == planned_in != st.sessions["writer"]
+    before_each = [turns[i - 1][0] for i, t in enumerate(turns) if t[0] == "control"]
+    assert before_each == ["copy"] * 3, "the commits as they are, before every turn of the planner's"
+    assert sum(1 for t in turns if t[0] == "copy") == 3, "and before none of the writer's"
+
+
+# --- a start ------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def starting(docker, monkeypatch):
+    """A real start whose pod and servers are stand-ins that say what they were asked, in order."""
+    from vivibox import prepare, toolchain
+
+    order: list[str] = []
+    monkeypatch.setattr(image, "exists", lambda ref: True)
+    monkeypatch.setattr(actions, "available_models", lambda refresh=False: {})
+    monkeypatch.setattr(Pod, "up", lambda self: order.append("up"))
+    monkeypatch.setattr(control, "refresh", lambda task, pod: order.append("copy"))
+    monkeypatch.setattr(toolchain, "ensure", lambda pod, java, tools=(): order.append("tools"))
+    monkeypatch.setattr(prepare, "begin", lambda task, project, pod: None)
+    for what in ("ensure_server", "restart_server"):
+        monkeypatch.setattr(
+            opencode.OpenCode,
+            what,
+            lambda self, what=what: order.append(f"{what.split('_')[0]} {self.pod.agent.rsplit('-', 1)[1]}"),
+        )
+    monkeypatch.setattr(opencode.OpenCode, "session_exists", lambda self, session: True)
+    return order
+
+
+@pytest.mark.real_start
+def test_a_start_brings_up_the_planners_server_in_its_own_container(starting):
+    """After the pod: the planner's copy of the commits before anything of the project runs,
+    then each container's own server, started again when its own files changed (a server reads
+    its configuration at its start). m on the planner restarts the planner's server alone."""
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    actions.start(task.id, supervise=False)
+    assert starting == ["up", "copy", "tools", "restart agent", "restart control"]
+    starting.clear()
+    actions.start(task.id, supervise=False)
+    assert starting == ["up", "copy", "tools", "ensure agent", "ensure control"], "nothing changed"
+    starting.clear()
+    actions.choose_role(task, "planner", ("opencode", "cheap/plans"), load_config())
+    actions.start(task.id, supervise=False)
+    assert starting == ["up", "copy", "tools", "ensure agent", "restart control"]
+    starting.clear()
+    actions.choose_role(task, "planner", ("claude-code", "claude-opus"), load_config())
+    actions.start(task.id, supervise=False)
+    assert starting == ["up", "copy", "tools", "ensure agent"], "claude has no server to keep"
+    assert held(f"{task.id}-control") == ["anthropic"]
+
+
+@pytest.mark.real_start
+def test_a_single_agent_starts_one_server_and_keeps_no_secrets_for_a_planners_container(starting):
+    task = actions.create("demo", "Add divide", orchestration="single_agent")
+    secrets.prepare(control.secrets_id(task.id), [])  # left by a flow the task had before
+    actions.start(task.id, supervise=False)
+    assert starting == ["up", "tools", "restart agent"]
+    assert not secrets.runtime_dir(f"{task.id}-control").exists()
+    assert held(task.id) == ["cheap", "strong"], "one agent on both roles' models"
+
+
+@pytest.mark.real_start
+def test_a_stop_and_a_delete_take_the_planners_secrets(starting, monkeypatch):
+    task = actions.create("demo", "Add divide", orchestration="planner_executor")
+    actions.start(task.id, supervise=False)
+    assert secrets.runtime_dir(f"{task.id}-control").is_dir()
+    monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
+    actions.stop(task)
+    assert not secrets.runtime_dir(f"{task.id}-control").exists()
+    actions.start(task.id, supervise=False)
+    actions.remove(task, actions.load(task.id)[1])
+    assert not secrets.runtime_dir(f"{task.id}-control").exists() and not task.root.exists()
+
+
+def held(directory: str) -> list[str]:
+    d = secrets.runtime_dir(directory)
+    return sorted(p.name for p in d.iterdir() if p.name != "server-password") if d.exists() else []

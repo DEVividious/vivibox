@@ -22,7 +22,8 @@ from .task import Task
 NAME = "opencode"
 PORT = 39417
 URL = f"http://127.0.0.1:{PORT}"
-# The reviewer's server, in its own container but the same network namespace as the writer's.
+# The reviewer's server, in its own container. The planner's, in its control container, has
+# PORT like the writer's: each listens on the localhost of its own network namespace.
 REVIEW_PORT = 39418
 HARNESS_MOUNT = "/task/harness"
 CONFIG = f"{HARNESS_MOUNT}/opencode.json"
@@ -151,8 +152,7 @@ class OpenCode(Harness):
         # Sent with every turn. The server has one model in its config, the writer's, and a planner
         # on another model would otherwise plan on the writer's without anything saying so.
         self.model = model
-        # Where this container's server listens: the reviewer's shares the pod's network namespace
-        # with the writer's, so it needs a port of its own.
+        # Where this container's server listens, on its own localhost.
         self.port = port
         self.url = f"http://127.0.0.1:{port}"
 

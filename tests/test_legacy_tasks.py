@@ -221,7 +221,7 @@ def test_delete_removes_everything_of_a_task_from_an_earlier_vivibox(
     assert "Deleted demo-1" in capsys.readouterr().out
     assert not earlier.root.exists(), "its folder"
     assert pods == ["demo-1"], "its containers, volumes and network"
-    assert keys == ["demo-1", "demo-1-review"], "its keys, the reviewer's too"
+    assert keys == ["demo-1", "demo-1-review", "demo-1-control"], "its keys, every container's"
     assert supervisor.wait(timeout=10) is not None, "the earlier vivibox's supervisor is stopped"
     entry = actions.history()[0]
     assert (entry["id"], entry["deleted"]) == ("demo-1", "implement")

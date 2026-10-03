@@ -16,9 +16,9 @@ from .task import TaskState
 class ReviewRound:
     def _review(self, st: TaskState) -> None:
         """A round of the reviewer's after a green gate, kept as handoff/review-N.md: in the review
-        container a fresh clone and a fresh conversation, or the supervisor in the pod, on the
-        worker's clone, in the conversation it planned in. Blocking notes go back to the writer
-        while it has rounds; then the work comes to you, with the notes."""
+        container a fresh clone and a fresh conversation, or the supervisor in its control
+        container, on its copy of the commits, in the conversation it planned in. Blocking notes
+        go back to the writer while it has rounds; then the work comes to you, with the notes."""
         if self._head_moved(st):
             return
         n = st.reviews + 1

@@ -1,7 +1,8 @@
 """How a task is shared between the planner, the writer and the reviewer (ADR: orchestration
 modes). A mode says which agent plays each role, whether the writer reviews its own work before
 the verification, and who reads the work after a green gate: a reviewer of its own in the review
-container, or the planner, as the supervisor, in the pod.
+container, or the planner, as the supervisor, in its control container. A planner that is an
+agent other than the writer's runs in that container, in a network of its own (Mode.control).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ class Mode:
     # A reviewer of its own reads the work after a green verification, in the review container.
     separate_reviewer: bool = False
     # The planner, with the plan still in its conversation, reads the work after a green gate in
-    # the pod, on the writer's clone.
+    # its control container, on its copy of the writer's commits.
     supervisor: bool = False
 
     def brief_of(self, agent: str) -> str:

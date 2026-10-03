@@ -19,6 +19,7 @@ from . import (
     keys,
     manual,
     opencode,
+    orchestration,
     providers,
     version,
 )
@@ -314,21 +315,46 @@ def models_offered(config: Config | None = None, harness: str = "") -> list[str]
 
 
 def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
-    """The tool a role talks through. Two roles on the same harness share nothing but the pod."""
+    """The tool a role talks through, bound to the container the role's agent runs in: the
+    writer's to the agent's container, the reviewer's to the side its caller gives (the review
+    container), the planner's to its control container wherever the task has one. Its server
+    there has the usual port: another network namespace than the writer's."""
     role = role_of(task, role_name)
     if role.harness == manual.NAME:
         return manual.Manual()
+    side = container_of(role_name, pod, task)
     if role.harness == claudecode.NAME:
-        return claudecode.ClaudeCode(pod, role.model)
+        return claudecode.ClaudeCode(side, role.model)
     if role_name == "reviewer":
-        return opencode.OpenCode(pod, role.model, port=opencode.REVIEW_PORT)
-    return opencode.OpenCode(pod, role.model, task=task if role_name == "writer" else None)
+        return opencode.OpenCode(side, role.model, port=opencode.REVIEW_PORT)
+    return opencode.OpenCode(side, role.model, task=task if role_name == "writer" else None)
 
 
-# The roles whose harness runs in the task's pod, in every mode. The reviewer reads in a container
-# of its own (reviewing.up); where a mode has no reviewer of its own, the planner or the writer
-# reviews in the pod on its own model.
+def container_of(role_name: str, pod: Pod, task: Task | None = None):
+    """Where a role's harness runs, as the harness talks to it. The planner of a task with a
+    control container is given that one or nothing (pod.control_side refuses a pod without one),
+    never the writer's container in its place; without a task, the pod says whether it has one."""
+    if role_name != "planner":
+        return pod
+    if task is not None:
+        apart = orchestration.has_control(task, load_config())
+    else:
+        apart = getattr(pod, "has_control", False)
+    return pod.control_side() if apart else pod
+
+
+# The roles whose harness runs in the agent's container where the task has no control container
+# (one agent plans and writes; a box): both. With one, the planner runs there and the agent's
+# container holds the writer's alone (WRITER_ROLES). The reviewer reads in a container of its
+# own (reviewing.up); where a flow has no reviewer of its own, the planner or the writer reviews
+# where it runs, on its own model.
 AGENT_ROLES = ("planner", "writer")
+WRITER_ROLES = ("writer",)
+
+
+def agent_roles(task: Task | None, config: Config) -> tuple[str, ...]:
+    """The roles whose keys and providers the agent's container gets."""
+    return WRITER_ROLES if orchestration.has_control(task, config) else AGENT_ROLES
 
 
 def provider_keys(config: Config, task: Task | None = None, roles: tuple[str, ...] = ()) -> list[str]:

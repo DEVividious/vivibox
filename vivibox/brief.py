@@ -1,8 +1,8 @@
 """What an agent is told before any turn: the brief common to every role, and the role's own.
 
 The common part goes to the harness as its standing instructions. The role's part is the first
-message of that role's conversation: a planner and a writer on one opencode server share the
-server's instructions, and a system prompt per agent there would replace opencode's own, which is
+message of that role's conversation: roles joined in one agent share one opencode server and its
+instructions, and a system prompt per agent there would replace opencode's own, which is
 what teaches a model to use the tools. A message costs nothing and says it once per conversation.
 """
 

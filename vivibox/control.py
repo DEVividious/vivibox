@@ -23,8 +23,6 @@ from .task import Task
 # where the harness reads them (opencode.HARNESS_MOUNT), over the writer's.
 HARNESS = "harness-control"
 ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR}
-# The roles whose keys the agent's container holds beside a control container: the writer's.
-WRITERS = ("writer",)
 PLANNERS = ("planner",)
 
 

@@ -182,6 +182,7 @@ from .roles import (  # noqa: F401
     task_settings,
     writer,
 )
+from .roles import agent_roles as agent_roles
 from .states import State
 from .task import DELETE, RUN, Task, TaskState, check_layout, create_task, find_task
 from .window import (  # noqa: F401
@@ -229,14 +230,19 @@ def pod_of(task: Task, project: Project) -> Pod:
     comments.ensure(task.meta)
     (task.meta / "harness").mkdir(exist_ok=True)
     (task.meta / "review").mkdir(exist_ok=True)
+    apart = has_control(task, config)
+    # The review folder is the reviewing agent's to write, and the host reads the verdict there:
+    # the agent's container writes it only where the writer's agent is the one that reviews (a
+    # single agent, a writer reading its own work, a box). Where a reviewer or the planner reads
+    # the work in a container of its own, the writer's has it read-only, under /task.
+    reviews_itself = task.read_state().box or not mode_of(task, config).reviews()
     mounts = [
         *repo.agent_mounts(task.repo, task.meta),
         # The plan, harness files and gate results: readable, not writable, for the agent.
         Mount(str(task.meta), "/task", read_only=True),
         Mount(str(task.meta / "handoff"), "/task/handoff"),
         comments.mount(task.meta),  # your replies, over the folder the agent writes
-        # Where a supervisor reading in the pod writes its review, as the reviewer's container does.
-        Mount(str(task.meta / "review"), reviewing.MOUNT),
+        *([Mount(str(task.meta / "review"), reviewing.MOUNT)] if reviews_itself else []),
         Mount(str(runtime), secrets.MOUNT, read_only=True),
     ]
     ref = image.image_ref()
@@ -261,7 +267,7 @@ def pod_of(task: Task, project: Project) -> Pod:
         hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",
         limits=task_limits, folder=task.root,
         # The planner's own container, where the flow has a planner other than the writer.
-        control_mounts=control.mounts(task) if has_control(task, config) else None,
+        control_mounts=control.mounts(task) if apart else None,
         control_env=dict(control.ENV),
     )  # fmt: skip
 
@@ -508,17 +514,26 @@ def _start(
         raise PodError(why)
     if mode_of(task, config).separate_reviewer and "reviewer" in config.roles:
         provider_keys(config, task, ("reviewer",))  # its key is for its own container; its model is due now
-    # The keys of the roles that run in the pod, the reviewer's not among them, and the secrets of
-    # the MCP servers there; at every start, so a key nobody here needs any more is gone.
-    secrets.prepare(task.id, provider_keys(config, task, AGENT_ROLES) + providers.mcp_secrets())
-    used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in AGENT_ROLES)
+    # The keys of the roles that run in the agent's container (the reviewer's never; the planner's
+    # only where it has no container of its own), and the secrets of the MCP servers there; at
+    # every start, so a key nobody here needs any more is gone.
+    in_agent = agent_roles(task, config)
+    secrets.prepare(task.id, provider_keys(config, task, in_agent) + providers.mcp_secrets())
+    used = [opencode.provider_of(r.model) for r in (role_of(task, n, config) for n in in_agent)
             if r.harness == opencode.NAME]  # fmt: skip
     changed = opencode.prepare(task, model, project.verify, used)
+    # The planner's own keys, password and harness files, for its control container alone.
+    if pod.has_control:
+        planners_changed = control.prepare(task, config, project.verify)
+    else:
+        control.forget(task.id)
     if config.hub_mirror:
         on_step("starting the Docker Hub mirror…")
     ensure_mirror(task, config)
     on_step("starting the pod…")
     pod.up()
+    if pod.has_control:
+        control.refresh(task, pod)  # the commits, for the planner to read, before anything runs
     if project.java or project.tools:
         on_step(
             f"installing {', '.join(([f'Java {project.java}'] if project.java else []) + project.tools)}…"
@@ -531,6 +546,8 @@ def _start(
         harness.restart_server()  # the server reads its configuration only at start
     else:
         harness.ensure_server()
+    if pod.has_control:
+        control.serve(task, pod, config, planners_changed)
     st = task.read_state()
     if (was := st.sessions.get("writer", "")) and not harness.session_exists(was):
         # The harness lost the conversation; the task goes on from its plan and handoff files.
@@ -612,6 +629,7 @@ def stop(task: Task, force: bool = False) -> None:
             pod.down()
     secrets.remove(task.id)
     reviewing.forget(task.id)
+    control.forget(task.id)
     if force:
         task.set_paused(True, problem=FORCED)
     elif not task.read_state().paused:
@@ -632,6 +650,7 @@ def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:
     left = pod_of(task, project).remove()  # said once the rest is gone too
     secrets.remove(task.id)
     reviewing.forget(task.id)
+    control.forget(task.id)
     worktree = repo.remove_review_worktree(project.repo, task.root)
     repo.drop_review_ref(project.repo, task.id)
     # Plain file removal: no git runs in the clone on the host.

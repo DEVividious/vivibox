@@ -104,6 +104,19 @@ def held(task_id: str) -> list[str]:
     return sorted(p.name for p in d.iterdir() if p.name != "server-password") if d.exists() else []
 
 
+CONTAINERS = ("demo-1", "demo-1-control", "demo-1-review")
+
+
+def planner_providers(task_id: str) -> list[str]:
+    """The providers the control container's opencode.json reads a key for."""
+    import json
+
+    from vivibox import actions
+
+    task, _ = actions.load(task_id)
+    return sorted(json.loads((task.meta / "harness-control" / "opencode.json").read_text())["provider"])
+
+
 def agent_providers(task_id: str) -> list[str]:
     """The providers the agent's opencode.json reads a key for: a missing file stops opencode."""
     import json
@@ -134,9 +147,9 @@ def test_the_writer_has_no_key_of_the_reviewer_and_the_reviewer_none_of_the_writ
 
 
 @pytest.mark.real_start
-def test_a_planner_on_a_third_provider_has_its_key_with_the_writer_and_not_with_the_reviewer(
-    env, monkeypatch
-):
+def test_a_planner_on_a_third_provider_has_its_key_in_its_own_container_alone(env, monkeypatch):
+    """Neither with the writer nor with the reviewer: the planner runs in its control container,
+    and its key and its opencode.json are that container's."""
     from vivibox import actions
 
     use(
@@ -148,8 +161,13 @@ def test_a_planner_on_a_third_provider_has_its_key_with_the_writer_and_not_with_
     actions.create("demo", "Goal")
     start(env, monkeypatch)
     review(env, monkeypatch)
-    assert held("demo-1") == ["deepseek", "openai"]
+    assert held("demo-1") == ["deepseek"], "the writer's alone"
+    assert agent_providers("demo-1") == ["deepseek"], "opencode there reads no key of the planner's"
+    assert held("demo-1-control") == ["openai"]
+    assert planner_providers("demo-1") == ["openai"]
     assert held("demo-1-review") == ["anthropic"]
+    passwords = {(secrets.runtime_dir(d) / "server-password").read_text() for d in CONTAINERS}
+    assert len(passwords) == 3, "a server password per container"
 
 
 @pytest.mark.real_start
@@ -165,6 +183,7 @@ def test_a_manual_planner_puts_no_key_in_the_agents_container(env, monkeypatch):
     actions.create("demo", "Goal")
     start(env, monkeypatch)
     assert held("demo-1") == ["deepseek"]
+    assert held("demo-1-control") == [], "nor in the planner's: you plan in your own chat"
 
 
 @pytest.mark.real_start
@@ -179,7 +198,8 @@ def test_a_planner_on_claude_code_has_the_anthropic_key_where_it_runs(env, monke
     )
     actions.create("demo", "Goal")
     start(env, monkeypatch)
-    assert held("demo-1") == ["anthropic", "deepseek"]
+    assert held("demo-1") == ["deepseek"], "not with the writer"
+    assert held("demo-1-control") == ["anthropic"], "in the planner's container"
     assert agent_providers("demo-1") == ["deepseek"], "claude reads its key itself, opencode none of it"
 
 
@@ -216,10 +236,28 @@ def test_a_writer_moved_to_another_provider_leaves_no_old_key_at_the_next_start(
     )
     task = actions.create("demo", "Goal")
     start(env, monkeypatch)
-    assert held("demo-1") == ["deepseek", "openai"]
+    assert held("demo-1") == ["deepseek"] and held("demo-1-control") == ["openai"]
     actions.choose_role(task, "writer", ("opencode", "anthropic/write"), load_config())
     start(env, monkeypatch)
-    assert held("demo-1") == ["anthropic", "openai"]
+    assert held("demo-1") == ["anthropic"] and held("demo-1-control") == ["openai"]
+
+
+@pytest.mark.real_start
+def test_a_planner_moved_to_another_model_changes_its_own_container_not_the_agents(env, monkeypatch):
+    """m on the planner: its key and its opencode.json are the control container's, written at
+    the next start; the agent's stay the writer's."""
+    from vivibox import actions
+    from vivibox.config import load_config
+
+    use(env, planner=("opencode", "openai/plan"), writer=("opencode", "deepseek/write"))
+    task = actions.create("demo", "Goal")
+    start(env, monkeypatch)
+    agents = (task.meta / "harness" / "opencode.json").read_text()
+    actions.choose_role(task, "planner", ("opencode", "anthropic/plan"), load_config())
+    start(env, monkeypatch)
+    assert held("demo-1-control") == ["anthropic"] and planner_providers("demo-1") == ["anthropic"]
+    assert held("demo-1") == ["deepseek"]
+    assert (task.meta / "harness" / "opencode.json").read_text() == agents, "the agent's is as it was"
 
 
 @pytest.mark.real_start
@@ -236,15 +274,34 @@ def test_a_provider_the_writer_and_the_reviewer_share_is_in_both_containers(env,
     actions.create("demo", "Goal")
     start(env, monkeypatch)
     review(env, monkeypatch)
-    assert held("demo-1") == ["anthropic", "deepseek"]
+    assert held("demo-1") == ["anthropic"]
     assert held("demo-1-review") == ["anthropic"]
+    assert held("demo-1-control") == ["deepseek"], "the planner's, in neither"
 
 
-# Where each role's model runs, by mode: the agent's container has the planner's and the writer's
-# keys in every mode; only a mode with a reviewer of its own brings up the reviewer's container,
-# on the reviewer's model, or the writer's where config.toml has no reviewer.
+@pytest.mark.real_start
+def test_a_provider_the_planner_and_the_writer_share_is_in_both_containers(env, monkeypatch):
+    """The same limit between the planner and the writer: one provider, its key in both."""
+    from vivibox import actions
+
+    use(env, planner=("opencode", "deepseek/plan"), writer=("opencode", "deepseek/write"))
+    actions.create("demo", "Goal")
+    start(env, monkeypatch)
+    assert held("demo-1") == ["deepseek"] and held("demo-1-control") == ["deepseek"]
+
+
+# Where each role's model runs, by mode: where the planner is an agent of its own, its key is in
+# its control container and the agent's container has the writer's alone; a single agent has
+# both roles' keys in the agent's container and no control container. Only a mode with a
+# reviewer of its own brings up the reviewer's container, on the reviewer's model, or the
+# writer's where config.toml has no reviewer.
 TABLE = [
-    (mode, reviewer, ["deepseek", "openai"], (["anthropic"] if reviewer else ["deepseek"]))
+    (
+        mode,
+        reviewer,
+        ["deepseek"] if MODES[mode].control else ["deepseek", "openai"],
+        (["anthropic"] if reviewer else ["deepseek"]),
+    )
     for mode in MODES
     for reviewer in (True, False)
 ]
@@ -265,6 +322,10 @@ def test_every_mode_puts_each_roles_key_where_the_role_runs(
     start(env, monkeypatch)
     assert held("demo-1") == agent
     assert agent_providers("demo-1") == agent
+    if MODES[mode].control:
+        assert held("demo-1-control") == ["openai"] and planner_providers("demo-1") == ["openai"]
+    else:
+        assert not secrets.runtime_dir("demo-1-control").exists(), "no control container in this mode"
     if MODES[mode].separate_reviewer:
         review(env, monkeypatch)
         assert held("demo-1-review") == reviewers

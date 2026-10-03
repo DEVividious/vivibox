@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from . import (
     actions,
+    control,
     display,
     gate,
     keys,
@@ -119,7 +120,11 @@ def make_supervisor(
         # the writer's progress recorded from its stream.
         planner = opencode.OpenCode(pod, actions.role_of(task, "planner", config).model, task=task)
     else:
+        # In its control container, never the agent's; its copy of the commits is brought up to
+        # date before each of its turns, so a review reads what the verification passed.
         planner = actions.harness_for("planner", pod, task)
+        if not getattr(planner, "manual", False):
+            planner = control.Reader(planner, lambda: control.refresh(task, pod))
     reviewer = None
     if mode.separate_reviewer:
         if "reviewer" in config.roles:

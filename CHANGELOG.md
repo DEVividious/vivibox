@@ -54,12 +54,20 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the task's disk and secrets of its own, under the task's slice with the `control_*` limits.
   It reads the work in a copy of the task's commits that vivibox makes on the task's disk and
   mounts read-only where the writer has its clone; the writer's clone itself is not mounted
-  there. It runs in a third network, the planner's, `vivibox-<id>-p`, on a bridge of its own
-  with rules of its own on your machine, made and checked with the writer's and the reviewer's
-  at every start; it reaches none of your machine's services. `vivibox stop` stops it, and
-  `vivibox delete` removes it with its network, its home and its secrets. A Single agent task
-  has neither: its planner's range stays reserved. Tasks created before this change are from an
-  earlier vivibox: delete them and create them again.
+  there. The planner's conversation, in the Supervisor ⇄ Worker flow its reviews too, runs
+  there instead of in the agent's container: its own opencode server with its own password, its
+  own conversation store, its provider's key and its MCP servers' secrets in a directory of its
+  own (`m` on the planner changes that container's files at the next start), so nothing the
+  writer runs can read or change what the planner takes for its own history, reach its server
+  or use its key; `w` on the planner's conversation opens it there. The agent's container holds
+  the writer's key alone (a provider both use is in both). Where a reviewer or the planner
+  reads the work, the agent's container no longer writes the task's review folder, where
+  vivibox reads the verdict. It runs in a third network, the planner's, `vivibox-<id>-p`, on a
+  bridge of its own with rules of its own on your machine, made and checked with the writer's
+  and the reviewer's at every start; it reaches none of your machine's services. `vivibox stop`
+  stops it, and `vivibox delete` removes it with its network, its home and its secrets. A
+  Single agent task has neither: its planner's range stays reserved. Tasks created before this
+  change are from an earlier vivibox: delete them and create them again.
 - A task has a network per role instead of one: the writer's, which the sidecar, the
   verification and the pod's own containers share, and the reviewer's, `vivibox-<id>-r`, of its
   own, each on a bridge of its own with rules of its own on your machine, which refuse each

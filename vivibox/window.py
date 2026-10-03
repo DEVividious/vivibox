@@ -137,7 +137,12 @@ def view_command(task: Task, st: TaskState, role: str = "") -> list[str]:
     session = actions.watchable_session(task, st, role)
     if not session:
         raise PodError(f"{task.id}: the agent is not working now; nothing to watch")
-    return opencode.OpenCode(actions.task_pod(task.id)).attach_command(session)
+    pod = actions.task_pod(task.id)
+    whose = next((r for r, s in actions.watchable_sessions(task, st) if s == session), "")
+    if whose == "planner":
+        # The planner's conversation is in its own container wherever the task has one.
+        return actions.harness_for("planner", pod, task).attach_command(session)
+    return opencode.OpenCode(pod).attach_command(session)
 
 
 def attach_command(task_id: str, role: str = "") -> list[str]:

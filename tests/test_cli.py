@@ -345,7 +345,7 @@ def test_a_forced_stop_kills_the_supervisor_and_the_pod_and_says_so(env, capsys,
 
     assert main(["stop", "demo-1", "--force"]) == 0
     assert signals == [(4242, signal.SIGKILL)] and killed == ["demo-1"]
-    assert removed == ["demo-1", "demo-1-review"], "the reviewer's key goes with the task's"
+    assert removed == ["demo-1", "demo-1-review", "demo-1-control"], "every container's keys go"
     st = task.read_state()
     assert st.paused and st.problem == "stopped by force"
     out = capsys.readouterr().out
@@ -1065,6 +1065,7 @@ def test_a_start_names_the_model_that_writes_in_the_tasks_mode(env, monkeypatch,
     monkeypatch.setattr(actions, "model_missing", lambda *a: "")
     monkeypatch.setattr(actions, "available_models", lambda refresh=False: [])
     monkeypatch.setattr(Pod, "up", lambda self: None)
+    monkeypatch.setattr(actions.control, "refresh", lambda task, pod: None)  # no pod, no copy to make
     monkeypatch.setattr(actions.toolchain, "ensure", lambda *a, **kw: None)
     monkeypatch.setattr(actions.prepare, "begin", lambda *a: None)
     monkeypatch.setattr(opencode.OpenCode, "ensure_server", lambda self: None)

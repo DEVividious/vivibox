@@ -1,4 +1,5 @@
-"""Secrets handed to a running task: files on tmpfs, mounted read-only into the agent container.
+"""Secrets handed to a running task: files on tmpfs, a directory per container (the agent's, the
+planner's control container's, the reviewer's), each mounted read-only into its own alone.
 
 The files live under $XDG_RUNTIME_DIR (memory, gone at logout), so keys never appear in images,
 volumes, `docker inspect` or the repository. A container's directory holds the keys of the roles

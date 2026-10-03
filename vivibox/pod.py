@@ -19,9 +19,10 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from importlib.resources import files
 from pathlib import Path
 
-from . import display, handoff, podspec, repo
+from . import display, handoff, podspec, repo, toolchain
 from .config import DEFAULT_HOST_ADDRESS, DEFAULT_NETWORK_POOL, HostService
 from .pod_demo import PREPARE_PID as PREPARE_PID
 from .pod_demo import PodDemo
@@ -131,6 +132,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     gate_dir: Path | None = None
     # Where the reviewer reads its own fresh clone, with its harness files and its review beside it.
     review_dir: Path | None = None
+    # The gate's PATH, JDK and mise (toolchain.gate_env); None: as for a project without a JDK.
+    gate_env: dict[str, str] | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
     network_pool: str = DEFAULT_NETWORK_POOL
     # The host's address for the pods, where the DNS forwarder listens; see config.Config.
@@ -264,7 +267,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         return podspec.agent_command(self, ca_mounts())
 
     def gate_command(self) -> list[str]:
-        return podspec.gate_command(self, ca_mounts())
+        env = self.gate_env if self.gate_env is not None else toolchain.gate_env("", {}, self.gate_dir)
+        return podspec.gate_command(self, ca_mounts(), env)
 
     def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
         return podspec.review_command(self, mounts, env, ca_mounts())
@@ -419,11 +423,15 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         installed.mkdir(parents=True, exist_ok=True)
         shutil.rmtree(self.gate_dir, ignore_errors=True)
         self.gate_dir.mkdir(parents=True)
+        # The build tools' own caches, cold (podspec.GATE_CACHE_DIRS), and Maven's settings: the
+        # shared caches are read-only in the gate, and nothing in them is touched for its sake.
+        for name in podspec.GATE_CACHE_DIRS:
+            (self.gate_dir / podspec.GATE_CACHES / name).mkdir(parents=True)
+        (self.gate_dir / podspec.MAVEN_SETTINGS).write_text(
+            files("vivibox").joinpath("templates", podspec.MAVEN_SETTINGS_TEMPLATE).read_text()
+        )
         self._rules_before("the verification")
         self._run(*self.gate_command())
-        # Gradle runs init scripts and reads JVM options from its home, a cache the agent can write.
-        self.gate_exec("rm", "-rf", f"{CACHES['gradle']}/init.d", f"{CACHES['gradle']}/gradle.properties",
-                       workdir=str(self.gate_dir))  # fmt: skip
         self.gate_exec("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.gate_src,
                        workdir=str(self.gate_dir))  # fmt: skip
 

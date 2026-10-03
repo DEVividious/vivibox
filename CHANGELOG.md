@@ -47,6 +47,21 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The verification trusts nothing the writer put into a cache: the caches shared between tasks
+  (`/cache/m2`, `/cache/gradle`, `/cache/npm`, `/cache/yarn`, `/cache/mise`, `/cache/corepack`,
+  `/cache/uv`, `/cache/go`, `/cache/cargo`, `/cache/rustup`) are mounted read-only in the gate's
+  container, its `PATH` is the image's without mise's shims from the shared cache, and every build
+  tool gets a cache of the gate's own under its directory on the task's disk, made fresh for every
+  verification (`caches/m2`, `caches/gradle`, `caches/npm`, …). Maven reads the shared downloads
+  through a file repository asked before the project's own (`settings.xml` under the gate's home,
+  written by vivibox), with its own local repository and its build cache where it was; Gradle reads
+  them through its read-only dependency cache (`GRADLE_RO_DEP_CACHE`) with a user home of its own;
+  npm, Yarn, corepack, uv, Go and Cargo fetch cold into the gate's directory. A project JDK
+  (`java`) is the one the writer's mise installed in the shared cache, found by `mise where` with
+  that cache read-only and linked under the gate's home; a tool a project brings (`tools`, its
+  `mise.toml`) is installed by the gate into a mise data directory of its own, never into the
+  shared one, and the gate's mise never installs java. The agent's start installs the image's
+  default toolchains (Python, uv) into the shared cache, which the gate's verification used to do.
 - `pod_cpus`, the CPUs each container of a pod may use, defaults to the machine's count when it
   has fewer than six, and a value past the machine's count is refused by name (Docker refuses
   such a `--cpus`, and the default would not have started a pod on a four-core machine).
@@ -121,6 +136,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
+  verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
+  nothing of the writer's is removed.
 - `detach-disk` unmounts a task's disk again: the helper held the mounted root open while it
   called `umount`, which is a reference on the mount, so every detach ended "target is busy"
   and the disk stayed mounted after the task was deleted. It now holds the task's directory

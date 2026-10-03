@@ -44,6 +44,29 @@ CACHES = {
 # Where Maven's split local repository puts what a build installs: a volume per task, over the
 # shared /cache/m2, so one task's unfinished modules never reach another's build.
 INSTALLED = "/cache/m2/installed"
+# The gate's own caches, under its directory on the task's disk, made fresh by gate_up for every
+# verification and gone with the directory. The shared caches are mounted read-only in the gate:
+# a writer can put a program into any of them (a git under mise's shims, an init script under
+# Gradle's home), so the gate runs nothing from them and writes nothing there. What a tool can
+# read from the shared cache without writing it reads (Maven through a file repository of the
+# shared downloads, Gradle through its read-only dependency cache); the rest is fetched cold.
+GATE_CACHES = "caches"
+GATE_CACHE_DIRS = (
+    "m2", "gradle", "npm", "yarn/classic", "yarn/berry", "corepack", "uv", "go", "cargo", "rustup", "mise",
+)  # fmt: skip
+# Maven's settings for the gate, written from the template into the gate's directory and mounted
+# under its home: the shared downloads as a repository before the project's own.
+MAVEN_SETTINGS = "settings.xml"
+MAVEN_SETTINGS_TEMPLATE = "maven-settings.xml"
+MAVEN_SETTINGS_HOME = "/config/.m2/settings.xml"
+# The image's Maven options (vivibox/images/agent/Dockerfile: the same words), for the gate with
+# its own repository in place of the shared one: the split (downloads under cached/, installs
+# under installed/), the file locks, and the build cache restored whole.
+IMAGE_MAVEN_ARGS = (
+    "-Dmaven.repo.local=/cache/m2 -Daether.syncContext.named.factory=file-lock"
+    " -Daether.syncContext.named.nameMapper=file-gav -Daether.enhancedLocalRepository.split=true"
+    " -Dmaven.build.cache.lazyRestore=false"
+)
 # The agent's Maven: the image's options, and no build cache. A hit there restores a module up to
 # the phase an earlier command reached (the agent builds with `test`, `package`, `-DskipTests` by
 # turns) and runs only the later phases, without `initialize`: what that phase sets for the tests
@@ -346,16 +369,52 @@ def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
     ]  # fmt: skip
 
 
-def gate_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
+def gate_caches(gate_dir) -> str:
+    return f"{gate_dir}/{GATE_CACHES}"
+
+
+def gate_tool_env(gate_dir) -> dict[str, str]:
+    """Every variable of the image's that aims a build tool at a shared cache, aimed at the gate's
+    own under its directory instead; Maven's build cache stays where the image had it, beside the
+    shared repository, which is the gate's own volume there. Gradle reads the shared dependency
+    cache through its read-only cache, the directory holding modules-2."""
+    caches = gate_caches(gate_dir)
+    build_cache = f"-Dmaven.build.cache.location={CACHES['build-cache']}"
+    return {
+        "MAVEN_ARGS": f"{IMAGE_MAVEN_ARGS.replace(CACHES['m2'], f'{caches}/m2')} {build_cache}",
+        "MAVEN_OPTS": f"-Dmaven.repo.local={caches}/m2 {build_cache}",
+        "GRADLE_USER_HOME": f"{caches}/gradle",
+        "GRADLE_RO_DEP_CACHE": f"{CACHES['gradle']}/caches",
+        "npm_config_cache": f"{caches}/npm",
+        "YARN_CACHE_FOLDER": f"{caches}/yarn/classic",
+        "YARN_GLOBAL_FOLDER": f"{caches}/yarn/berry",
+        "COREPACK_HOME": f"{caches}/corepack",
+        "UV_CACHE_DIR": f"{caches}/uv",
+        "UV_PYTHON_INSTALL_DIR": f"{caches}/uv/python",
+        "GOMODCACHE": f"{caches}/go/mod",
+        "GOCACHE": f"{caches}/go/build",
+        "CARGO_HOME": f"{caches}/cargo",
+        "RUSTUP_HOME": f"{caches}/rustup",
+    }
+
+
+def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[str]:
     """Like the agent container, but without anything the agent could have left behind: its
-    working tree and build outputs, its home directory, its background processes."""
+    working tree and build outputs, its home directory, its background processes, and what it
+    put into the shared caches, read-only here. env: the gate's PATH, JDK and mise
+    (toolchain.gate_env); the build tools' caches are gate_tool_env's."""
     mounts = [
         Mount(pod.volumes["socket"], SOCKET_DIR),
         Mount(str(pod.repo), str(pod.repo), read_only=True),
         Mount(str(pod.gate_dir), str(pod.gate_dir)),
+        Mount(f"{pod.gate_dir}/{MAVEN_SETTINGS}", MAVEN_SETTINGS_HOME, read_only=True),
         # Not the build cache the writer fills: a hit there would skip a module's build and
         # tests on the writer's word.
-        *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items() if name != "build-cache"),
+        *(
+            Mount(f"vivibox-cache-{name}", path, read_only=True)
+            for name, path in CACHES.items()
+            if name != "build-cache"
+        ),
         Mount(pod.volumes["gate-build-cache"], CACHES["build-cache"]),
         Mount(pod.volumes["gate-installed"], INSTALLED),
         *ca_mounts,
@@ -370,7 +429,7 @@ def gate_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
         *pod.limits.flags("gate", pod.task_id),
         *pod.docker_env(),
         "-e", "HUSKY=0",
-        *(arg for k, v in pod.agent_env.items() for arg in ("-e", f"{k}={v}")),
+        *(arg for k, v in {**gate_tool_env(pod.gate_dir), **env}.items() for arg in ("-e", f"{k}={v}")),
         *(arg for name in pod.passed_env for arg in ("-e", name)),
         *(arg for m in mounts for arg in ("-v", m.arg())),
         "-w", str(pod.gate_dir),

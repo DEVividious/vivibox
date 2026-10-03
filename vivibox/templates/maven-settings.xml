@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The verification's Maven settings (vivibox writes this file for the gate's container): the
+     downloads the tasks share, read-only there, as a repository asked before the project's own,
+     so what the shared cache holds is read from it and what it lacks is fetched into the
+     verification's own repository. Releases only: a snapshot or a version range is for the
+     project's repositories to answer. -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <profiles>
+    <profile>
+      <id>vivibox-shared-cache</id>
+      <repositories>
+        <repository>
+          <id>vivibox-shared-cache</id>
+          <url>file:///cache/m2/cached</url>
+          <releases><enabled>true</enabled><updatePolicy>never</updatePolicy></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>vivibox-shared-cache</id>
+          <url>file:///cache/m2/cached</url>
+          <releases><enabled>true</enabled><updatePolicy>never</updatePolicy></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>vivibox-shared-cache</activeProfile>
+  </activeProfiles>
+</settings>

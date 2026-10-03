@@ -614,6 +614,95 @@ def test_gate_container_sees_only_committed_work(pod, tmp_path):
     assert pod.runner.find("docker", "rm", "-f", pod.gate)
 
 
+def image_variables() -> dict[str, str]:
+    """The image's ENV block, as the Dockerfile writes it: what every tool in the pod starts with."""
+    from importlib.resources import files
+
+    dockerfile = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    block = dockerfile[dockerfile.index("ENV HOME=/config") :]
+    block = block[: block.index("\n\n")]
+    found = re.finditer(r'(\w+)=(?:"([^"]*)"|([^\s\\]*))', block)
+    return {m.group(1): m.group(2) if m.group(2) is not None else m.group(3) for m in found}
+
+
+def environment(cmd) -> dict[str, str]:
+    """The variables a docker run command sets, by name; a name alone (passed from the shell) as ""."""
+    found = {}
+    for i, arg in enumerate(cmd):
+        if arg == "-e":
+            name, _, value = cmd[i + 1].partition("=")
+            found[name] = value
+    return found
+
+
+def test_the_gate_reads_the_shared_caches_and_writes_only_its_own(pod, tmp_path):
+    """A writer can put a program into any shared cache: a git under mise's shims, an init script
+    under Gradle's home. The gate mounts every one of them read-only, finds its tools on the
+    image's PATH without the shims, and gives each build tool a cache of its own under the gate's
+    directory; what it keeps between verifications stays what it was, on the task's disk."""
+    from vivibox.pod import CACHES
+
+    pod.gate_dir = tmp_path / "gate"
+    gate = pod.gate_command()
+    mounts = binds(gate)
+    shared = {name: path for name, path in CACHES.items() if name != "build-cache"}
+    assert len(shared) == 10
+    for name, path in shared.items():
+        assert f"vivibox-cache-{name}:{path}:ro" in mounts, f"{name} is writable in the gate"
+    assert f"{pod.disk}/gate-build-cache:/cache/build-cache" in mounts, "the gate's own, writable"
+    assert f"{pod.disk}/gate-installed:/cache/m2/installed" in mounts, "the gate's own, writable"
+    assert f"{pod.gate_dir}/settings.xml:/config/.m2/settings.xml:ro" in mounts, "Maven's settings"
+    env = environment(gate)
+    caches = f"{pod.gate_dir}/caches"
+    assert "PATH" in env and "/cache/mise/shims" not in env["PATH"].split(":"), env.get("PATH")
+    assert env["PATH"].split(":")[0] == f"{caches}/mise/shims", "a tool the project brings: the gate's own"
+    for name, value in image_variables().items():
+        if "/cache/" not in value:
+            continue
+        assert name in env, f"the image aims {name} at a shared cache and the gate keeps it"
+        named = re.findall(r"/cache/[\w./-]*", env[name])
+        left = [p for p in named if not p.startswith("/cache/build-cache")]
+        assert not left, f"{name} would write into a shared cache: {env[name]}"
+    assert env["MAVEN_ARGS"].startswith(f"-Dmaven.repo.local={caches}/m2 ")
+    assert "-Daether.enhancedLocalRepository.split=true" in env["MAVEN_ARGS"], "as the image's"
+    assert "-Dmaven.build.cache.location=/cache/build-cache" in env["MAVEN_ARGS"], "the sibling moved: named"
+    assert env["GRADLE_USER_HOME"] == f"{caches}/gradle"
+    assert env["GRADLE_RO_DEP_CACHE"] == "/cache/gradle/caches", "the directory with modules-2, read-only"
+    assert env["MISE_DATA_DIR"] == f"{caches}/mise" and env["MISE_DISABLE_TOOLS"] == "java"
+    for name, value in (
+        ("npm_config_cache", f"{caches}/npm"), ("YARN_CACHE_FOLDER", f"{caches}/yarn/classic"),
+        ("YARN_GLOBAL_FOLDER", f"{caches}/yarn/berry"), ("COREPACK_HOME", f"{caches}/corepack"),
+        ("UV_CACHE_DIR", f"{caches}/uv"), ("UV_PYTHON_INSTALL_DIR", f"{caches}/uv/python"),
+        ("GOMODCACHE", f"{caches}/go/mod"), ("GOCACHE", f"{caches}/go/build"),
+        ("CARGO_HOME", f"{caches}/cargo"), ("RUSTUP_HOME", f"{caches}/rustup"),
+    ):  # fmt: skip
+        assert env[name] == value, name
+    assert "JAVA_HOME" not in env, "no project JDK: the image's, as its environment names it"
+
+
+def test_the_gates_caches_are_made_fresh_and_the_shared_ones_are_left_alone(pod, tmp_path):
+    """Every verification starts cold but for what reads from the shared caches; nothing in them is
+    deleted for the gate's sake (Gradle's init.d was, when the gate's home was the shared one)."""
+    from vivibox.podspec import GATE_CACHE_DIRS
+
+    pod.gate_dir = tmp_path / "gate"
+    stale = pod.gate_dir / "caches" / "npm" / "stale"
+    stale.mkdir(parents=True)
+    pod.ensure_network()
+    pod.gate_up()
+    assert not stale.exists()
+    for name in GATE_CACHE_DIRS:
+        assert (pod.gate_dir / "caches" / name).is_dir(), name
+    assert set(GATE_CACHE_DIRS) >= {"m2", "gradle", "npm", "yarn/classic", "yarn/berry", "uv", "go", "cargo"}
+    settings = (pod.gate_dir / "settings.xml").read_text()
+    assert "<url>file:///cache/m2/cached</url>" in settings, "the shared downloads, as a repository"
+    assert settings.count("file:///cache/m2/cached") == 2, "for plugins too"
+    assert "<activeProfile>" in settings
+    execs = pod.runner.find("docker", "exec")
+    assert not [c for c in execs if "rm" in c], "nothing of the shared caches is removed"
+    assert [c for c in execs if "git" in c and "clone" in c], "the clone is made"
+
+
 class FakeProcess:
     """A Popen that prints its lines and ends with a code, or never ends."""
 
@@ -666,9 +755,11 @@ def test_the_gate_container_gets_the_same_docker_as_the_agent(pod, tmp_path):
     pod.passed_env = ["ACME_KEY"]
     agent, gate = pod.agent_command(), pod.gate_command()
     env = lambda cmd: {cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-e"}  # noqa: E731
-    maven = lambda vars: {v for v in vars if v.startswith("MAVEN_OPTS=")}  # noqa: E731
-    assert env(gate) - maven(env(gate)) == env(agent) - maven(env(agent)), "the gate's environment drifted"
+    docker = {arg for arg in pod.docker_env() if arg != "-e"}
+    assert docker <= env(gate) and docker <= env(agent), "the gate's Docker drifted from the agent's"
+    assert "ACME_KEY" in env(gate) and "ACME_KEY" in env(agent)
     assert any(e.startswith("DOCKER_HOST=unix://") for e in env(gate))
+    assert "OPENCODE_CONFIG=/config/opencode.json" not in env(gate), "the agent's tools are not the gate's"
     socket = [m for m in agent if m.endswith(f":{SOCKET_DIR}")]
     assert socket and socket[0] in gate, "the daemon's socket, from the same volume"
 
@@ -704,7 +795,9 @@ def test_the_agent_builds_without_the_maven_build_cache_and_the_gate_keeps_its_o
     assert f"{image_opts} -Dmaven.build.cache.enabled=false" == AGENT_MAVEN_OPTS, "the image's, plus one"
     pod.gate_dir = tmp_path / "gate"
     assert f"MAVEN_OPTS={AGENT_MAVEN_OPTS}" in pod.agent_command()
-    assert not any(arg.startswith("MAVEN_OPTS=") for arg in pod.gate_command()), "the image's stay"
+    gate_opts = [arg for arg in pod.gate_command() if arg.startswith("MAVEN_OPTS=")]
+    own = f"-Dmaven.repo.local={pod.gate_dir}/caches/m2 -Dmaven.build.cache.location=/cache/build-cache"
+    assert gate_opts == [f"MAVEN_OPTS={own}"], "the gate's own repository, and its build cache where it was"
 
 
 def test_a_stop_and_a_forced_stop_take_the_gate_down_too(pod):
@@ -916,11 +1009,16 @@ def test_a_service_on_several_addresses_is_allowed_on_all_of_them(pod, monkeypat
 def test_the_gate_container_gets_the_project_jdk_too(tmp_path):
     """The build runs in the gate container, not the agent one. Its /config is a fresh tmpfs, so the
     JDK reaches it only through this env; without it the image's default Java would quietly win."""
-    where = toolchain.agent_env("17", {"PATH": "/cache/mise/shims:/usr/bin"})
-    pod = Pod("t1", tmp_path / "repo", "img", [], agent_env=where, gate_dir=tmp_path / "gate")
+    image = {"PATH": "/cache/mise/shims:/usr/bin"}
+    gate_dir = tmp_path / "gate"
+    pod = Pod(
+        "t1", tmp_path / "repo", "img", [], agent_env=toolchain.agent_env("17", image),
+        gate_env=toolchain.gate_env("17", image, gate_dir), gate_dir=gate_dir,
+    )  # fmt: skip
     args = pod.gate_command()
-    assert f"PATH={toolchain.JDK_LINK}/bin:/cache/mise/shims:/usr/bin" in args
+    assert f"PATH={toolchain.JDK_LINK}/bin:{gate_dir}/caches/mise/shims:/usr/bin" in args, "no shared shims"
     assert f"JAVA_HOME={toolchain.JDK_LINK}" in args
+    assert f"PATH={toolchain.JDK_LINK}/bin:/cache/mise/shims:/usr/bin" in pod.agent_command()
 
 
 def test_a_gate_command_is_given_its_time_limit(tmp_path):
@@ -1103,8 +1201,8 @@ def test_a_stopped_sidecar_made_with_other_limits_is_made_again(pod):
 
 
 def test_yarn_downloads_are_shared_but_gate_results_stay_private(pod):
-    for command in (pod.agent_command(), pod.gate_command()):
-        assert "vivibox-cache-yarn:/cache/yarn" in binds(command)
+    assert "vivibox-cache-yarn:/cache/yarn" in binds(pod.agent_command())
+    assert "vivibox-cache-yarn:/cache/yarn:ro" in binds(pod.gate_command()), "the gate reads, never writes"
     assert not any("-gate-" in mount for mount in binds(pod.agent_command()))
     pod.remove()
     assert not any("vivibox-cache-yarn" in call for call in pod.runner.find("docker", "volume", "rm"))

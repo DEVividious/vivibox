@@ -238,10 +238,11 @@ def pod_of(task: Task, project: Project) -> Pod:
         Mount(str(runtime), secrets.MOUNT, read_only=True),
     ]
     ref = image.image_ref()
+    image_env = image.env(ref)
     env = {
         "OPENCODE_CONFIG": opencode.CONFIG,
         "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR,
-        **toolchain.agent_env(project.java, image.env(ref)),
+        **toolchain.agent_env(project.java, image_env),
     }
     config = load_config()
     # The mirror is reached as a service of the host's, through the pod's firewall.
@@ -253,6 +254,7 @@ def pod_of(task: Task, project: Project) -> Pod:
         raise PodError(str(e)) from None
     return Pod(
         task.id, task.repo, ref, [*project.host_services, *through], mounts, env, project.pass_env,
+        gate_env=toolchain.gate_env(project.java, image_env, disk / "gate"),
         gate_dir=disk / "gate", review_dir=disk / "review", allocation=task.meta / "network.json",
         network_pool=config.network_pool, host_address=config.host_address,
         hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",

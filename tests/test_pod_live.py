@@ -733,7 +733,9 @@ def test_a_full_disk_is_the_tasks_and_the_hosts_keeps_its_room():
     try:
         pod.up()
         host_before = os.statvfs(TASKS_ROOT)
-        done = pod.exec("bash", "-c", "dd if=/dev/zero of=/config/fill bs=1M 2>&1 | tail -2", check=False)
+        # dd's whole output: its ENOSPC line comes before the records and bytes it reports last.
+        done = pod.exec("dd", "if=/dev/zero", "of=/config/fill", "bs=1M", check=False)
+        assert done.returncode != 0, done
         assert "No space left on device" in done.stdout + done.stderr, done
         host_after = os.statvfs(TASKS_ROOT)
         assert host_after.f_bavail > 0, "the host's filesystem is not full"

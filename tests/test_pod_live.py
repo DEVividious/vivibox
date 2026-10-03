@@ -384,6 +384,57 @@ def test_the_gate_verifies_committed_work_only(env):
         (pod.repo / "uncommitted.txt").unlink()
 
 
+def test_the_gate_does_not_run_what_the_writer_put_in_a_cache(env):
+    """The attack: the writer plants a git under mise's shims, an init script and JVM options under
+    Gradle's home, in caches shared between tasks and writable for it. The gate's git is the
+    image's, its PATH has no shims of the shared cache, its Maven and its Gradle home show no trace
+    of the plants, and it cannot write into any shared cache; the plants stay where the writer put
+    them, since nothing of the shared caches is removed for the gate's sake."""
+    from vivibox.pod import CACHES
+
+    pod = env["pod"]
+    marker = f"planted-{secrets.token_hex(4)}"
+    shim = f"printf '#!/bin/sh\\necho {marker}\\nexec /usr/bin/git \"$@\"\\n' > /cache/mise/shims/git"
+    plant = (
+        f"mkdir -p /cache/mise/shims /cache/gradle/init.d && {shim} && chmod +x /cache/mise/shims/git"
+        f" && printf 'println(\"{marker}\")\\n' > /cache/gradle/init.d/x.gradle"
+        f" && printf 'org.gradle.jvmargs=-D{marker}\\n' > /cache/gradle/gradle.properties"
+    )
+    agent(env, plant)
+    try:
+        assert marker in agent(env, "git --version").stdout, "the writer's own git is the planted one"
+        pod.gate_up()
+        try:
+            assert gate(env, "test -d .git", check=False).returncode == 0, "cloned"
+            got = gate(env, "command -v git && git --version")
+            assert got.stdout.startswith("/usr/bin/git\n") and marker not in got.stdout, got.stdout
+            path = gate(env, "echo $PATH").stdout.strip()
+            assert "/cache/mise/shims" not in path.split(":"), path
+            maven = gate(env, "mvn -v 2>&1", check=False)
+            assert marker not in maven.stdout + maven.stderr
+            home = gate(env, "echo $GRADLE_USER_HOME").stdout.strip()
+            assert home == f"{pod.gate_dir}/caches/gradle", home
+            assert gate(env, f"test -e {home}/init.d/x.gradle", check=False).returncode != 0, "its own home"
+            assert gate(env, "echo $GRADLE_RO_DEP_CACHE").stdout.strip() == "/cache/gradle/caches"
+            for name, path in CACHES.items():
+                if name == "build-cache":
+                    continue
+                got = gate(env, f"touch {path}/{marker}", check=False)
+                assert got.returncode != 0 and "Read-only file system" in got.stderr, f"{path}: {got.stderr}"
+            gate(env, f"touch /cache/build-cache/{marker} /cache/m2/installed/{marker}")
+            assert gate(env, f"touch {pod.gate_dir}/caches/m2/{marker}", check=False).returncode == 0, (
+                "its own"
+            )
+        finally:
+            pod.gate_down()
+        assert agent(env, "test -e /cache/gradle/init.d/x.gradle", check=False).returncode == 0, "left alone"
+    finally:
+        agent(
+            env, "rm -f /cache/mise/shims/git /cache/gradle/init.d/x.gradle /cache/gradle/gradle.properties"
+        )
+        agent(env, f"rm -f /cache/build-cache/{marker}", check=False)
+
+
 def test_pod_restart_keeps_images_and_firewall(env):
     pod = env["pod"]
     pod.down()
@@ -478,15 +529,34 @@ def test_a_project_jdk_still_beats_the_image_default(env):
     come first would be silently overruled by the default."""
     ref = image.build()[0]
     # Built the way actions.py builds it: the project JDK reaches the containers through this env.
-    where = toolchain.agent_env("17", image.env(ref))
+    image_env = image.env(ref)
     task_id = check_id("jdkcheck")
     folder = own_folder(task_id)
-    pod = Pod(task_id, env["repo"], ref, [], agent_env=where, folder=folder)
+    gate_dir = folder / "disk" / "gate"
+    pod = Pod(
+        task_id, env["repo"], ref, [], agent_env=toolchain.agent_env("17", image_env),
+        gate_env=toolchain.gate_env("17", image_env, gate_dir), gate_dir=gate_dir, folder=folder,
+    )  # fmt: skip
     try:
         pod.up()
         toolchain.ensure(pod, "17")
         got = pod.exec("bash", "-c", "java -version 2>&1").stdout
         assert "17." in got, f"the project JDK has to come first on PATH: {got}"
+        # The gate: the same JDK, found in the shared cache read-only and linked under its own home;
+        # nothing installed, nothing through a shim.
+        pod.gate_up()
+        try:
+            toolchain.ensure(pod, "17", gate=True)
+            got = pod.gate_exec(
+                "bash", "-c", "java -version 2>&1 && readlink -f /config/jdk && echo $JAVA_HOME"
+            )
+            assert "17." in got.stdout, got.stdout
+            assert "/cache/mise/installs/java/" in got.stdout and got.stdout.strip().endswith("/config/jdk")
+            assert not (gate_dir / "caches" / "mise" / "installs").exists(), (
+                "the gate installed no JDK of its own"
+            )
+        finally:
+            pod.gate_down()
     finally:
         pod.remove()
         shutil.rmtree(folder, ignore_errors=True)

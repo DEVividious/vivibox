@@ -1,4 +1,5 @@
-"""Downloaded Yarn packages survive a fresh verification; installed files never do."""
+"""Yarn in the verification downloads into a cache of the gate's own, fresh for every
+verification, never into the one the agent shares with other tasks; installed files never survive."""
 
 import json
 import shutil
@@ -15,7 +16,7 @@ env = pod_environment
 @pytest.mark.parametrize(
     ("version", "local"), [("1.22.22", False), ("3.8.7", False), ("4.9.2", False), ("4.9.2", True)]
 )
-def test_yarn_reuses_downloads_after_recreating_the_gate(env, version, local):
+def test_yarn_in_the_gate_downloads_into_its_own_cache_and_again_after_a_fresh_gate(env, version, local):
     pod = env["pod"]
     repo = env["repo"]
     package = repo / "package.json"
@@ -39,12 +40,13 @@ def test_yarn_reuses_downloads_after_recreating_the_gate(env, version, local):
     subprocess.run(["git", "commit", "-qm", f"Use Yarn {version}"], cwd=repo, check=True, capture_output=True)
     try:
         pod.gate_up()
+        own = f"{pod.gate_dir}/caches/yarn"
         if version.startswith("1."):
             cache = gate(env, "yarn cache dir").stdout.strip()
-            assert cache.startswith("/cache/yarn/"), cache
+            assert cache.startswith(f"{own}/classic"), cache
         else:
             global_dir = gate(env, "yarn config get globalFolder").stdout.strip()
-            assert global_dir == "/cache/yarn/berry", global_dir
+            assert global_dir == f"{own}/berry", global_dir
             if local:
                 cache = gate(env, "yarn config get cacheFolder").stdout.strip()
                 assert cache == f"{pod.gate_src}/.yarn/cache", "keep a project's local-cache choice"
@@ -61,16 +63,21 @@ def test_yarn_reuses_downloads_after_recreating_the_gate(env, version, local):
         subprocess.run(
             ["git", "commit", "-qm", "Lock the dependencies"], cwd=repo, check=True, capture_output=True
         )
+        assert gate(env, f"find {own} -type f | head -1").stdout.strip(), "downloaded into the gate's own"
         pod.gate_up()
         assert gate(env, "test -e node_modules", check=False).returncode != 0
         assert gate(env, "test -e /cache/m2/installed/first-build", check=False).returncode != 0
         assert gate(env, "test -e /cache/build-cache/first-build", check=False).returncode == 0
-        command = (
+        assert not gate(env, f"find {own} -type f | head -1").stdout.strip(), "a fresh gate starts cold"
+        offline = (
             "yarn install --offline --frozen-lockfile"
             if version.startswith("1.")
             else "YARN_ENABLE_NETWORK=0 yarn install --immutable"
         )
-        gate(env, command)
+        assert gate(env, offline, check=False).returncode != 0, "nothing of the shared cache is read"
+        gate(
+            env, "yarn install --frozen-lockfile" if version.startswith("1.") else "yarn install --immutable"
+        )
         assert gate(env, "node -e 'console.log(require(\"is-number\")(42))'").stdout.strip() == "true"
         assert gate(env, "test -e node_modules/first-build", check=False).returncode != 0
     finally:
@@ -107,8 +114,8 @@ def test_deleting_one_pod_keeps_shared_cache_and_another_live_pod(env):
     marker = f"/cache/yarn/{pod.task_id}"
     try:
         pod.up()
+        pod.exec("touch", marker)  # the agent's: the shared cache is read-only for the gate
         pod.gate_up()
-        pod.gate_exec("touch", marker)
         pod.gate_exec("touch", "/cache/m2/installed/from-this-verification")
         pod.gate_exec("touch", "/cache/build-cache/from-this-verification")
         assert pod.remove() == ""

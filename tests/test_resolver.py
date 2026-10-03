@@ -19,9 +19,6 @@ from vivibox.egress import hostd, resolver
 
 pytestmark = pytest.mark.real_hostd
 
-# The header's own, before conftest stands in for it.
-FORWARDER_PROBLEM = probe.forwarder_problem
-
 ROLES = (
     '[roles.planner]\nharness = "opencode"\nmodel = "m"\n[roles.writer]\nharness = "opencode"\nmodel = "m"\n'
 )
@@ -500,8 +497,23 @@ def test_the_header_asks_whether_a_pod_runs(monkeypatch):
         return ""
 
     monkeypatch.setattr(hostd, "problem", problem)
-    FORWARDER_PROBLEM(Config(tasks_dir=__import__("pathlib").Path("/t"), max_rounds=3, roles={}))
+    probe.forwarder_problem(Config(tasks_dir=__import__("pathlib").Path("/t"), max_rounds=3, roles={}))
     assert asked["pods_up"] is probe.pods_running
+
+
+def test_a_test_with_a_forwarder_of_its_own_asks_it_not_the_suites_stand_in(runtime):
+    """conftest answers probe.forwarder_problem with "" for the suite, which has no forwarder to
+    ask; a test marked real_hostd or docker has one, and the stand-in once hid from a live test
+    that the forwarder it had killed was down. A pid file naming a process that has ended is
+    reason enough: no forwarder has to run for the header to have something to say."""
+    from vivibox.config import Config
+
+    ended = subprocess.Popen(["true"])
+    ended.wait()
+    runtime.mkdir(parents=True)
+    (runtime / "hostd.pid").write_text(str(ended.pid))
+    said = probe.forwarder_problem(Config(tasks_dir=runtime, max_rounds=3, roles={}))
+    assert said.startswith("DNS forwarder not running: ") and f"process {ended.pid}" in said
 
 
 @pytest.mark.parametrize(("out", "code", "up"), [("3f2a\n", 0, True), ("", 0, False), ("3f2a\n", 1, False)])

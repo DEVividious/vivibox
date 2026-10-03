@@ -76,8 +76,10 @@ def no_real_start(request, monkeypatch):
     )
     # The view asks the daemon for the header's warning; the tests have no daemon to ask.
     monkeypatch.setattr(probe, "docker_running", lambda: True)
-    # Nor a DNS forwarder to ask about; and none is started by a test but one marked real_hostd.
-    monkeypatch.setattr(probe, "forwarder_problem", lambda config: "")
+    # Nor a DNS forwarder to ask about, but for a test that has one of its own to ask (real_hostd,
+    # docker): to that one the header says what it would say to a person.
+    if "real_hostd" not in request.keywords and "docker" not in request.keywords:
+        monkeypatch.setattr(probe, "forwarder_problem", lambda config: "")
     # vivibox new asks for the agent image before it creates a task; nor is there an image.
     from vivibox import image
 

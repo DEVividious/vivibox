@@ -189,23 +189,100 @@ def runtime(tmp_path, monkeypatch):
     reap(STARTED)
 
 
+# What hostd.start runs: a forwarder's argv holds these three words in a row, and nothing else's.
+HOSTD_ARGV = (b"-m", b"vivibox", b"hostd")
+# How long the teardown waits for a killed forwarder to go before it fails, never hanging the run.
+REAP_TIMEOUT = 5.0
+
+
+def forwarder_argv(pid: int) -> list[bytes] | None:
+    """The process's argv while it is a forwarder (hostd.start's command, word for word in a
+    row); None when it is not, or is gone: a pid a test's forwarder had may be another's by now."""
+    try:
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return None
+    runs = any(tuple(argv[i : i + 3]) == HOSTD_ARGV for i in range(len(argv) - 2))
+    return argv if runs else None
+
+
+def gone(pid: int) -> bool:
+    """Whether the process has ended, reaped here when it is a child of this one."""
+    try:
+        if os.waitpid(pid, os.WNOHANG) != (0, 0):
+            return True
+    except ChildProcessError:
+        pass  # not a child of this process: /proc says whether it is still there
+    return not Path(f"/proc/{pid}").exists()
+
+
 def reap(started: list[int]) -> None:
-    """No forwarder left on the machine by a test: the one the pid file names, when it is one, and
-    every one the test started, ended and waited for here, whether or not hostd.stop() works in
-    the code under test (a mutant that broke it once left two behind)."""
+    """No forwarder left on the machine by a test: the one the pid file names and every one the
+    test started, each killed while its argv is still a forwarder's, and waited for within a
+    bound; whether or not hostd.stop() works in the code under test (a mutant that broke it once
+    left two behind, and a bound-less wait for a kill that did not land once hung the run)."""
     with contextlib.suppress(Exception):
         hostd.stop()
     if (pid := hostd.recorded()) is not None and pid not in started:
-        with contextlib.suppress(OSError):
-            if b"hostd" in Path(f"/proc/{pid}/cmdline").read_bytes():
-                started.append(pid)
+        started.append(pid)
+    left = []
     for pid in started:
+        if (argv := forwarder_argv(pid)) is None:
+            continue
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
-        with contextlib.suppress(ChildProcessError):
-            os.waitpid(pid, 0)
+        deadline = time.monotonic() + REAP_TIMEOUT
+        while not gone(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not gone(pid):
+            left.append(f"pid {pid}, {b' '.join(argv).decode(errors='replace').strip()}")
     with contextlib.suppress(OSError):
         hostd.pid_file().unlink()
+    if left:
+        pytest.fail("a forwarder is still running after the teardown: " + "; ".join(left))
+
+
+def test_the_teardown_never_waits_forever_for_a_kill_that_did_not_land(runtime, stub, monkeypatch):
+    """A reviewer's mutant once hung the suite ten minutes in this teardown: the kill had not
+    landed, and waitpid without a bound waited for it. The teardown waits a few seconds, then
+    fails, naming the pid and what it is, and the run goes on."""
+    port = free_port()
+    hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+    pid = hostd.running()
+    outcome: dict[str, str] = {}
+
+    def teardown():
+        try:
+            reap([pid])
+            outcome["said"] = "returned without a word"
+        except BaseException as e:  # pytest.fail raises its own; what it says is the point
+            outcome["said"] = str(e)
+
+    real_kill = os.kill
+    with monkeypatch.context() as m:
+        m.setattr(hostd, "stop", lambda: False)
+        m.setattr(os, "kill", lambda pid, sig: None)  # the kill does not land
+        waiting = threading.Thread(target=teardown, daemon=True)
+        waiting.start()
+        waiting.join(10)
+    try:
+        assert not waiting.is_alive(), "the teardown waited past its bound"
+        assert f"pid {pid}" in outcome["said"] and "hostd" in outcome["said"], outcome
+    finally:
+        real_kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+
+
+def test_the_teardown_kills_only_a_forwarder_never_a_pid_something_else_has_now(runtime):
+    """A pid a test's forwarder had may be another process's by the teardown: one whose argv is
+    not `-m vivibox hostd` is left alone, whatever its name says."""
+    other = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        reap([other.pid])
+        assert other.poll() is None, "not a forwarder: left alone"
+    finally:
+        other.kill()
+        other.wait()
 
 
 def test_the_fixture_leaves_no_forwarder_behind_even_when_stop_is_broken(runtime, stub, monkeypatch):

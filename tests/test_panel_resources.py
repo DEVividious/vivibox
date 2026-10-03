@@ -75,14 +75,14 @@ def test_the_disk_is_shown_with_its_use_and_warns_at_four_fifths(env, monkeypatc
 
 def test_next_is_the_command_that_raises_a_limit_the_task_hit(env):
     task = implementing()
-    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", {})
+    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")
     task.set_paused(True, problem=limits.problem(task.id, [hit]))
     st = task.read_state()
     seen = ui.view(task, st, True, 3)
     assert seen.status == "out of memory"
     nxt = panel.next_steps(task, st, seen, True, panel.PodView())
     assert nxt == f"`vivibox limits {task.id} --agent-memory 6g` in a shell, then `s`"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", {})
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
     task.set_paused(True, problem=limits.problem(task.id, [full]))
     st = task.read_state()
     nxt = panel.next_steps(task, st, ui.view(task, st, True, 3), True, panel.PodView())

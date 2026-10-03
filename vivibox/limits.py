@@ -4,8 +4,9 @@ what the pod's own Docker runs in them, attributed to the container whose scope 
 (memory.events.local), and the disk's mount (statvfs), full at no block left. Read from the
 kernel's files, which need no root; nothing of Docker's output is more than a label for a scope
 under the slice, read where it exists. The supervisor asks through Ports.limits_exceeded, the
-command line wires it (supervise.py); a reported kill is kept with the task's events, so it is
-reported once."""
+command line wires it (supervise.py). The kernel's counters start again with a container (every
+docker run) and with the machine, so a step compares with the counts read when it began
+(Tracker), never with counts kept from an earlier run."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import math
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .podspec import GIB, Limits, size_option, size_text, slice_of
@@ -48,24 +49,13 @@ class Exceeded:
     limit: int  # bytes
     used: int  # the peak of memory, or the disk's used bytes
     words: str  # the kernel's: "oom_kill 1", "statvfs: 3 MiB of 1 GiB free"
-    # The OOM kill counts as read, by workload and "pod" for the slice's: the record a later
-    # check compares with, so one kill is reported once.
-    counts: dict[str, int] = field(default_factory=dict)
 
 
 def event_data(hit: Exceeded) -> dict:
     """The event as the plan names it: kind, workload, limit, and peak (memory) or used (disk)."""
     used = "peak" if hit.kind == "memory" else "used"
     return {"kind": hit.kind, "workload": hit.workload, "limit": hit.limit, used: hit.used,
-            "words": hit.words, "counts": hit.counts}  # fmt: skip
-
-
-def recorded_counts(events: list[dict]) -> dict[str, int]:
-    """The counts the last memory report kept with the task; {} before any."""
-    for event in reversed(events):
-        if event["type"] == "resource.limit.exceeded" and event["data"].get("kind") == "memory":
-            return dict(event["data"].get("counts") or {})
-    return {}
+            "words": hit.words}  # fmt: skip
 
 
 def slice_path(task_id: str, root: Path = CGROUP) -> Path:
@@ -227,40 +217,69 @@ class Watch:
     statvfs: Callable[[Path], os.statvfs_result] = os.statvfs
     is_mount: Callable[[Path], bool] = is_mount
 
-    def check(self, seen: dict[str, int]) -> list[Exceeded]:
-        """What is exceeded since the counts seen: a kill the slice counts past them, blamed on
-        every scope whose own count grew, else the pod's; and a disk with no block left. Nothing
-        while no container of the pod is there."""
-        scopes = {role: cid for role, cid in self.scopes().items() if CONTAINER_ID.fullmatch(cid)}
-        if not scopes and not self.scopes():
-            return []
+    def _read(self) -> tuple[dict[str, int], dict[str, int]] | None:
+        """The OOM kill counts and the memory peaks, by workload and "pod" for the slice's; None
+        while no container of the pod is there. Docker is asked once, for the scopes' labels."""
+        asked = self.scopes()
+        if not asked:
+            return None
         slice_ = slice_path(self.task_id, self.root)
         if not slice_.is_dir():
             raise Unreadable(f"the task's cgroup slice {slice_} is not there while its pod runs")
         counts = {"pod": counter(slice_ / "memory.events", "oom_kill")}
         peaks = {"pod": number(slice_ / "memory.peak")}
-        for role, cid in scopes.items():
+        for role, cid in asked.items():
             scope = slice_ / f"docker-{cid}.scope"
-            if scope.is_dir():
+            if CONTAINER_ID.fullmatch(cid) and scope.is_dir():
                 counts[role] = counter(scope / "memory.events.local", "oom_kill")
                 peaks[role] = number(scope / "memory.peak")
+        return counts, peaks
+
+    def counts(self) -> dict[str, int]:
+        """The counts as they are now: what a step begins with. {} while the pod is down."""
+        read = self._read()
+        return read[0] if read else {}
+
+    def check(self, seen: dict[str, int]) -> list[Exceeded]:
+        """What is exceeded since the counts seen: a kill the slice counts past them, blamed on
+        every scope whose own count grew, else the pod's (a count below the one seen is a
+        counter that started again, not a kill); and a disk below the floor. Nothing while no
+        container of the pod is there."""
+        read = self._read()
+        if read is None:
+            return []
+        counts, peaks = read
         found = []
         if counts["pod"] > seen.get("pod", 0):
             blamed = [r for r, n in counts.items() if r != "pod" and n > seen.get(r, 0)] or ["pod"]
             for role in blamed:
                 limit = self.limits.pod_memory if role == "pod" else self.limits.memory_of(role)
-                found.append(Exceeded("memory", role, limit, peaks[role], f"oom_kill {counts[role]}", counts))
+                found.append(Exceeded("memory", role, limit, peaks[role], f"oom_kill {counts[role]}"))
         if not self.is_mount(self.disk):
             raise Unreadable(f"the task's disk is not mounted at {self.disk} while its pod runs")
         st = self.statvfs(self.disk)
         size, free = st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
         if disk_full(free, size):
             used = (st.f_blocks - st.f_bfree) * st.f_frsize
-            found.append(Exceeded("disk", "pod", size, used, disk_words(free, size), counts))
+            found.append(Exceeded("disk", "pod", size, used, disk_words(free, size)))
         return found
 
 
-def exceeded(task, pod) -> list[Exceeded]:
-    """What the task's pod hit, compared with what its events recorded last."""
-    watch = Watch(task.id, pod.limits, pod.disk, pod.scopes)
-    return watch.check(recorded_counts(task.events()))
+class Tracker:
+    """What the supervisor is wired to: begin() reads the counts when a turn or a verification
+    begins, found() compares after it. The pod's watch is made on first use, from the pod."""
+
+    def __init__(self, task, pod, **watch):
+        self.task, self.pod, self.watch, self.seen = task, pod, watch, {}
+        self._watch: Watch | None = None
+
+    def _the_watch(self) -> Watch:
+        if self._watch is None:
+            self._watch = Watch(self.task.id, self.pod.limits, self.pod.disk, self.pod.scopes, **self.watch)
+        return self._watch
+
+    def begin(self) -> None:
+        self.seen = self._the_watch().counts()
+
+    def found(self) -> list[Exceeded]:
+        return self._the_watch().check(self.seen)

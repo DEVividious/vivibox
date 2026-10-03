@@ -118,6 +118,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An OOM kill is told from the counts read as the turn or the verification began, not from
+  counts kept with the task: the kernel's counters start again with every container and with
+  the machine, so a second kill after `vivibox limits … --agent-memory` and a start was read as
+  the pod's with no option to raise, and one after a restart of the machine was not seen at all.
+  The event `resource.limit.exceeded` carries kind, workload, limit, peak or used, and the
+  kernel's words.
 - The root helper refuses a task's disk whose mount point, image or any directory of the disk
   is a symbolic link, a special file or someone else's, before anything runs: a link at
   `<task>/disk` put there by the person's own uid would have had the disk mounted, and its

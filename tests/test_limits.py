@@ -36,6 +36,15 @@ class Stat:
         self.f_blocks, self.f_bfree, self.f_bavail, self.f_frsize = blocks, free, avail, frsize
 
 
+ROOM = lambda p: Stat(5_000_000, 4_000_000, 3_000_000)  # noqa: E731 (a disk with room)
+UP = lambda p: True  # noqa: E731 (a disk that is mounted)
+
+
+def at(root, scopes):
+    """A watch of shop-1's slice under root, the disk with room and mounted."""
+    return limits.Watch("shop-1", Limits(), root / "disk", scopes, root=root, statvfs=ROOM, is_mount=UP)
+
+
 def watch(tmp_path, scopes=None, stat=None, mounted=True):
     return limits.Watch(
         "shop-1", Limits(), tmp_path / "disk", scopes=lambda: dict(CID if scopes is None else scopes),
@@ -49,17 +58,100 @@ def test_an_oom_kill_is_attributed_to_the_container_whose_scope_saw_it(tmp_path)
     [hit] = watch(tmp_path).check({})
     assert (hit.kind, hit.workload, hit.limit, hit.used) == ("memory", "agent", 4 * 2**30, 4 * 2**30)
     assert hit.words == "oom_kill 1"
-    assert hit.counts == {"pod": 1, "agent": 1, "sidecar": 0, "gate": 0}, "for the record, reported once"
+    assert watch(tmp_path).counts() == {"pod": 1, "agent": 1, "sidecar": 0, "gate": 0}
 
 
-def test_an_oom_kill_is_reported_once(tmp_path):
+def test_an_oom_kill_is_reported_once_against_the_counts_read_before(tmp_path):
     tree(tmp_path, oom={"agent": 1})
     w = watch(tmp_path)
     [hit] = w.check({})
-    assert w.check(hit.counts) == [], "seen already"
+    assert w.check(w.counts()) == [], "seen already"
     tree(tmp_path / "later", oom={"agent": 1, "gate": 1})
-    [again] = watch(tmp_path / "later").check(hit.counts)
+    [again] = watch(tmp_path / "later").check(w.counts())
     assert again.workload == "gate", "the new one, not the agent's again"
+
+
+class Scopes:
+    """A pod's scopes as Docker answers, counting the questions."""
+
+    def __init__(self):
+        self.asked = 0
+
+    def __call__(self):
+        self.asked += 1
+        return dict(CID)
+
+
+def test_the_counters_restart_with_the_scope_and_the_slice_so_each_step_starts_from_what_is_there(tmp_path):
+    """The reviewer's two cases. A: the agent died on OOM, the person raised the limit and started
+    the task again; the agent's container is new (its count from 0), the slice stays (its count
+    goes on): the second kill is the agent's again. B: after a restart of the machine the slice
+    starts from 0 too, lower than any count kept: a lower count is no kill, and the next one is."""
+    scopes = Scopes()
+    first = tree(tmp_path / "1", oom={"agent": 1})
+    w1 = at(tmp_path / "1", scopes)
+    before = at(tmp_path / "1", scopes)
+    (first / "memory.events").write_text("low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n")
+    agent = first / f"docker-{CID['agent']}.scope"
+    (agent / "memory.events.local").write_text("low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n")
+    seen = before.counts()  # before the turn: nothing yet
+    tree(tmp_path / "1b", oom={"agent": 1})  # after the turn: the kill
+    w1.root = tmp_path / "1b"
+    [hit] = w1.check(seen)
+    assert hit.workload == "agent"
+    # A: the task started again: a new agent container (scope at 0), the slice still at 1.
+    second = tree(tmp_path / "2", oom={"agent": 0})
+    (second / "memory.events").write_text("low 0\nhigh 0\nmax 1\noom 1\noom_kill 1\n")
+    w2 = at(tmp_path / "2", scopes)
+    seen = w2.counts()
+    assert seen == {"pod": 1, "agent": 0, "sidecar": 0, "gate": 0}
+    assert w2.check(seen) == [], "nothing new since the turn began"
+    (second / f"docker-{CID['agent']}.scope" / "memory.events.local").write_text("oom_kill 1\n")
+    (second / "memory.events").write_text("oom_kill 2\n")
+    [hit] = w2.check(seen)
+    assert hit.workload == "agent" and hit.words == "oom_kill 1", "the second kill is the agent's again"
+    # B: after a restart of the machine: every count from 0, lower than the ones kept before it.
+    third = tree(tmp_path / "3", oom={})
+    w3 = at(tmp_path / "3", scopes)
+    assert w3.check({"pod": 2, "agent": 1}) == [], "a count lower than the stored one is not a kill"
+    seen = w3.counts()
+    (third / f"docker-{CID['agent']}.scope" / "memory.events.local").write_text("oom_kill 1\n")
+    (third / "memory.events").write_text("oom_kill 1\n")
+    [hit] = w3.check(seen)
+    assert hit.workload == "agent"
+
+
+def test_scopes_are_asked_of_docker_once_per_read(tmp_path):
+    tree(tmp_path, oom={"agent": 1})
+    scopes = Scopes()
+    w = limits.Watch("shop-1", Limits(), tmp_path / "disk", scopes, root=tmp_path, statvfs=ROOM, is_mount=UP)
+    w.check({})
+    assert scopes.asked == 1
+    w.counts()
+    assert scopes.asked == 2
+
+
+def test_the_tracker_reads_before_a_step_and_compares_after(tmp_path):
+    """What the supervisor is wired to: begin() before a turn or a verification, found() after."""
+
+    class Pod:
+        limits, disk = Limits(), tmp_path / "disk"
+
+        def scopes(self):
+            return dict(CID)
+
+    class Task:
+        id = "shop-1"
+
+    slice_ = tree(tmp_path, oom={})
+    tracker = limits.Tracker(Task(), Pod(), root=tmp_path, statvfs=ROOM, is_mount=UP)
+    tracker.begin()
+    (slice_ / f"docker-{CID['gate']}.scope" / "memory.events.local").write_text("oom_kill 1\n")
+    (slice_ / "memory.events").write_text("oom_kill 1\n")
+    [hit] = tracker.found()
+    assert hit.workload == "gate"
+    tracker.begin()
+    assert tracker.found() == [], "seen at the step's start"
 
 
 def test_an_oom_kill_no_scope_saw_is_the_pods(tmp_path):
@@ -109,7 +201,7 @@ def test_a_container_id_is_a_label_never_a_path_outside_the_slice(tmp_path):
     scopes = {"agent": "../../etc", "gate": CID["gate"], "review": "d" * 64}
     [hit] = watch(tmp_path, scopes=scopes).check({})
     assert hit.workload == "pod", "the agent's id was no id: its kill is nobody's"
-    assert "review" not in hit.counts, "a scope that is not there is not read"
+    assert "review" not in watch(tmp_path, scopes=scopes).counts(), "a scope that is not there is not read"
 
 
 def test_a_slice_missing_while_the_pod_runs_is_said_not_passed_over(tmp_path):
@@ -126,7 +218,7 @@ def test_nothing_is_read_while_the_pod_is_down(tmp_path):
 
 
 def test_the_problem_has_three_parts_and_names_the_option_that_raises_the_limit():
-    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", {})
+    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")
     said = limits.problem("shop-1", [hit])
     what, _, why = said.partition(": ")
     assert what == "out of memory"
@@ -134,31 +226,20 @@ def test_the_problem_has_three_parts_and_names_the_option_that_raises_the_limit(
     assert "vivibox limits shop-1 --agent-memory 6g" in why and "vivibox start shop-1" in why
     assert limits.raise_option("sidecar", 2 * 2**30) == "--sidecar-memory 3g"
     assert limits.raise_option("review", 3 * 2**29) == "--review-memory 3g"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", {})
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
     said = limits.problem("shop-1", [full])
     assert said.startswith("out of disk space: the task's disk is full (20 GiB)")
     assert "vivibox disk grow shop-1 40g" in said and "then vivibox start shop-1" in said
-    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1", {})
+    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1")
     assert "vivibox limits shop-1" in limits.problem("shop-1", [pod])
 
 
-def test_the_counts_recorded_last_come_from_the_tasks_events():
-    events = [
-        {"type": "turn", "data": {}},
-        {"type": "resource.limit.exceeded", "data": {"kind": "memory", "counts": {"pod": 1, "agent": 1}}},
-        {"type": "resource.limit.exceeded", "data": {"kind": "disk", "counts": {"pod": 1, "agent": 1}}},
-    ]
-    assert limits.recorded_counts(events) == {"pod": 1, "agent": 1}
-    assert limits.recorded_counts([]) == {}
-
-
 def test_the_event_carries_what_the_plan_names():
-    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 3 * 2**30, "oom_kill 2", {"pod": 2})
+    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 3 * 2**30, "oom_kill 2")
     assert limits.event_data(hit) == {
-        "kind": "memory", "workload": "gate", "limit": 4 * 2**30, "peak": 3 * 2**30,
-        "words": "oom_kill 2", "counts": {"pod": 2},
+        "kind": "memory", "workload": "gate", "limit": 4 * 2**30, "peak": 3 * 2**30, "words": "oom_kill 2",
     }  # fmt: skip
-    full = limits.Exceeded("disk", "pod", 10, 10, "statvfs: 0 of 1 blocks free", {})
+    full = limits.Exceeded("disk", "pod", 10, 10, "statvfs: 0 of 1 blocks free")
     assert limits.event_data(full)["used"] == 10 and "peak" not in limits.event_data(full)
 
 
@@ -190,9 +271,9 @@ def test_a_tasks_own_limits_come_over_the_machines(tmp_path):
 
 
 def test_the_command_that_raises_a_limit_is_read_from_the_problem():
-    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 4 * 2**30, "oom_kill 1", {})
+    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 4 * 2**30, "oom_kill 1")
     assert limits.raising_command(limits.problem("shop-1", [hit])) == "vivibox limits shop-1 --gate-memory 6g"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 1 blocks free", {})
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 1 blocks free")
     assert limits.raising_command(limits.problem("shop-1", [full])) == "vivibox disk grow shop-1 40g"
     assert limits.raising_command("agent turn failed: 429") == ""
 

@@ -680,8 +680,7 @@ def test_an_allocation_past_the_memory_limit_is_killed_and_attributed_to_the_age
     limit = pod.limits.memory_of("agent")
     assert scope_file(pod, "agent", "memory.max").read_text().strip() == str(limit)
     assert scope_file(pod, "agent", "memory.swap.max").read_text().strip() == "0", "--memory-swap == --memory"
-    before = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({})
-    seen = before[0].counts if before else {}
+    seen = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).counts()  # before, as the supervisor
     hog = f"x = bytearray(b'a' * ({limit} + 2**30))\nprint(len(x))"
     done = pod.exec("python3", "-c", hog, check=False)
     assert done.returncode == 137, f"killed for memory, not finished: {done}"

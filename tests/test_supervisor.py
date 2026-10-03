@@ -1609,7 +1609,7 @@ def test_an_oom_after_a_turn_stops_the_task_with_the_limit_the_kernels_words_and
 
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         task.transition(s)
-    hits = [[limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", {"pod": 1, "agent": 1})]]
+    hits = [[limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")]]
     harness = FakeHarness(task)
     sup, notes = make(task, harness)
     sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []
@@ -1624,7 +1624,7 @@ def test_an_oom_after_a_turn_stops_the_task_with_the_limit_the_kernels_words_and
     [event] = [e for e in task.events() if e["type"] == "resource.limit.exceeded"]
     assert event["data"] == {
         "kind": "memory", "workload": "agent", "limit": 4 * 2**30, "peak": 4 * 2**30,
-        "words": "oom_kill 1", "counts": {"pod": 1, "agent": 1},
+        "words": "oom_kill 1",
     }  # fmt: skip
     assert ui.view(task, st, True, 3).status == "out of memory"
     assert notes[-1].startswith("out of memory: ")
@@ -1636,7 +1636,7 @@ def test_a_full_disk_during_the_verification_stops_the_task_before_a_round_is_sp
 
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         task.transition(s)
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", {})
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
     hits = [[full]]
     sup, notes = make(task, FakeHarness(task), results=[gate_result(False)])
     sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []
@@ -1664,3 +1664,18 @@ def test_a_limit_that_cannot_be_read_stops_the_task_on_an_error_never_passes(tas
     with pytest.raises(limits.Unreadable):  # to run()'s catch-all, which stops the task on an error
         sup.step()
     assert [e["type"] for e in task.events()][-1] == "turn", "the turn was on the record first"
+
+
+def test_the_limits_are_read_before_each_turn_and_each_verification_and_compared_after(task):
+    """The kernel's counters start again with a container and with the machine: what a step
+    compares with is read when the step begins, not kept from an earlier run."""
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    calls = []
+    sup, _ = make(task, FakeHarness(task), results=[gate_result(True)])
+    sup.ports.limits_baseline = lambda: calls.append("begin")
+    sup.ports.limits_exceeded = lambda: calls.append("found") or []
+    sup.step()  # the writer's turn
+    assert calls == ["begin", "found"]
+    sup.step()  # the verification, then the whole build's baseline (nothing to run, nothing compared)
+    assert calls == ["begin", "found", "begin", "found", "begin"]

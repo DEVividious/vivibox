@@ -212,8 +212,9 @@ class Ports:
     # The whole build, once, before the work comes to you (limits.whole_build_before_review), for a
     # task verified by its modules; None when there is nothing to run.
     run_whole_gate: Callable[[Task], gate.GateResult | None] = lambda task: None
-    # What the pod hit of its limits (limits.py), asked after a turn and after a verification:
-    # nothing, for a caller without a pod.
+    # What the pod hit of its limits (limits.py): the counts read as a turn or a verification
+    # begins, and what passed them when it ends; nothing, for a caller without a pod.
+    limits_baseline: Callable[[], None] = lambda: None
     limits_exceeded: Callable[[], list[limits.Exceeded]] = lambda: []
 
 
@@ -351,6 +352,7 @@ class Supervisor(ReviewRound):
             if was:  # a tool that keeps no session ahead of the turn gives ""
                 self.task.set_session(agent, was)
                 self.ports.session_started(self.task.read_state())
+        self.ports.limits_baseline()  # the kernel's counts start again with a container
         turn = self._attempts(harness, prompt, was, title, st, role)
         transcript.write(self.task, role, agent, str(st.state), kind, asked, turn, time.monotonic() - began)
         if turn.session and turn.session != was:
@@ -660,6 +662,7 @@ class Supervisor(ReviewRound):
         return not self.project_verify and not nothing
 
     def _verify(self, st: TaskState) -> None:
+        self.ports.limits_baseline()
         result = self.ports.run_gate(self.task)
         if self._limits_hit():  # the limit's, not the code's: no round, verified again at the start
             return
@@ -734,6 +737,7 @@ class Supervisor(ReviewRound):
     def _whole_build_holds(self, st: TaskState) -> bool:
         """The whole build, when the work is about to come to you and it was verified by its modules
         only; red, it goes back to the writer like any failed verification. True to go on."""
+        self.ports.limits_baseline()
         result = self.ports.run_whole_gate(self.task)
         if result is not None and self._limits_hit():
             return False

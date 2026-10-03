@@ -188,6 +188,7 @@ def make_supervisor(
             tools=p.tools,
         )
 
+    tracker = limits.Tracker(task, pod)  # the pod's limits, read as each step begins and ends
     ports = supervisor.Ports(
         run_gate=run_gate,
         run_whole_gate=run_whole_gate,
@@ -199,7 +200,8 @@ def make_supervisor(
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
         head=lambda: repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip(),
-        limits_exceeded=lambda: limits.exceeded(task, pod),
+        limits_baseline=tracker.begin,
+        limits_exceeded=tracker.found,
     )
     return supervisor.Supervisor(
         task,

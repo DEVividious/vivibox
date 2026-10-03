@@ -7,8 +7,11 @@ from __future__ import annotations
 import hashlib
 import re
 
-# The roles a task has a network for: the writer's today; the reviewer's and the planner's later.
+# The roles a task has a network for, in the order their ranges are cut from the task's block:
+# the writer's, the reviewer's, the planner's (its network is made once the planner has a
+# container of its own). What each is called in a message a person reads.
 ROLES = ("w", "r", "p")
+ROLE_NAMES = {"w": "writer", "r": "reviewer", "p": "planner"}
 # Every bridge of a task network starts so; the host rejects what comes from one without a policy.
 BRIDGE_PREFIX = "vbx"
 # The kernel's limit on an interface's name (IFNAMSIZ less its terminating zero).

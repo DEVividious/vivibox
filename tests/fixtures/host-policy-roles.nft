@@ -1,0 +1,101 @@
+# vivibox-host apply-policy shop-1: present
+add table inet vivibox
+add map inet vivibox out_by_bridge { type ifname : verdict; }
+add map inet vivibox back_by_bridge { type ifname : verdict; }
+add map inet vivibox host_by_bridge { type ifname : verdict; }
+add map inet vivibox dns_by_bridge { type ifname : verdict; }
+add chain inet vivibox forward { type filter hook forward priority -10; policy accept; }
+add chain inet vivibox input { type filter hook input priority -10; policy accept; }
+add chain inet vivibox prerouting { type nat hook prerouting priority -110; policy accept; }
+flush chain inet vivibox forward
+flush chain inet vivibox input
+flush chain inet vivibox prerouting
+add rule inet vivibox forward iifname vmap @out_by_bridge
+add rule inet vivibox forward oifname vmap @back_by_bridge
+add rule inet vivibox forward iifname "vbx*" reject with icmpx admin-prohibited
+add rule inet vivibox input iifname vmap @host_by_bridge
+add rule inet vivibox input iifname "vbx*" reject with icmpx admin-prohibited
+add rule inet vivibox input ip daddr 203.0.113.1 iifname != "lo" drop
+add rule inet vivibox prerouting iifname vmap @dns_by_bridge
+# w: vbx-shop-1-w, 198.51.100.0/28, policy open
+add chain inet vivibox out_vbx_shop_1_w
+add chain inet vivibox back_vbx_shop_1_w
+add chain inet vivibox host_vbx_shop_1_w
+add chain inet vivibox dns_vbx_shop_1_w
+flush chain inet vivibox out_vbx_shop_1_w
+flush chain inet vivibox back_vbx_shop_1_w
+flush chain inet vivibox host_vbx_shop_1_w
+flush chain inet vivibox dns_vbx_shop_1_w
+add rule inet vivibox out_vbx_shop_1_w tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu
+add rule inet vivibox out_vbx_shop_1_w ct state established,related accept
+add rule inet vivibox out_vbx_shop_1_w meta nfproto ipv6 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w ip saddr != 198.51.100.0/28 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w ip daddr 198.51.100.1 tcp dport 5432 accept
+add rule inet vivibox out_vbx_shop_1_w ip daddr 203.0.113.1 tcp dport 5055 accept
+add rule inet vivibox out_vbx_shop_1_w ip daddr 192.168.1.50 tcp dport 8080 accept
+add rule inet vivibox out_vbx_shop_1_w tcp dport 853 reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_w udp dport 853 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w ip daddr 198.51.100.16/29 meta l4proto tcp reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_w ip daddr 198.51.100.16/29 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 198.51.100.0/24, 224.0.0.0/3 } meta l4proto tcp reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_w ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 198.51.100.0/24, 224.0.0.0/3 } reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w meta l4proto udp reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_w accept
+add rule inet vivibox back_vbx_shop_1_w tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu
+add rule inet vivibox host_vbx_shop_1_w ct state established,related accept
+add rule inet vivibox host_vbx_shop_1_w meta nfproto ipv6 reject with icmpx admin-prohibited
+add rule inet vivibox host_vbx_shop_1_w ip saddr != 198.51.100.0/28 reject with icmpx admin-prohibited
+add rule inet vivibox host_vbx_shop_1_w ip daddr 203.0.113.1 udp dport 5053 accept
+add rule inet vivibox host_vbx_shop_1_w ip daddr 203.0.113.1 tcp dport 5053 accept
+add rule inet vivibox host_vbx_shop_1_w ip daddr 198.51.100.1 tcp dport 5432 accept
+add rule inet vivibox host_vbx_shop_1_w ip daddr 203.0.113.1 tcp dport 5055 accept
+add rule inet vivibox host_vbx_shop_1_w ip daddr 192.168.1.50 tcp dport 8080 accept
+add rule inet vivibox host_vbx_shop_1_w meta l4proto tcp reject with tcp reset
+add rule inet vivibox host_vbx_shop_1_w reject with icmpx admin-prohibited
+add rule inet vivibox dns_vbx_shop_1_w udp dport 53 dnat ip to 203.0.113.1:5053
+add rule inet vivibox dns_vbx_shop_1_w tcp dport 53 dnat ip to 203.0.113.1:5053
+add element inet vivibox out_by_bridge { "vbx-shop-1-w" : jump out_vbx_shop_1_w }
+add element inet vivibox back_by_bridge { "vbx-shop-1-w" : jump back_vbx_shop_1_w }
+add element inet vivibox host_by_bridge { "vbx-shop-1-w" : jump host_vbx_shop_1_w }
+add element inet vivibox dns_by_bridge { "vbx-shop-1-w" : jump dns_vbx_shop_1_w }
+# r: vbx-shop-1-r, 198.51.100.16/29, policy open
+add chain inet vivibox out_vbx_shop_1_r
+add chain inet vivibox back_vbx_shop_1_r
+add chain inet vivibox host_vbx_shop_1_r
+add chain inet vivibox dns_vbx_shop_1_r
+flush chain inet vivibox out_vbx_shop_1_r
+flush chain inet vivibox back_vbx_shop_1_r
+flush chain inet vivibox host_vbx_shop_1_r
+flush chain inet vivibox dns_vbx_shop_1_r
+add rule inet vivibox out_vbx_shop_1_r tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu
+add rule inet vivibox out_vbx_shop_1_r ct state established,related accept
+add rule inet vivibox out_vbx_shop_1_r meta nfproto ipv6 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r ip saddr != 198.51.100.16/29 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r ip daddr 198.51.100.1 tcp dport 5432 accept
+add rule inet vivibox out_vbx_shop_1_r ip daddr 203.0.113.1 tcp dport 5055 accept
+add rule inet vivibox out_vbx_shop_1_r ip daddr 192.168.1.50 tcp dport 8080 accept
+add rule inet vivibox out_vbx_shop_1_r tcp dport 853 reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_r udp dport 853 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r ip daddr 198.51.100.0/28 meta l4proto tcp reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_r ip daddr 198.51.100.0/28 reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 198.51.100.0/24, 224.0.0.0/3 } meta l4proto tcp reject with tcp reset
+add rule inet vivibox out_vbx_shop_1_r ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 198.51.100.0/24, 224.0.0.0/3 } reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r meta l4proto udp reject with icmpx admin-prohibited
+add rule inet vivibox out_vbx_shop_1_r accept
+add rule inet vivibox back_vbx_shop_1_r tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu
+add rule inet vivibox host_vbx_shop_1_r ct state established,related accept
+add rule inet vivibox host_vbx_shop_1_r meta nfproto ipv6 reject with icmpx admin-prohibited
+add rule inet vivibox host_vbx_shop_1_r ip saddr != 198.51.100.16/29 reject with icmpx admin-prohibited
+add rule inet vivibox host_vbx_shop_1_r ip daddr 203.0.113.1 udp dport 5053 accept
+add rule inet vivibox host_vbx_shop_1_r ip daddr 203.0.113.1 tcp dport 5053 accept
+add rule inet vivibox host_vbx_shop_1_r ip daddr 198.51.100.1 tcp dport 5432 accept
+add rule inet vivibox host_vbx_shop_1_r ip daddr 203.0.113.1 tcp dport 5055 accept
+add rule inet vivibox host_vbx_shop_1_r ip daddr 192.168.1.50 tcp dport 8080 accept
+add rule inet vivibox host_vbx_shop_1_r meta l4proto tcp reject with tcp reset
+add rule inet vivibox host_vbx_shop_1_r reject with icmpx admin-prohibited
+add rule inet vivibox dns_vbx_shop_1_r udp dport 53 dnat ip to 203.0.113.1:5053
+add rule inet vivibox dns_vbx_shop_1_r tcp dport 53 dnat ip to 203.0.113.1:5053
+add element inet vivibox out_by_bridge { "vbx-shop-1-r" : jump out_vbx_shop_1_r }
+add element inet vivibox back_by_bridge { "vbx-shop-1-r" : jump back_vbx_shop_1_r }
+add element inet vivibox host_by_bridge { "vbx-shop-1-r" : jump host_vbx_shop_1_r }
+add element inet vivibox dns_by_bridge { "vbx-shop-1-r" : jump dns_vbx_shop_1_r }

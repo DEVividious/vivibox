@@ -56,6 +56,16 @@ def test_every_bridge_name_fits_is_deterministic_and_unique_per_task_and_role():
             seen[name] = (task_id, role)
 
 
+def test_the_reviewers_bridge_fits_for_the_longest_id_too():
+    """A project name of 31 characters and a task number of five digits: the longest id there is."""
+    longest = "a" + "b" * 30 + "-99999"
+    for role in names.ROLES:
+        assert len(names.bridge(longest, role)) <= names.IFNAME_MAX
+    assert names.bridge(longest, "r").endswith("-r") and names.bridge(longest, "r") != names.bridge(
+        longest, "w"
+    )
+
+
 def test_every_bridge_name_matches_the_hosts_wildcard():
     """The host rejects whatever comes from a vbx bridge without a policy of its own."""
     assert names.bridge("shop-1", "w").startswith(names.BRIDGE_PREFIX)

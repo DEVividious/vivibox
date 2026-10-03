@@ -30,6 +30,20 @@ def test_loads_config_with_defaults(tmp_path):
     assert config.whole_build_before_review is False, "the pipeline builds it whole after a push"
 
 
+@pytest.mark.parametrize("pool", ["198.51.100.0/28", "198.51.100.0/29", "198.51.100.0/32"])
+def test_a_pool_too_small_for_one_tasks_block_is_refused_by_name(tmp_path, pool):
+    """A task takes a /27 of the pool (the writer's /28, the reviewer's and the planner's /29)."""
+    base = write(tmp_path / "config.toml", f'tasks_dir = "/t"\n[network]\npool = "{pool}"\n' + ROLES)
+    with pytest.raises(ConfigError, match="network.pool") as refused:
+        load_config(base)
+    assert "/27" in str(refused.value) and pool in str(refused.value)
+
+
+def test_a_pool_of_one_block_is_taken(tmp_path):
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[network]\npool = "198.51.100.0/27"\n' + ROLES)
+    assert load_config(base).network_pool == "198.51.100.0/27"
+
+
 def test_desktop_notifications_can_be_turned_on_and_off(tmp_path):
     for value, expected in (("true", True), ("false", False)):
         text = f'tasks_dir = "/t"\n[notifications]\ndesktop = {value}\n' + ROLES

@@ -475,5 +475,12 @@ def test_the_tests_reach_no_docker():
 def test_a_task_from_before_the_disk_image_is_from_an_earlier_vivibox():
     """4: the task's volumes are directories of a disk image of its own; a task created under 3
     has none, and is not carried over: deleted and created again."""
-    assert task_module.TASK_SCHEMA_VERSION == 4
     assert task_module.classify(3) == task_module.EARLIER
+
+
+def test_a_task_with_one_network_is_from_an_earlier_vivibox():
+    """5: a network per role, the reviewer's own among them, three ranges recorded with the task;
+    a task created under 4 has the writer's alone, and is not given the others: deleted and
+    created again."""
+    assert task_module.TASK_SCHEMA_VERSION == 5
+    assert task_module.classify(4) == task_module.EARLIER

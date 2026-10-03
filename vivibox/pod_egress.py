@@ -116,8 +116,11 @@ class PodEgress:
     def policy(self) -> dict:
         """What the helper is given for this task: its role networks, the pool (every other task's
         range, refused), the uplink's MTU (the MSS clamp follows a VPN going on or off), the host
-        services and where the forwarder listens."""
-        nets = self.networks()
+        services and where the forwarder listens. The networks are those with a bridge, the
+        writer's and the reviewer's (pod_network.MADE_ROLES): the planner's range is reserved
+        with the task and gets its rules once there is a planner's network to key them by, so
+        that no chain is loaded for a bridge nothing is on."""
+        nets = self.made_networks()
         if not nets:
             raise PodError(f"{self.task_id} has no network allocated yet")
         return {

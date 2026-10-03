@@ -8,6 +8,7 @@ import pytest
 
 from vivibox import pod_network, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
+from vivibox.pod import HELPER as HELPER_PATH
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
 from vivibox.probe import Listener
 
@@ -106,11 +107,19 @@ class FakeDocker:
         elif cmd[:3] == ["docker", "network", "inspect"] and cmd[-1] in self.networks:
             out, rc = "", 0
         elif cmd[:3] == ["docker", "network", "inspect"]:
-            out, rc = (self.subnets, 0) if cmd[-1] != "vivibox-shop-1-net" else ("", 1)
+            # A task's network it has not made is not there; anything else is the listing of ids.
+            out, rc = (self.subnets, 0) if not cmd[-1].startswith("vivibox-") else ("", 1)
         return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
 
     def find(self, *prefix):
         return [c for c in self.calls if c[: len(prefix)] == list(prefix)]
+
+
+def allocation(w: str, r: str, p: str) -> str:
+    """A task's allocation file as vivibox writes it: every role's range."""
+    return json.dumps(
+        {"networks": [{"role": "w", "subnet": w}, {"role": "r", "subnet": r}, {"role": "p", "subnet": p}]}
+    )
 
 
 def applied_policy(pod) -> dict:
@@ -219,6 +228,7 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
         "prepare-engine",
         "attach-disk",
         "network",
+        "network",
         "apply-policy",
         "vivibox-shop-1-dind",
         "vivibox-shop-1-agent",
@@ -230,13 +240,55 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
     assert applied[:5] == ["sudo", "-n", "/usr/local/libexec/vivibox-host", "apply-policy", "shop-1"]
     assert json.loads(applied[5]) == {
         "state": "present",
-        "networks": [{"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"}],
+        "networks": [
+            {"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"},
+            {"role": "r", "bridge": "vbx-shop-1-r", "subnet": "198.51.100.16/29", "policy": "open"},
+        ],
         "pool": DEFAULT_NETWORK_POOL,
         "mtu": 1500,
         "hostsvc": ["198.51.100.1:5432"],
         "dns": "203.0.113.1",
         "dns_port": 5053,
     }
+
+
+def test_up_makes_the_writers_and_the_reviewers_networks_before_the_rules(pod):
+    """Two Docker networks per task, the writer's first, each on its recorded range with its
+    gateway and on the bridge vivibox names it by, both before the host's rules are loaded; the
+    rules are for those two. The planner's range is recorded and reserved, and has no network
+    nor rules until the planner has a container of its own."""
+    pod.up()
+    made = pod.runner.find("docker", "network", "create")
+    assert [c[-1] for c in made] == ["vivibox-shop-1-net", "vivibox-shop-1-r"]
+    assert [c[c.index("--subnet") + 1] for c in made] == ["198.51.100.0/28", "198.51.100.16/29"]
+    assert [c[c.index("--gateway") + 1] for c in made] == ["198.51.100.1", "198.51.100.17"]
+    assert [c[c.index("-o") + 1] for c in made] == [
+        "com.docker.network.bridge.name=vbx-shop-1-w", "com.docker.network.bridge.name=vbx-shop-1-r",
+    ]  # fmt: skip
+    calls = pod.runner.calls
+    applied = next(i for i, c in enumerate(calls) if c[:1] == ["sudo"] and c[3] == "apply-policy")
+    assert all(calls.index(c) < applied for c in made), "both before the rules"
+    policy = applied_policy(pod)
+    assert [(n["role"], n["subnet"]) for n in policy["networks"]] == [
+        ("w", "198.51.100.0/28"), ("r", "198.51.100.16/29"),
+    ], "the planner's reserved range is not in the policy"  # fmt: skip
+    assert [n.role for n in pod.networks()] == ["w", "r", "p"], "but it is recorded"
+
+
+def test_a_reviewers_network_gone_while_the_task_was_stopped_is_made_again_on_its_range(pod):
+    """The sidecar is there, on the writer's network; the reviewer's was removed by hand. It is
+    made again on the range recorded for it, and the writer's is left alone."""
+    pod.up()
+    pod.runner.networks.discard("vivibox-shop-1-r")
+    pod.runner.states["vivibox-shop-1-dind"] = "exited"
+    made_now(pod, state="exited")
+    before = len(pod.runner.calls)
+    pod.up(timeout=1)
+    made = [c for c in pod.runner.calls[before:] if c[:3] == ["docker", "network", "create"]]
+    assert [c[-1] for c in made] == ["vivibox-shop-1-r"] and made[0][
+        made[0].index("--subnet") + 1
+    ] == "198.51.100.16/29"
+    assert not [c for c in pod.runner.calls[before:] if c[:3] == ["docker", "network", "rm"]]
 
 
 def starts(calls) -> list[str]:
@@ -526,7 +578,7 @@ def test_up_attaches_the_tasks_disk_after_the_host_and_before_any_container(pod)
         or c[:3] == ["docker", "network", "create"]
     ]
     assert steps == [
-        "prepare-engine", "attach-disk", "network", "apply-policy", "vivibox-shop-1-dind",
+        "prepare-engine", "attach-disk", "network", "network", "apply-policy", "vivibox-shop-1-dind",
         "vivibox-shop-1-agent",
     ]  # fmt: skip
     attached = pod.runner.find("sudo")[1]
@@ -556,7 +608,7 @@ def test_remove_detaches_the_disk_deletes_its_image_then_the_rules_and_the_netwo
         for c in pod.runner.calls[before:]
         if c[:2] == ["docker", "rm"] or c[0] == "sudo" or c[:3] == ["docker", "network", "rm"]
     ]
-    assert steps == ["rm", "detach-disk", "apply-policy", "vivibox-shop-1-net"]
+    assert steps == ["rm", "detach-disk", "apply-policy", "vivibox-shop-1-net", "vivibox-shop-1-r"]
     detached = next(c for c in pod.runner.calls[before:] if c[0] == "sudo" and c[3] == "detach-disk")
     assert json.loads(detached[5]) == {"dir": str(pod.folder)}
     assert not pod.disk_image.exists() and not pod.disk.exists(), "the image goes with the task"
@@ -843,7 +895,33 @@ def test_the_pod_trusts_the_authorities_the_host_trusts(pod, tmp_path, monkeypat
 
 def test_each_task_gets_its_own_range_avoiding_what_docker_already_uses(pod):
     pod.runner.subnets = "172.20.0.0/16 198.51.100.0/28 fd00::/64 198.51.100.16/28"
-    assert str(pod.free_subnet()) == "198.51.100.32/28", "the lowest range nothing else holds"
+    assert str(pod.free_subnet()) == "198.51.100.32/27", "the lowest block nothing else holds any of"
+
+
+def test_a_task_takes_one_block_of_the_pool_split_by_role(pod, tmp_path):
+    """A /27 of the pool per task, recorded whole at the first allocation: the writer's /28
+    first, then the reviewer's /29 and the planner's /29 (reserved: its network is made later).
+    Each role's address is the third of its range, and its gateway the first."""
+    pod.allocation = tmp_path / "network.json"
+    pod.ensure_network()
+    assert json.loads(pod.allocation.read_text()) == {
+        "networks": [
+            {"role": "p", "subnet": "198.51.100.24/29"},
+            {"role": "r", "subnet": "198.51.100.16/29"},
+            {"role": "w", "subnet": "198.51.100.0/28"},
+        ]
+    }
+    assert [n.role for n in pod.networks()] == ["w", "r", "p"], "in the roles' order"
+    reviewer = pod.recorded_network("r")
+    assert (reviewer.bridge, reviewer.gateway, reviewer.address) == (
+        "vbx-shop-1-r",
+        "198.51.100.17",
+        "198.51.100.18",
+    )
+    assert (
+        pod.recorded_network("w").address == "198.51.100.2"
+        and pod.recorded_network("p").gateway == "198.51.100.25"
+    )
 
 
 def test_the_sidecar_is_pinned_to_the_same_address_every_time(pod):
@@ -851,7 +929,7 @@ def test_the_sidecar_is_pinned_to_the_same_address_every_time(pod):
     run = pod.runner.find("docker", "run", "-d", "--name", "vivibox-shop-1-dind")[0]
     assert run[run.index("--network") + 1] == "vivibox-shop-1-net"
     assert run[run.index("--ip") + 1] == "198.51.100.2"
-    [made] = pod.runner.find("docker", "network", "create")
+    [made] = [c for c in pod.runner.find("docker", "network", "create") if c[-1] == "vivibox-shop-1-net"]
     assert made[made.index("--subnet") + 1] == "198.51.100.0/28"
     assert made[made.index("--gateway") + 1] == "198.51.100.1", "the gateway is vivibox's choice too"
     assert made[made.index("-o") + 1] == "com.docker.network.bridge.name=vbx-shop-1-w"
@@ -910,11 +988,13 @@ def test_a_pod_without_an_allocation_has_no_gateway(pod):
 def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_path):
     pod.allocation = tmp_path / "network.json"
     first = pod.ensure_network()
-    assert json.loads(pod.allocation.read_text()) == {
-        "networks": [{"role": "w", "subnet": "198.51.100.0/28"}]
-    }
+    assert json.loads(pod.allocation.read_text())["networks"] == [
+        {"role": "p", "subnet": "198.51.100.24/29"},
+        {"role": "r", "subnet": "198.51.100.16/29"},
+        {"role": "w", "subnet": "198.51.100.0/28"},
+    ]
     again = Pod("shop-1", pod.repo, "img", runner=FakeDocker(), allocation=pod.allocation)
-    again.runner.networks.add("vivibox-shop-1-net")  # its own network, which Docker has
+    again.runner.networks |= {"vivibox-shop-1-net", "vivibox-shop-1-r"}  # its own networks, which Docker has
     assert again.recorded_network() == first and again.gateway() == "198.51.100.1"
     again.runner.states["vivibox-shop-1-dind"] = "exited"
     made_now(again, state="exited")
@@ -925,7 +1005,7 @@ def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_pa
 
 def test_an_allocation_outside_the_pool_now_is_made_again(pod, tmp_path):
     pod.allocation = tmp_path / "network.json"
-    pod.allocation.write_text(json.dumps({"networks": [{"role": "w", "subnet": "10.9.9.0/28"}]}))
+    pod.allocation.write_text(allocation("10.9.9.0/28", "10.9.9.16/29", "10.9.9.24/29"))
     assert pod.recorded_network() is None, "the pool moved since"
     made_now(pod, state="exited")
     pod.up(timeout=1)
@@ -961,10 +1041,32 @@ def test_a_pod_does_not_start_while_the_dns_forwarder_is_down(pod, monkeypatch):
 
 
 def test_a_full_pool_says_what_to_do_about_it(pod):
-    pod.network_pool = "198.51.100.0/28"
-    pod.runner.subnets = "198.51.100.0/28"
-    with pytest.raises(PodError, match="Remove tasks you have finished with"):
+    """Every block of the pool taken: the message names the pool and its size in tasks, the three
+    ranges a task takes, that deleting finished tasks frees their blocks, and the key to widen."""
+    pod.runner.subnets = " ".join(f"198.51.100.{n * 32}/27" for n in range(8))
+    with pytest.raises(PodError) as full:
         pod.free_subnet()
+    said = str(full.value)
+    assert "198.51.100.0/24" in said and "8 tasks" in said, "the pool and its size in tasks"
+    assert "/28" in said and "/29" in said, "what one task takes"
+    assert "Delete tasks you have finished with" in said and "vivibox delete" in said
+    assert "network.pool" in said and "config.toml" in said
+
+
+def test_an_allocation_of_one_network_is_from_an_earlier_vivibox_and_is_still_deleted(pod, tmp_path):
+    """A task allocated one network, the writer's alone, was made before every role had one: it
+    is not started on it, nor given a reviewer's network after the fact; delete it and create it
+    again. Deleting it still takes its network and its rules."""
+    pod.allocation = tmp_path / "network.json"
+    pod.allocation.write_text(json.dumps({"networks": [{"role": "w", "subnet": "198.51.100.0/28"}]}))
+    with pytest.raises(PodError, match="from an earlier vivibox") as refused:
+        pod.up()
+    assert "vivibox delete shop-1" in str(refused.value), "what to do"
+    assert not pod.runner.find("docker", "run") and not pod.runner.find("docker", "network", "create")
+    assert not pod.runner.find("sudo"), "nothing of the host is touched for it"
+    assert pod.remove() == ""
+    assert pod.runner.find("docker", "network", "rm", "vivibox-shop-1-net")
+    assert pod.runner.find("docker", "network", "rm", "vivibox-shop-1-r"), "whether it had one or not"
 
 
 def test_listening_ports_are_read_from_the_kernel(pod):
@@ -989,6 +1091,7 @@ def test_removing_a_task_takes_its_network_and_its_rules_with_it(pod):
     calls = pod.runner.calls
     gone = next(i for i, c in enumerate(calls) if c[:1] == ["sudo"] and c[3] == "apply-policy")
     assert calls.index(["docker", "network", "rm", "vivibox-shop-1-net"]) > gone, "the rules first"
+    assert calls.index(["docker", "network", "rm", "vivibox-shop-1-r"]) > gone, "the reviewer's too"
     assert calls[gone][3:5] == ["apply-policy", "shop-1"]
     assert json.loads(calls[gone][5]) == {
         "state": "absent",
@@ -1242,9 +1345,42 @@ def test_a_range_another_task_took_meanwhile_is_given_up_for_the_next(pod):
         return real(cmd)
 
     pod.runner = racing
-    assert str(pod.ensure_network().subnet) == "198.51.100.16/28"
+    assert str(pod.ensure_network().subnet) == "198.51.100.32/28", "the writer's /28 of the next block"
     made = real.find("docker", "network", "create")
-    assert [c[c.index("--subnet") + 1] for c in made] == ["198.51.100.0/28", "198.51.100.16/28"]
+    assert [c[c.index("--subnet") + 1] for c in made] == [
+        "198.51.100.0/28",
+        "198.51.100.32/28",
+        "198.51.100.48/29",
+    ]
+
+
+def test_a_block_whose_reviewers_range_was_taken_meanwhile_is_given_up_whole(pod):
+    """The writer's network made, the reviewer's refused for an overlap: the writer's goes too,
+    and the task takes the next block, so its ranges are one block's."""
+    real = pod.runner
+    raced = []
+
+    def racing(cmd):
+        cmd = list(cmd)
+        if cmd[:3] == ["docker", "network", "create"] and cmd[-1] == "vivibox-shop-1-r" and not raced:
+            raced.append(cmd)
+            real.subnets = "198.51.100.16/29"  # the other's, created in between
+            real.calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Pool overlaps with other one")
+        return real(cmd)
+
+    pod.runner = racing
+    nets = pod.ensure_networks()
+    assert [(n.role, str(n.subnet)) for n in nets] == [("w", "198.51.100.32/28"), ("r", "198.51.100.48/29")]
+    assert real.find("docker", "network", "rm", "vivibox-shop-1-net"), (
+        "the first block's writer network, undone"
+    )
+    assert [str(s) for s in pod._allocated().values()] == [
+        "198.51.100.32/28",
+        "198.51.100.48/29",
+        "198.51.100.56/29",
+    ]
+    assert real.networks == {"vivibox-shop-1-net", "vivibox-shop-1-r"}
 
 
 def test_a_network_docker_refuses_for_another_reason_says_so(pod):
@@ -1260,16 +1396,27 @@ def test_a_network_docker_refuses_for_another_reason_says_so(pod):
         pod.ensure_network()
 
 
-def test_a_network_that_is_not_on_its_bridge_is_refused(pod, tmp_path):
+def test_a_network_that_is_not_on_its_bridge_is_refused(pod, tmp_path, sys_net):
     """The rules hold for the bridge vivibox names; a network of that name made another way (by
-    hand, by a script of someone else's) is on a bridge they do not know. The kernel says which."""
+    hand, by a script of someone else's) is on a bridge they do not know. The kernel says which.
+    The reviewer's network is checked like the writer's."""
+    import shutil
+
     pod.allocation = tmp_path / "network.json"
-    pod.allocation.write_text(json.dumps({"networks": [{"role": "w", "subnet": "198.51.100.0/28"}]}))
+    pod.allocation.write_text(allocation("198.51.100.0/28", "198.51.100.16/29", "198.51.100.24/29"))
     pod.runner.networks.add("vivibox-shop-1-net")  # there, and not on vbx-shop-1-w
     with pytest.raises(PodError, match="not on the bridge vbx-shop-1-w") as e:
         pod.up()
     assert "docker network rm vivibox-shop-1-net" in str(e.value)
     assert not pod.runner.find("docker", "run"), "no container of the pod"
+    pod.runner.networks.discard("vivibox-shop-1-net")
+    shutil.rmtree(sys_net / "vbx-shop-1-r")  # the reviewer's, made another way: its bridge is not this
+    with pytest.raises(PodError, match="vivibox-shop-1-r is not on the bridge vbx-shop-1-r") as e:
+        pod.up()
+    assert "docker network rm vivibox-shop-1-r" in str(e.value)
+    assert not pod.runner.find("docker", "run") and not pod.runner.find(
+        "sudo", "-n", HELPER_PATH, "apply-policy"
+    )
 
 
 def test_a_removal_the_host_refused_is_said_and_the_rest_still_goes(pod):

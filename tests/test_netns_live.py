@@ -92,7 +92,7 @@ def pod(tmp_path_factory):
     finally:
         sh("docker", "rm", "-f", SIDECAR, check=False)
         p.remove_firewall()
-        sh("docker", "network", "rm", p.network, check=False)
+        sh("docker", "network", "rm", p.network, p.network_name("r"), check=False)
         allowed.shutdown()
         denied.shutdown()
         hostd.ensure(p.host_ip)  # whatever a test did to it
@@ -208,12 +208,12 @@ def test_applying_the_policy_again_mid_download_drops_nothing_and_opens_nothing(
 
 
 def test_a_policy_refused_half_way_leaves_the_rules_before_it(pod):
-    """A second network the helper refuses (it overlaps the first): nothing is loaded, and the
+    """A third network the helper refuses (it overlaps the first): nothing is loaded, and the
     rules before stay whole. A file nft itself refuses is all or nothing as well (one nft -f)."""
     p, net = pod["pod"], pod["net"]
     bad = p.policy()
     bad["networks"].append(
-        {"role": "r", "bridge": names.bridge(TASK, "r"), "subnet": str(net.subnet), "policy": "open"}
+        {"role": "p", "bridge": names.bridge(TASK, "p"), "subnet": str(net.subnet), "policy": "open"}
     )
     refused = sh("sudo", "-n", HELPER, "apply-policy", TASK, json.dumps(bad), check=False)
     assert refused.returncode == 1 and "overlaps" in refused.stderr

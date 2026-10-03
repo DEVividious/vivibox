@@ -37,8 +37,8 @@ from .pod_egress import PodEgress
 from .pod_egress import RulesLeft as RulesLeft
 from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
+from .pod_network import MADE_ROLES, PodNetwork, RoleNetwork
 from .pod_network import PodError as PodError
-from .pod_network import PodNetwork, RoleNetwork
 from .podspec import AGENT_MAVEN_OPTS as AGENT_MAVEN_OPTS
 from .podspec import CA_LABEL as CA_LABEL
 from .podspec import CACHES as CACHES
@@ -296,6 +296,10 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         """Starts whatever is not running. Idempotent."""
         if not self.repo.is_dir():
             raise PodError(f"task repo {self.repo} does not exist")
+        # A task allocated one network alone is an earlier vivibox's: not started, not given the
+        # other roles' networks after the fact; nothing of the host is touched for it.
+        if why := self.allocation_problem():
+            raise PodError(why)
         prepare_host(self.host_address, self.network_pool, self.runner)
         # The disk before anything of the pod: the daemon's data and the agent's home are on it.
         self.attach_disk()
@@ -314,13 +318,16 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             if state is not None and self._outdated_sidecar():
                 # docker start would run the script it was made with; its data is in volumes.
                 state = self._sidecar_gone()
-        net = self.ensure_network() if state is None else self.recorded_network()
-        self.check_bridge(net)
+        # The writer's network and the reviewer's, each on its bridge (with the sidecar up, the
+        # ranges are recorded, and only a network gone meanwhile is made again).
+        nets = self.ensure_networks()
+        for net in nets:
+            self.check_bridge(net)
         # The host's rules for the task's bridges, before anything of the pod sends a packet, and
         # again at every start: they follow the uplink of the moment (a VPN on or off).
         self.apply_firewall()
         if state is None:
-            self._run(*self.sidecar_command(net))
+            self._run(*self.sidecar_command(nets[0]))
         elif state != "running":
             self._run("docker", "start", self.sidecar)
         if state != "running":
@@ -507,7 +514,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
 
     def remove(self) -> str:
         """Removes containers, the task's disk (detached, then its image deleted) and socket
-        volume, the host's rules for it and its network. Shared caches stay. Returns what the
+        volume, the host's rules for it and its networks. Shared caches stay. Returns what the
         host kept (a disk the helper did not detach, its rules), "" else."""
         self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
         kept = [self.remove_disk()]
@@ -515,9 +522,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         # The volumes a task had before its data was on its disk (layout 3), by their old names:
         # a task from an earlier vivibox is deleted here, and nothing else would list them.
         self._run("docker", "volume", "rm", "-f", *self.legacy_volumes(), check=False)
-        # The host's rules go before the bridge: one left without them is refused outright.
+        # The host's rules go before the bridges: one left without them is refused outright. Every
+        # role's network by name, whether the task had it or not (one from before the reviewer's).
         kept.append(self.remove_firewall())
-        self._run("docker", "network", "rm", self.network, check=False)
+        for role in MADE_ROLES:
+            self._run("docker", "network", "rm", self.network_name(role), check=False)
         return "; ".join(filter(None, kept))
 
     # --- inside the pod ---------------------------------------------------------------------

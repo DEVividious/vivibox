@@ -204,6 +204,47 @@ def test_every_role_network_of_a_task_refuses_every_other():
                 assert f"ip daddr {other['subnet']} reject with icmpx admin-prohibited" in out
 
 
+# The writer's and the reviewer's networks of one task, as vivibox allocates them (pod_network):
+# the first /28 and the next /29 of the task's /27 block.
+ROLE_NETWORKS = [
+    {"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"},
+    {"role": "r", "bridge": "vbx-shop-1-r", "subnet": "198.51.100.16/29", "policy": "open"},
+]
+GOLDEN_ROLES = Path(__file__).parent / "fixtures" / "host-policy-roles.nft"
+
+
+def test_the_writers_and_the_reviewers_networks_refuse_each_other_and_each_has_its_own_chains():
+    """Each role network's out chain refuses the other's range at once (a TCP reset, an ICMP
+    refusal for the rest), before the internet is accepted; each has host and DNS chains and map
+    entries of its own, keyed by its bridge; the reviewer's internet is open like the writer's."""
+    text = helper.policy_file("shop-1", helper.parse_policy("shop-1", policy(networks=ROLE_NETWORKS)))
+    w, r = "198.51.100.0/28", "198.51.100.16/29"
+    for me, other, mine in (("vbx_shop_1_w", r, w), ("vbx_shop_1_r", w, r)):
+        out = rules(text, f"out_{me}")
+        reset = out.index(f"ip daddr {other} meta l4proto tcp reject with tcp reset")
+        assert out[reset + 1] == f"ip daddr {other} reject with icmpx admin-prohibited"
+        assert out.index("ct state established,related accept") < reset < out.index("accept")
+        assert f"ip saddr != {mine} reject with icmpx admin-prohibited" in out, "its own range only"
+        assert out[-1] == "accept", "the internet open for both"
+        host = rules(text, f"host_{me}")
+        assert f"ip saddr != {mine} reject with icmpx admin-prohibited" in host
+        assert "ip daddr 203.0.113.1 udp dport 5053 accept" in host
+        assert rules(text, f"dns_{me}") == [
+            "udp dport 53 dnat ip to 203.0.113.1:5053",
+            "tcp dport 53 dnat ip to 203.0.113.1:5053",
+        ]
+        for kind in helper.KINDS:
+            bridge = me.replace("_", "-")
+            assert f'add element inet vivibox {kind}_by_bridge {{ "{bridge}" : jump {kind}_{me} }}' in text
+    assert "vbx-shop-1-p" not in text, "the planner's range, reserved, is not in the policy"
+
+
+def test_the_dry_run_of_both_role_networks_is_the_reviewed_file():
+    done = dry("apply-policy", "shop-1", policy(networks=ROLE_NETWORKS))
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == GOLDEN_ROLES.read_text(), "the golden file is the reviewed policy"
+
+
 def test_the_same_input_writes_the_same_file():
     networks = [
         {"role": "r", "bridge": "vbx-shop-1-r", "subnet": "198.51.100.16/28", "policy": "open"},

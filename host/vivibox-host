@@ -62,8 +62,9 @@ BRIDGE = re.compile(r"vbx(-[a-z0-9-]+|[0-9a-f]{10})-[wrp]")
 IFNAME_MAX = 15
 HASH_LENGTH = 10
 MAX_JSON = 16384
-# The task pool's widest and narrowest: vivibox/config.py takes the same (a test holds them equal).
-POOL_SHORTEST, POOL_LONGEST = 8, 28
+# The task pool's widest and narrowest (a task takes a /27 of it, split between its roles' networks):
+# vivibox/config.py takes the same (a test holds them equal).
+POOL_SHORTEST, POOL_LONGEST = 8, 27
 MAX_HOSTSVC = 64
 TEXT = re.compile(r"[\x21-\x7e]+")
 # Never reached from a pod but through a host service: this network, private ranges, loopback,

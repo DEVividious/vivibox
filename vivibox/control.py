@@ -14,10 +14,9 @@ which is never its harness's working directory (podspec.CONTROL_WORK), and the h
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-from . import brief, claudecode, comments, opencode, providers, repo, reviewing, roles, secrets
+from . import brief, claudecode, comments, opencode, providers, reading, repo, reviewing, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
 from .states import State
@@ -38,16 +37,10 @@ def env(task: Task) -> dict[str, str]:
     a harness loads as a project's configuration follows its working directory, not git (seen
     in the image: opencode then names the copy as its project's worktree, and still loads
     nothing from it). And no language server is downloaded (opencode.READER_ENV)."""
-    return {
-        **ENV,
-        "GIT_DIR": str(task.repo / ".git"),
-        "GIT_WORK_TREE": str(task.repo),
-        **opencode.READER_ENV,
-    }
+    return {**ENV, **reading.git_env(task.repo), **opencode.READER_ENV}
 
 
 PLANNERS = ("planner",)
-HEX = re.compile(r"[0-9a-f]{40,64}")
 
 
 def secrets_id(task_id: str) -> str:
@@ -108,35 +101,13 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     return before != {p.name: p.read_text() for p in d.iterdir()}
 
 
-# git on the host, in the planner's copy, reads no configuration but the copy's own, which is
-# the host's making: your global and system configuration (a filter driver, git-lfs, a submodule
-# setting) would otherwise run your programs on what the writer committed.
-HOST_GIT = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+HOST_GIT = reading.HOST_GIT
+PLANNERS_OWN = "the planner's"
 
 
 def workdir(pod: Pod) -> None:
-    """The working directory of the planner's harness, made once: a git repository of the
-    host's with one empty commit and nothing else, no hook and no file. Mounted read-only in the
-    control container, it is where the harness looks for a project's configuration and finds
-    none; a repository with a commit, so opencode knows the directory as one project from turn
-    to turn without writing there."""
-    work = pod.control_work
-    if not work.is_dir() or work.is_symlink():
-        raise repo.RepoError(f"the planner's working directory has no folder at {work}; start the task again")
-    if (work / ".git").exists():
-        return
-    repo.git("init", "--quiet", "--template=", "--initial-branch", "main", str(work), env=HOST_GIT)
-    who = ("-c", "user.name=vivibox", "-c", "user.email=vivibox@localhost")
-    repo.git(
-        *who,
-        "commit",
-        "--quiet",
-        "--allow-empty",
-        "-m",
-        "The planner's working directory",
-        cwd=work,
-        env=HOST_GIT,
-    )
+    """The working directory of the planner's harness (reading.workdir), on the task's disk."""
+    reading.workdir(pod.control_work, PLANNERS_OWN)
 
 
 def reviewed_commit(task: Task) -> str:
@@ -148,44 +119,12 @@ def reviewed_commit(task: Task) -> str:
 
 
 def refresh(task: Task, pod: Pod, commit: str = "") -> None:
-    """The planner's copy of the committed work: made by git on the host, in a folder of the
-    task's disk that only the control container mounts, read-only. The writer's clone is read
-    as every git of the host's reads it, once it is as recorded (repo.guard) and within a time
-    limit, and only its commits are taken: its .git, where the writer can leave what git follows
-    to a command, is never what the planner's git works in. The copy stands on commit when one
-    is given (the verified one, for a review; not on the task's branch, it is refused), else on
-    the task's branch as it is. Before the planner's first turn and before each one after it;
-    the harness's working directory (workdir) is made with it."""
+    """The planner's copy of the committed work (reading.view), in a folder of the task's disk
+    that only the control container mounts, read-only: on commit when one is given (the verified
+    one, for a review), else on the task's branch as it is. Before the planner's first turn and
+    before each one after it; the harness's working directory (workdir) is made with it."""
     workdir(pod)
-    src, branch = pod.control_src, repo.branch_name(task.id)
-    if not src.is_dir() or src.is_symlink():
-        raise repo.RepoError(f"the planner's copy of the work has no folder at {src}; start the task again")
-    if not (src / ".git").exists():
-        repo.git("init", "--quiet", "--initial-branch", branch, str(src), env=HOST_GIT)
-    try:
-        repo.in_clone(
-            task.repo, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", str(task.repo),
-            f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=HOST_GIT,
-        )  # fmt: skip
-    except repo.GitTimeout as e:
-        raise repo.GitTimeout(
-            f"the planner's copy of the work could not be brought up to date: {e}"
-        ) from None
-    if commit:
-        if not HEX.fullmatch(commit):
-            raise repo.RepoError(f"not a commit to read the work at: {commit[:60]!r}")
-        known = repo.git(
-            "merge-base", "--is-ancestor", commit, "FETCH_HEAD", cwd=src, check=False, env=HOST_GIT
-        )
-        if known.returncode != 0:
-            raise repo.RepoError(
-                f"the verified commit {commit[:7]} is not on the task's branch {branch}, so the "
-                "planner's copy cannot show the work that was verified"
-            )
-    repo.git(
-        "reset", "--quiet", "--hard", "--no-recurse-submodules", commit or "FETCH_HEAD", cwd=src,
-        env=HOST_GIT,
-    )  # fmt: skip
+    reading.view(task.repo, repo.branch_name(task.id), pod.control_src, commit, PLANNERS_OWN)
 
 
 class Reader:

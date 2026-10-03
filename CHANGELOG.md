@@ -417,6 +417,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   modules of their own (`podspec.py`, `pod_demo.py`, `pod_egress.py`); nothing changes for a person.
 - The project's panel, a finished or deleted task's, the projects the view offers and the view's
   kept choices moved from `panel.py` to `panels.py`; nothing changes for a person.
+- What the host makes for a container that only reads the work (its harness's working
+  directory, its view of the commits) moved from `control.py` to `reading.py`, for the
+  reviewer's container to use too; nothing changes for a person.
 
 ## [0.1.0] - 2026-09-29
 

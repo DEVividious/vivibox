@@ -250,6 +250,13 @@ def test_a_task_from_before_the_host_held_its_rules_is_deleted_with_its_network(
     detached, gone = docker.find("sudo")
     assert detached[3:5] == ["detach-disk", "demo-1"], "a disk it never had: the helper says so, harmless"
     assert gone[3:5] == ["apply-policy", "demo-1"] and json.loads(gone[5])["state"] == "absent"
+    # Its volumes, from before a task's data was on its disk: the nested Docker's store (often
+    # gigabytes), what Maven installed, the gate's own, the agent's home; nothing else lists them.
+    removals = docker.find("docker", "volume", "rm")
+    removed = {name for c in removals for name in c if name.startswith("vivibox-")}
+    assert removed >= {
+        f"vivibox-demo-1-{v}" for v in ("docker", "installed", "gate-installed", "gate-build-cache", "config")
+    }
 
 
 @pytest.mark.parametrize("how", NEWER)

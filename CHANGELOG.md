@@ -118,6 +118,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Deleting a task from an earlier vivibox removes the five volumes it had before a task's data
+  was on its disk (its Docker's store, what Maven installed, the verification's own, the agent's
+  home), which stayed behind, listed nowhere, until a `docker volume prune`.
 - `vivibox limits <id> --<role>-memory …` checks the task's own limit against this machine's
   `[limits]`, not the defaults: a machine with `pod_memory = "16g"` takes `--agent-memory 8g`,
   and one with `pod_memory = "4g"` refuses `--agent-memory 5g` by name at once, instead of at

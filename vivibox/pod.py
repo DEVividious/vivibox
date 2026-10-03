@@ -78,6 +78,9 @@ def addresses(sidecars: Sequence[str], runner: Runner = run, timeout: float | No
 
 
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
+# The volumes of a task from before its data was on its disk (layout 3), by the ending of their
+# names; the socket's stays a volume, and is not one of them.
+LEGACY_VOLUMES = ("docker", "installed", "gate-installed", "gate-build-cache", "config")
 
 
 def container_ids(names: Sequence[str], runner: Runner = run) -> dict[str, str]:
@@ -195,6 +198,10 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             # The agent's home: its tools' configuration and state.
             "config": str(disk / "config"),
         }
+
+    def legacy_volumes(self) -> list[str]:
+        """The names of the volumes a task had before its data was on its disk."""
+        return [f"vivibox-{self.task_id}-{v}" for v in LEGACY_VOLUMES]
 
     def _run(
         self, *cmd: str, check: bool = True, timeout: float | None = None
@@ -495,6 +502,9 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         self._run("docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, check=False)
         kept = [self.remove_disk()]
         self._run("docker", "volume", "rm", self.volumes["socket"], check=False)
+        # The volumes a task had before its data was on its disk (layout 3), by their old names:
+        # a task from an earlier vivibox is deleted here, and nothing else would list them.
+        self._run("docker", "volume", "rm", "-f", *self.legacy_volumes(), check=False)
         # The host's rules go before the bridge: one left without them is refused outright.
         kept.append(self.remove_firewall())
         self._run("docker", "network", "rm", self.network, check=False)

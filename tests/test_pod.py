@@ -467,9 +467,15 @@ def test_up_requires_repo(tmp_path):
 
 
 def test_remove_keeps_shared_caches(pod):
+    """The socket's volume, and the five a task from before the disk image had, by their old
+    names (nothing else lists them once the task is gone); never a shared cache."""
     pod.remove()
     removed = pod.runner.find("docker", "volume", "rm")
-    assert removed == [["docker", "volume", "rm", "vivibox-shop-1-socket"]], "the one volume left to a task"
+    assert [c[3:] for c in removed] == [
+        ["vivibox-shop-1-socket"],
+        ["-f", "vivibox-shop-1-docker", "vivibox-shop-1-installed", "vivibox-shop-1-gate-installed",
+         "vivibox-shop-1-gate-build-cache", "vivibox-shop-1-config"],
+    ]  # fmt: skip
     assert not any(v.startswith("vivibox-cache-") for c in removed for v in c)
 
 

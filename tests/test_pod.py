@@ -1233,11 +1233,58 @@ def test_the_reviewer_runs_in_a_network_of_its_own_at_its_pinned_address(pod, tm
 
 def test_a_review_does_not_start_without_the_reviewers_network(pod, tmp_path):
     """Fail-closed: a reviewer that cannot have its own network is not started on the writer's."""
+    real = pod.runner
+
+    def refusing(cmd):
+        if list(cmd)[:3] == ["docker", "network", "create"]:
+            return subprocess.CompletedProcess(list(cmd), 1, stdout="", stderr="permission denied")
+        return real(cmd)
+
+    pod.runner = refusing
     pod.review_dir = tmp_path / "review"
     pod.review_fresh()
-    with pytest.raises(PodError, match="the review could not start: shop-1 has no network allocated"):
+    with pytest.raises(
+        PodError, match="the review could not start: docker network create .*permission denied"
+    ):
         pod.review_start([], {})
-    assert not pod.runner.find("docker", "run"), "no container of the review"
+    assert not real.find("docker", "run") and not real.find("sudo"), "no container of the review, no rules"
+
+
+def test_a_review_remakes_the_reviewers_network_gone_between_rounds(pod, tmp_path):
+    """Nothing is on the reviewer's network between rounds, so a prune of Docker's takes it;
+    the next review makes it again on its recorded range, before the host's rules and the
+    container, instead of failing on Docker's words."""
+    pod.up()
+    pod.review_dir = tmp_path / "review"
+    pod.runner.networks.discard("vivibox-shop-1-r")
+    before = len(pod.runner.calls)
+    pod.review_fresh()
+    pod.review_start([], {})
+    after = pod.runner.calls[before:]
+    made = next(i for i, c in enumerate(after) if c[:3] == ["docker", "network", "create"])
+    assert (
+        after[made][-1] == "vivibox-shop-1-r"
+        and after[made][after[made].index("--subnet") + 1] == "198.51.100.16/29"
+    )
+    rules = next(i for i, c in enumerate(after) if c[:1] == ["sudo"] and c[3] == "apply-policy")
+    run = next(i for i, c in enumerate(after) if c[:4] == ["docker", "run", "-d", "--name"])
+    assert made < rules < run, "the network, then the rules, then the container"
+
+
+def test_a_review_on_a_reviewers_network_not_on_its_bridge_is_refused(pod, tmp_path, sys_net):
+    """The reviewer's network made again by hand under its name, on a bridge of Docker's: the
+    host's rules are not keyed by it, so no reviewer runs there; the remedy is named."""
+    import shutil
+
+    pod.up()
+    pod.review_dir = tmp_path / "review"
+    shutil.rmtree(sys_net / "vbx-shop-1-r")
+    before = len(pod.runner.calls)
+    pod.review_fresh()
+    with pytest.raises(PodError, match="the review could not start: .*not on the bridge vbx-shop-1-r") as e:
+        pod.review_start([], {})
+    assert "docker network rm vivibox-shop-1-r" in str(e.value)
+    assert not [c for c in pod.runner.calls[before:] if c[:2] in (["docker", "run"], ["sudo"])]
 
 
 def flag(cmd, name) -> str:

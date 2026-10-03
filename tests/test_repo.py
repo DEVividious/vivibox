@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import make_repo
+from conftest import make_repo, networks_up
 
 from vivibox import repo as r
 
@@ -476,7 +476,7 @@ def test_the_containers_copy_of_a_changed_clone_is_not_made(cloned, tmp_path):
     pod = Pod(
         "demo-1", repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
     )
-    pod.ensure_network()
+    networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
     pod.review_fresh()
     (repo / ".git" / "commondir").write_text("../elsewhere\n")
     with pytest.raises(r.RepoError, match="changed"):

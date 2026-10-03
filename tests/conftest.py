@@ -127,6 +127,16 @@ def no_real_hostd(request, monkeypatch, tmp_path_factory):
     monkeypatch.setattr(hostd, "ensure", lambda address, port=0, upstream="", timeout=0: None)
 
 
+def networks_up(pod) -> None:
+    """The pod's networks as up() leaves them, for a test that starts the gate or the review
+    without up(): allocated, and each on its bridge as this test's /sys/class/net shows it (a
+    runner that answers everything with 0 makes no bridge; the review checks for one)."""
+    from vivibox import pod_network
+
+    for net in pod.ensure_networks():
+        (pod_network.SYS_NET / net.bridge / "bridge").mkdir(parents=True, exist_ok=True)
+
+
 @pytest.fixture(autouse=True)
 def no_real_docker(request, monkeypatch, tmp_path_factory):
     """No test but one marked docker reaches the machine's Docker, nor sudo: a docker first on PATH answers

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import make_repo
+from conftest import make_repo, networks_up
 from test_gate import PLAN, FakePod
 from test_supervisor import FakeHarness
 
@@ -516,7 +516,7 @@ def a_pod(task, docker, tmp_path):
     pod = Pod(
         task.id, task.repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
     )
-    pod.ensure_network()  # as up would have: the gate and the review apply the host's rules first
+    networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
     return pod
 
 

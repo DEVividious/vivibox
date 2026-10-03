@@ -1,5 +1,7 @@
 import stat
 
+from conftest import networks_up
+
 from vivibox import secrets
 
 
@@ -92,7 +94,7 @@ def review(env, monkeypatch, task_id="demo-1"):
         task.id, task.repo, "img", runner=lambda cmd: subprocess.CompletedProcess(cmd, 0, "", ""),
         review_dir=task.root / "review",
     )  # fmt: skip
-    pod.ensure_network()
+    networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
     reviewing.up(task, pod, load_config())
 
 

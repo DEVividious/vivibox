@@ -1392,7 +1392,8 @@ def test_the_view_follows_the_pod_on_its_own(env, monkeypatch):
 
 def test_a_task_with_no_pod_claims_nothing(env):
     task = new_task("Waiting")
-    assert "Pod" not in detail(task, task.read_state(), 3, pod=panel.PodView())
+    shown = detail(task, task.read_state(), 3, pod=panel.PodView())
+    assert "Pod `" not in shown and "· demo " not in shown, "no address, no demo: nothing runs"
 
 
 def test_running_it_does_not_stop_to_ask_permission_to_work_out_how(env, monkeypatch):

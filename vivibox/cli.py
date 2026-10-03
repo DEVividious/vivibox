@@ -14,6 +14,7 @@ from . import (
     answers,
     cli_agent,
     cli_host,
+    cli_pod,
     clone_read,
     context,
     display,
@@ -749,6 +750,7 @@ def parser() -> argparse.ArgumentParser:
     pod.set_defaults(func=cmd_pod)
     cli_agent.register(sub)
     cli_host.register(sub)
+    cli_pod.register(sub)
     return p
 
 

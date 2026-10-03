@@ -145,3 +145,44 @@ def test_the_real_root_is_the_kernels():
     assert str(limits.CGROUP) == "/sys/fs/cgroup"
     assert str(limits.slice_path("shop-1")) == "/sys/fs/cgroup/vivibox.slice/vivibox-shop_1.slice"
     assert os.statvfs is limits.Watch.__dataclass_fields__["statvfs"].default
+
+
+def test_a_tasks_own_limits_come_over_the_machines(tmp_path):
+    """.task/limits.json, written by vivibox limits, host-owned like network.json: its keys over
+    config.toml's [limits]; checked the same way, the error naming the file and the key."""
+    meta = tmp_path / ".task"
+    meta.mkdir()
+    assert limits.for_task(Limits(), meta) == Limits(), "no file: the machine's"
+    limits.write_overrides(meta, {"agent_memory": "6g"})
+    limits.write_overrides(meta, {"gate_pids": 100})
+    found = limits.for_task(Limits(), meta)
+    assert found.memory_of("agent") == 6 * 2**30 and found.pids_of("gate") == 100
+    assert limits.read_overrides(meta) == {"agent_memory": "6g", "gate_pids": 100}
+    (meta / "limits.json").write_text('{"agent_memory": "9g"}')
+    with pytest.raises(ValueError, match="limits.json.*limits.agent_memory"):
+        limits.for_task(Limits(), meta)
+    (meta / "limits.json").write_text("[]")
+    with pytest.raises(ValueError, match="limits.json"):
+        limits.for_task(Limits(), meta)
+    with pytest.raises(ValueError, match="limits.disk"):
+        limits.write_overrides(meta, {"disk": "40g"})  # the image's size is the disk's: vivibox disk grow
+
+
+def test_the_command_that_raises_a_limit_is_read_from_the_problem():
+    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 4 * 2**30, "oom_kill 1", {})
+    assert limits.raising_command(limits.problem("shop-1", [hit])) == "vivibox limits shop-1 --gate-memory 6g"
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 1 blocks free", {})
+    assert limits.raising_command(limits.problem("shop-1", [full])) == "vivibox disk grow shop-1 40g"
+    assert limits.raising_command("agent turn failed: 429") == ""
+
+
+def test_current_use_is_read_from_the_slice_and_its_scopes(tmp_path):
+    slice_ = tree(tmp_path, peak={"pod": 3 * 2**30, "agent": 2 * 2**30})
+    (slice_ / "memory.current").write_text(str(2 * 2**30) + "\n")
+    (slice_ / "pids.current").write_text("49\n")
+    agent = slice_ / f"docker-{CID['agent']}.scope"
+    (agent / "memory.current").write_text(str(2**30) + "\n")
+    (agent / "pids.current").write_text("37\n")
+    found = limits.current("shop-1", {"agent": CID["agent"], "gate": "x" * 64}, root=tmp_path)
+    assert found == {"pod": (2 * 2**30, 3 * 2**30, 49), "agent": (2**30, 2 * 2**30, 37)}
+    assert limits.current("shop-1", {}, root=tmp_path / "none") == {}, "no slice: nothing"

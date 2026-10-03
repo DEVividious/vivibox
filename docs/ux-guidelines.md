@@ -249,7 +249,12 @@ looks like an empty cache.
   sections in the same order, each only when it has something: the newest review
   (`#### Review n: …`), `#### Acceptance criteria n/N`, `#### Roles` (a line per agent: what it
   runs on, its turns and its cost, the total last; roles one agent plays share a line; a list,
-  never a table, whose frame takes rows the panel does not have) and `#### The plan`. A
+  never a table, whose frame takes rows the panel does not have), `#### Resources` (a line per
+  container of the pod: its memory and process limits and, while the pod runs, what it uses,
+  read from the kernel, never `docker stats`; the pod's CPUs and budget; the disk's use of its
+  size, `nearly full` with the `vivibox disk grow` command from four fifths; where the limits
+  come from) and `#### The plan`. A task stopped at a limit has for `Next:` the command that
+  raises it, then `s`. A
   plan under review is the body itself, not a section below it. A review's or a plan's own
   headings are bold lines, never larger than the section they are in; the accepted plan leaves
   its criteria to their section.

@@ -9,6 +9,7 @@ reported once."""
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -20,6 +21,9 @@ from .podspec import GIB, Limits, size_option, size_text, slice_of
 
 CGROUP = Path("/sys/fs/cgroup")
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
+# A task's own limits over the machine's, written by `vivibox limits`, host-owned like network.json.
+OVERRIDES = "limits.json"
+RAISING = re.compile(r"(vivibox (?:limits|disk grow) \S+ [^,]+?)(?:,| in a shell)")
 # How a limit is said to be raised: half as much again, in whole gigabytes.
 RAISE_BY = 1.5
 # What each workload is to a person, and the option of `vivibox limits` that raises its memory.
@@ -109,6 +113,77 @@ def problem(task_id: str, hits: list[Exceeded]) -> str:
     else:
         todo = f"See the limits: vivibox limits {task_id}; raise one, then vivibox start {task_id}"
     return f"out of memory: {what}: {hit.words}. {todo}"
+
+
+def raising_command(problem: str) -> str:
+    """The command a problem of a limit's names to raise it; "" for any other problem."""
+    if not problem.startswith(("out of memory: ", "out of disk space: ")):
+        return ""
+    found = RAISING.search(problem)
+    return found.group(1).strip() if found else ""
+
+
+def read_overrides(meta: Path) -> dict:
+    """The task's own limits, by their keys in [limits]; {} without the file. ValueError names
+    the file for one that is not an object of them."""
+    path = meta / OVERRIDES
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{path}: {e}") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: not an object of limits")
+    return data
+
+
+def for_task(machine: Limits, meta: Path) -> Limits:
+    """The machine's limits with the task's own over them, checked as config.toml's are."""
+    given = read_overrides(meta)
+    try:
+        return machine.with_values(given)
+    except ValueError as e:
+        raise ValueError(f"{meta / OVERRIDES}: {e}") from None
+
+
+def write_overrides(meta: Path, values: dict) -> dict:
+    """The given keys over the task's own, checked whole over the defaults first (a key past the
+    pod's is refused by name, and nothing is written); the disk's size is the image's, grown with
+    `vivibox disk grow`, not a key here. Returns what the file holds now."""
+    if "disk" in values:
+        raise ValueError("limits.disk is the disk's size: vivibox disk grow <id> <size> changes it")
+    found = {**read_overrides(meta), **values}
+    Limits().with_values(found)
+    path = meta / OVERRIDES
+    part = path.with_name(path.name + ".part")
+    part.write_text(json.dumps(found) + "\n")
+    os.replace(part, path)
+    return found
+
+
+def current(task_id: str, scopes: dict[str, str], root: Path = CGROUP) -> dict[str, tuple[int, int, int]]:
+    """What the slice and each scope use now: (memory, its peak, processes), by workload and
+    "pod"; {} without the slice. Read from the kernel's files, nothing of Docker but the labels."""
+    slice_ = slice_path(task_id, root)
+    if not slice_.is_dir():
+        return {}
+    found = {
+        "pod": (
+            number(slice_ / "memory.current"),
+            number(slice_ / "memory.peak"),
+            number(slice_ / "pids.current"),
+        )
+    }
+    for role, cid in scopes.items():
+        scope = slice_ / f"docker-{cid}.scope"
+        if CONTAINER_ID.fullmatch(cid) and scope.is_dir():
+            found[role] = (
+                number(scope / "memory.current"),
+                number(scope / "memory.peak"),
+                number(scope / "pids.current"),
+            )
+    return found
 
 
 def is_mount(path: Path) -> bool:

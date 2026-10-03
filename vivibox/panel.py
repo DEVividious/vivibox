@@ -17,6 +17,7 @@ from . import (
     display,
     gate,
     manual,
+    panel_resources,
     progress,
     proposal,
     providers,
@@ -322,7 +323,7 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
             "`w` enter the box (Ctrl-q leaves) · `a` close it and bring its work to review · `v` run the app"
         )
     if seen.problem:
-        return "`s` try again"
+        return panel_resources.next_step(st) or "`s` try again"
     if seen.status in ("not started",):
         return "`e` write the plan yourself · `s` start"
     if seen.status in ("stopped", "not running"):
@@ -655,6 +656,7 @@ def detail(
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += [*reviewers_notes(task), *criteria_section(task)]
     body += roles_section(task, st) + cost_section(task, st)
+    body += panel_resources.section(task, st, up=bool((pod if pod is not None else pod_view(st.id)).address))
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):
         body += plan_section(task)
     return "\n".join(head + body)

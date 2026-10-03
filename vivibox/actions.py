@@ -28,6 +28,7 @@ from . import (
     handoff,
     ide,
     image,
+    limits,
     manual,
     mirror,
     opencode,
@@ -233,12 +234,16 @@ def pod_of(task: Task, project: Project) -> Pod:
     # The mirror is reached as a service of the host's, through the pod's firewall.
     through = [HostService(config.host_ip, config.hub_mirror_port)] if config.hub_mirror else []
     disk = task.root / DISK_MOUNT
+    try:
+        task_limits = limits.for_task(config.limits, task.meta)
+    except ValueError as e:
+        raise PodError(str(e)) from None
     return Pod(
         task.id, task.repo, ref, [*project.host_services, *through], mounts, env, project.pass_env,
         gate_dir=disk / "gate", review_dir=disk / "review", allocation=task.meta / "network.json",
         network_pool=config.network_pool, host_address=config.host_address,
         hub_mirror=mirror.url(config.host_ip, config.hub_mirror_port) if through else "",
-        limits=config.limits, folder=task.root,
+        limits=task_limits, folder=task.root,
     )  # fmt: skip
 
 

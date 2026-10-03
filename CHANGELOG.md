@@ -36,6 +36,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `resource.limit.exceeded` (kind, workload, limit, peak or used) is on the task's timeline; a
   kill is reported once. A slice or a disk that cannot be read while the pod runs stops the task
   on an error, never passes as fine.
+- The task's panel has a Resources section: each container's limits and, while the pod runs,
+  what it uses (from the kernel's cgroup files, never `docker stats`), the pod's CPUs and
+  budget, and the disk's use of its size, nearly full from four fifths with the command that
+  grows it. `vivibox limits <id>` prints the same; `vivibox limits <id> --agent-memory 6g` (one
+  option per key of `[limits]` but `disk`) sets the task's own limits over the machine's in
+  `.task/limits.json`, applied at the task's next start; `vivibox disk grow <id> 40g` makes its
+  disk larger at once (a disk never shrinks). `vivibox usage` and `u` count a task's disk from
+  its mount.
 
 ### Changed
 

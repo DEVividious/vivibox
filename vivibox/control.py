@@ -32,7 +32,8 @@ ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFI
 def env(task: Task) -> dict[str, str]:
     """The control container's environment. git there, wherever it is run, works on the copy of
     the commits: the planner's harness stands in a directory of the host's (podspec.CONTROL_WORK),
-    and the review's `git diff <base>..HEAD` is asked of "the repository you are in". The copy's
+    and its brief says git answers for the project from any directory (the review's turn asks
+    for `git diff <base>..HEAD` and names no place to run it). The copy's
     .git is the host's and read-only there, so its hooks and configuration are the host's; what
     a harness loads as a project's configuration follows its working directory, not git (seen
     in the image: opencode then names the copy as its project's worktree, and still loads

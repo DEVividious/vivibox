@@ -135,6 +135,43 @@ def test_a_reader_is_told_what_its_own_container_has_and_nothing_of_the_writers(
     assert prompts.REVIEW_RULES in prompts.SUPERVISOR_REVIEW_PROMPT, "the same rules as every reviewer's"
 
 
+def test_a_reader_with_no_verification_command_is_told_of_none():
+    """A project whose command the writer has yet to propose, or with nothing to build: the item
+    ends as a sentence, with no list to follow and no colon left hanging."""
+    without = brief.reader("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", [])
+    assert "with:" not in without
+    assert (
+        "container. The orchestrator builds and tests the commits itself, on a fresh clone.\n"
+        "- There is no language server and no symbol index" in without
+    )
+    several = brief.reader("demo-1", "/r", "b", ["make build", "make test"])
+    assert (
+        "on a fresh clone, with:\n  - `make build`\n  - `make test`\n- There is no language server" in several
+    )
+
+
+# The reader's brief with a command, as the behavioural run of 2026-10-03 read it (its project
+# had one): a change to it is a prompt change, with a run of its own.
+READER_AS_RUN = "50fb06d1f969fe13b4005feaa39330e95d50a7e6b5d9aca2b30a58c3cbf0a9e5"
+
+
+def test_the_readers_brief_with_a_command_is_the_one_the_behavioural_run_read():
+    import hashlib
+
+    assert hashlib.sha256(brief.reader(*FACTS).encode()).hexdigest() == READER_AS_RUN
+
+
+def test_the_readers_briefs_are_those_of_the_flows_with_a_control_container():
+    """What picks the reader's brief, the reader's role files and the supervisor's review prompt
+    is one fact: the planner is an agent apart from the writer, in a container of its own."""
+    from vivibox import orchestration
+
+    modes = orchestration.MODES.values()
+    assert {m.brief_of("planner") for m in modes if m.control} == set(brief.READERS)
+    assert not {m.brief_of("planner") for m in modes if not m.control} & set(brief.READERS)
+    assert all(m.control for m in modes if m.supervisor), "a supervisor reads from a control container"
+
+
 # What the agents outside a control container read, as it was before the planner had one: the
 # writer's and the single agent's common brief and role files, the reviewer's, and the review
 # turn's prompt. A change to one of them is a change of its own, with its own behavioural run:

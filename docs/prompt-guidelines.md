@@ -120,7 +120,11 @@ Mechanical, in `tests/test_prompt_rules.py`:
 - no sentence appears in both the brief and a turn prompt;
 - every failure the gate can record has a line in its feedback;
 - the placeholder criterion in the templates is the one the gate refuses;
-- the word budgets.
+- the word budgets;
+- a reader's brief says what its own container has (the view by its path, no Docker, no build)
+  and none of what is true only where the writer works;
+- what the writer, the single agent and the reviewer read is as it was (by digest: a change to
+  one of those texts replaces its digest, with its own behavioural run).
 
 Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
 models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,

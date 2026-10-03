@@ -35,17 +35,25 @@ def common(task_id: str, repo: str | Path, branch: str, verify: list[str] | tupl
     )
 
 
+# How the reader's brief ends its sentence on the verification when there are no commands to list.
+NO_COMMANDS = ", with:\n\n"
+
+
 def reader(task_id: str, repo: str | Path, branch: str, verify: list[str] | tuple = ()) -> str:
     """The common brief of an agent that reads the work in a container of its own: where the
     project is (repo: the read-only view of the task's commits there), what the container has
     not, and where the agent writes. What common() says of the writer's container is not true
     there."""
-    return _template("instructions-reader.md").format(
+    text = _template("instructions-reader.md").format(
         task_id=task_id,
         repo=repo,
         branch=branch,
         verify="\n".join(f"  - `{c}`" for c in verify),
     )
+    if not verify:  # a project with no verification command (yet): the fact, without a list
+        assert NO_COMMANDS in text
+        text = text.replace(NO_COMMANDS, ".\n")
+    return text
 
 
 def role_text(role: str) -> str:

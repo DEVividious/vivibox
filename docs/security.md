@@ -152,12 +152,14 @@ by enforcement. What is enforced is where the planner's harness works and what i
 with. It starts in a directory vivibox made, `/work`: a git repository with one empty commit
 and nothing else, on the task's disk, read-only in the container. The copy of the commits is
 beside it and is read as data, by its path; it is never the harness's working directory, and
-Claude Code there is given no directory besides its own. The harness's configuration is the
-one vivibox writes: its language servers are off and none is downloaded, and it carries the
-MCP servers you brought and never vivibox's own Serena, whose language servers would work on
-the writer's commits beside the planner's key and conversation. Git in the planner's container
-answers for the copy from wherever it is run (`GIT_DIR` and `GIT_WORK_TREE` in its
-environment); the copy's `.git` is vivibox's and read-only there.
+Claude Code there is given no directory besides its own. A planner on opencode runs on the
+configuration vivibox writes for it: its language servers are off and none is downloaded, and
+it carries the MCP servers you brought and never vivibox's own Serena, whose language servers
+would work on the writer's commits beside the planner's key and conversation. A planner on
+Claude Code gets no configuration and no MCP server from vivibox: its brief, its key and a
+home of its own. Git in the planner's container answers for the copy from wherever it is run
+(`GIT_DIR` and `GIT_WORK_TREE` in its environment); the copy's `.git` is vivibox's and
+read-only there.
 
 The reviewer reads an untrusted repository too. Isolating its harness and its configuration
 from that repository is part of the hardening still to come before the next release.

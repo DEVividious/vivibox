@@ -1320,8 +1320,8 @@ def test_the_review_and_the_final_checkpoint_get_the_commit_the_gate_verified(ta
 
 
 def supervised(task, tmp_path, texts, results=(), max_rounds=2):
-    """supervisor_worker: the planner's harness reviews in the pod, writing where the review
-    mount is; no review container."""
+    """supervisor_worker: the planner's harness reviews (in the product, in its control
+    container), writing where the review mount is; no review container."""
     accepted(task)
     out = task.meta / "review"
     out.mkdir(exist_ok=True)
@@ -1339,7 +1339,8 @@ def test_the_supervisor_reads_the_work_after_a_green_gate_in_the_pod_in_the_plan
     task, tmp_path
 ):
     """supervisor_worker: the flow is planner_writer_reviewer's; who reviews, and where, differs: the
-    planner's own conversation, on the worker's clone in the pod, no review container."""
+    planner's own conversation, asked for its review as a reader of the commits, no review
+    container."""
     sup, notes, reviewer = supervised(task, tmp_path, [BLOCKING, CLEAN])
     sup.step()  # implement: to the gate, as in every mode
     assert task.read_state().state is State.VERIFY

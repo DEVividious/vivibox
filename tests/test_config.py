@@ -354,3 +354,18 @@ def test_the_machines_cpus_are_the_ones_this_process_may_run_on(monkeypatch):
     assert podspec.machine_cpus() == 16
     monkeypatch.delattr(os, "sched_getaffinity")
     assert podspec.machine_cpus() == 16
+
+
+def test_the_suite_pins_twenty_cpus_for_the_figures_it_asserts():
+    import os
+
+    assert len(os.sched_getaffinity(0)) == 20 and os.sched_getaffinity.__name__ == "<lambda>"
+
+
+@pytest.mark.docker
+def test_a_live_test_sees_the_machines_own_cpus():
+    """A pod of a live test is made from this machine's limits: the count must be the real one,
+    or a machine with fewer than six CPUs would ask Docker for six."""
+    import os
+
+    assert type(os.sched_getaffinity).__name__ == "builtin_function_or_method"

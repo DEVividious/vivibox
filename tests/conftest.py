@@ -61,9 +61,13 @@ def own_temporary_folder(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def twenty_cpus(monkeypatch):
+def twenty_cpus(request, monkeypatch):
     """The CPUs a pod's containers may use default to the machine's, up to six (podspec): the
-    suite's figures (6) hold on any machine, and a test of the count sets its own."""
+    suite's figures (6) hold on any machine, and a test of the count sets its own. Not for a
+    test marked docker: its pod is made from the machine's real limits, and on a machine with
+    fewer CPUs a pinned count would ask Docker for more than it has."""
+    if request.node.get_closest_marker("docker"):
+        return
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(20)), raising=False)
 
 

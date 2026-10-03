@@ -101,9 +101,11 @@ address allocated for it, with rules of its own on your host, loaded before it s
 network's rules refuse the other's range, so nothing the writer runs, a nested container with
 `NET_RAW` or `NET_ADMIN` included, sees a packet of the reviewer's or reaches its container, and the
 reviewer reaches nothing of the writer's; vivibox talks to each through `docker exec`, never through
-the task's networks. The reviewer's DNS goes to the forwarder like the pod's, `host.docker.internal`
-there is its own network's gateway, and its internet is open like the writer's (it reaches its
-provider over TLS); nothing narrows it until names are allowed by policy.
+the task's networks. A project's `host_services` are let through for the writer's network alone:
+the reviewer reaches none of your machine's services. Its DNS goes to the forwarder like the
+pod's, `host.docker.internal` there is its own network's gateway, and its internet is open like
+the writer's (it reaches its provider over TLS); nothing narrows it until names are allowed by
+policy.
 
 With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
 pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not

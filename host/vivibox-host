@@ -9,11 +9,13 @@
         table inet vivibox with its base chains. Refuses, changing nothing, when the address is
         another interface's, a route through another interface covers it, or it is in the pool.
     vivibox-host [--dry-run] apply-policy <task id> <json>
-        {"state": "present", "networks": [{"role", "bridge", "subnet", "policy"}, ...],
-         "pool", "mtu", "hostsvc": ["<ipv4>:<port>", ...], "dns": "<ipv4>", "dns_port"}
+        {"state": "present", "networks": [{"role", "bridge", "subnet", "policy",
+                                            "hostsvc": ["<ipv4>:<port>", ...]}, ...],
+         "pool", "mtu", "dns": "<ipv4>", "dns_port"}
         {"state": "absent", "networks": [{"role", "bridge"}, ...]}
         A task's egress rules, keyed by the bridges of its role networks, loaded with one nft -f:
-        one transaction, so the rules before it stay whole until the new ones replace them.
+        one transaction, so the rules before it stay whole until the new ones replace them. The
+        host's services a network may reach are its own (hostsvc; none without the key).
     vivibox-host [--dry-run] attach-disk <task id> {"dir": "<tasks dir>/<task id>", "size": "20g"}
         The task's disk: a sparse image <dir>/disk.img with an XFS filesystem, made once, on a
         loop device, mounted discard,nosuid,nodev at <dir>/disk, with the directories the pod
@@ -48,7 +50,7 @@ import stat
 import subprocess
 import sys
 
-VERSION = "2"
+VERSION = "3"
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
 TABLE = "vivibox"
 DUMMY = "vivibox0"
@@ -195,7 +197,9 @@ def task(value):
 
 
 def role_network(task_id, given, where, present):
-    wanted = ("role", "bridge", "subnet", "policy") if present else ("role", "bridge")
+    wanted = ("role", "bridge", "subnet", "policy", "hostsvc") if present else ("role", "bridge")
+    if present and isinstance(given, dict):
+        given = {"hostsvc": [], **given}  # a network without the key reaches no host service
     fields(given, wanted, where)
     role = given["role"]
     if role not in ROLES:
@@ -209,6 +213,27 @@ def role_network(task_id, given, where, present):
         if given["policy"] not in POLICIES:
             raise Refused(f"{where}: not a policy: {given['policy']!r:.20}")
         found["policy"] = given["policy"]
+        found["hostsvc"] = given["hostsvc"]  # checked once the pool is known (parse_policy)
+    return found
+
+
+def host_services(given, where, pool, gateways):
+    """The host's services a network may reach, <ipv4>:<port> each: on the host, or on one of
+    the task's gateways; never in the pool otherwise, never twice."""
+    if not isinstance(given, list) or len(given) > MAX_HOSTSVC:
+        raise Refused(f"{where} must be a list of at most {MAX_HOSTSVC}")
+    found = []
+    for i, entry in enumerate(given):
+        at = f"{where}[{i}]"
+        ip, sep, port = text(entry, at, 21).rpartition(":")
+        if not sep or not port.isdigit() or port != str(int(port)):
+            raise Refused(f"{at}: not <ipv4>:<port>: {entry!r}")
+        parsed = (address(ip, at), number(int(port), at, 1, 65535))
+        if parsed[0] in pool and parsed[0] not in gateways:
+            raise Refused(f"{at}: {entry} is in the task pool and not one of the task's gateways")
+        if parsed in found:
+            raise Refused(f"{at}: {entry} given twice")
+        found.append(parsed)
     return found
 
 
@@ -219,7 +244,7 @@ def parse_policy(task_id, raw):
     if not isinstance(data, dict) or data.get("state") not in ("present", "absent"):
         raise Refused('state must be "present" or "absent"')
     present = data["state"] == "present"
-    wanted = ("state", "networks") + (("pool", "mtu", "hostsvc", "dns", "dns_port") if present else ())
+    wanted = ("state", "networks") + (("pool", "mtu", "dns", "dns_port") if present else ())
     fields(data, wanted, "the policy")
     given = data["networks"]
     if not isinstance(given, list) or not 1 <= len(given) <= len(ROLES):
@@ -238,28 +263,14 @@ def parse_policy(task_id, raw):
         if any(n["subnet"].overlaps(m["subnet"]) for m in nets[:i]):
             raise Refused(f"networks[{i}].subnet {n['subnet']} overlaps another of the task's")
     gateways = {n["subnet"].network_address + 1 for n in nets}
-    services = data["hostsvc"]
-    if not isinstance(services, list) or len(services) > MAX_HOSTSVC:
-        raise Refused(f"hostsvc must be a list of at most {MAX_HOSTSVC}")
-    hostsvc = []
-    for i, entry in enumerate(services):
-        where = f"hostsvc[{i}]"
-        ip, sep, port = text(entry, where, 21).rpartition(":")
-        if not sep or not port.isdigit() or port != str(int(port)):
-            raise Refused(f"{where}: not <ipv4>:<port>: {entry!r}")
-        parsed = (address(ip, where), number(int(port), where, 1, 65535))
-        if parsed[0] in pool and parsed[0] not in gateways:
-            raise Refused(f"{where}: {entry} is in the task pool and not one of the task's gateways")
-        if parsed in hostsvc:
-            raise Refused(f"{where}: {entry} given twice")
-        hostsvc.append(parsed)
+    for i, n in enumerate(nets):
+        n["hostsvc"] = host_services(n["hostsvc"], f"networks[{i}].hostsvc", pool, gateways)
     dns = address(data["dns"], "dns")
     if dns in pool or dns.is_loopback:
         raise Refused(f"dns: {dns} cannot be the forwarder's address")
     policy.update(
         pool=pool,
         mtu=number(data["mtu"], "mtu", 576, 65535),
-        hostsvc=hostsvc,
         dns=dns,
         dns_port=number(data["dns_port"], "dns_port", 1024, 65535),
     )
@@ -661,10 +672,11 @@ def network_rules(net, policy):
     name, subnet = net["bridge"], net["subnet"]
     t = f"inet {TABLE}"
     out, back, host, dns = (chain(kind, name) for kind in KINDS)
-    services = [f"ip daddr {ip} tcp dport {port} accept" for ip, port in policy["hostsvc"]]
+    services = [f"ip daddr {ip} tcp dport {port} accept" for ip, port in net["hostsvc"]]
     others = [n["subnet"] for n in policy["networks"] if n is not net]
     to_forwarder = (policy["dns"], policy["dns_port"])
-    lines = [f"# {net['role']}: {name}, {subnet}, policy {net['policy']}"]
+    head = f"# {net['role']}: {name}, {subnet}, policy {net['policy']}, host services {len(net['hostsvc'])}"
+    lines = [head]
     lines += [f"add chain {t} {c}" for c in (out, back, host, dns)]
     lines += [f"flush chain {t} {c}" for c in (out, back, host, dns)]
     rules = {

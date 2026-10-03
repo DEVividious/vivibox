@@ -34,12 +34,22 @@ def load():
 
 helper = load()
 
+# The host's services a network may reach are the network's own (hostsvc): the writer's has the
+# project's, the reviewer's none.
+HOSTSVC = ["198.51.100.1:5432", "203.0.113.1:5055", "192.168.1.50:8080"]
 POLICY = {
     "state": "present",
-    "networks": [{"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"}],
+    "networks": [
+        {
+            "role": "w",
+            "bridge": "vbx-shop-1-w",
+            "subnet": "198.51.100.0/28",
+            "policy": "open",
+            "hostsvc": HOSTSVC,
+        }
+    ],
     "pool": "198.51.100.0/24",
     "mtu": 1500,
-    "hostsvc": ["198.51.100.1:5432", "203.0.113.1:5055", "192.168.1.50:8080"],
     "dns": "203.0.113.1",
     "dns_port": 5053,
 }
@@ -207,7 +217,13 @@ def test_every_role_network_of_a_task_refuses_every_other():
 # The writer's and the reviewer's networks of one task, as vivibox allocates them (pod_network):
 # the first /28 and the next /29 of the task's /27 block.
 ROLE_NETWORKS = [
-    {"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"},
+    {
+        "role": "w",
+        "bridge": "vbx-shop-1-w",
+        "subnet": "198.51.100.0/28",
+        "policy": "open",
+        "hostsvc": HOSTSVC,
+    },
     {"role": "r", "bridge": "vbx-shop-1-r", "subnet": "198.51.100.16/29", "policy": "open"},
 ]
 GOLDEN_ROLES = Path(__file__).parent / "fixtures" / "host-policy-roles.nft"
@@ -239,6 +255,25 @@ def test_the_writers_and_the_reviewers_networks_refuse_each_other_and_each_has_i
     assert "vbx-shop-1-p" not in text, "the planner's range, reserved, is not in the policy"
 
 
+def test_the_hosts_services_are_let_through_for_the_network_that_lists_them_only():
+    """The writer's network reaches the project's host services; the reviewer's, which lists
+    none (a network without the key has none), reaches the forwarder and the internet alone."""
+    parsed = helper.parse_policy("shop-1", policy(networks=ROLE_NETWORKS))
+    assert parsed["networks"][1]["hostsvc"] == [] and len(parsed["networks"][0]["hostsvc"]) == 3
+    text = helper.policy_file("shop-1", parsed)
+    for chain in ("out_vbx_shop_1_w", "host_vbx_shop_1_w"):
+        assert "ip daddr 198.51.100.1 tcp dport 5432 accept" in rules(text, chain), chain
+    for chain in ("out_vbx_shop_1_r", "host_vbx_shop_1_r"):
+        accepted = [r for r in rules(text, chain) if r.endswith("accept") and "dport" in r]
+        assert all("5053" in r for r in accepted), (chain, accepted)
+
+
+def test_the_helpers_version_is_the_one_vivibox_asks_for():
+    from vivibox.pod_egress import HELPER_VERSION
+
+    assert helper.VERSION == HELPER_VERSION == "3", "the policy's shape changed: a host service per network"
+
+
 def test_the_dry_run_of_both_role_networks_is_the_reviewed_file():
     done = dry("apply-policy", "shop-1", policy(networks=ROLE_NETWORKS))
     assert done.returncode == 0, done.stderr
@@ -262,7 +297,6 @@ def test_a_pool_that_overlaps_a_private_range_is_refused_in_one_piece():
     p = policy(
         pool="10.200.0.0/24",
         networks=[{"role": "w", "bridge": "vbx-shop-1-w", "subnet": "10.200.0.0/28", "policy": "open"}],
-        hostsvc=[],
     )
     out = rules(helper.policy_file("shop-1", helper.parse_policy("shop-1", p)), "out_vbx_shop_1_w")
     refused = next(r for r in out if "10.0.0.0/8" in r)
@@ -314,7 +348,7 @@ def test_without_root_it_validates_and_stops(capsys):
 
 def test_it_says_its_version():
     done = subprocess.run([sys.executable, str(HELPER), "--version"], capture_output=True, text=True)
-    assert done.returncode == 0 and done.stdout.startswith("vivibox-host ")
+    assert done.returncode == 0 and done.stdout == f"vivibox-host {helper.VERSION}\n"
 
 
 # --- what it refuses --------------------------------------------------------------------------------
@@ -328,7 +362,7 @@ def bad_policies():
 
     yield "a newline", policy(dns="203.0.113.1\n")
     yield "a brace", policy(networks=net(bridge="vbx-shop-1-w}"))
-    yield "a semicolon", policy(hostsvc=["198.51.100.1:5432;flush ruleset"])
+    yield "a semicolon", policy(networks=net(hostsvc=["198.51.100.1:5432;flush ruleset"]))
     yield "a path", policy(networks=net(bridge="/etc/passwd"))
     yield "a 300-character name", policy(networks=net(bridge="v" * 300))
     yield "a bridge over 15 characters", policy(networks=net(bridge="vbx-shop-1234-w"))
@@ -349,12 +383,14 @@ def bad_policies():
     yield "an mtu too small", policy(mtu=100)
     yield "a pool too small", policy(pool="198.51.100.0/29")
     yield "an IPv6 pool", policy(pool="fd00::/64")
-    yield "a host service without a port", policy(hostsvc=["198.51.100.1"])
-    yield "a host service by name", policy(hostsvc=["host.docker.internal:5432"])
-    yield "a host service on port 0", policy(hostsvc=["198.51.100.1:0"])
-    yield "a host service in another task's subnet", policy(hostsvc=["198.51.100.17:80"])
-    yield "a host service twice", policy(hostsvc=["192.168.1.50:80", "192.168.1.50:80"])
-    yield "a multicast host service", policy(hostsvc=["224.0.0.1:80"])
+    yield "a host service without a port", policy(networks=net(hostsvc=["198.51.100.1"]))
+    yield "a host service by name", policy(networks=net(hostsvc=["host.docker.internal:5432"]))
+    yield "a host service on port 0", policy(networks=net(hostsvc=["198.51.100.1:0"]))
+    yield "a host service in another task's subnet", policy(networks=net(hostsvc=["198.51.100.17:80"]))
+    yield "a host service twice", policy(networks=net(hostsvc=["192.168.1.50:80", "192.168.1.50:80"]))
+    yield "a multicast host service", policy(networks=net(hostsvc=["224.0.0.1:80"]))
+    yield "a host service that is not a list", policy(networks=net(hostsvc="198.51.100.1:5432"))
+    yield "a host service outside its network", policy(hostsvc=["198.51.100.1:5432"])
     yield "an address with a leading zero", policy(dns="203.0.113.01")
     yield "a forwarder in the pool", policy(dns="198.51.100.5")
     yield "a privileged forwarder port", policy(dns_port=53)

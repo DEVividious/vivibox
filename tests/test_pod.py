@@ -241,12 +241,23 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
     assert json.loads(applied[5]) == {
         "state": "present",
         "networks": [
-            {"role": "w", "bridge": "vbx-shop-1-w", "subnet": "198.51.100.0/28", "policy": "open"},
-            {"role": "r", "bridge": "vbx-shop-1-r", "subnet": "198.51.100.16/29", "policy": "open"},
-        ],
+            {
+                "role": "w",
+                "bridge": "vbx-shop-1-w",
+                "subnet": "198.51.100.0/28",
+                "policy": "open",
+                "hostsvc": ["198.51.100.1:5432"],
+            },
+            {
+                "role": "r",
+                "bridge": "vbx-shop-1-r",
+                "subnet": "198.51.100.16/29",
+                "policy": "open",
+                "hostsvc": [],
+            },
+        ],  # fmt: skip
         "pool": DEFAULT_NETWORK_POOL,
         "mtu": 1500,
-        "hostsvc": ["198.51.100.1:5432"],
         "dns": "203.0.113.1",
         "dns_port": 5053,
     }
@@ -970,8 +981,33 @@ def test_the_policy_holds_nothing_from_dockers_output(pod):
     assert sent and not any("6.6.6" in s or "evil" in s for s in sent)
     policy = json.loads(sent[-1])
     assert policy["networks"][0]["subnet"] == "198.51.100.0/28"
-    assert policy["hostsvc"] == ["198.51.100.1:5432"]
+    assert policy["networks"][0]["hostsvc"] == ["198.51.100.1:5432"]
     assert not [c for c in real.calls if c[-1:] == ["/etc/hosts"]], "nothing is read from the sidecar"
+
+
+def test_your_hosts_services_are_the_writers_only(pod):
+    """A project's host services are for its build: the writer's network reaches them, on its
+    gateway; the reviewer, which reads and runs nothing, reaches none of your machine's."""
+    pod.up()
+    policy = applied_policy(pod)
+    assert [(n["role"], n["hostsvc"]) for n in policy["networks"]] == [
+        ("w", ["198.51.100.1:5432"]),
+        ("r", []),
+    ]
+    assert "hostsvc" not in policy, "each network's own"
+
+
+def test_an_older_root_helper_is_said_with_what_to_run():
+    from vivibox.pod_egress import helper_missing
+
+    def answering(text, rc=0):
+        return lambda cmd: subprocess.CompletedProcess(list(cmd), rc, stdout=text, stderr="")
+
+    assert helper_missing(answering("vivibox-host 3\n")) == ""
+    said = helper_missing(answering("vivibox-host 2\n"))
+    assert "older than this vivibox" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
+    assert "host/setup.sh" in said
+    assert "not installed" in helper_missing(answering("", rc=1))
 
 
 def test_the_gateway_is_the_allocations(pod):

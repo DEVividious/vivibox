@@ -17,7 +17,7 @@ add rule inet vivibox input iifname vmap @host_by_bridge
 add rule inet vivibox input iifname "vbx*" reject with icmpx admin-prohibited
 add rule inet vivibox input ip daddr 203.0.113.1 iifname != "lo" drop
 add rule inet vivibox prerouting iifname vmap @dns_by_bridge
-# w: vbx-shop-1-w, 198.51.100.0/28, policy open
+# w: vbx-shop-1-w, 198.51.100.0/28, policy open, host services 3
 add chain inet vivibox out_vbx_shop_1_w
 add chain inet vivibox back_vbx_shop_1_w
 add chain inet vivibox host_vbx_shop_1_w

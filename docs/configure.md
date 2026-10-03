@@ -316,9 +316,10 @@ A pod reaches the internet; it does not reach your machine, your LAN, other priv
 tasks, IPv6, or UDP other than DNS. These rules are on your machine, not in the pod, keyed by the
 bridges of the task's networks (`vbx-<task>-w` for the writer's, which the pod's containers share,
 `vbx-<task>-r` for the reviewer's; each refuses the other's range), and loaded before the pod's
-first packet; root in the pod cannot remove them. A project's `host_services` are the exceptions: `host.docker.internal:5432`
-is your machine, on the gateway of the task's network, so a service listening on all addresses
-answers there; a name resolves on your machine when the task starts.
+first packet; root in the pod cannot remove them. A project's `host_services` are the exceptions,
+for the writer's network only (the reviewer reaches no service of your machine's):
+`host.docker.internal:5432` is your machine, on the gateway of the writer's network, so a service
+listening on all addresses answers there; a name resolves on your machine when the task starts.
 
 A pod's DNS queries to port 53, UDP or TCP, whatever server they name, go to a forwarder on your
 machine, `vivibox hostd`, which passes them to your machine's resolver: names resolve in the pod

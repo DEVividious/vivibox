@@ -16,6 +16,9 @@ from .pod_network import PodError
 from .podspec import HOST_GATEWAY, Runner, run
 
 HELPER = "/usr/local/libexec/vivibox-host"
+# The helper this vivibox speaks to (its VERSION): one that answers another number takes
+# another policy, and the person is told to install this one.
+HELPER_VERSION = "3"
 # The one policy there is until a task's names are allowed by name (phase 4a): the internet open,
 # everything private, the host and the other tasks refused.
 POLICY = "open"
@@ -57,11 +60,18 @@ def helper(runner: Runner, *args: str, what: str = "this machine's rules for pod
 
 
 def helper_missing(runner: Runner = run) -> str:
-    """Why the root helper does not run without a password; "" when it does. For the live tests,
-    which skip without it."""
-    if runner(["sudo", "-n", HELPER, "--version"]).returncode == 0:
-        return ""
-    return f"the root helper {HELPER} is not installed, or sudo does not allow it; run host/setup.sh"
+    """Why the root helper does not run without a password, or is not the one this vivibox
+    speaks to; "" when it is. For the live tests, which skip without it."""
+    p = runner(["sudo", "-n", HELPER, "--version"])
+    if p.returncode != 0:
+        return f"the root helper {HELPER} is not installed, or sudo does not allow it; run host/setup.sh"
+    wanted = f"vivibox-host {HELPER_VERSION}"
+    if (found := p.stdout.strip()) != wanted:
+        return (
+            f"the root helper {HELPER} is older than this vivibox ({found}; it needs {wanted}); "
+            "run host/setup.sh"
+        )
+    return ""
 
 
 def prepare_host(host_address: str, pool: str, runner: Runner = run) -> None:
@@ -114,23 +124,32 @@ class PodEgress:
         return targets
 
     def policy(self) -> dict:
-        """What the helper is given for this task: its role networks, the pool (every other task's
-        range, refused), the uplink's MTU (the MSS clamp follows a VPN going on or off), the host
-        services and where the forwarder listens. The networks are those with a bridge, the
-        writer's and the reviewer's (pod_network.MADE_ROLES): the planner's range is reserved
-        with the task and gets its rules once there is a planner's network to key them by, so
-        that no chain is loaded for a bridge nothing is on."""
+        """What the helper is given for this task: its role networks, each with the host services
+        it may reach, the pool (every other task's range, refused), the uplink's MTU (the MSS
+        clamp follows a VPN going on or off) and where the forwarder listens. The networks are
+        those with a bridge, the writer's and the reviewer's (pod_network.MADE_ROLES): the
+        planner's range is reserved with the task and gets its rules once there is a planner's
+        network to key them by, so that no chain is loaded for a bridge nothing is on."""
         nets = self.made_networks()
         if not nets:
             raise PodError(f"{self.task_id} has no network allocated yet")
+        # The project's host services are its build's: the writer's network reaches them, on its
+        # gateway; the reviewer reads and runs nothing and reaches none of the host's.
+        services = self.firewall_targets()
         return {
             "state": "present",
             "networks": [
-                {"role": n.role, "bridge": n.bridge, "subnet": str(n.subnet), "policy": POLICY} for n in nets
-            ],
+                {
+                    "role": n.role,
+                    "bridge": n.bridge,
+                    "subnet": str(n.subnet),
+                    "policy": POLICY,
+                    "hostsvc": services if n.role == "w" else [],
+                }
+                for n in nets
+            ],  # fmt: skip
             "pool": self.network_pool,
             "mtu": uplink_mtu(self.runner),
-            "hostsvc": self.firewall_targets(),
             "dns": self.host_ip,
             "dns_port": resolver.PORT,
         }

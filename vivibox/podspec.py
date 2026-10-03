@@ -81,7 +81,12 @@ MOST_DEFAULT_CPUS = 6
 
 
 def machine_cpus() -> int:
-    return os.cpu_count() or MOST_DEFAULT_CPUS
+    """The CPUs this process may run on, which is what Docker counts; the machine's where the
+    kernel does not say."""
+    try:
+        return len(os.sched_getaffinity(0)) or os.cpu_count() or MOST_DEFAULT_CPUS
+    except (AttributeError, OSError):
+        return os.cpu_count() or MOST_DEFAULT_CPUS
 
 
 def default_cpus() -> float:

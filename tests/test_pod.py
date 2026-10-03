@@ -1253,7 +1253,7 @@ def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):
 def test_every_container_gets_the_machines_cpus_when_it_has_fewer_than_six(tmp_path, monkeypatch):
     import os
 
-    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(4)))
     repo = tmp_path / "repo"
     repo.mkdir()
     pod = Pod("shop-1", repo, "img", runner=FakeDocker(), folder=tmp_path)

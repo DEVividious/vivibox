@@ -121,6 +121,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The root helper gives `mount` and `umount` the mount point's descriptor with
+  `--no-canonicalize`: without it they read the descriptor's link back to a path and the kernel
+  resolved that path anew, so the directory held open protected nothing. `pod_cpus` counts the
+  CPUs this process may run on (the affinity set, what Docker counts), the machine's count only
+  where the kernel does not say.
 - An OOM kill no container of the task's own saw (one the pod's Docker runs) is said as a
   process killed in the pod, with `vivibox limits <id>` alone as the next step, not as the pod
   running out of a budget nothing enforces. `vivibox disk grow <id> 1.5g` hands the helper the

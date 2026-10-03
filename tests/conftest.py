@@ -61,6 +61,13 @@ def own_temporary_folder(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def twenty_cpus(monkeypatch):
+    """The CPUs a pod's containers may use default to the machine's, up to six (podspec): the
+    suite's figures (6) hold on any machine, and a test of the count sets its own."""
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(20)), raising=False)
+
+
+@pytest.fixture(autouse=True)
 def no_real_start(request, monkeypatch):
     """A decision now starts a task nobody is working on, and starting means Docker. Tests get a
     stand-in that records the call in vivibox.actions.started; one marked real_start gets the real

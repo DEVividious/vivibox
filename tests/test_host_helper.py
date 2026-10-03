@@ -634,8 +634,10 @@ def test_attach_makes_a_sparse_xfs_image_mounts_it_and_makes_the_pods_directorie
     assert made.st_size == 20 * 2**30 and made.st_blocks == 0, "sparse: made by the helper, never written"
     assert host.privileged()[:2] == [["mkfs.xfs", "-q", img], ["losetup", "--find", "--show", img]]
     [mount] = [c for c in host.privileged() if c[:1] == ["mount"]]
-    assert mount[:4] == ["mount", "-o", "discard,nosuid,nodev", "/dev/loop7"]
-    assert re.fullmatch(r"/proc/self/fd/\d+", mount[4]), "the mount point as a directory fd, not a path"
+    assert mount[:5] == ["mount", "--no-canonicalize", "-o", "discard,nosuid,nodev", "/dev/loop7"], (
+        "without --no-canonicalize mount(8) reads the link back to a path and mount(2) resolves it anew"
+    )
+    assert re.fullmatch(r"/proc/self/fd/\d+", mount[5]), "the mount point as a directory fd, not a path"
     assert len(host.privileged()) == 3
     for name in ("docker", "config", "installed", "gate-installed", "gate-build-cache", "gate", "review"):
         found = os.lstat(tasks / "shop-1" / "disk" / name)
@@ -691,7 +693,9 @@ def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(t
     code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
     assert code == 0
     [umount, freed] = host.privileged()
-    assert umount[:1] == ["umount"] and re.fullmatch(r"/proc/self/fd/\d+", umount[1]), "by its directory fd"
+    assert umount[:2] == ["umount", "--no-canonicalize"] and re.fullmatch(r"/proc/self/fd/\d+", umount[2]), (
+        "by its directory fd, which umount(8) must hand the kernel as it is"
+    )
     assert freed == ["losetup", "-d", "/dev/loop3"]
     assert (tasks / "shop-1" / "disk.img").exists(), "the caller deletes it, after a detach that worked"
 
@@ -802,7 +806,7 @@ def test_the_disk_dry_run_prints_the_steps_and_runs_nothing(tasks, capsys):
     assert code == 0 and host.privileged() == []
     out = capsys.readouterr().out
     assert "# would make" in out and "sparse" in out and "# would run: mkfs.xfs" in out
-    assert "mount -o discard" in out
+    assert "mount --no-canonicalize -o discard" in out
     assert not (tasks / "shop-1" / "disk").exists(), "nothing made"
     assert not (tasks / "shop-1" / "disk.img").exists(), "no image either"
 
@@ -908,4 +912,53 @@ def test_a_mount_that_failed_leaves_one_loop_device_that_the_next_attach_uses(ta
     code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
     assert code == 0
     assert len([c for c in host.calls if c[:2] == ["losetup", "--find"]]) == 1, "the device it has is used"
-    assert [c for c in host.privileged() if c[:1] == ["mount"]][-1][3] == "/dev/loop7"
+    assert [c for c in host.privileged() if c[:1] == ["mount"]][-1][4] == "/dev/loop7"
+
+
+class Swapping(Disks):
+    """The person's process swapping the image, or the mount point, for another between the
+    helper's check and the tool it then runs: the fake does it while answering a question."""
+
+    def __init__(self, swap_on, swap, **kw):
+        super().__init__(**kw)
+        self.swap_on, self.swap = swap_on, swap
+
+    def __call__(self, cmd, input=None, pass_fds=()):
+        done = super().__call__(cmd, input, pass_fds)
+        if cmd[: len(self.swap_on)] == list(self.swap_on):
+            self.swap()
+        return done
+
+
+def test_an_image_swapped_after_the_check_is_not_given_to_a_tool(tasks, capsys):
+    """The inode checked is the inode the tool gets, or nothing runs: here the image is replaced
+    while blkid is asked (after lstat, before losetup)."""
+    img = tasks / "shop-1" / "disk.img"
+    img.write_bytes(b"")
+    other = tasks / "shop-1" / "other.img"
+    other.write_bytes(b"")
+
+    def swap():
+        os.replace(other, img)
+
+    host = Swapping(("blkid",), swap, fstype={str(img): "xfs"})
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 1 and host.privileged() == [], "no losetup, no mount"
+    assert "changed while the helper worked" in capsys.readouterr().err
+
+
+def test_a_mount_point_swapped_after_the_check_is_not_grown(tasks, capsys):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), tasks / "shop-1" / "disk"
+    with open(img, "wb") as f:
+        f.truncate(20 * 2**30)
+    mnt.mkdir()
+
+    def swap():
+        mnt.rename(mnt.with_name("was-disk"))
+        mnt.mkdir()
+
+    host = Swapping(("losetup", "-c"), swap, mounted={str(mnt)}, loops={img: "/dev/loop3"})
+    code, _ = call("grow-disk", "shop-1", disk(tasks=tasks, size="40g"), host=host)
+    assert code == 1
+    assert [c[0] for c in host.privileged()] == ["losetup"], "the loop grew, xfs_growfs did not run"
+    assert "changed while the helper worked" in capsys.readouterr().err

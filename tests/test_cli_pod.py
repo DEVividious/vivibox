@@ -152,7 +152,7 @@ def test_a_tasks_limit_past_this_machines_pod_is_refused_though_the_default_woul
 def test_cpus_past_this_machines_are_refused_for_a_task_too(task, capsys, monkeypatch):
     import os
 
-    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(4)))
     assert main(["limits", "demo-1", "--pod-cpus", "8"]) == 1
     err = capsys.readouterr().err
     assert "limits.pod_cpus" in err and "4 CPUs" in err

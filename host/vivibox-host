@@ -489,13 +489,16 @@ def attach_disk(spec, runner, dry):
     if found is None and steps.say(f"make {mountpoint}"):
         os.mkdir(mountpoint, 0o755)
     if dry:
-        print(f"# would run: mount -o {DISK_OPTIONS} /dev/loopN {mountpoint}")
+        print(f"# would run: mount --no-canonicalize -o {DISK_OPTIONS} /dev/loopN {mountpoint}")
         print(f"# would make {mountpoint} and its {', '.join(DISK_DIRS)} owned by {owner.st_uid}")
         return
     target = open_dir(mountpoint)
     try:
         owned(target, owner.st_uid, owner.st_gid)
-        steps.run(["mount", "-o", DISK_OPTIONS, device, fd_path(target)], pass_fds=(target,))
+        # --no-canonicalize: mount(8) would read the link back to a path and hand mount(2) the
+        # path, resolved anew; with it the kernel resolves the link to the directory held open.
+        mount = ["mount", "--no-canonicalize", "-o", DISK_OPTIONS, device, fd_path(target)]
+        steps.run(mount, pass_fds=(target,))
     finally:
         os.close(target)
     disk_directories(mountpoint, owner.st_uid, owner.st_gid)
@@ -520,7 +523,7 @@ def detach_disk(spec, runner, dry):
         else:
             target = open_dir(mountpoint)
             try:
-                steps.run(["umount", fd_path(target)], pass_fds=(target,))
+                steps.run(["umount", "--no-canonicalize", fd_path(target)], pass_fds=(target,))
             finally:
                 os.close(target)
     if device is not None:

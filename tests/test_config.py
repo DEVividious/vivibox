@@ -325,12 +325,32 @@ def test_the_pods_cpus_default_to_the_machines_up_to_six_and_never_past_them(tmp
     the default config would not start a pod on a four-core laptop, and nothing named the key."""
     import os
 
-    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(4)))
     config = load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES))
     assert config.limits.pod_cpus == 4
     with pytest.raises(ConfigError) as e:
         load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[limits]\npod_cpus = 8\n' + ROLES))
     assert "limits.pod_cpus" in str(e.value) and "4 CPUs" in str(e.value)
     assert load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n[limits]\npod_cpus = 4\n' + ROLES))
-    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(32)))
     assert load_config(write(tmp_path / "config.toml", 'tasks_dir = "/t"\n' + ROLES)).limits.pod_cpus == 6
+
+
+def test_the_machines_cpus_are_the_ones_this_process_may_run_on(monkeypatch):
+    """What Docker counts: the affinity set (a container, a cgroup or taskset may give fewer
+    than the machine has); os.cpu_count only where the kernel does not say."""
+    import os
+
+    from vivibox import podspec
+
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0, 2, 5})
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    assert podspec.machine_cpus() == 3
+
+    def unknown(pid):
+        raise OSError("no affinity here")
+
+    monkeypatch.setattr(os, "sched_getaffinity", unknown)
+    assert podspec.machine_cpus() == 16
+    monkeypatch.delattr(os, "sched_getaffinity")
+    assert podspec.machine_cpus() == 16

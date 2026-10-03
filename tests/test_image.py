@@ -181,3 +181,26 @@ def test_there_is_a_c_compiler_for_build_scripts_and_native_packages():
     packages = text.split("apt-get install -y --no-install-recommends")[1].split("&&")[0].split()
     assert {"gcc", "libc6-dev"} <= set(packages)
     assert any(check.command.startswith("cc --version") for check in image.checks(1000, 1000))
+
+
+def test_python_and_uv_are_the_images_own_and_mise_pins_nothing_by_default():
+    """The verification finds its tools in the image's root filesystem, by the usual directories
+    (its PATH has no shims of the shared cache): Python was mise's alone, so a gate's cold mise
+    would have downloaded it for every verification. A CPython of uv's is installed at build
+    time, with python3 and python linked into /usr/local/bin; uv is the image's binary; and
+    /etc/mise/config.toml, which pinned python, uv and java for mise, is gone (java is the
+    image's Corretto 21 on PATH; a project JDK comes through `java`)."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    assert "uv python install 3.13" in text and "UV_PYTHON_INSTALL_DIR=/opt/python" in text
+    assert (
+        "/usr/local/bin/python3.13" in text
+        and "/usr/local/bin/python3" in text
+        and "/usr/local/bin/python " in text
+    )
+    assert "/etc/mise/config.toml" not in text
+    checks = {c.name: c for c in image.checks(1000, 1000)}
+    assert checks["Python 3.13 from the image"].expect == "Python 3.13"
+    assert "command -v python3" in checks["Python 3.13 from the image"].command
+    assert checks["uv"].command == "uv --version"

@@ -11,6 +11,7 @@ docs/security.md.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import podspec
@@ -19,6 +20,13 @@ if TYPE_CHECKING:
     from .pod import Pod
 
 JDK_LINK = "/config/jdk"
+# The files of a checkout that pin a tool for mise (mise's configuration file names).
+MISE_FILES = frozenset(
+    {
+        "mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", ".tool-versions",
+        ".mise/config.toml", "mise/config.toml", ".config/mise.toml", ".config/mise/config.toml",
+    }
+)  # fmt: skip
 # The shims of the shared cache, on the agent's PATH and never on the gate's.
 SHIMS = f"{podspec.CACHES['mise']}/shims"
 # The image's PATH without the shims, for a pod built without the image's environment.
@@ -49,27 +57,29 @@ def gate_env(java: str, image_env: dict[str, str], gate_dir) -> dict[str, str]:
 
 
 def install_declared(pod: Pod, gate: bool = False) -> None:
-    """Install whatever the checkout's own mise.toml asks for, on top of the image's defaults.
+    """Install whatever the checkout's own mise.toml asks for, on top of the image's own toolchains.
 
     A shim exists only for a tool that is installed, so a project that chose Go or Ruby would
     otherwise fail with 'command not found' — which names the symptom and hides the cause. Failure
-    is not raised: the verify command runs next and says what is actually missing. In the gate,
-    into its own data directory, cold; the image's default JDK is never installed there.
+    is not raised: the verify command runs next and says what is actually missing. Only when the
+    checkout pins a tool (MISE_FILES): the gate's mise data directory is its own and cold, and
+    mise would otherwise download for every verification; the image's Python, uv and JDK are in
+    its root filesystem and need no mise.
     """
+    root = Path(pod.gate_src if gate else pod.repo)
+    if not any((root / name).is_file() for name in MISE_FILES):
+        return
     (pod.gate_exec if gate else pod.exec)("bash", "-c", "mise install --yes", check=False)
 
 
 def ensure(pod: Pod, java: str, gate: bool = False, tools: list[str] | tuple = ()) -> None:
     """In the agent container, or with gate=True in the gate container, which has its own /config.
-    The agent installs the image's defaults too (the shared cache may be empty: Python and uv are
-    mise's), and a project JDK into the shared cache; the gate only finds that JDK there, by
+    The agent installs a project JDK into the shared cache; the gate only finds that JDK there, by
     `mise where` with the shared data directory named for that one command, which reads it.
     tools: the project's other toolchains, made global in the container's own mise configuration
     (under /config), so the repository gets no mise.toml; the installs go to the shared cache for
     the agent and to the gate's own directory for the gate."""
     run = pod.gate_exec if gate else pod.exec
-    if not gate:
-        pod.exec("bash", "-c", "mise install --yes", check=False)
     if java:
         spec = mise_spec(java)
         if gate:

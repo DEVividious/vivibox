@@ -7,7 +7,7 @@ ARG DOCKER_CLI_IMAGE=docker:29.8.1-cli
 ARG NODE_IMAGE=node:24.21.0-trixie-slim
 ARG MISE_IMAGE=jdxcode/mise:2026.9.11
 ARG BASE_IMAGE=maven:3.9.16-amazoncorretto-21-debian
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.8
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.22
 
 FROM ${DOCKER_CLI_IMAGE} AS docker-cli
 FROM ${NODE_IMAGE} AS node
@@ -43,22 +43,30 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 
-# Serena, the MCP server vivibox offers itself (off until you turn it on): installed here with its
-# own Python, outside /cache, so a project's mise versions cannot break it and it needs no download
-# when a task starts. It reads the task's repository through language servers it fetches per language.
+# Python and uv are the image's own, like Node: uv's CPython 3.13 installed at build time under
+# /opt/python, in the root filesystem, with python3.13, python3 and python linked into
+# /usr/local/bin, so the agent and the verification find Python by the usual directories and
+# neither downloads an interpreter (uv prefers a Python it finds on PATH to fetching one). A project
+# that wants another version gets it through uv (into UV_PYTHON_INSTALL_DIR, below) or mise
+# (`mise use python@3.12`, whose shim then comes first on the agent's PATH). Serena, the MCP server
+# vivibox offers itself (off until you turn it on), is installed with that Python too: it needs no
+# download when a task starts, and it reads the task's repository through language servers it
+# fetches per language.
 COPY --from=uv /uv /usr/local/bin/uv
-RUN UV_PYTHON_INSTALL_DIR=/opt/python UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
+RUN UV_PYTHON_INSTALL_DIR=/opt/python uv python install 3.13 \
+ && ln -s "$(UV_PYTHON_INSTALL_DIR=/opt/python uv python find 3.13)" /usr/local/bin/python3.13 \
+ && ln -s python3.13 /usr/local/bin/python3 \
+ && ln -s python3.13 /usr/local/bin/python \
+ && python3 -V && python -V \
+ && UV_PYTHON_INSTALL_DIR=/opt/python UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
     uv tool install --python 3.13 --no-cache "git+https://github.com/oraios/serena@${SERENA_VERSION}" \
  && serena --help >/dev/null
 
-# Default toolchains. /etc/mise/config.toml is mise's system-wide config, so it applies in the gate
-# container too, whose /config is a fresh tmpfs that loses anything mise writes to HOME. Without it
-# the shims are on PATH and fail with "no version set", which reads as "this language is missing"
-# and quietly pushed every agent towards node. A project that wants other versions, or another
-# language entirely, puts its own mise.toml in the repository: that file wins over this one, and
-# the user approves it as a build file before it reaches their checkout.
-RUN mkdir -p /etc/mise \
- && printf '[tools]\npython = "3.13"\nuv = "0.12"\njava = "corretto-21"\n' > /etc/mise/config.toml
+# No default toolchain is pinned for mise: Python, uv and Java 21 are the image's own, on PATH,
+# and a project that wants other versions, or another language entirely, puts its own mise.toml
+# in the repository (the user approves it as a build file before it reaches their checkout) or
+# names them in the project's settings (`java`, `tools`). A shim of mise's exists only for a tool
+# it installed, so the shims first on PATH shadow nothing of the image's until a project asks.
 
 # -o: tolerate an ID that already exists in the base image.
 RUN groupadd -o -g "${GID}" agent \
@@ -86,11 +94,12 @@ RUN mkdir -p /usr/local/etc \
 # another's build. A fresh volume takes its owner from the image, hence the directory above.
 # lazyRestore is off: on a build cache hit the extension would leave the module's target/ empty
 # until asked, and whatever reads the jar there, the next module or a packaging plugin, fails.
-# uv keeps its downloads, and the Pythons it fetches, in a shared cache too; it copies from there,
-# the cache being another volume than the clone. Python writes no __pycache__ into the clone,
-# where an untracked folder stops the gate's build. pip installs only into a virtual environment:
-# mise's Python is in the cache every task shares, and a package installed there by one task
-# was on every other task's import path, the gate's too. Go's modules and build cache, and Rust's
+# uv keeps its downloads, and the Pythons of other versions it fetches, in a shared cache too; it
+# copies from there, the cache being another volume than the clone. Python writes no __pycache__
+# into the clone, where an untracked folder stops the gate's build. pip installs only into a
+# virtual environment: the image's Python is read-only and a Python of mise's is in the cache every
+# task shares, where a package installed by one task was on every other task's import path, the
+# gate's too. Go's modules and build cache, and Rust's
 # toolchains and crates, which a project's tools setting brings, are shared the same way; Go's
 # module cache is left writable so a volume can be emptied.
 ENV HOME=/config \

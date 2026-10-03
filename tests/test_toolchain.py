@@ -57,6 +57,7 @@ def test_tools_are_mise_versions_and_nothing_else(tmp_path):
 class Recording:
     def __init__(self):
         self.agent, self.gate = [], []
+        self.gate_src, self.repo = "/nowhere/gate/src", "/nowhere/repo"
 
     def exec(self, *cmd, check=True):
         self.agent.append(cmd[-1])
@@ -69,21 +70,10 @@ def test_a_projects_tools_are_installed_for_the_agent_and_the_gate():
     pod = Recording()
     toolchain.ensure(pod, "", tools=["go@1.25.3"])
     toolchain.ensure(pod, "", gate=True, tools=["go@1.25.3", "rust@stable"])
-    assert pod.agent == ["mise install --yes", "mise use --global --yes go@1.25.3"]
+    assert pod.agent == ["mise use --global --yes go@1.25.3"]
     assert pod.gate == ["mise use --global --yes go@1.25.3 rust@stable"]
     toolchain.ensure(pod, "")
-    assert pod.agent[2:] == ["mise install --yes"], "no tools: the defaults, which the gate no longer fills"
-
-
-def test_the_agents_mise_fills_the_shared_cache_with_the_defaults_the_gate_once_did():
-    """The gate's `mise install` used to install the image's default Python and uv into the shared
-    cache, where the agent's shims found them. The gate installs into its own directory now, so the
-    agent's start does it; it is a no-op once they are there."""
-    pod = Recording()
-    toolchain.ensure(pod, "")
-    assert pod.agent == ["mise install --yes"]
-    toolchain.ensure(pod, "", gate=True)
-    assert pod.gate == [], "the gate's defaults come with install_declared, into its own directory"
+    assert len(pod.agent) == 1, "no tools, nothing to install: the image's defaults are its own"
 
 
 def test_the_gate_finds_a_project_jdk_in_the_shared_cache_without_installing_anything():
@@ -95,4 +85,29 @@ def test_the_gate_finds_a_project_jdk_in_the_shared_cache_without_installing_any
     where = "MISE_DATA_DIR=/cache/mise MISE_DISABLE_TOOLS= mise where java@corretto-17"
     assert pod.gate == [f'jdk="$({where})" && ln -sfn "$jdk" /config/jdk']
     toolchain.ensure(pod, "17")
-    assert pod.agent[1].startswith("mise install --yes java@corretto-17 >/dev/null && ln -sfn"), "installs"
+    installs = 'mise install --yes java@corretto-17 >/dev/null && ln -sfn "$(mise where java@corretto-17)"'
+    assert pod.agent == [f"{installs} /config/jdk"]
+
+
+@pytest.mark.parametrize("name", sorted(toolchain.MISE_FILES))
+def test_the_gate_runs_mise_install_only_for_a_checkout_that_pins_a_tool(tmp_path, name):
+    """The image's own toolchains need no mise, and the gate's mise data directory is cold: a
+    `mise install` there would download for every verification of every project. It runs only
+    when the clone pins a tool in a file of mise's (the project's `tools` go through `ensure`)."""
+    pod = Recording()
+    pod.gate_src = str(tmp_path / "src")
+    pod.repo = tmp_path / "repo"
+    toolchain.install_declared(pod, gate=True)
+    assert pod.gate == [], "nothing pinned: nothing to install"
+    pinned = tmp_path / "src" / name
+    pinned.parent.mkdir(parents=True, exist_ok=True)
+    pinned.write_text('[tools]\ngo = "1.25.3"\n')
+    toolchain.install_declared(pod, gate=True)
+    assert pod.gate == ["mise install --yes"]
+    toolchain.install_declared(pod)
+    assert pod.agent == [], "the agent's clone pins nothing"
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "repo" / name).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "repo" / name).write_text("go 1.25.3\n")
+    toolchain.install_declared(pod)
+    assert pod.agent == ["mise install --yes"]

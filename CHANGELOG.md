@@ -60,8 +60,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   (`java`) is the one the writer's mise installed in the shared cache, found by `mise where` with
   that cache read-only and linked under the gate's home; a tool a project brings (`tools`, its
   `mise.toml`) is installed by the gate into a mise data directory of its own, never into the
-  shared one, and the gate's mise never installs java. The agent's start installs the image's
-  default toolchains (Python, uv) into the shared cache, which the gate's verification used to do.
+  shared one, and the gate's mise never installs java; it runs `mise install` only for a checkout
+  that pins a tool in a file of mise's.
+- Python 3.13 and uv are the image's own, like Node: a CPython of uv's in the image's root
+  filesystem, `python3` and `python` in `/usr/local/bin`, uv 0.12. Nothing is pinned for mise by
+  default any more (`/etc/mise/config.toml` is gone): Python, uv and Java 21 come from the image,
+  and a project that wants other versions names them in its `mise.toml` or its settings (`java`,
+  `tools`), as before. Build the image again (`vivibox image build`).
 - `pod_cpus`, the CPUs each container of a pod may use, defaults to the machine's count when it
   has fewer than six, and a value past the machine's count is refused by name (Docker refuses
   such a `--cpus`, and the default would not have started a pod on a four-core machine).

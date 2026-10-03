@@ -47,6 +47,7 @@ class FakePod:
         self.commands = []
         self.output = output
         self.passed = list(passed)
+        self.gate_src = "/nowhere/gate/src"  # a clone that pins no tool of mise's
 
     def passed_values(self):
         return self.passed
@@ -134,9 +135,7 @@ def test_gate_passes_when_everything_is_done(task):
     pod = FakePod()
     result = gate.run_gate(task, pod, ["mvn -B verify"], [])
     assert result.passed and not result.risky
-    # The toolchain a project declared has to be installed before anything tries to use it: a shim
-    # exists only for an installed tool, so a Go project would fail with "go: command not found".
-    assert pod.commands == ["mise install --yes", "mvn -B verify"]
+    assert pod.commands == ["mvn -B verify"], "the image's toolchains: nothing to install first"
     assert "output of mvn -B verify" in result.log.read_text()
     assert gate.next_state(result, 1, 3) is State.CHECKPOINT_FINAL
     assert task.events()[-1]["type"] == "gate"
@@ -149,7 +148,21 @@ def test_the_gate_installs_the_projects_tools_before_its_commands(task):
     commit(task.repo, "Add health endpoint")
     pod = FakePod()
     gate.run_gate(task, pod, ["go test ./..."], [], tools=["go@1.25.3"])
-    assert pod.commands == ["mise install --yes", "mise use --global --yes go@1.25.3", "go test ./..."]
+    # The toolchain a project declared has to be installed before anything tries to use it: a shim
+    # exists only for an installed tool, so a Go project would fail with "go: command not found".
+    assert pod.commands == ["mise use --global --yes go@1.25.3", "go test ./..."]
+
+
+def test_the_gate_installs_what_the_checkout_pins_with_mise_before_its_commands(task, tmp_path):
+    gate.accept_plan(task)
+    tick(task, "endpoint returns 200", "error path is tested")
+    commit(task.repo, "Add health endpoint")
+    pod = FakePod()
+    pod.gate_src = str(tmp_path / "src")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mise.toml").write_text('[tools]\nruby = "3.4"\n')
+    gate.run_gate(task, pod, ["bundle exec rspec"], [])
+    assert pod.commands == ["mise install --yes", "bundle exec rspec"]
 
 
 def test_gate_stops_at_first_failing_command_and_writes_feedback(task):

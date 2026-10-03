@@ -283,9 +283,6 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
-- The loop device over a task's disk image is set up with direct I/O (`losetup --direct-io=on`):
-  a loop over a file otherwise caches every block twice, in the file's page cache and the
-  device's. A `losetup` that cannot set it fails the attach in its own words.
 - `host/vivibox-host` 2 attaches, detaches and grows a task's disk: `attach-disk <id>
   {"dir", "size"}` makes a sparse XFS image `<dir>/disk.img`, formatted once and never over
   a file that holds no filesystem, on a loop device mounted `discard,nosuid,nodev` at

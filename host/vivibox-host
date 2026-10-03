@@ -498,10 +498,7 @@ def attach_disk(spec, runner, dry):
     if device is None:
         if not dry:
             pinned(image, img)
-        # Direct I/O on the backing file: a loop device over a file otherwise caches every block
-        # twice, in the file's page cache and the device's. A losetup that cannot set it fails
-        # the attach, said in its words: no buffered fallback nobody is told of.
-        device = steps.run(["losetup", "--find", "--show", "--direct-io=on", image]).strip()
+        device = steps.run(["losetup", "--find", "--show", image]).strip()
         if not dry and not LOOP.fullmatch(device):
             raise Refused(f"losetup gave no loop device for {image}: {device!r:.80}")
     if found is None and steps.say(f"make {mountpoint}"):

@@ -92,6 +92,7 @@ def review(env, monkeypatch, task_id="demo-1"):
         task.id, task.repo, "img", runner=lambda cmd: subprocess.CompletedProcess(cmd, 0, "", ""),
         review_dir=task.root / "review",
     )  # fmt: skip
+    pod.ensure_network()
     reviewing.up(task, pod, load_config())
 
 

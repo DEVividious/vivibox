@@ -340,6 +340,16 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         self.review_down()
         self.gate_down()
 
+    def _rules_before(self, what: str) -> None:
+        """The host's rules for the task, applied again before a container of the pod other than
+        at up: every operation that starts one reconciles them first, fail-closed, so none runs
+        on a bridge without them (the host restarted, its table gone with it). The policy is
+        vivibox's own allocation and configuration, as at up; nothing of Docker's."""
+        try:
+            self.apply_firewall()
+        except PodError as e:
+            raise PodError(f"{what} could not start: {e}") from None
+
     def gate_up(self) -> None:
         """A fresh container with a fresh clone of the task branch: only committed work is verified."""
         if self.gate_dir is None:
@@ -349,6 +359,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
         self._run("docker", "volume", "rm", "-f", self.volumes["gate-installed"], check=False)
         shutil.rmtree(self.gate_dir, ignore_errors=True)
         self.gate_dir.mkdir(parents=True)
+        self._rules_before("the verification")
         self._run(*self.gate_command())
         # Gradle runs init scripts and reads JVM options from its home, a cache the agent can write.
         self.gate_exec("rm", "-rf", f"{CACHES['gradle']}/init.d", f"{CACHES['gradle']}/gradle.properties",
@@ -406,6 +417,7 @@ class Pod(PodNetwork, PodDemo, PodEgress):
     def review_start(self, mounts: list[Mount], env: dict[str, str]) -> None:
         """The reviewer's container, with a fresh clone of the task branch in it."""
         self._placeholders(mounts)
+        self._rules_before("the review")
         self._run(*self.review_command(mounts, env))
         where = ("docker", "exec", "-w", str(self.review_dir), self.review)
         clone = ("git", "clone", "--quiet", "--no-hardlinks", str(self.repo), self.review_src)

@@ -68,6 +68,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   Desktop, neither of which Sysbox runs under, and names the guide when Docker is missing or
   your user cannot reach it.
 
+- This machine's rules for a task are applied again before its verification's container and
+  its reviewer's start, as they are before its pod, and neither starts when the helper refuses:
+  the error names which could not start and why. The rules and `vivibox0` do not survive a
+  restart of your machine, and no pod container starts by itself after one; a pod container
+  started by hand with `docker start` after a restart has no rules until the task's next
+  `vivibox start`, so start tasks, not containers.
+
 ### Fixed
 
 - A pod does not start on a network of its name that is not on the bridge vivibox named, as the

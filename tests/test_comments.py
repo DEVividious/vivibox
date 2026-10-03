@@ -102,6 +102,7 @@ def pod(tmp_path):
     made = Pod(
         task.id, task.repo, "img", agent_mounts=mounts, runner=FakeDocker(), review_dir=task.root / "review"
     )
+    made.ensure_network()  # as up would have: the review applies the host's rules for it first
     made.meta = task.meta
     return made
 
@@ -195,6 +196,7 @@ def test_the_reviewer_reads_your_replies_not_the_empty_mount_point(env, monkeypa
     target = task.meta / "handoff" / "comments.md"
     outside = linked(target)
     pod = Pod(task.id, task.repo, "img", runner=runner, review_dir=task.root / "review")
+    pod.ensure_network()
     reviewing.up(task, pod, load_config())
     run = next(c for c in calls if c[:3] == ["docker", "run", "-d"])
     binds = [run[i + 1] for i, arg in enumerate(run) if arg == "-v"]

@@ -47,11 +47,14 @@ class FakeDocker:
         self.started = True  # the demo tests turn this off first
         self.route = ""  # what `ip route get` says; nothing, and the host is taken for Ethernet
         self.links = ""  # what `ip -o link` says
+        self.refuses = ""  # what the root helper says when it refuses; "" and it does its job
 
     def __call__(self, cmd):
         cmd = list(cmd)
         self.calls.append(cmd)
         out, rc = "", 0
+        if cmd[:1] == ["sudo"] and self.refuses:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=self.refuses)
         if cmd[:2] == ["docker", "inspect"]:
             state = self.states.get(cmd[-1])
             if state and "Config.Cmd" in cmd[3]:
@@ -179,6 +182,7 @@ def test_the_gate_reuses_only_what_it_built_itself(pod, tmp_path):
     gate = pod.gate_command()
     assert "vivibox-shop-1-gate-build-cache:/cache/build-cache" in gate
     assert not any(arg.startswith("vivibox-cache-build-cache:") for arg in gate)
+    pod.ensure_network()
     pod.gate_up()
     assert not any("vivibox-shop-1-gate-build-cache" in c for c in pod.runner.find("docker", "volume", "rm"))
     pod.remove()
@@ -230,6 +234,66 @@ def test_up_prepares_the_host_then_the_policy_before_anything_of_the_pod_runs(po
         "dns": "203.0.113.1",
         "dns_port": 5053,
     }
+
+
+def starts(calls) -> list[str]:
+    """What was asked for, in order, of what starts a container or sets the host's rules: the
+    name a docker run or docker start is given, or the helper's operation and state."""
+    found = []
+    for c in calls:
+        if c[:4] == ["docker", "run", "-d", "--name"]:
+            found.append(c[4])
+        elif c[:2] == ["docker", "start"]:
+            found.append(c[2])
+        elif c[:1] == ["sudo"] and c[3] == "apply-policy":
+            found.append(f"apply-policy {json.loads(c[5])['state']}")
+    return found
+
+
+def starting_the_gate(pod, tmp_path):
+    pod.gate_dir = tmp_path / "gate"
+    pod.gate_up()
+
+
+def starting_the_review(pod, tmp_path):
+    pod.review_dir = tmp_path / "review"
+    pod.review_fresh()
+    pod.review_start([Mount(str(tmp_path / "out"), "/task/review")], {})
+
+
+def test_up_applies_the_hosts_rules_before_the_first_container_starts(pod):
+    pod.up()
+    assert starts(pod.runner.calls) == ["apply-policy present", "vivibox-shop-1-dind", "vivibox-shop-1-agent"]
+
+
+@pytest.mark.parametrize(
+    ("start", "container"),
+    [(starting_the_gate, "vivibox-shop-1-gate"), (starting_the_review, "vivibox-shop-1-review")],
+)
+def test_the_rules_are_applied_again_before_the_gate_and_the_review_run(pod, tmp_path, start, container):
+    """Every operation that can start a container of the pod reconciles the host's rules first,
+    fail-closed, like up: the gate and the review join the sidecar's network, and a caller that
+    starts one when the rules are gone (the host restarted, the table with it) must not get a
+    container without them."""
+    pod.up()
+    before = len(pod.runner.calls)
+    start(pod, tmp_path)
+    assert starts(pod.runner.calls[before:]) == ["apply-policy present", container]
+
+
+@pytest.mark.parametrize(
+    ("start", "said"), [(starting_the_gate, "the verification"), (starting_the_review, "the review")]
+)
+def test_a_helper_that_refuses_before_the_gate_or_the_review_starts_no_container(pod, tmp_path, start, said):
+    pod.up()
+    before = len(pod.runner.calls)
+    pod.runner.refuses = "vivibox-host: nft: Operation not permitted"
+    with pytest.raises(PodError) as refused:
+        start(pod, tmp_path)
+    what, why = f"{said} could not start", "this machine's rules for pods could not be set"
+    assert str(refused.value).startswith(f"{what}: {why}: vivibox-host: nft: Operation not permitted")
+    assert "run host/setup.sh" in str(refused.value), "what to do"
+    assert not [c for c in pod.runner.calls[before:] if c[:2] in (["docker", "run"], ["docker", "start"])]
 
 
 WIFI = (
@@ -412,6 +476,7 @@ def test_what_a_task_installs_stays_in_a_volume_of_its_own(pod, tmp_path):
     pod.gate_dir = tmp_path / "gate"
     assert "vivibox-shop-1-installed:/cache/m2/installed" in pod.agent_command()
     assert "vivibox-shop-1-gate-installed:/cache/m2/installed" in pod.gate_command()
+    pod.ensure_network()
     pod.gate_up()
     calls = pod.runner.calls
     emptied = calls.index(["docker", "volume", "rm", "-f", "vivibox-shop-1-gate-installed"])
@@ -448,6 +513,7 @@ def test_gate_container_sees_only_committed_work(pod, tmp_path):
 
     (pod.gate_dir / "src").mkdir(parents=True)
     (pod.gate_dir / "src" / "stale").write_text("old build output")
+    pod.ensure_network()
     pod.gate_up()
     assert not (pod.gate_dir / "src").exists(), "every run starts from an empty directory"
     clone = pod.runner.find("docker", "exec", "-w", str(pod.gate_dir), pod.gate, "git", "clone")
@@ -820,6 +886,7 @@ def test_the_review_container_is_a_fresh_clone_with_only_what_a_reader_needs(pod
 
     pod.review_fresh()
     assert (pod.review_dir / "src").is_dir() and not any((pod.review_dir / "src").iterdir())
+    pod.ensure_network()
     pod.review_start(mounts, {})
     clone = pod.runner.find("docker", "exec", "-w", str(pod.review_dir), pod.review, "git", "clone")
     assert clone and clone[0][-2:] == [str(pod.repo), pod.review_src]

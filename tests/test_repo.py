@@ -476,6 +476,7 @@ def test_the_containers_copy_of_a_changed_clone_is_not_made(cloned, tmp_path):
     pod = Pod(
         "demo-1", repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
     )
+    pod.ensure_network()
     pod.review_fresh()
     (repo / ".git" / "commondir").write_text("../elsewhere\n")
     with pytest.raises(r.RepoError, match="changed"):

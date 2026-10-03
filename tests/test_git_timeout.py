@@ -513,9 +513,11 @@ class BlockingDocker:
 def a_pod(task, docker, tmp_path):
     from vivibox.pod import Pod
 
-    return Pod(
+    pod = Pod(
         task.id, task.repo, "img", gate_dir=tmp_path / "gate", review_dir=tmp_path / "review", runner=docker
     )
+    pod.ensure_network()  # as up would have: the gate and the review apply the host's rules first
+    return pod
 
 
 @pytest.mark.parametrize("step", ["clone", "submodule"])

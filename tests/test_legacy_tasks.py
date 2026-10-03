@@ -472,6 +472,27 @@ def test_the_tests_reach_no_docker():
     assert Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).read_text() == "inspect vivibox-demo-1-dind\n"
 
 
+def test_a_test_on_real_models_gets_the_real_machine_and_is_no_live_test():
+    """tests/behavioural runs agents in real pods: conftest leaves it this machine's Docker, as
+    it does a test marked docker. It is selected by -m model alone: marked docker as well, a run
+    of the live suites would spend money."""
+    import ast
+    from types import SimpleNamespace
+
+    import conftest
+
+    assert conftest.real_machine(SimpleNamespace(keywords={"model": True, "real_start": True}))
+    assert conftest.real_machine(SimpleNamespace(keywords={"docker": True}))
+    assert not conftest.real_machine(SimpleNamespace(keywords={"real_start": True}))
+    bench = (Path(__file__).parent / "behavioural" / "test_prompts.py").read_text()
+    marks = next(
+        ast.unparse(node.value)
+        for node in ast.parse(bench).body
+        if isinstance(node, ast.Assign) and node.targets[0].id == "pytestmark"
+    )
+    assert "mark.model" in marks and "mark.docker" not in marks
+
+
 def test_a_task_from_before_the_disk_image_is_from_an_earlier_vivibox():
     """4: the task's volumes are directories of a disk image of its own; a task created under 3
     has none, and is not carried over: deleted and created again."""

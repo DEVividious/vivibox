@@ -31,11 +31,13 @@ from pathlib import Path
 import pytest
 from conftest import make_repo
 
-from vivibox import actions, gate, image, keys, plan, prompts, supervisor, ui
-from vivibox.config import load_config
+from vivibox import actions, control, gate, image, keys, opencode, plan, probe, prompts, supervisor, ui
+from vivibox.config import ConfigError, load_config
 from vivibox.pod_egress import helper_missing
+from vivibox.secrets import MOUNT as SECRETS
 from vivibox.states import State
 from vivibox.supervise import make_supervisor
+from vivibox.task import DELETE
 
 pytestmark = [pytest.mark.model, pytest.mark.real_start]
 
@@ -101,43 +103,89 @@ REPORT_ONLY = (
 )
 
 
+# The projects of this run, by the name a scenario gives one: each is the run's own, so its
+# tasks, which live among yours in the tasks directory, are told from yours by their names.
+NAMES: dict[str, str] = {}
+
+
+def missing() -> str:
+    """Why the bench cannot run on this machine, "" when it can: said before anything is made
+    or spent."""
+    if not TASKS_ROOT.is_dir():
+        return "run host/setup.sh first"
+    if not os.access(TASKS_ROOT, os.W_OK):
+        return f"{TASKS_ROOT} is not yours to write"
+    if not probe.docker_running():
+        return "Docker is not running"
+    if why := helper_missing():
+        return why
+    if not (keys.store() / "deepseek").exists():
+        return "no deepseek key in the key store"
+    try:
+        load_config()
+    except ConfigError as e:
+        return f"this machine's config.toml cannot be read: {e}"
+    return ""
+
+
+def leftovers(run: str) -> list[Path]:
+    """The folders of this run's tasks that are still in the tasks directory."""
+    return sorted(p for p in TASKS_ROOT.glob(f"bh{run}-*-*") if (p / ".task").is_dir())
+
+
+def clean_up(run: str) -> None:
+    """Exactly what the run made in the tasks directory: its tasks that a scenario left (their
+    pods, disks, networks and rules with them), and its projects' counters."""
+    for root in leftovers(run):
+        try:
+            task, proj = actions.load(root.name, DELETE)
+            actions.remove(task, proj)
+        except Exception as e:  # said, and the folder still goes when nothing holds it
+            print(f"behavioural run: {root.name} was not removed cleanly: {e}")
+        shutil.rmtree(root, ignore_errors=True)
+    for counter in TASKS_ROOT.glob(f".last-bh{run}-*"):
+        counter.unlink(missing_ok=True)
+
+
 @pytest.fixture(scope="module")
 def bench(tmp_path_factory):
-    if not TASKS_ROOT.is_dir():
-        pytest.skip("run host/setup.sh first")
-    if why := helper_missing():
+    if why := missing():
         pytest.skip(why)
+    machine = load_config()  # the pool and the host's address this machine was set up with
     real_keys = keys.store()
-    if not (real_keys / "deepseek").exists():
-        pytest.skip("no deepseek key in the key store")
     tmp = tmp_path_factory.mktemp("behavioural")
     # Your keys, in a data directory of the run's own: its history and archive never reach yours.
     shutil.copytree(real_keys, tmp / "data" / "vivibox" / "keys")
-    tasks_dir = TASKS_ROOT / f".pytest-behavioural-{secrets.token_hex(4)}"
+    # The root helper attaches a task's disk only in a folder directly under the tasks
+    # directory, so the run's tasks are made there, among yours, under projects of its own name.
+    run = secrets.token_hex(3)
     cfg = tmp / "config"
     (cfg / "projects").mkdir(parents=True)
     (cfg / "config.toml").write_text(
-        f'tasks_dir = "{tasks_dir}"\n[limits]\nmax_rounds = 3\n'
+        f'tasks_dir = "{TASKS_ROOT}"\n[limits]\nmax_rounds = 3\n'
         f'[roles.planner]\nharness = "opencode"\nmodel = "{PLANNER}"\n'
         f'[roles.writer]\nharness = "opencode"\nmodel = "{WRITER}"\n'
         "[notifications]\ndesktop = false\n"
+        f'[network]\npool = "{machine.network_pool}"\nhost_address = "{machine.host_address}"\n'
     )
     mp = pytest.MonkeyPatch()
     mp.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
     mp.setenv("XDG_DATA_HOME", str(tmp / "data"))
     mp.setenv("XDG_CONFIG_HOME", str(tmp / "xdg"))
     mp.delenv("OPENCODE_CONFIG", raising=False)
-    with IMAGE_LOCK.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        image.build()
     try:
-        yield {"tmp": tmp, "cfg": cfg}
+        with IMAGE_LOCK.open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            image.build()
+        yield {"tmp": tmp, "cfg": cfg, "run": run}
     finally:
         print(f"\nbehavioural run: ${spent():.3f} spent, planner {PLANNER}, writer {WRITER}")
         if KEEP:
-            print(f"kept: {tasks_dir} (VIVIBOX_CONFIG_DIR={cfg})")
+            kept = ", ".join(p.name for p in leftovers(run)) or "nothing"
+            print(f"kept in {TASKS_ROOT}: {kept} (VIVIBOX_CONFIG_DIR={cfg})")
         else:
-            shutil.rmtree(tasks_dir, ignore_errors=True)
+            clean_up(run)
+        NAMES.clear()
         mp.undo()
 
 
@@ -149,6 +197,7 @@ def project(
     pass_env: tuple = (),
     prepare: tuple = (),
 ) -> Path:
+    """A throwaway project of the run's own: begin(name, …) starts a task of it."""
     repo = make_repo(bench["tmp"] / name)
     # Bytecode a test run leaves would count as uncommitted files, and the gate builds commits only.
     (repo / ".gitignore").write_text("__pycache__/\ntarget/\n")
@@ -163,13 +212,15 @@ def project(
         text += f"pass_env = {json.dumps(list(pass_env))}\n"
     if prepare:
         text += f"prepare = {json.dumps(list(prepare))}\n"
-    (bench["cfg"] / "projects" / f"{name}.toml").write_text(text)
+    NAMES[name] = f"bh{bench['run']}-{name}"
+    (bench["cfg"] / "projects" / f"{NAMES[name]}.toml").write_text(text)
     return repo
 
 
 def begin(name: str, goal: str, orchestration: str = ""):
-    """A task, its pod up and its supervisor built here, not in a process of its own."""
-    task = actions.create(name, goal, auto=True, orchestration=orchestration)
+    """A task of the project a scenario named, its pod up and its supervisor built here, not in
+    a process of its own."""
+    task = actions.create(NAMES.get(name, name), goal, auto=True, orchestration=orchestration)
     actions.start(task.id, supervise=False)
     task, proj = actions.load(task.id)
     return task, make_supervisor(task, proj, actions.task_pod(task.id), load_config())
@@ -211,6 +262,11 @@ def head(repo: Path) -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
     ).stdout.strip()
+
+
+def host_status(repo: Path) -> str:
+    done = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    return done.stdout
 
 
 def turns(task, state: str) -> int:
@@ -798,34 +854,131 @@ def test_planner_executor_the_self_review_makes_a_fake_test_real_before_the_gate
         finish(task)
 
 
-def test_supervisor_worker_the_planner_reviews_green_work_in_the_pod_and_commits_nothing(bench):
-    """P → W → Gate → (P+R) ⇄ W: past a green gate, the supervisor's blocking note on the fake test
-    goes to the worker; the fix comes back through the gate; the second round accepts. The
-    supervisor changes no commit of the clone's."""
+# What a tool call of the planner's says when it acted on what is true only where the writer
+# works: a Docker that is not there, a repository it does not stand in.
+OLD_ASSUMPTIONS = re.compile(
+    r"docker: (?:command )?not found|the Docker daemon|not a git repository|bad revision|unknown revision",
+    re.IGNORECASE,
+)
+
+
+def host_git(where: Path, *args: str) -> str:
+    """git on the host, reading a repository of the host's own making (the planner's view)."""
+    done = subprocess.run(
+        ["git", "-C", str(where), *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, **control.HOST_GIT},
+    )
+    assert done.returncode == 0, f"git {' '.join(args)} in {where}: {done.stderr}"
+    return done.stdout.strip()
+
+
+def conversation(pod, session: str) -> list[dict]:
+    """The planner's conversation as its own server in the control container holds it: every
+    message with its parts, the tool calls with what they were given and what came back."""
+    get = (
+        f'curl -fsS -m 30 -u "opencode:$(cat {SECRETS}/server-password)" '
+        f"http://127.0.0.1:{opencode.PORT}/session/{session}/message"
+    )
+    done = pod.control_side().exec("bash", "-c", get, check=False)
+    assert done.returncode == 0, f"the control container's server did not give the session: {done.stderr}"
+    return json.loads(done.stdout)
+
+
+def tool_calls(messages: list[dict]) -> list[dict]:
+    return [part for m in messages for part in m["parts"] if part.get("type") == "tool"]
+
+
+def said_by_the_user(messages: list[dict]) -> list[str]:
+    return [
+        "\n".join(part.get("text", "") for part in m["parts"] if part.get("type") == "text")
+        for m in messages
+        if m["info"].get("role") == "user"
+    ]
+
+
+def show(task, calls: list[dict]) -> None:
+    """The planner's turns for whoever reads the run (-s): the task's own log of them, then every
+    tool call with what came back, cut short."""
+    for role in ("planner", "reviewer"):  # its reviews are logged under the role it plays in them
+        log = task.meta / "log" / f"{role}.log"
+        if log.exists():
+            print(f"\n===== {task.id}: the planner's turns as {role} (log/{role}.log) =====")
+            print(log.read_text())
+    print(f"===== {task.id}: the planner's {len(calls)} tool calls, from its server =====")
+    for call in calls:
+        state = call.get("state") or {}
+        back = str(state.get("error") or state.get("output") or "").strip()
+        print(f"--- {call.get('tool')} [{state.get('status')}] {json.dumps(state.get('input'))[:300]}")
+        print("    " + back[:600].replace("\n", "\n    "))
+
+
+def test_supervisor_worker_the_planner_plans_and_reviews_in_its_own_container_and_changes_nothing(bench):
+    """P → W → Gate → (P+R) ⇄ W, with the planner in a control container of its own: it plans
+    from a read-only view of the commits, without a repair turn or a question; its turns are in
+    that container's harness and not the agent's; the conversation it planned in is the one it
+    reviews in, twice; past a green gate its blocking note on the fake test goes to the worker,
+    the fix comes back through the gate, and the second round accepts; it changes nothing in
+    the worker's clone or in its own view; and no tool call of its own ran into a Docker or a
+    repository that is not there, or reached for a symbol tool."""
     project(bench, "supervised", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
     task, sup = begin("supervised", GOAL, "supervisor_worker")
     try:
+        pod = actions.task_pod(task.id)
+        view = pod.control_src
+        base = task.read_state().base_commit
+        assert host_git(view, "rev-parse", "HEAD") == base, "the view, made at the start, on the base"
         st = drive(task, sup, {State.IMPLEMENT})
-        assert st.state is State.IMPLEMENT
+        # (2) Planned from the view: accepted as written, no repair turn, no question.
+        assert st.state is State.IMPLEMENT, f"the plan was not accepted: {st.state} {st.problem}"
+        planning = [e["data"] for e in task.events() if e["type"] == "turn" and e["data"]["state"] == "plan"]
+        assert len(planning) == 1 and not planning[0].get("kind"), f"one planning turn, no repair: {planning}"
+        asked = [p.name for p in (task.meta / "handoff").iterdir() if p.name.startswith("question")]
+        assert not asked, f"the planner asked instead of planning: {asked}"
+        assert (task.meta / gate.ACCEPTED_PLAN).exists()
+        assert host_git(view, "status", "--porcelain") == "", "planning changed nothing in the view"
+        # (1) The planner's turns ran in the control container, not in the agent's.
+        planned_in = task.read_state().sessions["planner"]
+        planner = actions.harness_for("planner", pod, task)
+        assert planner.pod.agent == pod.control == sup.planner.harness.pod.agent
+        running = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", pod.control], capture_output=True, text=True
+        )
+        assert running.stdout.strip() == "running", "the control container is up"
+        assert planner.session_exists(planned_in), "its session is on the control container's server"
+        agents = opencode.OpenCode(pod)
+        assert agents.healthy() and not agents.session_exists(planned_in), "and not on the agent's"
+
         plant_a_fake_test(task)
-        before = head(task.repo)
+        before, clone_status = head(task.repo), host_status(task.repo)
         task.transition(State.VERIFY)
         sup.step()  # the gate: green, the fake test runs and passes
         spend(task)
         assert task.read_state().state is State.REVIEW, f"the gate let it through: {task.read_state()}"
-        sup.step()  # the supervisor, in the pod
+        sup.step()  # the supervisor, in its own container
         spend(task)
         review = (task.meta / "handoff" / "review-1.md").read_text()
         st = task.read_state()
-        assert head(task.repo) == before, "the supervisor committed"
+        # (4) A real review: the fake test is blocked, and the supervisor changed nothing.
+        assert head(task.repo) == before and host_status(task.repo) == clone_status, (
+            "the supervisor changed the worker's clone"
+        )
+        assert host_git(view, "rev-parse", "HEAD") == before == st.verified_commit, (
+            "the view stood on the commit the verification passed"
+        )
+        assert host_git(view, "status", "--porcelain") == "", "the supervisor changed its own view"
         assert st.state is State.IMPLEMENT and "test_calc.py" in review.split("## Not blocking")[0], (
             f"the supervisor did not block the fake test:\n{review}"
         )
         assert [e["data"]["agent"] for e in task.events() if e["type"] == "turn"][-1] == "planner"
+        # (3) Continuity: the review is in the conversation the plan was made in.
+        assert st.sessions["planner"] == planned_in, "the first review, in the session it planned in"
         sup.step()  # the worker fixes it
         spend(task)
         assert task.read_state().state is State.VERIFY, "through the gate before the supervisor again"
         assert "assertTrue(True)" not in (task.repo / "test_calc.py").read_text(), "made real"
+        fixed = head(task.repo)
         sup.step()  # the gate
         spend(task)
         sup.step()  # the supervisor accepts
@@ -833,5 +986,24 @@ def test_supervisor_worker_the_planner_reviews_green_work_in_the_pod_and_commits
         st = task.read_state()
         assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY), f"ended in {st.state}"
         assert st.reviews == 2
+        assert head(task.repo) == fixed, "the supervisor committed"
+        assert host_git(view, "rev-parse", "HEAD") == fixed and host_git(view, "status", "--porcelain") == ""
+        assert st.sessions["planner"] == planned_in, "the second review, in the same session"
+        messages = conversation(pod, planned_in)
+        told = said_by_the_user(messages)
+        assert any("/task/handoff/plan-draft.md" in text for text in told), "the plan was asked for there"
+        reviews = [text for text in told if "/task/review/review.md with three sections" in text]
+        assert len(reviews) >= 2, f"both reviews were asked for in the session of the plan: {len(reviews)}"
+        assert all("in the repository you are in" not in text for text in told)
+        # (5) Nothing in its tool calls came of what is true only where the writer works.
+        calls = tool_calls(messages)
+        show(task, calls)
+        assert calls, "the planner read the project with its tools"
+        for call in calls:
+            name, state = str(call.get("tool", "")), call.get("state") or {}
+            assert "serena" not in name.lower() and "symbol" not in name.lower(), f"a symbol tool: {name}"
+            came_back = f"{state.get('output') or ''}\n{state.get('error') or ''}"
+            found = OLD_ASSUMPTIONS.search(came_back)
+            assert not found, f"{name} {json.dumps(state.get('input'))[:200]} ran into: {found.group(0)}"
     finally:
         finish(task)

@@ -141,9 +141,12 @@ the commit that changed the prompt:
   the gate; no review state.
 - planner and executor: the same fake test, planted before the writer's own review turn; that
   turn makes it real before the gate.
-- supervisor and worker: the same fake test, past a green gate, read by the supervisor in the
-  pod; its blocking note goes to the worker, the fix comes back through the gate, and the second
-  round accepts; the supervisor's turns change no commit.
+- supervisor and worker: the planner plans in its own container, from the read-only view of the
+  commits, without a repair turn or a question; the same fake test, past a green gate, is read
+  by the supervisor there, in the conversation it planned in; its blocking note goes to the
+  worker, the fix comes back through the gate, and the second round accepts; the supervisor's
+  turns change nothing in the worker's clone or in its view, and none of its tool calls runs
+  into a Docker or a repository that is not there. Its turns are printed (`-s`).
 - prepared: a Maven project of three modules, installed once by `prepare`; the task changes two
   of them, one depending on the other. The writer works on the modules it changes, together, and
   builds the whole reactor once at most, as its last check; the evidence stays out of the

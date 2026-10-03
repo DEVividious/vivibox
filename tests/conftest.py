@@ -60,13 +60,20 @@ def own_temporary_folder(monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(TEMPORARY))
 
 
+def real_machine(request) -> bool:
+    """Whether the test runs pods on this machine's Docker: one marked docker, and one marked
+    model, which runs agents in real pods (tests/behavioural) and is selected by -m model alone,
+    never by -m docker, so that no run of the live suites spends money."""
+    return "docker" in request.keywords or "model" in request.keywords
+
+
 @pytest.fixture(autouse=True)
 def twenty_cpus(request, monkeypatch):
     """The CPUs a pod's containers may use default to the machine's, up to six (podspec): the
     suite's figures (6) hold on any machine, and a test of the count sets its own. Not for a
     test marked docker: its pod is made from the machine's real limits, and on a machine with
     fewer CPUs a pinned count would ask Docker for more than it has."""
-    if request.node.get_closest_marker("docker"):
+    if real_machine(request):
         return
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(20)), raising=False)
 
@@ -89,7 +96,7 @@ def no_real_start(request, monkeypatch):
     monkeypatch.setattr(probe, "docker_running", lambda: True)
     # Nor a DNS forwarder to ask about, but for a test that has one of its own to ask (real_hostd,
     # docker): to that one the header says what it would say to a person.
-    if "real_hostd" not in request.keywords and "docker" not in request.keywords:
+    if "real_hostd" not in request.keywords and not real_machine(request):
         monkeypatch.setattr(probe, "forwarder_problem", lambda config: "")
     # vivibox new asks for the agent image before it creates a task; nor is there an image.
     from vivibox import image
@@ -113,7 +120,7 @@ def no_real_hostd(request, monkeypatch, tmp_path_factory):
     """No test starts the host's DNS forwarder but one marked real_hostd or docker: a pod's start
     asks for it (hostd.ensure), and it would outlive the test. Nor takes its locks in your
     runtime folder, nor reads your /sys/class/net: every test has its own."""
-    if "docker" in request.keywords:
+    if real_machine(request):
         return
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("run")))
     # The kernel's interfaces as a folder of the test's own: a fake Docker makes its bridges there.
@@ -143,7 +150,7 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     every call as a daemon with nothing in it would, and a test that asked it to change something
     fails, so a stand-in that stops intercepting (a pod built another way) is caught. A task's pod
     (actions.Pod) answers the same way without asking, as a test's own stand-in may still do."""
-    if "docker" in request.keywords:
+    if real_machine(request):
         yield
         return
     from functools import partial

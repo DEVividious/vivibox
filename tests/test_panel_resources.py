@@ -8,6 +8,7 @@ from test_tui import implementing
 
 from vivibox import limits, panel, panel_resources, ui
 from vivibox.panel import detail
+from vivibox.podspec import Limits
 
 
 def test_the_panel_shows_each_containers_limits_the_pods_budget_and_the_disk(env):
@@ -26,7 +27,7 @@ def test_the_panel_shows_each_containers_limits_the_pods_budget_and_the_disk(env
 
 def test_the_tasks_own_limits_show_in_the_panel(env):
     task = implementing()
-    limits.write_overrides(task.meta, {"agent_memory": "6g"})
+    limits.write_overrides(task.meta, {"agent_memory": "6g"}, Limits())
     shown = detail(task, task.read_state(), 3, running=True)
     assert "- **Agent** · 6 GiB, 2048 processes" in shown and "its own" in shown
 

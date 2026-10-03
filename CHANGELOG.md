@@ -118,6 +118,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `vivibox limits <id> --<role>-memory …` checks the task's own limit against this machine's
+  `[limits]`, not the defaults: a machine with `pod_memory = "16g"` takes `--agent-memory 8g`,
+  and one with `pod_memory = "4g"` refuses `--agent-memory 5g` by name at once, instead of at
+  the task's next start.
 - An OOM kill is told from the counts read as the turn or the verification began, not from
   counts kept with the task: the kernel's counters start again with every container and with
   the machine, so a second kill after `vivibox limits … --agent-memory` and a start was read as

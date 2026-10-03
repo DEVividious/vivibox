@@ -137,14 +137,14 @@ def for_task(machine: Limits, meta: Path) -> Limits:
         raise ValueError(f"{meta / OVERRIDES}: {e}") from None
 
 
-def write_overrides(meta: Path, values: dict) -> dict:
-    """The given keys over the task's own, checked whole over the defaults first (a key past the
-    pod's is refused by name, and nothing is written); the disk's size is the image's, grown with
-    `vivibox disk grow`, not a key here. Returns what the file holds now."""
+def write_overrides(meta: Path, values: dict, machine: Limits) -> dict:
+    """The given keys over the task's own, checked whole over the machine's limits they go over
+    (a key past the machine's pod is refused by name, and nothing is written); the disk's size
+    is the image's, grown with `vivibox disk grow`, not a key here. Returns what the file holds."""
     if "disk" in values:
         raise ValueError("limits.disk is the disk's size: vivibox disk grow <id> <size> changes it")
     found = {**read_overrides(meta), **values}
-    Limits().with_values(found)
+    machine.with_values(found)
     path = meta / OVERRIDES
     part = path.with_name(path.name + ".part")
     part.write_text(json.dumps(found) + "\n")

@@ -8,6 +8,7 @@ import argparse
 import sys
 
 from . import actions, limits, panel_resources
+from .config import load_config
 from .pod import PodError
 from .podspec import DISK_LARGEST, DISK_SMALLEST, LIMIT_KEYS, parse_size, size_option
 
@@ -21,7 +22,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
     given = {key: value for key in OPTIONS if (value := getattr(args, key)) is not None}
     if given:
         try:
-            limits.write_overrides(task.meta, given)
+            limits.write_overrides(task.meta, given, load_config().limits)
         except ValueError as e:
             print(f"vivibox: {e}", file=sys.stderr)
             return 1

@@ -255,8 +255,8 @@ def test_a_tasks_own_limits_come_over_the_machines(tmp_path):
     meta = tmp_path / ".task"
     meta.mkdir()
     assert limits.for_task(Limits(), meta) == Limits(), "no file: the machine's"
-    limits.write_overrides(meta, {"agent_memory": "6g"})
-    limits.write_overrides(meta, {"gate_pids": 100})
+    limits.write_overrides(meta, {"agent_memory": "6g"}, Limits())
+    limits.write_overrides(meta, {"gate_pids": 100}, Limits())
     found = limits.for_task(Limits(), meta)
     assert found.memory_of("agent") == 6 * 2**30 and found.pids_of("gate") == 100
     assert limits.read_overrides(meta) == {"agent_memory": "6g", "gate_pids": 100}
@@ -267,7 +267,19 @@ def test_a_tasks_own_limits_come_over_the_machines(tmp_path):
     with pytest.raises(ValueError, match="limits.json"):
         limits.for_task(Limits(), meta)
     with pytest.raises(ValueError, match="limits.disk"):
-        limits.write_overrides(meta, {"disk": "40g"})  # the image's size is the disk's: vivibox disk grow
+        limits.write_overrides(meta, {"disk": "40g"}, Limits())  # the image's size: vivibox disk grow
+
+
+def test_overrides_are_checked_against_the_machines_limits_they_go_over(tmp_path):
+    meta = tmp_path / ".task"
+    meta.mkdir()
+    strong = Limits().with_values({"pod_memory": "16g"})
+    assert limits.write_overrides(meta, {"agent_memory": "8g"}, strong) == {"agent_memory": "8g"}
+    assert limits.for_task(strong, meta).memory_of("agent") == 8 * 2**30
+    small = Limits().with_values({"pod_memory": "4g", "agent_memory": "4g"})
+    with pytest.raises(ValueError, match="limits.agent_memory.*4 GiB"):
+        limits.write_overrides(meta, {"agent_memory": "5g"}, small)
+    assert limits.read_overrides(meta) == {"agent_memory": "8g"}, "nothing written"
 
 
 def test_the_command_that_raises_a_limit_is_read_from_the_problem():

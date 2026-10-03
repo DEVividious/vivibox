@@ -121,3 +121,29 @@ def test_a_grow_the_helper_refused_is_said_in_its_words(task, capsys, monkeypatc
     assert main(["disk", "grow", "demo-1", "40g"]) == 1
     err = capsys.readouterr().err
     assert "the task's disk could not be grown" in err and "a disk only grows" in err
+
+
+def with_machine_limits(env, text: str) -> None:
+    """config.toml's [limits] on this machine."""
+    path = env / "config" / "config.toml"
+    path.write_text(path.read_text() + "[limits]\n" + text)
+
+
+def test_a_tasks_limit_is_checked_against_this_machines_pod_not_the_defaults(env, task, capsys):
+    """The reviewer's case A: a strong machine, pod_memory 16g; raising the agent to 8g for one
+    task is what the setting is for."""
+    with_machine_limits(env, 'pod_memory = "16g"\n')
+    assert main(["limits", "demo-1", "--agent-memory", "8g"]) == 0
+    assert json.loads((task.meta / "limits.json").read_text()) == {"agent_memory": "8g"}
+    assert actions.task_pod("demo-1").limits.memory_of("agent") == 8 * 2**30
+
+
+def test_a_tasks_limit_past_this_machines_pod_is_refused_though_the_default_would_take_it(env, task, capsys):
+    """The reviewer's case B: pod_memory 4g; 5g for the agent would be written against the
+    defaults' 6 GiB and refused at the task's start instead, with the task stuck on its file."""
+    with_machine_limits(env, 'pod_memory = "4g"\nagent_memory = "4g"\n')
+    assert main(["limits", "demo-1", "--agent-memory", "5g"]) == 1
+    err = capsys.readouterr().err
+    assert "limits.agent_memory" in err and "4 GiB" in err
+    assert not (task.meta / "limits.json").exists()
+    assert actions.task_pod("demo-1").limits.memory_of("agent") == 4 * 2**30, "the task starts as before"

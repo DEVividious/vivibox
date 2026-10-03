@@ -214,6 +214,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- `host/vivibox-host` 2 attaches, detaches and grows a task's disk: `attach-disk <id>
+  {"dir", "size"}` makes a sparse XFS image `<dir>/disk.img`, formatted once and never over
+  a file that holds no filesystem, on a loop device mounted `discard,nosuid,nodev` at
+  `<dir>/disk` with the directories the pod binds, owned by the task's owner; `detach-disk`
+  unmounts and frees the device and never deletes the image; `grow-disk` enlarges the image, the
+  device and the filesystem and refuses to shrink. `dir` is one level under the tasks directory
+  of `/etc/vivibox/host.json` (root's) or `/srv/vivibox`, the task's own, with no symbolic link
+  in its path; a size is `1g` to `2t`. `--dry-run` prints the steps. `host/setup.sh` installs
+  `xfsprogs` and writes that file; `host/uninstall.sh` unmounts every task disk under the tasks
+  directory before anything else goes, and removes the file.
 - `host/vivibox-host`, the root helper in place of `vivibox-netns`: a closed list of
   operations (`prepare-engine host`, `apply-policy`), every value of its JSON checked before
   anything runs as root, and the host's nft rules written by itself; `--dry-run` prints them.

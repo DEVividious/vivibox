@@ -589,3 +589,46 @@ def test_setup_check_asks_for_the_interface_while_the_helper_is_not_ready(tmp_pa
     assert "  missing  host address for the pods 203.0.113.1/32 on vivibox0" in result.stdout, result.stdout
     assert "  info     host address" not in result.stdout
     assert result.returncode == 1 and "prepare-engine" not in calls, "--check changes nothing"
+
+
+def test_setup_installs_xfsprogs_for_the_tasks_disks():
+    """A task's disk is an XFS image the root helper makes with mkfs.xfs and grows with
+    xfs_growfs: setup names the package among the ones it installs, so --check says it is missing."""
+    text = (HOST / "setup.sh").read_text()
+    packages = re.search(r"^PACKAGES=\((.*)\)$", text, re.MULTILINE).group(1).split()
+    assert "xfsprogs" in packages
+
+
+def test_the_tasks_directory_for_the_helper_is_recorded_in_a_file_of_roots(tmp_path):
+    """The helper attaches a disk one level under the tasks directory of /etc/vivibox/host.json
+    and nowhere else, so the file has to be root's alone: one that is yours, or missing, or says
+    another directory, is a step for setup."""
+    mine = tmp_path / "host.json"
+    env = {"VIVIBOX_TASKS_DIR": "/srv/tasks", "HOST_FILE": str(mine)}
+    assert setup_fn("host_file_content", env).stdout == '{"tasks_dir": "/srv/tasks"}\n'
+    assert setup_fn("host_file_ok", env).returncode == 1, "missing"
+    mine.write_text('{"tasks_dir": "/srv/tasks"}\n')
+    assert setup_fn("host_file_ok", env).returncode == 1, "the right words, but not root's"
+    assert "do_host_file" in (HOST / "setup.sh").read_text()
+
+
+def test_uninstall_finds_the_tasks_disks_still_mounted_under_the_tasks_directory(tmp_path):
+    """Only a task's own disk, one level under the tasks directory, is one to unmount: not the
+    tasks directory's own bind mount, nor a mount deeper in a task or elsewhere."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "findmnt").write_text(
+        "#!/bin/sh\n"
+        "echo '/'\n"
+        "echo '/srv/vivibox'\n"
+        "echo '/srv/vivibox/shop-1/disk'\n"
+        "echo '/srv/vivibox/shop-12/disk'\n"
+        "echo '/srv/vivibox/shop-2/disk/docker'\n"
+        "echo '/srv/vivibox-other/shop-3/disk'\n"
+        "echo '/mnt/shop-4/disk'\n"
+    )
+    (fake / "findmnt").chmod(0o755)
+    script = f'source "{HOST / "uninstall.sh"}"; task_disks'
+    env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "VIVIBOX_TASKS_DIR": "/srv/vivibox"}
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+    assert result.stdout.split() == ["/srv/vivibox/shop-1/disk", "/srv/vivibox/shop-12/disk"], result.stderr

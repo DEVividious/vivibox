@@ -9,10 +9,13 @@
 # It first checks the kernel can run Sysbox, and stops if it cannot.
 #
 # What it sets up:
-#   - packages: git, tmux (agent sessions), jq, libnotify-bin (desktop notifications), curl;
+#   - packages: git, tmux (agent sessions), jq, libnotify-bin (desktop notifications), curl,
+#     xfsprogs (each task's disk is an XFS image);
 #   - Docker networks moved off the ranges Docker uses inside Sysbox containers (restarts Docker);
 #   - Sysbox CE, the runtime for the per-task Docker sidecar;
-#   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev;
+#   - the tasks directory, outside $HOME, yours only (750), mounted nosuid,nodev, and its path
+#     recorded for the root helper in /etc/vivibox/host.json (root's), the only place the helper
+#     takes it from when it attaches a task's disk;
 #   - the root helper (vivibox-host) and a sudo rule that allows running only that helper, in
 #     place of the old firewall helper (vivibox-netns) and its rule;
 #   - the host's address for the pods (network.host_address) on an interface of its own,
@@ -29,7 +32,10 @@ HELPER=/usr/local/libexec/vivibox-host
 OLD_HELPER=/usr/local/libexec/vivibox-netns
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
-PACKAGES=(git tmux jq libnotify-bin curl)
+PACKAGES=(git tmux jq libnotify-bin curl xfsprogs)
+# Where the root helper reads the tasks directory from, root's: a task's disk is attached one
+# level under it and nowhere else. Keep in step with ROOT_FILE in host/vivibox-host.
+HOST_FILE=/etc/vivibox/host.json
 # Ranges for the host daemon's own networks: the bridge first, then the pool it cuts networks
 # from. The first two that nothing on this machine routes (a VPN, a LAN, a Docker network) are
 # taken; VIVIBOX_DOCKER_RANGES="<bridge> <pool>" chooses them instead. Not 172.17.0.0/16: Docker
@@ -139,6 +145,16 @@ required_tools() {
   ((${#missing[@]} == 0)) && return 0
   echo "${missing[*]} not found: vivibox's root helper needs them; install them: sudo apt-get install nftables python3"
   return 1
+}
+
+# What the host's file says, and whether the installed one says it and is root's alone.
+host_file_content() {
+  printf '{"tasks_dir": "%s"}\n' "$TASKS_DIR"
+}
+host_file_ok() {
+  [[ -f "$HOST_FILE" ]] || return 1
+  [[ "$(stat -c '%U %a' "$HOST_FILE")" == "root 644" ]] || return 1
+  [[ "$(cat "$HOST_FILE")" == "$(host_file_content)" ]]
 }
 
 # The task layout this checkout runs (TASK_SCHEMA_VERSION in vivibox/task.py).
@@ -415,6 +431,12 @@ else
   need "$TASKS_DIR as a nosuid,nodev bind mount in /etc/fstab" do_mount
 fi
 
+if host_file_ok; then
+  ok "tasks directory recorded for the root helper in $HOST_FILE"
+else
+  need "tasks directory $TASKS_DIR recorded for the root helper in $HOST_FILE (root's, 644)" do_host_file
+fi
+
 helper_state=$(copy_state "$HERE/vivibox-host" "$HELPER")
 helper_ready=no
 if [[ $helper_state == same && "$(stat -c '%U %a' "$HELPER")" == "root 755" ]]; then
@@ -561,6 +583,15 @@ do_mount() {
 do_helper() {
   sudo install -d -o root -g root -m 755 "$(dirname "$HELPER")"
   sudo install -o root -g root -m 755 "$HERE/vivibox-host" "$HELPER"
+}
+
+do_host_file() {
+  local tmp
+  tmp=$(mktemp)
+  host_file_content >"$tmp"
+  sudo install -d -o root -g root -m 755 "$(dirname "$HOST_FILE")"
+  sudo install -o root -g root -m 644 "$tmp" "$HOST_FILE"
+  rm -f "$tmp"
 }
 
 do_old_helper() {

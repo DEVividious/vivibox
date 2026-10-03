@@ -564,3 +564,225 @@ def test_the_pool_vivibox_takes_is_the_pool_the_helper_takes(tmp_path, bits):
     except helper.Refused:
         helper_takes = False
     assert vivibox_takes is helper_takes, pool
+
+
+# --- a task's disk --------------------------------------------------------------------------------
+
+
+class Disks(Host):
+    """The machine's loop devices and mounts as the helper asks about them: findmnt, blkid and
+    losetup -j answer from what the test set; the commands that change something are recorded."""
+
+    def __init__(self, mounted=(), loops=None, fstype=None, grows_fail=False):
+        super().__init__()
+        self.mounted = set(mounted)
+        self.loops = dict(loops or {})
+        self.fstype = dict(fstype or {})
+        self.grows_fail = grows_fail
+
+    def __call__(self, cmd, input=None):
+        self.calls.append(list(cmd))
+        self.inputs.append(input)
+        out, rc, err = "", 0, ""
+        if cmd[:1] == ["findmnt"]:
+            target = cmd[-1]
+            out, rc = ("/dev/loop7\n", 0) if target in self.mounted else ("", 1)
+        elif cmd[:1] == ["blkid"]:
+            out, rc = (self.fstype[cmd[-1]] + "\n", 0) if self.fstype.get(cmd[-1]) else ("", 2)
+        elif cmd[:2] == ["losetup", "-j"]:
+            out = f"{self.loops[cmd[2]]}\n" if cmd[2] in self.loops else ""
+        elif cmd[:2] == ["losetup", "--find"]:
+            out = "/dev/loop7\n"
+            self.loops[cmd[-1]] = "/dev/loop7"
+        elif cmd[:1] == ["xfs_growfs"] and self.grows_fail:
+            rc, err = 1, "xfs_growfs: /srv/vivibox/shop-1/disk is not a mounted XFS filesystem"
+        return subprocess.CompletedProcess(cmd, rc, out, err)
+
+    def privileged(self):
+        """Every call that changes something: not the questions (findmnt, blkid, losetup -j)."""
+        asks = (["findmnt"], ["blkid"], ["losetup", "-j"])
+        return [c for c in self.calls if not any(c[: len(a)] == a for a in asks)]
+
+
+@pytest.fixture
+def tasks(tmp_path, monkeypatch):
+    """A tasks directory the helper takes as the root, with the task shop-1 in it."""
+    monkeypatch.setattr(helper, "tasks_root", lambda: str(tmp_path))
+    (tmp_path / "shop-1").mkdir()
+    return tmp_path
+
+
+def disk(task_id="shop-1", tasks=None, **changes):
+    spec = {"dir": str(tasks / task_id), "size": "20g"}
+    spec.update(changes)
+    return json.dumps(spec)
+
+
+def test_attach_makes_a_sparse_xfs_image_mounts_it_and_makes_the_pods_directories(tasks, capsys):
+    host = Disks()
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 0, capsys.readouterr().err
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    assert host.privileged() == [
+        ["truncate", "-s", str(20 * 2**30), img],
+        ["mkfs.xfs", "-q", img],
+        ["losetup", "--find", "--show", img],
+        ["mount", "-o", "discard,nosuid,nodev", "/dev/loop7", mnt],
+    ], "sparse (truncate, never a full write), a filesystem once, mounted by its loop device"
+    for name in ("docker", "config", "installed", "gate-installed", "gate-build-cache", "gate", "review"):
+        assert (tasks / "shop-1" / "disk" / name).is_dir(), name
+    assert (tasks / "shop-1" / "disk" / "docker").stat().st_uid == (tasks / "shop-1").stat().st_uid
+
+
+def test_attach_of_an_existing_image_only_mounts_it(tasks):
+    img = tasks / "shop-1" / "disk.img"
+    img.write_bytes(b"")
+    host = Disks(fstype={str(img): "xfs"})
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 0
+    assert [c[0] for c in host.privileged()] == ["losetup", "mount"], "no truncate, no mkfs: the data stays"
+
+
+def test_attach_refuses_to_format_an_image_without_a_filesystem(tasks, capsys):
+    """An image left by a failed mkfs, or one that is not an image: never formatted over, said."""
+    img = tasks / "shop-1" / "disk.img"
+    img.write_bytes(b"")
+    host = Disks()
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 1 and host.privileged() == []
+    assert "no XFS filesystem" in capsys.readouterr().err
+
+
+def test_attach_of_a_mounted_disk_does_nothing_and_says_so(tasks, capsys):
+    mnt = tasks / "shop-1" / "disk"
+    host = Disks(mounted={str(mnt)})
+    code, _ = call("attach-disk", "shop-1", disk(tasks=tasks), host=host)
+    assert code == 0 and host.privileged() == []
+    assert "already attached" in capsys.readouterr().out
+
+
+def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(tasks):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    (tasks / "shop-1" / "disk.img").write_bytes(b"")
+    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
+    code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
+    assert code == 0
+    assert host.privileged() == [["umount", mnt], ["losetup", "-d", "/dev/loop3"]]
+    assert (tasks / "shop-1" / "disk.img").exists(), "the caller deletes it, after a detach that worked"
+
+
+def test_detach_of_a_detached_disk_does_nothing_and_says_so(tasks, capsys):
+    host = Disks()
+    code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
+    assert code == 0 and host.privileged() == []
+    assert "already detached" in capsys.readouterr().out
+
+
+def test_grow_enlarges_the_image_the_loop_device_and_the_filesystem(tasks):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    with open(img, "wb") as f:
+        f.truncate(20 * 2**30)
+    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
+    code, _ = call("grow-disk", "shop-1", disk(tasks=tasks, size="40g"), host=host)
+    assert code == 0
+    assert host.privileged() == [
+        ["truncate", "-s", str(40 * 2**30), img],
+        ["losetup", "-c", "/dev/loop3"],
+        ["xfs_growfs", mnt],
+    ]
+
+
+@pytest.mark.parametrize("size", ["20g", "10g"])
+def test_grow_refuses_to_shrink_or_stay(tasks, size, capsys):
+    img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
+    with open(img, "wb") as f:
+        f.truncate(20 * 2**30)
+    host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
+    code, _ = call("grow-disk", "shop-1", disk(tasks=tasks, size=size), host=host)
+    assert code == 1 and host.privileged() == []
+    assert "only grows" in capsys.readouterr().err
+
+
+def test_grow_refuses_a_disk_that_is_not_attached(tasks, capsys):
+    img = str(tasks / "shop-1" / "disk.img")
+    with open(img, "wb") as f:
+        f.truncate(20 * 2**30)
+    code, host = call("grow-disk", "shop-1", disk(tasks=tasks, size="40g"), host=Disks())
+    assert code == 1 and host.privileged() == []
+    assert "not attached" in capsys.readouterr().err
+
+
+def bad_disks(tasks):
+    yield "a size below a gigabyte", disk(tasks=tasks, size="500m")
+    yield "a size past two terabytes", disk(tasks=tasks, size="3t")
+    yield "a size without a unit", disk(tasks=tasks, size="20")
+    yield "a size that is a number", json.dumps({"dir": str(tasks / "shop-1"), "size": 20})
+    yield "a size with a fraction", disk(tasks=tasks, size="1.5g")
+    yield "a dir of another task", disk(tasks=tasks, dir=str(tasks / "shop-2"))
+    yield "a dir outside the root", disk(tasks=tasks, dir="/tmp/shop-1")
+    yield "a dir two levels deep", disk(tasks=tasks, dir=str(tasks / "nested" / "shop-1"))
+    yield "a relative dir", disk(tasks=tasks, dir="shop-1")
+    yield "a dir with a trailing slash", disk(tasks=tasks, dir=str(tasks / "shop-1") + "/")
+    yield "a dir with a dot component", disk(tasks=tasks, dir=f"{tasks}/./shop-1")
+    yield "an extra field", disk(tasks=tasks, extra=1)
+    yield "a missing size", json.dumps({"dir": str(tasks / "shop-1")})
+
+
+def test_a_malformed_disk_request_is_refused_before_anything_runs(tasks, capsys):
+    (tasks / "nested" / "shop-1").mkdir(parents=True)
+    (tasks / "shop-2").mkdir()
+    for why, given in bad_disks(tasks):
+        host = Disks()
+        code, _ = call("attach-disk", "shop-1", given, host=host)
+        assert code == 1, why
+        assert host.calls == [], f"{why}: refused before any command"
+        assert capsys.readouterr().err.startswith("vivibox-host: "), why
+
+
+def test_a_dir_with_a_symlink_in_its_path_is_refused(tmp_path, monkeypatch, capsys):
+    """A link anywhere in the path could point the mount, or the chown of the pod's directories,
+    at something else of the person's; every component has to be a plain directory."""
+    real = tmp_path / "real"
+    (real / "shop-1").mkdir(parents=True)
+    linked = tmp_path / "tasks"
+    linked.symlink_to(real)
+    monkeypatch.setattr(helper, "tasks_root", lambda: str(linked))
+    host = Disks()
+    code, _ = call("attach-disk", "shop-1", disk(tasks=linked), host=host)
+    assert code == 1 and host.calls == []
+    assert "symbolic link" in capsys.readouterr().err
+    (real / "shop-2").symlink_to(real / "shop-1")
+    monkeypatch.setattr(helper, "tasks_root", lambda: str(real))
+    code, _ = call("attach-disk", "shop-2", disk("shop-2", tasks=real), host=host)
+    assert code == 1 and host.calls == []
+
+
+def test_a_task_id_outside_the_pattern_is_refused_for_a_disk_too(tasks):
+    for task_id in ("Shop-1", "shop", "../shop-1", "shop-1;id"):
+        code, host = call("attach-disk", task_id, disk(tasks=tasks), host=Disks())
+        assert code == 1 and host.calls == [], task_id
+
+
+def test_the_tasks_root_comes_from_a_root_owned_file_or_the_default(tmp_path):
+    """Where a task's dir may be is decided by the host's file, never by the request: a file
+    that is not root's (or that others may write) is refused, and without one the default holds."""
+    assert helper.tasks_root(str(tmp_path / "missing.json")) == "/srv/vivibox"
+    mine = tmp_path / "host.json"
+    mine.write_text('{"tasks_dir": "/data/tasks"}')
+    with pytest.raises(helper.Refused, match="root"):
+        helper.tasks_root(str(mine))
+
+
+def test_the_disk_dry_run_prints_the_steps_and_runs_nothing(tasks, capsys):
+    host = Disks()
+    code = helper.main(["--dry-run", "attach-disk", "shop-1", disk(tasks=tasks)], run=host, euid=1000)
+    assert code == 0 and host.privileged() == []
+    out = capsys.readouterr().out
+    assert "# would run: truncate -s" in out and "# would run: mkfs.xfs" in out and "mount -o discard" in out
+    assert not (tasks / "shop-1" / "disk").exists(), "nothing made"
+
+
+def test_the_disks_size_range_is_the_one_config_takes():
+    from vivibox.podspec import DISK_LARGEST, DISK_SMALLEST
+
+    assert (helper.DISK_SMALLEST, helper.DISK_LARGEST) == (DISK_SMALLEST, DISK_LARGEST)

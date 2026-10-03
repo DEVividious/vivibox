@@ -8,7 +8,10 @@
 #
 # What it removes:
 #   - every task's pod: containers, networks, volumes (the shared caches too) and the agent image;
-#   - the vivibox command (uv tool), the sudo rule and the root helper (the old firewall helper too);
+#   - every task's disk still mounted under the tasks directory (its loop device freed; the
+#     image stays with the task);
+#   - the vivibox command (uv tool), the sudo rule, the root helper (the old firewall helper too)
+#     and the tasks directory recorded for it in /etc/vivibox/host.json;
 #   - the pods' egress rules (nft table inet vivibox), the host's address for the pods (vivibox0)
 #     and the DNS forwarder (vivibox hostd);
 #   - the vivibox skill for Claude Code and Codex, where vivibox installed it;
@@ -23,6 +26,7 @@ set -euo pipefail
 TASKS_DIR=${VIVIBOX_TASKS_DIR:-/srv/vivibox}
 HELPER=/usr/local/libexec/vivibox-host
 OLD_HELPER=/usr/local/libexec/vivibox-netns
+HOST_FILE=/etc/vivibox/host.json
 HOSTD_PID=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/vivibox/hostd.pid
 SUDOERS=/etc/sudoers.d/vivibox
 DOCKER_CFG=/etc/docker/daemon.json
@@ -61,6 +65,13 @@ hostd_pid() {
   return 0
 }
 
+# The tasks' disks still mounted, one level under the tasks directory, a mount point a line.
+task_disks() {
+  findmnt -rn -o TARGET 2>/dev/null | awk -v root="$TASKS_DIR" '
+    index($0, root "/") == 1 { rest = substr($0, length(root) + 2); if (rest ~ /^[^\/]+\/disk$/) print }'
+  return 0
+}
+
 # Sourced by the tests for the functions above.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -93,6 +104,13 @@ else
   absent "pods in Docker"
 fi
 
+mapfile -t DISKS < <(task_disks)
+if ((${#DISKS[@]})); then
+  found "${#DISKS[@]} task disks mounted under $TASKS_DIR (unmounted, their images kept with the tasks)" do_disks
+else
+  absent "task disks mounted under $TASKS_DIR"
+fi
+
 # --- the command, the sudo rule, the helper -----------------------------------------------------
 
 UV=$(command -v uv || echo "$BIN/uv")
@@ -110,6 +128,8 @@ if [[ -e "$SUDOERS" ]]; then found "sudo rule $SUDOERS" do_sudoers; else absent 
 if [[ -e "$HELPER" ]]; then found "root helper $HELPER" do_helper; else absent "root helper $HELPER"; fi
 
 if [[ -e "$OLD_HELPER" ]]; then found "old firewall helper $OLD_HELPER" do_old_helper; fi
+
+if [[ -e "$HOST_FILE" ]]; then found "tasks directory recorded for the helper in $HOST_FILE" do_host_file; else absent "$HOST_FILE"; fi
 
 # The rules' table cannot be listed without root; it is there where vivibox0 or the helper is.
 if ip -o link show vivibox0 >/dev/null 2>&1 || [[ -e "$HELPER" || -e "$HOSTD_PID" ]]; then
@@ -177,6 +197,17 @@ do_pods() {
   return 0
 }
 
+# Each disk: unmounted, and the loop device its image is on freed; the image stays in the task.
+do_disks() {
+  local mnt dev
+  for mnt in "${DISKS[@]}"; do
+    sudo umount "$mnt" || die "$mnt is busy; stop what uses it (a pod) and run again"
+    dev=$(losetup -j "${mnt%/disk}/disk.img" -O NAME -n 2>/dev/null | head -1)
+    [[ -n $dev ]] && sudo losetup -d "$dev"
+  done
+  return 0
+}
+
 do_vivibox() { "$UV" tool uninstall vivibox; }
 
 do_skill() { rm -rf "${SKILLS[@]}"; }
@@ -186,6 +217,11 @@ do_sudoers() { sudo rm -f "$SUDOERS"; }
 do_helper() { sudo rm -f "$HELPER"; }
 
 do_old_helper() { sudo rm -f "$OLD_HELPER"; }
+
+do_host_file() {
+  sudo rm -f "$HOST_FILE"
+  sudo rmdir "$(dirname "$HOST_FILE")" 2>/dev/null || true
+}
 
 do_engine() {
   # The forwarder (vivibox hostd) first: it listens on vivibox0's address.

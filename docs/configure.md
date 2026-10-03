@@ -92,6 +92,47 @@ reviewer's `mode`. `max_reviews` and `mode` are ignored; `max_iterations` suppli
 only when the latter is absent. The supervisor reports these old fields once, in its window
 and in the task's timeline.
 
+## Limits on the pod
+
+Every container of a task's pod runs with limits of its own, under one cgroup slice of the task's
+(`vivibox-<id>.slice`, a dash in the id written `_`): memory, with swap bounded to the same figure,
+a number of processes, and the pod's CPUs; the kernel's OOM killer is never turned off. What the
+task writes outside its clone (its Docker's data, the agent's home, what a build installs, the
+verification's and the reviewer's clones) is on a disk image of the task's own, whose size bounds
+it; the clone stays beside the image. `[limits]` in `config.toml` sets them per machine, sizes as
+you write them:
+
+```toml
+[limits]
+agent_memory = "4g"      # the agent's container; agent_pids = 2048
+gate_memory = "4g"       # the verification's; gate_pids = 4096
+sidecar_memory = "2g"    # the pod's own Docker; sidecar_pids = 4096
+review_memory = "1536m"  # the reviewer's; review_pids = 1024
+control_memory = "1536m" # the planner's control container; control_pids = 1024
+pod_memory = "6g"        # the pod's budget: a container's limit past it is refused by name
+pod_cpus = 6             # what each container may use
+pod_pids = 8192
+disk = "20g"             # a new task's disk, from 1g to 2t
+```
+
+What is enforced is each container's memory, its processes and its CPUs, and the disk's size.
+`pod_memory` and `pod_pids` are a budget the containers' limits are checked against and the
+panel shows as the task's, not a limit on the slice itself; a container of the pod's Docker runs
+under the sidecar's limits. A scratch tmpfs (`/tmp`, the verification's and the reviewer's
+`/config`) is half of its container's memory.
+
+The task's panel has a Resources section with each container's limits and, while the pod runs,
+what it uses; `vivibox limits <id>` prints the same. One task can have more than the machine's
+defaults: `vivibox limits <id> --agent-memory 6g` (one option per key above but `disk`) writes
+the task's own into `.task/limits.json`, over `config.toml`'s, and they apply at the task's next
+start, which makes its containers with the new flags. `vivibox disk grow <id> 40g` makes the
+task's disk larger at once; a disk never shrinks.
+
+When the kernel kills a process of the pod for memory, or the disk is full, the task stops for
+you after the turn or the verification it happened in, with `out of memory` or `out of disk
+space` on its row: which container and its limit, the kernel's words, and the command that
+raises it, then `vivibox start <id>`; no fix round is spent on it.
+
 ## Project setup
 
 Once per repository you want agents to work on: press `i` in the view, and browse to its folder

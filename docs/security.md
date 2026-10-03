@@ -20,6 +20,12 @@ on your machine until you have approved it.
   characters in added lines, and that every test file added or changed is named in the agent's
   `red.md`. Tests the work removed are counted for you at review. When a verification fails, the task's details show the lines of the
   build log that say why, and where the whole log is.
+- **A task's use of your machine is bounded.** Every container of its pod runs with a memory
+  limit (swap bounded to the same figure), a process limit and the pod's CPUs, under one cgroup
+  slice of the task's that counts what the pod's own Docker runs as well; what the task writes
+  outside its clone is on a disk image of its own, whose size bounds it, so a full disk is the
+  task's and not your machine's. The pod's total memory and processes are a budget the
+  containers' limits are checked against, not a limit of the slice itself.
 - **Keys stay out of images, volumes and `docker inspect`.** The agent pod gets the provider keys needed by its configured roles and enabled MCP secrets,
   mounted as read-only files on tmpfs. The separate review container gets the reviewer's provider
   key and enabled MCP secrets. These files are readable by the agents that use them.
@@ -33,6 +39,13 @@ clone, its home and `/tmp`, and `/tmp` is a tmpfs of half the container's memory
 default), so what an agent leaves there cannot take the host's memory. Your replies to the agent are mounted read-only from the task's own folder,
 where they are read (`/task/handoff/comments.md`), in the agent's container and the reviewer's, so the agent
 cannot change what you told it. The Docker socket lives in a volume the two share and never on your host.
+Each container of the pod is bounded by its cgroup: memory with swap bounded to the same figure
+(`--memory`, `--memory-swap`), processes (`--pids-limit`) and the pod's CPUs, all under the task's
+slice (`--cgroup-parent`), never with the OOM killer turned off; `[limits]` in `config.toml` and
+`vivibox limits` set them. The pod's Docker data, the agent's home, what a build installs and the
+verification's and the reviewer's clones are directories of a disk image of the task's (an XFS file
+in the task's folder, attached by the root helper on a loop device mounted `nosuid,nodev` with
+`discard`), whose size is the most the task writes there; the clone is outside it.
 Testcontainers in the pod runs Ryuk 0.12.0, whatever the project's library would pick
 (`TESTCONTAINERS_RYUK_CONTAINER_IMAGE`): the Ryuk of older libraries prunes images when it cleans up
 after a test, and the pod's daemon then loses the image another test is still pulling, at random. A

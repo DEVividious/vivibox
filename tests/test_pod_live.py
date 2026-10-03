@@ -11,6 +11,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -628,3 +629,123 @@ def test_a_link_the_agent_left_at_the_mount_point_is_never_mounted_through(repli
     assert in_agent(pod, "test -e /task/handoff/decoy.md").returncode != 0, "nothing mounted elsewhere"
     assert "Keep the tests." in in_agent(pod, "cat /task/handoff/comments.md").stdout
     assert in_agent(pod, "rm -f /task/handoff/comments.md").returncode != 0
+
+
+# --- limits: T20, T21, D8 -----------------------------------------------------------------------
+
+
+def scope_file(pod, role: str, name: str) -> Path:
+    """A file of the container's cgroup scope under the task's slice, as the kernel has it."""
+    from vivibox import limits
+
+    return limits.slice_path(pod.task_id) / f"docker-{pod.scopes()[role]}.scope" / name
+
+
+def test_a_fork_bomb_in_the_agent_stops_at_the_pids_limit_and_the_pod_lives(env):
+    """T20: the agent's container may hold 2048 processes; a bomb of forks past them fails
+    ("can't fork"), the daemon in the sidecar answers all along, and the container answers again
+    once the children are gone."""
+    pod = env["pod"]
+    assert scope_file(pod, "agent", "pids.max").read_text().strip() == str(pod.limits.pids_of("agent"))
+    assert agent(env, "cat /sys/fs/cgroup/pids.max").stdout.strip() == str(pod.limits.pids_of("agent"))
+    bomb = (
+        "import os, time\n"
+        "fails = 0\n"
+        "for i in range(3000):\n"
+        "    try:\n"
+        "        pid = os.fork()\n"
+        "    except BlockingIOError:\n"
+        "        fails += 1\n"
+        "        continue\n"
+        "    if pid == 0:\n"
+        "        time.sleep(8)\n"
+        "        os._exit(0)\n"
+        "print(fails)\n"
+    )
+    done = pod.exec("python3", "-c", bomb, check=False)
+    assert done.returncode == 0 and int(done.stdout.strip()) > 0, f"forks past the limit must fail: {done}"
+    assert pod.sidecar_docker("info", check=False).returncode == 0, "the daemon is not the agent's"
+    assert pod.running(), "the container lives"
+    time.sleep(10)  # the children end
+    assert agent(env, "true", check=False).returncode == 0, "and answers again"
+
+
+def test_an_allocation_past_the_memory_limit_is_killed_and_attributed_to_the_agent(env):
+    """T21: the agent's container may hold 4 GiB, swap included; an allocation past it ends
+    with 137 (the kernel's OOM killer), the pod and the host's Docker live, the kernel counts
+    the kill in the agent's scope, and vivibox reads it as the agent's."""
+    from vivibox import limits
+
+    pod = env["pod"]
+    limit = pod.limits.memory_of("agent")
+    assert scope_file(pod, "agent", "memory.max").read_text().strip() == str(limit)
+    assert scope_file(pod, "agent", "memory.swap.max").read_text().strip() == "0", "--memory-swap == --memory"
+    before = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({})
+    seen = before[0].counts if before else {}
+    hog = f"x = bytearray(b'a' * ({limit} + 2**30))\nprint(len(x))"
+    done = pod.exec("python3", "-c", hog, check=False)
+    assert done.returncode == 137, f"killed for memory, not finished: {done}"
+    assert pod.running() and pod.sidecar_docker("info", check=False).returncode == 0, "the pod lives"
+    assert subprocess.run(["docker", "info"], capture_output=True).returncode == 0, "the host's Docker too"
+    [hit] = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check(seen)
+    assert (hit.kind, hit.workload, hit.limit) == ("memory", "agent", limit)
+    assert hit.words.startswith("oom_kill ") and hit.used > 0
+
+
+def test_a_nested_containers_processes_count_under_the_tasks_slice(env):
+    """D8: cgroup v2 counts hierarchically: what the pod's own Docker runs in a nested container
+    is under the sidecar's scope, so the slice's pids.current grows by its processes."""
+    from vivibox import limits
+
+    pod = env["pod"]
+    pids = limits.slice_path(pod.task_id) / "pids.current"
+    before = int(pids.read_text())
+    sleeps = "sh -c 'sleep 300 & sleep 300 & sleep 300 & wait'"
+    agent(env, f"docker rm -f d8 2>/dev/null; docker run -d --name d8 alpine:3 {sleeps}")
+    try:
+        time.sleep(1)
+        assert int(pids.read_text()) >= before + 4, "sh and its three sleeps, under the slice"
+    finally:
+        agent(env, "docker rm -f d8", check=False)
+
+
+def test_a_full_disk_is_the_tasks_and_the_hosts_keeps_its_room():
+    """D8: a write in /config of the agent ends in ENOSPC at the image's size, the host's
+    filesystem under the tasks directory is not filled, and the room comes back once the file is
+    gone (the mount's discard reaches the sparse image). A pod of its own, with a disk of 1 GiB."""
+    from vivibox import limits
+
+    if not TASKS_ROOT.is_dir():
+        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
+    task_id = check_id("diskcheck")
+    folder = own_folder(task_id)
+    repo = folder / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    ref, _ = image.build()
+    cfg = load_config()
+    pod = Pod(
+        task_id, repo, ref, [], host_address=cfg.host_address, network_pool=cfg.network_pool,
+        limits=cfg.limits.with_values({"disk": "1g"}), folder=folder,
+    )  # fmt: skip
+    try:
+        pod.up()
+        host_before = os.statvfs(TASKS_ROOT)
+        done = pod.exec("bash", "-c", "dd if=/dev/zero of=/config/fill bs=1M 2>&1 | tail -2", check=False)
+        assert "No space left on device" in done.stdout + done.stderr, done
+        host_after = os.statvfs(TASKS_ROOT)
+        assert host_after.f_bavail > 0, "the host's filesystem is not full"
+        taken = (host_before.f_bavail - host_after.f_bavail) * host_before.f_frsize
+        assert taken <= 2**30 + 64 * 2**20, f"the image took no more than its size: {taken}"
+        [hit] = limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({})
+        assert hit.kind == "disk" and hit.limit <= 2**30 and hit.words.startswith("statvfs: 0 of ")
+        pod.exec("bash", "-c", "rm /config/fill && sync")
+        time.sleep(2)
+        assert limits.Watch(pod.task_id, pod.limits, pod.disk, pod.scopes).check({}) == [], "room again"
+        freed = os.statvfs(TASKS_ROOT)
+        assert freed.f_bavail > host_after.f_bavail, "the host's room came back: discard reached the image"
+    finally:
+        assert pod.remove() == ""
+        shutil.rmtree(folder, ignore_errors=True)

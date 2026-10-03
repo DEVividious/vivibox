@@ -385,6 +385,15 @@ step, vivibox checks the total reported cost (including review) and stops if the
 reached. It is not a hard spending cap: a turn, self-review or separate review can overshoot it.
 Raise the limit and press `s` to take it on.
 
+## When the pod hits a limit
+
+Every container of the pod has a memory limit and a process limit, and the task a disk of its
+own ([limits](configure.md#limits-on-the-pod)). When the kernel kills a process for memory, or the
+disk is full, the task stops after the turn or the verification it happened in, with `out of
+memory` or `out of disk space` on its row and, in its details, which container, its limit, the
+kernel's words and the command that raises it: `vivibox limits <id> --agent-memory 6g`, or
+`vivibox disk grow <id> 40g`; then `s`. No fix round is spent on it.
+
 ## When a turn fails
 
 An error that passes with time (the provider busy or rate limiting, the network gone for a

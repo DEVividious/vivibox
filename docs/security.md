@@ -159,6 +159,9 @@ the writer's commits beside the planner's key and conversation. Git in the plann
 answers for the copy from wherever it is run (`GIT_DIR` and `GIT_WORK_TREE` in its
 environment); the copy's `.git` is vivibox's and read-only there.
 
+The reviewer reads an untrusted repository too. Isolating its harness and its configuration
+from that repository is part of the hardening still to come before the next release.
+
 The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
 planner's session id in the task's state and the transcripts of its turns in the task's log.
 Knowing them gives no way to the conversation: the store and the server are in the planner's

@@ -70,3 +70,21 @@ def test_the_opencode_configuration_names_only_this_server():
     settings = mock_provider.opencode_config(8099)
     assert settings["model"] == "mock/mock-model" and list(settings["provider"]) == ["mock"]
     assert settings["provider"]["mock"]["options"] == {"baseURL": "http://127.0.0.1:8099/v1"}
+
+
+def test_a_turn_reads_the_files_named_beside_the_log_one_a_request_then_answers(provider):
+    url, log = provider
+    mock_provider.reads(log).write_text("/srv/a.ts\n/srv/b.rs\n")
+    tools = [{"type": "function", "function": {"name": "read"}}]
+    ask = lambda messages, offered=tools: post(  # noqa: E731
+        f"{url}/v1/chat/completions", {"model": "m", "stream": True, "tools": offered, "messages": messages}
+    )[1]
+    user, result = {"role": "user", "content": "Read."}, {"role": "tool", "content": "text"}
+    first = json.loads(ask([user]).split("\n\n")[0].removeprefix("data: "))
+    call = first["choices"][0]["delta"]["tool_calls"][0]["function"]
+    assert call == {"name": "read", "arguments": json.dumps({"filePath": "/srv/a.ts"})}
+    assert '"finish_reason": "tool_calls"' in ask([user])
+    assert "/srv/b.rs" in ask([user, result]) and mock_provider.ANSWER in ask([user, result, result])
+    assert mock_provider.ANSWER in ask([user], offered=[]), "a request that offers no read is answered"
+    mock_provider.reads(log).unlink()
+    assert mock_provider.ANSWER in ask([user]), "and so is every request once the file is gone"

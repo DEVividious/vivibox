@@ -135,10 +135,11 @@ def a_pod(task: SimpleNamespace, ref: str) -> Pod:
     a stand-in provider on its own container's localhost."""
     meta = task.meta
     comments.ensure(meta)
-    settings = json.dumps(mock_provider.opencode_config(MOCK_PORT), indent=2) + "\n"
-    for harness in (meta / "harness", control.harness_dir(task)):
+    settings = mock_provider.opencode_config(MOCK_PORT)
+    # The planner's is a reader's, as control.prepare writes it: no language server.
+    for harness, own in ((meta / "harness", {}), (control.harness_dir(task), opencode.READER)):
         harness.mkdir(exist_ok=True)
-        (harness / "opencode.json").write_text(settings)
+        (harness / "opencode.json").write_text(json.dumps({**settings, **own}, indent=2) + "\n")
         (harness / "instructions.md").write_text("# A live test of vivibox\n\nAnswer briefly.\n")
     shutil.copy(mock_provider.__file__, meta / "mock" / "mock_provider.py")
     (meta / "mock" / "inject_store.js").write_text(INJECT_STORE)
@@ -160,7 +161,7 @@ def a_pod(task: SimpleNamespace, ref: str) -> Pod:
     return Pod(
         task.id, task.repo, ref, [], mounts, env, review_dir=task.root / "disk" / "review",
         host_address=cfg.host_address, network_pool=cfg.network_pool, limits=cfg.limits, folder=task.root,
-        control_mounts=control.mounts(task), control_env=env,
+        control_mounts=control.mounts(task), control_env={**env, **control.env(task)},
     )  # fmt: skip
 
 
@@ -430,17 +431,67 @@ def test_the_planners_traffic_is_not_on_the_writers_wire(live):
         bash(pod, f"docker rm -f {sniffer}")
 
 
+# Source files a writer commits, each beside what a language server of its language would build,
+# import or run by itself; and the ones the planner's turn reads.
+SOURCES = {
+    "web/main.ts": "export const x: number = 1;\n",
+    "web/package.json": '{"name": "web", "devDependencies": {"typescript": "*", "eslint": "*"}}\n',
+    "web/tsconfig.json": "{}\n",
+    "web/eslint.config.js": 'require("fs").writeFileSync("/task/handoff/ran-build", "x");\n',
+    "crate/Cargo.toml": '[package]\nname = "c"\nversion = "0.1.0"\nedition = "2021"\nbuild = "build.rs"\n',
+    "crate/build.rs": 'fn main() { std::fs::write("/task/handoff/ran-build", "x").unwrap(); }\n',
+    "crate/src/lib.rs": "pub fn f() {}\n",
+    "py/pyproject.toml": '[project]\nname = "p"\nversion = "0"\n',
+    "py/app.py": "x = 1\n",
+    "go/go.mod": "module m\n\ngo 1.22\n",
+    "go/main.go": "package main\n\nfunc main() {}\n",
+    "java/build.gradle": 'new File("/task/handoff/ran-build").text = "x"\n',
+    "java/src/main/java/Main.java": "class Main {}\n",
+}
+READ = ("web/main.ts", "crate/src/lib.rs", "py/app.py", "go/main.go", "java/src/main/java/Main.java")
+# What runs in the control container besides a language server, were one started: the
+# container's own sleep, the harness's server, the stand-in provider, the listeners the tests
+# before this one left to end by themselves, and the question itself.
+OWN_PROCESSES = (
+    "sleep infinity",
+    "opencode serve",
+    "python3 /task/mock/mock_provider.py",
+    "timeout 300 python3 -m http.server",
+    "python3 -m http.server",
+    "ps -eo args=",
+    "bash -c ps -eo args=",
+)
+# One of them that ended and nobody reaped (the container's first process is sleep), by its name.
+ENDED = ("opencode", "python3", "timeout", "bash", "sh", "curl", "git", "ps", "sleep")
+
+
+def not_its_own(listing: str) -> list[str]:
+    """The lines of a `ps -eo args=` in the control container that are none of OWN_PROCESSES."""
+    found = []
+    for line in filter(None, map(str.strip, listing.splitlines())):
+        ended = line.endswith("<defunct>") and line.split("]")[0].lstrip("[") in ENDED
+        if not ended and not line.startswith(OWN_PROCESSES):
+            found.append(line)
+    return found
+
+
 def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_writers(live):
     """The planner as the reader of the work: git diff <base>..HEAD and git log work in its
     container, in a copy of the commits at the path the writer has its clone; the copy is
     read-only there; the writer's clone is not mounted and is as it was after; and what a
-    writer plants in its clone's .git for the next git to follow never runs for the planner."""
+    writer plants in its clone's .git for the next git to follow never runs for the planner.
+    git answers for the copy from the harness's own directory too; and a turn of the planner's
+    that reads source files starts no language server and downloads none."""
     task, pod, planner = live.task, live.pod, live.planner
     there = shlex.quote(str(pod.repo))
     (task.repo / "calc.py").write_text(
         "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
     )
-    sh("git", "commit", "-q", "-am", "Add sub", cwd=task.repo)
+    for name, text in SOURCES.items():
+        (task.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (task.repo / name).write_text(text)
+    sh("git", "add", "-A", cwd=task.repo)
+    sh("git", "commit", "-q", "-m", "Add sub", cwd=task.repo)
     head = sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip()
     (task.repo / "scratch.txt").write_text("not committed\n")
     status = sh("git", "status", "--porcelain", cwd=task.repo).stdout
@@ -451,6 +502,39 @@ def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_wri
     log = bash(planner, f"cd {there} && git log --oneline && git status --porcelain")
     assert log.returncode == 0 and "Add sub" in log.stdout, log.stderr
     assert bash(planner, f"test -e {there}/scratch.txt").returncode != 0, "only what is committed"
+    # From where its harness stands, as the review's prompt asks it ("the repository you are
+    # in"): git there answers for the copy, by the container's environment.
+    assert bash(planner, "pwd").stdout.strip() == "/work"
+    stat = bash(planner, f"git diff --stat {task.base}..HEAD")
+    assert stat.returncode == 0 and "calc.py" in stat.stdout and "crate/build.rs" in stat.stdout, stat.stderr
+    assert "Add sub" in bash(planner, "git log --oneline").stdout
+    assert bash(planner, "git rev-parse --show-toplevel").stdout.strip() == str(pod.repo)
+    # A turn that reads source files of five languages, each beside what a language server of
+    # its would build, import or run: nothing starts for them and nothing is downloaded.
+    harness = opencode.OpenCode(planner, MOCK_MODEL)
+    provider_up(planner)
+    paths = "\\n".join(f"{pod.repo}/{name}" for name in READ)
+    assert bash(planner, f"printf '{paths}\\n' > {mock_provider.reads(MOCK_LOG)}").returncode == 0
+    try:
+        before = len(asked(planner))
+        turn(harness, "Planner: read the sources.")
+        told = json.dumps(asked(planner)[before:])
+        assert all(marker in told for marker in ("pub fn f()", "class Main", "package main")), (
+            "the files were read: their text came back to the model"
+        )
+        time.sleep(10)  # a server started for a file read would be up, or being fetched, by now
+        running = bash(planner, "ps -eo args=")
+        assert running.returncode == 0 and "sleep infinity" in running.stdout, running.stderr
+        others = not_its_own(running.stdout)
+        assert others == [], f"a process in the control container that is not the harness's own: {others}"
+        log = "cat /config/.local/share/opencode/log/*.log"
+        assert int(bash(planner, f"{log} | grep -c 'all LSPs are disabled'").stdout) >= 1
+        assert int(bash(planner, f"{log} | grep -c 'enabled LSP servers'").stdout) == 0
+        fetched = bash(planner, "ls -A /config/.local/share/opencode/bin 2>/dev/null").stdout.split()
+        assert fetched == [], f"a language server was downloaded: {fetched}"
+        assert not (task.meta / "handoff" / "ran-build").exists(), "a build script of the writer's ran"
+    finally:
+        bash(planner, f"rm -f {mock_provider.reads(MOCK_LOG)}")
     wrote = bash(planner, f"cd {there} && echo x > planted.txt")
     assert wrote.returncode != 0 and "Read-only file system" in wrote.stderr
     assert bash(planner, f"cd {there} && git commit --allow-empty -qm x").returncode != 0
@@ -489,6 +573,10 @@ def test_the_planner_reads_the_commits_in_its_copy_and_writes_nothing_of_the_wri
 
 # The paths a harness reads its project's configuration from, as the test commits them.
 HARNESS_CONFIGURATION = ("opencode.json", ".opencode", ".claude", ".mcp.json")
+
+
+# git on the directory it is run in, not on the copy the container's environment names.
+OWN_GIT = "env -u GIT_DIR -u GIT_WORK_TREE git"
 
 
 def committed_harness_configuration(task) -> dict[str, Path]:
@@ -542,7 +630,7 @@ def test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner
         assert bash(planner, committed).returncode == 0, "the configuration is in the planner's copy"
         assert bash(planner, "pwd").stdout.strip() == "/work"
         assert bash(planner, "ls -A /work").stdout.split() == [".git"]
-        assert bash(planner, "cd /work && git log --oneline | wc -l").stdout.strip() == "1", (
+        assert bash(planner, f"{OWN_GIT} -C /work log --oneline | wc -l").stdout.strip() == "1", (
             "the host's one empty commit"
         )
         assert bash(planner, "touch /work/opencode.json").returncode != 0, (
@@ -711,6 +799,9 @@ def test_a_task_started_by_vivibox_runs_its_planner_in_the_control_container(tmp
         planners = json.loads(inspect("{{json .HostConfig.Binds}}", pod.control))
         assert f"{pod.control_src}:{task.repo}:ro" in planners and f"{pod.control_home}:/config" in planners
         assert inspect("{{.Config.WorkingDir}}", pod.control).strip() == "/work"
+        assert f"GIT_DIR={task.repo}/.git" in json.loads(inspect("{{json .Config.Env}}", pod.control))
+        written = json.loads((task.meta / "harness-control" / "opencode.json").read_text())
+        assert written["lsp"] is False and "serena" not in json.dumps(written), "a reader's configuration"
         assert f"{pod.control_work}:/work:ro" in planners
         (task.meta / "mock").mkdir()
         shutil.copy(mock_provider.__file__, task.meta / "mock" / "mock_provider.py")
@@ -724,7 +815,7 @@ def test_a_task_started_by_vivibox_runs_its_planner_in_the_control_container(tmp
         assert writer.pod.agent == pod.agent and not writer.session_exists(done.session)
         own = (secrets.runtime_dir(control.secrets_id(task.id)) / secrets.PASSWORD).read_text()
         assert own != (secrets.runtime_dir(task.id) / secrets.PASSWORD).read_text()
-        assert bash(planner.pod, f"cd {shlex.quote(str(task.repo))} && git log --oneline").returncode == 0
+        assert bash(planner.pod, "git log --oneline").stdout.strip(), "the copy's commits, from /work"
         actions.stop(task)
         assert not secrets.runtime_dir(control.secrets_id(task.id)).exists()
         assert sh("docker", "inspect", "-f", "{{.State.Status}}", pod.control).stdout.strip() == "exited"

@@ -98,8 +98,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   none, and it gets the MCP servers you brought and not vivibox's own Serena. A copy that
   cannot be made (a clone that is not as recorded, a verified commit that is not on the task's
   branch, a clone git waits on) stops the review with the reason, and no reviewer's container
-  is started. The reviewer's container is otherwise as it was: its network, its home and
-  scratch folder in memory, its secrets and its limits.
+  is started; nor is one started on a folder vivibox did not make for the round, and that
+  refusal names the command that starts the task again. The reviewer's container is otherwise
+  as it was: its network, its home and scratch folder in memory, its secrets and its limits.
 - The reviewer in its own container is told what that container is, in the words the planner
   and the supervisor read: the project is a read-only view of the task's committed work at its
   path, on the commit the verification passed; it starts in an empty directory and git answers

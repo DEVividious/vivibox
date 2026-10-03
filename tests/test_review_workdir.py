@@ -141,8 +141,9 @@ def test_a_review_container_is_not_started_on_folders_the_host_did_not_make(dock
     is no review container, whoever asks for one."""
     task, pod, head = verified
     pod.review_fresh()
-    with pytest.raises(PodError, match="the review could not start: the reviewer's working directory"):
+    with pytest.raises(PodError, match="the review could not start: the reviewer's working directory") as e:
         pod.review_start([], {})
+    assert str(e.value).endswith(f"start the task again: vivibox start {task.id}"), "what to do"
     reading.workdir(pod.review_work, "the reviewer's")
     with pytest.raises(PodError, match="the review could not start: the reviewer's view of the work"):
         pod.review_start([], {})

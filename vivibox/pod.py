@@ -607,7 +607,10 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             (Path(self.review_src), "view of the work"),
         ):
             if not reading.made(folder):
-                raise PodError(f"the review could not start: the reviewer's {what} was not made at {folder}")
+                raise PodError(
+                    f"the review could not start: the reviewer's {what} was not made at {folder}; "
+                    f"start the task again: vivibox start {self.task_id}"
+                )
         self._run(*self.review_command(mounts, env))
 
     def review_down(self) -> None:

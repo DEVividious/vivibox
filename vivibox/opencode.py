@@ -50,10 +50,11 @@ def provider_entry(provider: str) -> dict:
 
 
 # What the configuration of a harness that only reads the work adds (the planner's in its control
-# container): no language server, which opencode would start for a file it reads, rooted in the
-# project the file is in, and some of which run the project's own code (a build script, a
-# plugin, a configuration that is a program). LSP is off by default in opencode 1.18.31 ("all
-# LSPs are disabled" in its log); said here, it stays off whatever a later default is.
+# container, the reviewer's in its own): no language server, which opencode would start for a
+# file it reads, rooted in the project the file is in, and some of which run the project's own
+# code (a build script, a plugin, a configuration that is a program). LSP is off by default in
+# opencode 1.18.31 ("all LSPs are disabled" in its log); said here, it stays off whatever a
+# later default is.
 # Not "snapshot": false, though a reader needs no undo: with it, 1.18.31's attached run ends
 # before it prints the turn's last step, and the turn's answer and cost are lost (seen in the image).
 READER = {"lsp": False}

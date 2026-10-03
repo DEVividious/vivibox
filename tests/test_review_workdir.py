@@ -258,3 +258,24 @@ def test_git_in_the_reviewers_view_runs_nothing_the_writer_planted(docker, verif
     git(view, "log", "--oneline")
     assert not (view / ".git" / "commondir").exists()
     assert not ran.exists(), "no command of the writer's ran, on the host or for the reviewer"
+
+
+def test_the_supervisor_brings_a_round_up_with_the_readers_brief_and_the_projects_commands(docker, verified):  # noqa: F811
+    """What the supervisor's own review_up writes for the reviewer: the reader's brief, for a
+    container that has the handoff to read, naming the project's verification commands as a
+    fact; never the writer's brief, which describes the writer's container."""
+    from vivibox import brief, supervise
+
+    task, pod, head = verified
+    _, project = actions.load(task.id)
+    actions.save_verify(project, ["make test"])
+    _, project = actions.load(task.id)
+    assert project.verify == ["make test"]
+    sup = supervise.make_supervisor(task, project, pod, load_config())
+    out = sup.ports.review_up()
+    assert out == pod.review_dir / "out"
+    told = (pod.review_dir / "harness" / "instructions.md").read_text()
+    facts = (task.id, task.repo, repo.branch_name(task.id), ["make test"])
+    assert told == brief.reader(*facts, writes_handoff=False) and "`make test`" in told
+    assert "Docker, docker compose and Testcontainers work" not in told
+    assert sup.reviewer.pod.agent == pod.review and sup.reviewer.port == opencode.REVIEW_PORT

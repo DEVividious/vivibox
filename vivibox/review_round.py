@@ -13,7 +13,6 @@ from .prompts import (
     REVIEW_FIX_PROMPT,
     REVIEW_PROMPT,
     REVIEW_REPAIR_PROMPT,
-    SUPERVISOR_REVIEW_PROMPT,
 )
 from .states import State
 from .task import TaskState
@@ -22,8 +21,8 @@ from .task import TaskState
 class ReviewRound:
     def _review(self, st: TaskState) -> None:
         """A round of the reviewer's after a green gate, kept as handoff/review-N.md: in the review
-        container a fresh clone and a fresh conversation, or the supervisor in its control
-        container, on its copy of the commits, in the conversation it planned in. Blocking notes
+        container a fresh view of the commits and a fresh conversation, or the supervisor in its
+        control container, on its copy of the commits, in the conversation it planned in. Blocking notes
         go back to the writer while it has rounds; then the work comes to you, with the notes."""
         if self._head_moved(st):
             return
@@ -110,9 +109,8 @@ class ReviewRound:
         it was not read when it is a link or a special file. None when a turn failed and the task
         stopped."""
         st = self.task.read_state()
-        # The supervisor reads from its control container, the reviewer in its clone of the commits.
-        asked = SUPERVISOR_REVIEW_PROMPT if self.mode.supervisor else REVIEW_PROMPT
-        prompt = asked.format(base=st.base_commit)
+        # The same turn for both readers: the reviewer in its container, the supervisor in its own.
+        prompt = REVIEW_PROMPT.format(base=st.base_commit)
         if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
             prompt = REVIEW_AGAIN_PREFIX + prompt
         if self._turn(st, prompt, role="reviewer") is None:

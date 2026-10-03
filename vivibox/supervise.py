@@ -203,7 +203,7 @@ def make_supervisor(
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
         keep_command=lambda command: actions.save_verify(now(), [command]),
-        review_up=lambda: reviewing.up(task, pod, config),
+        review_up=lambda: reviewing.up(task, pod, config, now().verify),
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
         head=lambda: repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip(),

@@ -14,7 +14,8 @@ from pathlib import Path
 ROLES = ("planner", "writer", "reviewer")
 # The briefs of an agent that runs in a control container of its own (orchestration.Mode.control)
 # and reads the work there: the planner's, and the supervisor's, which plans and then reviews.
-# Their common part is reader(), not common().
+# Their common part is reader(), not common(). The reviewer, in a container of its own for each
+# round, has reader() too, without what is the planner's alone (WRITES_HANDOFF).
 READERS = ("planner", "planner-reviewer")
 # The briefs there are: a role's own, and the ones for roles joined in one agent (orchestration
 # modes), named by the roles they join.
@@ -39,11 +40,20 @@ def common(task_id: str, repo: str | Path, branch: str, verify: list[str] | tupl
 NO_COMMANDS = ", with:\n\n"
 
 
-def reader(task_id: str, repo: str | Path, branch: str, verify: list[str] | tuple = ()) -> str:
+# What the reader's brief says of the handoff that is true of the planner alone: it writes its
+# draft and its question there. The reviewer's container has the handoff to read, and writes its
+# review to /task/review; the sentence then reads as the writer's brief has it.
+WRITES_HANDOFF = ", and where you write.\n  Besides"
+READS_HANDOFF = ". Besides"
+
+
+def reader(
+    task_id: str, repo: str | Path, branch: str, verify: list[str] | tuple = (), writes_handoff: bool = True
+) -> str:
     """The common brief of an agent that reads the work in a container of its own: where the
     project is (repo: the read-only view of the task's commits there), what the container has
     not, and where the agent writes. What common() says of the writer's container is not true
-    there."""
+    there. writes_handoff: False for the reviewer, whose container has the handoff read-only."""
     text = _template("instructions-reader.md").format(
         task_id=task_id,
         repo=repo,
@@ -53,6 +63,9 @@ def reader(task_id: str, repo: str | Path, branch: str, verify: list[str] | tupl
     if not verify:  # a project with no verification command (yet): the fact, without a list
         assert NO_COMMANDS in text
         text = text.replace(NO_COMMANDS, ".\n")
+    if not writes_handoff:
+        assert WRITES_HANDOFF in text
+        text = text.replace(WRITES_HANDOFF, READS_HANDOFF)
     return text
 
 

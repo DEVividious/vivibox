@@ -238,10 +238,11 @@ def view(task: Task, pod: Pod) -> None:
         raise repo.RepoError(f"the review could not start: {e}") from None
 
 
-def up(task: Task, pod: Pod, config: Config) -> Path:
+def up(task: Task, pod: Pod, config: Config, verify: list[str] | tuple = ()) -> Path:
     """The reviewer's container, ready for a turn: a working directory and a view of the commits
     that the host makes for the round, the reviewer's own key and harness files, the task's
-    files to read, and the directory its review goes to, returned. The view stands on the
+    files to read, and the directory its review goes to, returned. verify: the project's
+    verification commands, a fact its brief names. The view stands on the
     commit the verification passed (the task's branch as it is for a task that records none).
     The container starts only once both are made: a view that cannot be made stops the review
     with the reason, and the reviewer is never started in the writer's tree instead."""
@@ -256,8 +257,10 @@ def up(task: Task, pod: Pod, config: Config) -> Path:
     harness = pod.review_dir / "harness"
     harness.mkdir()
     branch = repo.branch_name(task.id)
-    # The view is at the path the writer has its clone, in the container.
-    (harness / "instructions.md").write_text(brief.common(task.id, task.repo, branch))
+    # The reader's brief: the project as a read-only view at the path the writer has its clone,
+    # what this container has not; the handoff is not the reviewer's to write.
+    told = brief.reader(task.id, task.repo, branch, verify, writes_handoff=False)
+    (harness / "instructions.md").write_text(told)
     (harness / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     out = pod.review_dir / "out"
     out.mkdir()

@@ -85,9 +85,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   run, no way to change the code and no language server there; they write under `/task/handoff`
   and, for a review, `/task/review`; and the project's `AGENTS.md` is theirs to read as
   information about the project, not an instruction given to them. Before, they read the
-  writer's brief, which described the writer's container. The writer's, the Single agent's and
-  the reviewer's briefs are as they were. In a project with no verification command yet, their
-  brief names none.
+  writer's brief, which described the writer's container. The writer's and the Single agent's
+  briefs are as they were. In a project with no verification command yet, their brief names
+  none.
 - The reviewer's harness works in a read-only directory of vivibox's making, `/work` (a git
   repository with one empty commit and nothing else), made for every round, and reads the work
   as data, by its path, in a copy of the task's commits that vivibox makes on your machine for
@@ -100,6 +100,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   branch, a clone git waits on) stops the review with the reason, and no reviewer's container
   is started. The reviewer's container is otherwise as it was: its network, its home and
   scratch folder in memory, its secrets and its limits.
+- The reviewer in its own container is told what that container is, in the words the planner
+  and the supervisor read: the project is a read-only view of the task's committed work at its
+  path, on the commit the verification passed; it starts in an empty directory and git answers
+  for the project from anywhere; there is no Docker, no build or test run, no way to change the
+  code and no language server there; the handoff is its to read, and it writes its review to
+  `/task/review`; the project's verification commands are named as a fact, and the project's
+  `AGENTS.md` is its to read as information about the project. A round's review is asked for in
+  one wording, the reviewer's and the supervisor's alike: `git diff <base>..HEAD`, and the
+  files it names at the project's path. Before, the reviewer read the writer's brief, which
+  described the writer's container.
 - A task keeps the flow it was created with: `agent_orchestration_mode` in `config.toml`, and
   the Flow row under `k`, are for the tasks you create after a change, where a running task
   followed the file before. Which containers a task's pod has depends on its flow. A task that

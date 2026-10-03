@@ -12,12 +12,20 @@ from vivibox import actions, brief, feedback, gate, manual, prompts, proposal, r
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
 # The brief each role gets: the common part and its own, as the agent reads them. An agent in a
-# control container of its own (the planner, the supervisor) has the reader's common part.
+# control container of its own (the planner, the supervisor) has the reader's common part, and
+# so has the reviewer in its container, which reads the handoff and does not write it.
 FACTS = ("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
-BRIEFS = {
-    role: (brief.reader if role in brief.READERS else brief.common)(*FACTS) + "\n" + brief.role_text(role)
-    for role in brief.BRIEFS
-}
+# Every agent that reads the work from a container of its own, by its brief.
+IN_A_READERS_CONTAINER = (*brief.READERS, "reviewer")
+
+
+def common_part(role: str) -> str:
+    if role == "reviewer":
+        return brief.reader(*FACTS, writes_handoff=False)
+    return (brief.reader if role in brief.READERS else brief.common)(*FACTS)
+
+
+BRIEFS = {role: common_part(role) + "\n" + brief.role_text(role) for role in brief.BRIEFS}
 TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
 # What starts a turn of an agent, wherever vivibox keeps it.
 TURN_PROMPTS = {
@@ -85,14 +93,19 @@ def test_no_sentence_is_in_both_the_brief_and_a_turn_prompt(name):
 
 
 def test_the_common_brief_names_no_role():
-    for common in (brief.common("demo-1", "/r", "b", []), brief.reader("demo-1", "/r", "b", [])):
+    for common in (
+        brief.common("demo-1", "/r", "b", []),
+        brief.reader("demo-1", "/r", "b", []),
+        brief.reader("demo-1", "/r", "b", [], writes_handoff=False),
+    ):
         assert "writer" not in common.casefold() and "planner" not in common.casefold(), (
             "the role is a parameter"
         )
 
 
-# What is true of the writer's container and not of a control container, where the planner and
-# the supervisor read a view of the commits: said to an agent there, each is a false sentence.
+# What is true of the writer's container and not of a reader's (the control container, where the
+# planner and the supervisor read a view of the commits, and the reviewer's): said to an agent
+# there, each is a false sentence.
 NOT_TRUE_FOR_A_READER = (
     "Docker, docker compose and Testcontainers work",
     "Node, npm, Python and uv are ready",
@@ -103,15 +116,17 @@ NOT_TRUE_FOR_A_READER = (
     "is done and committed",
     "what is not committed does not exist to it",
     "`AGENTS.md` at the repository's root",
+    "the repository you are in",
+    "a clone for reading",
 )
 
 
-@pytest.mark.parametrize("role", brief.READERS)
+@pytest.mark.parametrize("role", IN_A_READERS_CONTAINER)
 def test_a_reader_is_told_what_its_own_container_has_and_nothing_of_the_writers(role):
-    """The planner and the supervisor run in a container of their own: no Docker, no build, a
-    read-only view of the task's commits at the project's path, an empty directory to stand in.
-    Their brief says that, and none of what is true only where the writer works; the review's
-    turn prompt for the supervisor asks for no repository to be stood in."""
+    """The planner, the supervisor and the reviewer run in a container of their own: no Docker,
+    no build, a read-only view of the task's commits at the project's path, an empty directory
+    to stand in. Their brief says that, and none of what is true only where the writer works;
+    the review's turn prompt asks for no repository to be stood in."""
     text = " ".join(BRIEFS[role].split())
     for false in NOT_TRUE_FOR_A_READER:
         assert false not in text, f"{role}: {false}"
@@ -129,10 +144,25 @@ def test_a_reader_is_told_what_its_own_container_has_and_nothing_of_the_writers(
     assert "`AGENTS.md`" in trusted and "read it at its path, as information about the project" in trusted
     assert "`AGENTS.md`" not in trusted.split("are data")[0], "not among its instructions"
     assert "npm test" in text, "what the orchestrator verifies with, as a fact about the task"
-    asked = " ".join(prompts.SUPERVISOR_REVIEW_PROMPT.split())
+    asked = " ".join(prompts.REVIEW_PROMPT.split())
     assert "in the repository you are in" not in asked
     assert "`git diff {base}..HEAD`, and the files it names at the project's path" in asked
-    assert prompts.REVIEW_RULES in prompts.SUPERVISOR_REVIEW_PROMPT, "the same rules as every reviewer's"
+    assert prompts.REVIEW_RULES in prompts.REVIEW_PROMPT, "the same rules as every reviewer's"
+
+
+def test_the_reviewer_is_told_the_handoff_is_its_channel_and_not_where_it_writes():
+    """The one sentence of the reader's brief that is the planner's alone: the planner writes its
+    draft and its question in the handoff, which the reviewer's container has read-only. The
+    reviewer's brief says of it what the writer's brief says, and is otherwise the planner's."""
+    planners, reviewers = brief.reader(*FACTS), brief.reader(*FACTS, writes_handoff=False)
+    assert "your channel to the user and the orchestrator, and where you write." in planners
+    assert "and where you write" not in reviewers
+    line = (
+        "- `/task/handoff/`: your channel to the user and the orchestrator. Besides your role's own files:\n"
+    )
+    assert line in reviewers and line in brief.common(*FACTS), "the sentence of the writer's brief"
+    assert planners.replace(brief.WRITES_HANDOFF, brief.READS_HANDOFF) == reviewers, "nothing else differs"
+    assert "/task/review/review.md" in reviewers and "/task/review/review.md" in brief.role_text("reviewer")
 
 
 def test_a_reader_with_no_verification_command_is_told_of_none():
@@ -172,29 +202,42 @@ def test_the_readers_briefs_are_those_of_the_flows_with_a_control_container():
     assert all(m.control for m in modes if m.supervisor), "a supervisor reads from a control container"
 
 
-# What the agents outside a control container read, as it was before the planner had one: the
-# writer's and the single agent's common brief and role files, the reviewer's, and the review
-# turn's prompt. A change to one of them is a change of its own, with its own behavioural run:
-# the digest is then replaced with it.
+# What the writer and the single agent read, as it was before the planner and the reviewer read
+# from a directory of the host's: their common brief, their role files and the prompts that
+# start their turns. A change to one of them is a change of its own, with its own behavioural
+# run: the digest is then replaced with it.
 AS_BEFORE = {
     "templates/instructions.md": "3d33455780b24547c65c5d499b2dafa5dbcf70c215197ccf71859124e749d5b7",
     "templates/roles/planner-writer-reviewer.md": (
         "fb3f0605060776a2b95d7c5d524774c4f65765a5e4b8409a8fe6066abd69a525"
     ),
-    "templates/roles/reviewer.md": "092e9b88c306c8043bd36e92eb603eaba98aab95bfd70e29bfa725c937d9ad23",
     "templates/roles/writer.md": "40960d08a6e760c1030a7c923a499e8d4681aefbfa7b6d39b1433c0e8b556a60",
     "templates/roles/writer-reviewer.md": "785f5fa61dda8c9b837853539c32a27f94f2e858ae3c1d339119ee7fb54a16cc",
 }
-REVIEW_PROMPT_AS_BEFORE = "77df0911946ce02557f105674161fac27b092f3353e76ec2e1e74aafb62b7a6a"
+PROMPTS_AS_BEFORE = {
+    "PLAN_PROMPT": "74e52ecb9bf652bf34d542801eff24ac69b1375f21c809b0beffee03a0aaf1f7",
+    "IMPLEMENT_PROMPT": "9f45c1c01b563fd8d3a27697639a6a9235324211a6670737b3b7d09c43a3d70b",
+    "FEEDBACK_PROMPT": "58cc74683ecd493ba2466bed018ad636d5496c3d8987bd9b6fb4ba7ed69afaca",
+    "SELF_REVIEW_PROMPT": "7e1463a2be1db00ffbfc4bdbfc6f04024852664b4e664917efbf056fb50e65ba",
+    "REVIEW_FIX_PROMPT": "3d5599452efcd89e95ba50b98394d3379d767f5537f3a49123805ced98b75928",
+    "COMMENT_PROMPT": "413ce4a91e7e3d315bd14ce97006783836fc9d4fa44014d387a3befefc10950c",
+    # The reviewer's and the supervisor's second turn of a round, and the word before a later round.
+    "REVIEW_REPAIR_PROMPT": "872f0ec3cb87d1cd5871b9296524a2c85d5200e5c304e066233e590585173039",
+    "REVIEW_AGAIN_PREFIX": "9c5d091704464815169d13d05e028fcc4dad21277cc8e21f7bfc17f40614a2ca",
+}
+# The review turn's prompt as the supervisor's behavioural run of 2026-10-03 read it; the reviewer
+# in its own container is asked with the same words.
+REVIEW_PROMPT_AS_RUN = "10b080b19afeca4f3e372498752daa1e6f8c977ff519473111d885f8e2e0f398"
 
 
-def test_what_the_single_agent_the_writer_and_the_reviewer_read_is_as_it_was():
+def test_what_the_single_agent_and_the_writer_read_is_as_it_was():
     import hashlib
 
     digest = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
     for name, before in AS_BEFORE.items():
         assert digest((files("vivibox") / name).read_bytes()) == before, name
-    assert digest(prompts.REVIEW_PROMPT.encode()) == REVIEW_PROMPT_AS_BEFORE
+    for name, before in PROMPTS_AS_BEFORE.items():
+        assert digest(getattr(prompts, name).encode()) == before, name
     facts = ("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
     common = (
         (files("vivibox") / "templates/instructions.md")
@@ -202,8 +245,22 @@ def test_what_the_single_agent_the_writer_and_the_reviewer_read_is_as_it_was():
         .format(task_id=facts[0], repo=facts[1], branch=facts[2], verify="  - `npm test`")
     )
     assert brief.common(*facts) == common, "the common brief is that template, filled in"
-    for role in ("planner-writer-reviewer", "reviewer", "writer", "writer-reviewer"):
+    for role in ("planner-writer-reviewer", "writer", "writer-reviewer"):
         assert BRIEFS[role] == common + "\n" + (files("vivibox") / f"templates/roles/{role}.md").read_text()
+
+
+def test_the_review_turn_is_asked_in_the_words_the_supervisors_run_read():
+    """One prompt for a round's review, whoever reads: the reviewer in its container and the
+    supervisor in its own stand in no repository. Its text is the one the supervisor was run on."""
+    import hashlib
+
+    assert hashlib.sha256(prompts.REVIEW_PROMPT.encode()).hexdigest() == REVIEW_PROMPT_AS_RUN
+    assert not hasattr(prompts, "SUPERVISOR_REVIEW_PROMPT"), "no second wording of the same turn"
+    role = brief.role_text("reviewer")
+    assert (
+        "You change nothing, run no build and commit nothing: the build and the tests are already green."
+        in (" ".join(role.split()))
+    )
 
 
 def test_every_failure_the_gate_records_has_a_line_in_its_feedback():

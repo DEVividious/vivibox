@@ -43,23 +43,18 @@ behaviour the plan rules out. Under "## Not blocking": the rest. Each note is on
 "## Checked": what you read and checked, one line each, at least one. Do not report what the
 verification already checks: commits, ticks, switched-off tests, red evidence named."""
 
+# The review's turn, for the reviewer in its own container and for the supervisor in its control
+# container alike: each reads the work from a directory of the host's (brief.reader), stands in
+# no repository, and git answers for the project wherever it is asked.
 REVIEW_PROMPT = (
     """The verification passed: the build and the tests are green, do not run them.
 Read /task/plan.md, /task/handoff/criteria.md, /task/handoff/red.md and /task/handoff/comments.md,
-then the work itself: `git diff {base}..HEAD` in the repository you are in. Write
+then the work itself: `git diff {base}..HEAD`, and the files it names at the project's path. Write
 /task/review/review.md """
     + REVIEW_RULES
     + """
 End the turn when the review is written."""
 )
-
-# The same turn for the supervisor, who reads the work from its own container (brief.reader): it
-# stands in no repository, and git answers for the project wherever it is asked.
-SUPERVISOR_REVIEW_PROMPT = REVIEW_PROMPT.replace(
-    "`git diff {base}..HEAD` in the repository you are in",
-    "`git diff {base}..HEAD`, and the files it names at the project's path",
-)
-assert SUPERVISOR_REVIEW_PROMPT != REVIEW_PROMPT
 
 # Before a round after the first: the writer may have answered the last round instead of acting
 # on it; a round that does not read the answer repeats its note, and the dispute goes to you.

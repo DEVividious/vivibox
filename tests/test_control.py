@@ -1186,6 +1186,6 @@ def test_the_supervisor_is_asked_for_its_review_without_a_repository_to_stand_in
     st = task.read_state()
     assert st.state is State.IMPLEMENT and st.reviews == 1, "the review ran"
     asked = [prompt for place, prompt in turns.prompts if place == "control"][-1]
-    assert asked.endswith(prompts.SUPERVISOR_REVIEW_PROMPT.format(base=st.base_commit))
+    assert asked.endswith(prompts.REVIEW_PROMPT.format(base=st.base_commit))
     assert "in the repository you are in" not in asked
     assert "`git diff " in asked and "and the files it names at the project's path" in asked

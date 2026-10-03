@@ -20,12 +20,15 @@ here in the same commit.
   `templates/instructions-reader.md` (`brief.reader`): where the project is there (a read-only
   view of the task's commits, at its path, brought up to date before each of its turns), what
   that container has not (Docker, a build, a way to change the code, a language server), and
-  where the agent writes. What is true only where the writer works is not said to it.
+  where the agent writes. What is true only where the writer works is not said to it. The
+  reviewer, in a container of its own for each round, has the same common part without the one
+  clause that is the planner's alone (`brief.WRITES_HANDOFF`): its container has the handoff to
+  read, and it writes its review and nothing else.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
   …): what to do now, which files to read and write, and the sentence that ends
-  the turn. Where the same turn is asked of agents that stand in different places, the prompt
-  varies by where its reader runs and by nothing else (`SUPERVISOR_REVIEW_PROMPT` is
-  `REVIEW_PROMPT` for the supervisor, which stands in no repository). A role's part of the brief is one file per agent: a role's own, or the roles one agent
+  the turn. The same turn asked of agents that stand in the same kind of place is one prompt:
+  `REVIEW_PROMPT` is the reviewer's and the supervisor's, each reading the work from a
+  directory of its own container that is no repository of the project's. A role's part of the brief is one file per agent: a role's own, or the roles one agent
   plays in one conversation (`roles/writer-reviewer.md`, `roles/planner-writer-reviewer.md`,
   `roles/planner-reviewer.md`, chosen by the orchestration mode).
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
@@ -123,8 +126,11 @@ Mechanical, in `tests/test_prompt_rules.py`:
 - the word budgets;
 - a reader's brief says what its own container has (the view by its path, no Docker, no build)
   and none of what is true only where the writer works;
-- what the writer, the single agent and the reviewer read is as it was (by digest: a change to
-  one of those texts replaces its digest, with its own behavioural run).
+- what the writer and the single agent read is as it was (by digest: a change to one of those
+  texts replaces its digest, with its own behavioural run), and the review turn's prompt is the
+  one the supervisor's run read;
+- the reviewer's common brief is the reader's, differing from the planner's in the one clause
+  on the handoff.
 
 Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
 models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,
@@ -140,7 +146,11 @@ the commit that changed the prompt:
   nothing new was committed.
 - review: the writer commits a test that proves nothing (it asserts a constant) with the
   criterion ticked; the reviewer's blocking note names it, and the next turn makes the test
-  real.
+  real. The reviewer reads in its own container from a directory of the host's, the work a
+  read-only view of the verified commit at the project's path, each round in a container and a
+  conversation of its own; its turns change nothing in the writer's clone, and none of its
+  tool calls runs into a Docker or a repository that is not there. Its tool calls are printed
+  (`-s`).
 - single agent: one conversation on the planner's model plans, writes, reviews itself and passes
   the gate; no review state.
 - planner and executor: the same fake test, planted before the writer's own review turn; that

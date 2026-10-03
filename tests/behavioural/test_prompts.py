@@ -735,33 +735,125 @@ def plant_a_fake_test(task) -> None:
     git(*who, "commit", "-q", "-m", "Add subtract with a test")
 
 
+def watched_rounds(sup, pod, task) -> list[dict]:
+    """Every round's review container as it was when its turns ended, read just before the round
+    takes it down: what it was made with, where its harness worked, the reviewer's conversation
+    from its own server, and the view of the commits it read."""
+    rounds: list[dict] = []
+    down = sup.ports.review_down
+
+    def inspect(what: str) -> str:
+        done = subprocess.run(["docker", "inspect", "-f", what, pod.review], capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    def read_then_down() -> None:
+        try:
+            side, view = pod.review_side(), Path(pod.review_src)
+            session = task.read_state().sessions.get("reviewer", "")
+            cwds = side.exec(
+                "bash",
+                "-c",
+                "for p in /proc/[0-9]*; do grep -qa opencode $p/cmdline 2>/dev/null && readlink $p/cwd; done",
+                check=False,
+            )
+            rounds.append(
+                {
+                    "workdir": inspect("{{.Config.WorkingDir}}"),
+                    "binds": json.loads(inspect("{{json .HostConfig.Binds}}")),
+                    "env": json.loads(inspect("{{json .Config.Env}}")),
+                    "cwds": set(cwds.stdout.split()),
+                    "session": session,
+                    "messages": conversation(pod, session, side, opencode.REVIEW_PORT) if session else [],
+                    "view_head": host_git(view, "rev-parse", "HEAD"),
+                    "view_status": host_git(view, "status", "--porcelain"),
+                    "work": sorted(p.name for p in pod.review_work.iterdir()),
+                }
+            )
+        finally:
+            down()
+
+    sup.ports.review_down = read_then_down
+    return rounds
+
+
+def a_round_in_the_hosts_directory(task, pod, seen: dict, verified: str) -> None:
+    """One round of the reviewer's, as the review container had it: the harness in the host's
+    directory, the work as a read-only view on the verified commit, the writer's clone not
+    mounted, and a real review made with tools that ran into nothing that is not there."""
+    assert seen["workdir"] == "/work" and seen["cwds"] == {"/work"}, f"the harness worked in {seen['cwds']}"
+    assert seen["work"] == [".git"], "the working directory holds nothing but the host's empty repository"
+    assert f"{pod.review_work}:/work:ro" in seen["binds"]
+    assert f"{pod.review_src}:{task.repo}:ro" in seen["binds"], (
+        "the view, where the brief says the project is"
+    )
+    assert not [b for b in seen["binds"] if b.startswith(f"{task.repo}:")], (
+        "the writer's clone is not mounted"
+    )
+    assert f"GIT_DIR={task.repo}/.git" in seen["env"] and f"GIT_WORK_TREE={task.repo}" in seen["env"]
+    assert seen["view_head"] == verified and seen["view_status"] == "", "the view: the verified commit, clean"
+    told = said_by_the_user(seen["messages"])
+    assert any("/task/review/review.md with three sections" in text for text in told), "asked for its review"
+    assert all("in the repository you are in" not in text for text in told)
+    calls = tool_calls(seen["messages"])
+    print(
+        f"===== {task.id}: the reviewer's {len(calls)} tool calls in {seen['session']}, from its server ====="
+    )
+    for call in calls:
+        state = call.get("state") or {}
+        back = str(state.get("error") or state.get("output") or "").strip()
+        print(f"--- {call.get('tool')} [{state.get('status')}] {json.dumps(state.get('input'))[:300]}")
+        print("    " + back[:600].replace("\n", "\n    "))
+    assert calls, "the reviewer read the work with its tools"
+    for call in calls:
+        name, state = str(call.get("tool", "")), call.get("state") or {}
+        assert "serena" not in name.lower() and "symbol" not in name.lower(), f"a symbol tool: {name}"
+        came_back = f"{state.get('output') or ''}\n{state.get('error') or ''}"
+        found = OLD_ASSUMPTIONS.search(came_back)
+        assert not found, f"{name} {json.dumps(state.get('input'))[:200]} ran into: {found.group(0)}"
+
+
 def test_review_a_test_that_proves_nothing_is_a_blocking_note_and_the_next_turn_makes_it_real(bench):
     """The gate cannot see a test that asserts a constant; the reviewer can. Its blocking note
     names the test, the writer's next turn makes it real, and the second review lets the work
-    through. Needs a reviewer in the bench's config: set with VIVIBOX_BEHAVIOURAL_REVIEWER."""
+    through. The reviewer reads in its own container, from a directory of the host's: its
+    harness works in /work, the work is a read-only view of the verified commit at the
+    project's path, the writer's clone is not mounted there, and its turns change nothing in
+    the writer's clone; no tool call of its own ran into a Docker or a repository that is not
+    there. Its tool calls are printed (-s). Needs a reviewer in the bench's config: set with
+    VIVIBOX_BEHAVIOURAL_REVIEWER."""
     cfg = bench["cfg"] / "config.toml"
     cfg.write_text(cfg.read_text() + f'[roles.reviewer]\nharness = "opencode"\nmodel = "{REVIEWER}"\n')
     try:
         project(bench, "review", {"calc.py": CALC, "test_calc.py": TESTS}, VERIFY)
         task, sup = begin("review", "Add subtract(a, b) to calc.py, with a unit test in test_calc.py")
         try:
+            pod = actions.task_pod(task.id)
+            rounds = watched_rounds(sup, pod, task)
             st = drive(task, sup, {State.IMPLEMENT})
             assert st.state is State.IMPLEMENT
             plant_a_fake_test(task)
+            before, clone_status = head(task.repo), host_status(task.repo)
             task.transition(State.VERIFY)
             sup.step()  # the gate: green, the test runs and passes
             spend(task)
             assert task.read_state().state is State.REVIEW, f"the gate let it through: {task.read_state()}"
-            sup.step()  # the reviewer
+            sup.step()  # the reviewer, in its own container
             spend(task)
             review = (task.meta / "handoff" / "review-1.md").read_text()
             st = task.read_state()
+            assert len(rounds) == 1, "one round, one review container"
+            a_round_in_the_hosts_directory(task, pod, rounds[0], st.verified_commit)
+            assert head(task.repo) == before and host_status(task.repo) == clone_status, (
+                "the reviewer changed the writer's clone"
+            )
             assert st.state is State.IMPLEMENT and "test_calc.py" in review.split("## Not blocking")[0], (
                 f"the reviewer did not block the fake test:\n{review}"
             )
             sup.step()  # the writer fixes it
             spend(task)
             assert "assertTrue(True)" not in (task.repo / "test_calc.py").read_text(), "made real"
+            fixed = head(task.repo)
             sup.step()  # the gate
             spend(task)
             sup.step()  # the reviewer again
@@ -769,6 +861,11 @@ def test_review_a_test_that_proves_nothing_is_a_blocking_note_and_the_next_turn_
             st = task.read_state()
             assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY), f"ended in {st.state}"
             assert st.reviews == 2
+            assert len(rounds) == 2 and rounds[1]["session"] != rounds[0]["session"], (
+                "a container and a conversation of its own for the second round"
+            )
+            a_round_in_the_hosts_directory(task, pod, rounds[1], fixed)
+            assert head(task.repo) == fixed, "the reviewer committed"
         finally:
             finish(task)
     finally:
@@ -894,15 +991,17 @@ def host_git(where: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def conversation(pod, session: str) -> list[dict]:
-    """The planner's conversation as its own server in the control container holds it: every
-    message with its parts, the tool calls with what they were given and what came back."""
+def conversation(pod, session: str, side=None, port: int = opencode.PORT) -> list[dict]:
+    """A conversation as the harness server of its own container holds it (the planner's in the
+    control container, unless told another): every message with its parts, the tool calls with
+    what they were given and what came back."""
     get = (
         f'curl -fsS -m 30 -u "opencode:$(cat {SECRETS}/server-password)" '
-        f"http://127.0.0.1:{opencode.PORT}/session/{session}/message"
+        f"http://127.0.0.1:{port}/session/{session}/message"
     )
-    done = pod.control_side().exec("bash", "-c", get, check=False)
-    assert done.returncode == 0, f"the control container's server did not give the session: {done.stderr}"
+    side = side or pod.control_side()
+    done = side.exec("bash", "-c", get, check=False)
+    assert done.returncode == 0, f"the server in {side.agent} did not give the session: {done.stderr}"
     return json.loads(done.stdout)
 
 

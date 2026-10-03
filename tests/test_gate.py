@@ -494,6 +494,9 @@ def test_a_log_excerpt_keeps_what_went_wrong():
         "curl: (6) Could not resolve host: artifacts.example.com",
         "The security token included in the request is expired",
         "No space left on device",
+        # The kernel's OOM killer in the pod: the container's limit, not the code.
+        "[INFO] Building shop\nOut of memory: Killed process 4242 (java) total-vm:9876543kB",
+        "mmap(0x7f, 1073741824) failed: Cannot allocate memory",
         "testcontainers cannot pull confluentinc/cp-kafka:7.6.1: Docker reports tls: failed to verify"
         " certificate: x509: certificate signed by unknown authority",
         "testcontainers cannot pull confluentinc/cp-kafka:7.6.1: Docker reports short read: expected"

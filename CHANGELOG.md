@@ -28,6 +28,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the task detaches the disk and deletes the image; one the helper could not detach is kept and
   said. The clone stays beside the image, outside it. Tasks created before this change are from
   an earlier vivibox: delete them and create them again.
+- A task stops for you when the kernel kills a process of its pod for memory or its disk is
+  full, after the turn or the verification it happened in, with the status `out of memory` or
+  `out of disk space`: which container and its limit, the kernel's words (`oom_kill 1`), and the
+  command that raises it (`vivibox limits <id> --agent-memory 6g`, `vivibox disk grow <id> 40g`),
+  then `vivibox start <id>`. No fix round is spent on it. The event
+  `resource.limit.exceeded` (kind, workload, limit, peak or used) is on the task's timeline; a
+  kill is reported once. A slice or a disk that cannot be read while the pod runs stops the task
+  on an error, never passes as fine.
 
 ### Changed
 

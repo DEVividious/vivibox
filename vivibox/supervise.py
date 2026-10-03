@@ -12,6 +12,7 @@ from . import (
     display,
     gate,
     keys,
+    limits,
     ntfy,
     opencode,
     orchestration,
@@ -198,6 +199,7 @@ def make_supervisor(
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
         head=lambda: repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip(),
+        limits_exceeded=lambda: limits.exceeded(task, pod),
     )
     return supervisor.Supervisor(
         task,

@@ -1599,3 +1599,68 @@ def test_a_verification_that_could_not_run_verifies_no_commit(task):
     sup, _ = make(task, FakeHarness(task), results=[broken])
     sup.step()
     assert task.read_state().verified_commit != "c9"
+
+
+def test_an_oom_after_a_turn_stops_the_task_with_the_limit_the_kernels_words_and_the_command(task):
+    """The kernel killed a process in the agent's container: on the record as the plan names it,
+    and the task waits for you with what happened, the kernel's count and the command that raises
+    the limit, then the start. Before the turn's failure is read as the agent's: it was the limit."""
+    from vivibox import limits
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    hits = [[limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", {"pod": 1, "agent": 1})]]
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness)
+    sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []
+    assert sup.step()
+    st = task.read_state()
+    assert st.paused and st.state is State.IMPLEMENT, "stopped where it was: a start goes on from here"
+    what, _, why = st.problem.partition(": ")
+    assert what == "out of memory"
+    assert "the agent's container ran out of memory (4 GiB)" in why, "what happened"
+    assert "oom_kill 1" in why, "the kernel's words"
+    assert f"vivibox limits {task.id} --agent-memory 6g" in why and f"vivibox start {task.id}" in why
+    [event] = [e for e in task.events() if e["type"] == "resource.limit.exceeded"]
+    assert event["data"] == {
+        "kind": "memory", "workload": "agent", "limit": 4 * 2**30, "peak": 4 * 2**30,
+        "words": "oom_kill 1", "counts": {"pod": 1, "agent": 1},
+    }  # fmt: skip
+    assert ui.view(task, st, True, 3).status == "out of memory"
+    assert notes[-1].startswith("out of memory: ")
+    assert not sup.step(), "waits for you"
+
+
+def test_a_full_disk_during_the_verification_stops_the_task_before_a_round_is_spent(task):
+    from vivibox import limits
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", {})
+    hits = [[full]]
+    sup, notes = make(task, FakeHarness(task), results=[gate_result(False)])
+    sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []
+    rounds = task.read_state().rounds
+    assert sup.step()
+    st = task.read_state()
+    assert st.paused and st.state is State.VERIFY and st.rounds == rounds, "no fix turn for a full disk"
+    assert st.problem.startswith("out of disk space: the task's disk is full (20 GiB)")
+    assert f"vivibox disk grow {task.id} 40g" in st.problem
+    assert ui.view(task, st, True, 3).status == "out of disk space"
+    assert not (task.meta / "handoff" / "verify-feedback.md").exists(), "nothing for the writer to fix"
+
+
+def test_a_limit_that_cannot_be_read_stops_the_task_on_an_error_never_passes(task):
+    from vivibox import limits
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+        task.transition(s)
+    sup, notes = make(task, FakeHarness(task))
+
+    def unreadable():
+        raise limits.Unreadable("the task's cgroup slice vivibox-demo_1.slice is not there")
+
+    sup.ports.limits_exceeded = unreadable
+    with pytest.raises(limits.Unreadable):  # to run()'s catch-all, which stops the task on an error
+        sup.step()
+    assert [e["type"] for e in task.events()][-1] == "turn", "the turn was on the record first"

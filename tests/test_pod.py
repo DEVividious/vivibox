@@ -1219,3 +1219,26 @@ def test_pods_starting_at_once_prepare_the_host_one_at_a_time():
     for t in starts:
         t.join()
     assert len(most) == 3 and max(most) == 1, "one prepare-engine at a time"
+
+
+def test_the_pods_scopes_are_its_containers_ids_by_their_limits_role(pod):
+    """For limits.py: a label for the cgroup scope under the task's slice, nothing else; one that
+    is not an id is dropped, and a container that is not there has none."""
+    real = pod.runner
+
+    def inspecting(cmd):
+        cmd = list(cmd)
+        if cmd[:3] == ["docker", "inspect", "-f"] and "{{.Id}}" in cmd[3]:
+            real.calls.append(cmd)
+            found = "\n".join(
+                [f"/{pod.agent} {'a' * 64}", f"/{pod.sidecar} {'b' * 64}", f"/{pod.gate} nonsense"]
+            )
+            return subprocess.CompletedProcess(
+                cmd, 1, found + "\n", "Error: No such object: vivibox-shop-1-review"
+            )
+        return real(cmd)
+
+    pod.runner = inspecting
+    assert pod.scopes() == {"agent": "a" * 64, "sidecar": "b" * 64}
+    [asked] = real.find("docker", "inspect", "-f")
+    assert asked[4:] == [pod.agent, pod.sidecar, pod.gate, pod.review], "one question for all"

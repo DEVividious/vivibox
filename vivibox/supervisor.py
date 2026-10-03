@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, display, feedback, gate, handoff, manual, orchestration, proposal, transcript, ui
+from . import brief, display, feedback, gate, handoff, limits, manual, orchestration, proposal, transcript, ui
 from . import init as project_init
 from .config import DEFAULT_VERIFY_TIMEOUT, Project, by_modules
 from .harness import Harness, HarnessError, Turn
@@ -212,6 +212,9 @@ class Ports:
     # The whole build, once, before the work comes to you (limits.whole_build_before_review), for a
     # task verified by its modules; None when there is nothing to run.
     run_whole_gate: Callable[[Task], gate.GateResult | None] = lambda task: None
+    # What the pod hit of its limits (limits.py), asked after a turn and after a verification:
+    # nothing, for a caller without a pod.
+    limits_exceeded: Callable[[], list[limits.Exceeded]] = lambda: []
 
 
 @dataclass
@@ -365,12 +368,28 @@ class Supervisor(ReviewRound):
             error=turn.error[:500],
             **({"kind": kind} if kind else {}),
         )
+        if self._limits_hit():  # before a failure is read as the agent's: it was the limit
+            return None
         if not turn.ok:
             self.task.set_paused(True, problem=f"agent turn failed: {turn.error or turn.text}")
             self.ports.notify(self.task.id, f"agent turn failed, task paused: {turn.error[:200]}")
             return None
         clear_next_prompt(self.task)
         return turn
+
+    def _limits_hit(self) -> bool:
+        """What the pod hit of its limits, on the record as the plan names it; the task then
+        stops for you where it is, with what happened, the kernel's words and the command that
+        raises the limit. What cannot be read where it should be raises, to the catch-all."""
+        found = self.ports.limits_exceeded()
+        for hit in found:
+            self.task.event("resource.limit.exceeded", **limits.event_data(hit))
+        if not found:
+            return False
+        said = limits.problem(self.task.id, found)
+        self.task.set_paused(True, problem=said)
+        self.ports.notify(self.task.id, said)
+        return True
 
     def _attempts(
         self, harness: Harness, prompt: str, session: str, title: str, st: TaskState, role: str
@@ -642,6 +661,8 @@ class Supervisor(ReviewRound):
 
     def _verify(self, st: TaskState) -> None:
         result = self.ports.run_gate(self.task)
+        if self._limits_hit():  # the limit's, not the code's: no round, verified again at the start
+            return
         target = gate.next_state(result, st.rounds, self.max_rounds)
         if result.passed:
             self.task.set_verified_commit(result.commit)
@@ -714,6 +735,8 @@ class Supervisor(ReviewRound):
         """The whole build, when the work is about to come to you and it was verified by its modules
         only; red, it goes back to the writer like any failed verification. True to go on."""
         result = self.ports.run_whole_gate(self.task)
+        if result is not None and self._limits_hit():
+            return False
         if result is None or result.passed:
             return True
         feedback.write_feedback(self.task, result)

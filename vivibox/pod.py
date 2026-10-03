@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -73,6 +74,23 @@ def addresses(sidecars: Sequence[str], runner: Runner = run, timeout: float | No
         name, _, address = line.strip().partition(" ")
         if address:
             out[name.lstrip("/")] = address
+    return out
+
+
+CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
+
+
+def container_ids(names: Sequence[str], runner: Runner = run) -> dict[str, str]:
+    """The id of each container that exists, by name, in one question. An id is 64 hex digits
+    and nothing else is taken: a label for a cgroup scope (limits.py), never a path or an argument."""
+    if not names:
+        return {}
+    found = runner(["docker", "inspect", "-f", "{{.Name}} {{.Id}}", *names])
+    out = {}
+    for line in found.stdout.splitlines():
+        name, _, cid = line.strip().partition(" ")
+        if CONTAINER_ID.fullmatch(cid):
+            out[name.lstrip("/")] = cid
     return out
 
 
@@ -243,6 +261,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
 
     def review_command(self, mounts: list[Mount], env: dict[str, str]) -> list[str]:
         return podspec.review_command(self, mounts, env, ca_mounts())
+
+    def scopes(self) -> dict[str, str]:
+        """The id of each container of the pod that is there, by its limits role (config.toml's
+        [limits]): for limits.py, a label for the container's cgroup scope under the task's slice."""
+        names = {"agent": self.agent, "sidecar": self.sidecar, "gate": self.gate, "review": self.review}
+        found = container_ids(list(names.values()), self.runner)
+        return {role: found[name] for role, name in names.items() if name in found}
 
     def passed_values(self) -> list[str]:
         """The values of the passed variables, for keeping them out of logs."""

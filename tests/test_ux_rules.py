@@ -124,6 +124,8 @@ def situations(env):
         "stopped on an error: boom",
         "could not start: X not set",
         "cost limit reached: $2.10 of $2.00",
+        "out of memory: the agent's container ran out of memory (4 GiB): oom_kill 1",
+        "out of disk space: the task's disk is full (20 GiB): statvfs: 0 of 5242880 blocks free",
     ):
         failed = implementing(problem)
         failed.set_paused(True, problem=problem)

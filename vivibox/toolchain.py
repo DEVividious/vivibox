@@ -20,12 +20,16 @@ if TYPE_CHECKING:
     from .pod import Pod
 
 JDK_LINK = "/config/jdk"
-# The files of a checkout that pin a tool for mise (mise's configuration file names).
-MISE_FILES = frozenset(
-    {
-        "mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", ".tool-versions",
-        ".mise/config.toml", "mise/config.toml", ".config/mise.toml", ".config/mise/config.toml",
-    }
+# Where mise reads a project's configuration (its documented list): the plain files, the
+# fragments under conf.d, and the environment-specific (`mise.<env>.toml`) and local variants of
+# each; globs, as a checkout's files are read on the host, not through mise (which would be one
+# more exec in the gate and would answer for its own home too).
+MISE_PATTERNS = (
+    "mise.toml", "mise.*.toml", ".mise.toml", ".mise.*.toml", ".tool-versions",
+    "mise/config.toml", "mise/config.*.toml", "mise/conf.d/*.toml",
+    ".mise/config.toml", ".mise/config.*.toml", ".mise/conf.d/*.toml",
+    ".config/mise.toml", ".config/mise.*.toml",
+    ".config/mise/config.toml", ".config/mise/config.*.toml", ".config/mise/conf.d/*.toml",
 )  # fmt: skip
 # The shims of the shared cache, on the agent's PATH and never on the gate's.
 SHIMS = f"{podspec.CACHES['mise']}/shims"
@@ -56,18 +60,27 @@ def gate_env(java: str, image_env: dict[str, str], gate_dir) -> dict[str, str]:
     return {**env, "PATH": ":".join(dirs), "MISE_DATA_DIR": mise, "MISE_DISABLE_TOOLS": "java"}
 
 
+def pins_a_tool(checkout: Path) -> bool:
+    """Whether the checkout has a configuration file of mise's: a plain file, and under conf.d a
+    non-hidden one, as mise reads them."""
+    return any(
+        found.is_file() and not ("conf.d" in pattern and found.name.startswith("."))
+        for pattern in MISE_PATTERNS
+        for found in checkout.glob(pattern)
+    )
+
+
 def install_declared(pod: Pod, gate: bool = False) -> None:
     """Install whatever the checkout's own mise.toml asks for, on top of the image's own toolchains.
 
     A shim exists only for a tool that is installed, so a project that chose Go or Ruby would
     otherwise fail with 'command not found' — which names the symptom and hides the cause. Failure
     is not raised: the verify command runs next and says what is actually missing. Only when the
-    checkout pins a tool (MISE_FILES): the gate's mise data directory is its own and cold, and
+    checkout pins a tool (MISE_PATTERNS): the gate's mise data directory is its own and cold, and
     mise would otherwise download for every verification; the image's Python, uv and JDK are in
     its root filesystem and need no mise.
     """
-    root = Path(pod.gate_src if gate else pod.repo)
-    if not any((root / name).is_file() for name in MISE_FILES):
+    if not pins_a_tool(Path(pod.gate_src if gate else pod.repo)):
         return
     (pod.gate_exec if gate else pod.exec)("bash", "-c", "mise install --yes", check=False)
 

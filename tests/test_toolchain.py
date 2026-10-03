@@ -89,11 +89,23 @@ def test_the_gate_finds_a_project_jdk_in_the_shared_cache_without_installing_any
     assert pod.agent == [f"{installs} /config/jdk"]
 
 
-@pytest.mark.parametrize("name", sorted(toolchain.MISE_FILES))
+# Every place mise reads a project's configuration from (mise's documented list): the plain files,
+# the fragments under conf.d, the environment-specific and local variants at each level.
+PINNED_IN = (
+    "mise.toml", ".mise.toml", "mise.local.toml", ".mise.local.toml", ".tool-versions",
+    "mise/config.toml", ".mise/config.toml", ".config/mise.toml", ".config/mise/config.toml",
+    "mise/conf.d/go.toml", ".mise/conf.d/go.toml", ".config/mise/conf.d/go.toml",
+    "mise.ci.toml", ".mise.ci.toml", "mise.ci.local.toml", ".mise.ci.local.toml",
+    ".config/mise/config.ci.toml", ".config/mise/config.ci.local.toml",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("name", PINNED_IN)
 def test_the_gate_runs_mise_install_only_for_a_checkout_that_pins_a_tool(tmp_path, name):
     """The image's own toolchains need no mise, and the gate's mise data directory is cold: a
     `mise install` there would download for every verification of every project. It runs only
-    when the clone pins a tool in a file of mise's (the project's `tools` go through `ensure`)."""
+    when the clone pins a tool in a file of mise's, wherever mise reads one (the project's
+    `tools` go through `ensure`)."""
     pod = Recording()
     pod.gate_src = str(tmp_path / "src")
     pod.repo = tmp_path / "repo"
@@ -111,3 +123,14 @@ def test_the_gate_runs_mise_install_only_for_a_checkout_that_pins_a_tool(tmp_pat
     (tmp_path / "repo" / name).write_text("go 1.25.3\n")
     toolchain.install_declared(pod)
     assert pod.agent == ["mise install --yes"]
+
+
+def test_a_file_that_is_not_mises_does_not_make_the_gate_install(tmp_path):
+    pod = Recording()
+    pod.gate_src = str(tmp_path / "src")
+    for name in ("mise/conf.d/notes.md", ".mise/conf.d/.hidden.toml", "mise.toml.bak", "config/mise.toml"):
+        (tmp_path / "src" / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "src" / name).write_text("x")
+    (tmp_path / "src" / "mise.toml.d").mkdir()  # a directory of that name, not a file
+    toolchain.install_declared(pod, gate=True)
+    assert pod.gate == []

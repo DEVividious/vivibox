@@ -256,7 +256,12 @@ through its read-only dependency cache) and keep what they fetch in the gate's d
 task's disk, fresh for every verification; npm, Yarn, uv, Go and Cargo fetch cold into that
 directory every time, so a verification of such a project takes the download's time on top of
 the build's. `java` and `tools` reach the gate too: the JDK from the shared cache, the tools
-installed again for the verification.
+installed again for the verification. The verification's tools are the image's (`git`, `mvn`,
+`java`, `node`, `python`, `uv`) unless the checkout's own `mise.toml` or the project's `tools`
+pin one, which the verification then installs for itself and runs instead: the project's choice,
+from a file you approve. A JDK pinned only in the checkout's `mise.toml` is the agent's, not the
+verification's, which takes `java` from the project's settings or the image's Java 21: set `java`
+in the project for a JDK the verification must build with.
 
 `prepare` is for a project whose whole build takes long: the commands run once in a new task's
 clone while the plan is made, and the writer's first turn waits for them, so the writer builds the
@@ -334,9 +339,9 @@ cache. The verification reads nothing from it: it downloads into a cache of its 
 time. `node_modules` and other installed project files stay in the task's clone, and verification
 installs them again in a fresh clone.
 
-Yarn Classic defaults to `/cache/yarn/classic` through `/usr/local/etc/yarnrc` in the image
-(`YARN_CACHE_FOLDER` in the verification, under its own directory). Your own
-`cache-folder`, CLI flag or `YARN_CACHE_FOLDER` can override it. Yarn 2 and later use
+Yarn Classic defaults to `/cache/yarn/classic` through `/usr/local/etc/yarnrc` in the image; in
+the verification, to a folder of its own through a `.yarnrc` under the verification's home. Your
+own `cache-folder`, CLI flag or `YARN_CACHE_FOLDER` can override it. Yarn 2 and later use
 `YARN_GLOBAL_FOLDER=/cache/yarn/berry` (the verification's own in the gate) for the global cache
 or the download mirror of a local cache. vivibox leaves `enableGlobalCache`, `cacheFolder` and `enableMirror` to the project,
 so checked-in caches and zero-installs keep working. A project that chooses a local cache and

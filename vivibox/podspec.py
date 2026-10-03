@@ -41,8 +41,10 @@ CACHES = {
     # Maven's build cache extension puts its cache beside the local repository, /cache/m2.
     "build-cache": "/cache/build-cache",
 }
-# Where Maven's split local repository puts what a build installs: a volume per task, over the
-# shared /cache/m2, so one task's unfinished modules never reach another's build.
+# Where Maven's split local repository puts what the agent's build installs: a directory of the
+# task's disk, over the shared /cache/m2, so one task's unfinished modules never reach another's
+# build. The gate's repository is its own (gate_tool_env), installed modules included; in the gate
+# this path is the read-only volume's own empty directory.
 INSTALLED = "/cache/m2/installed"
 # The gate's own caches, under its directory on the task's disk, made fresh by gate_up for every
 # verification and gone with the directory. The shared caches are mounted read-only in the gate:

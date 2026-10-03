@@ -52,7 +52,10 @@ The dependency caches the tasks share (`/cache/m2`, `/cache/gradle`, `/cache/npm
 writable for the agent and mounted read-only in the gate's container: the verification runs nothing
 from them and writes nothing into them. Its `PATH` is the image's without mise's shims from the
 shared cache (a program the agent put there would otherwise be its `git`, its `python`); its
-`git`, `mvn`, `java`, `node`, `python` and `uv` are the image's; its Gradle home, Maven repository, npm, Yarn,
+`git`, `mvn`, `java`, `node`, `python` and `uv` are the image's, unless the checkout's own
+`mise.toml` or the project's `tools` pin one: then the verification installs it into a directory of
+its own and runs that one, the project's choice from a file you approve (the clone and its
+submodules are made before anything is installed); its Gradle home, Maven repository, npm, Yarn,
 corepack, uv, Go and Cargo caches are directories of its own under the gate's directory on the
 task's disk, made fresh for every verification, so no init script, JVM option or configuration the
 agent left in a shared cache is read. What a tool can read from the shared cache without writing it

@@ -139,6 +139,20 @@ def test_nested_container_cannot_write_to_repo(env):
     assert not (repo / "suid").exists()
 
 
+def test_nested_container_cannot_write_to_the_gates_directory(env):
+    """The gate's directory holds its clone, its caches and the shims of its own mise, first on
+    its PATH: the sidecar mounts it read-only like the repo, so root in a container the writer
+    starts cannot plant anything there, and the agent's container does not mount it at all."""
+    pod = env["pod"]
+    gate_dir = pod.gate_dir
+    gate_dir.mkdir(parents=True, exist_ok=True)
+    write = f"mkdir -p {gate_dir}/caches/mise/shims && touch {gate_dir}/caches/mise/shims/git"
+    agent(env, f"docker run --rm -v {gate_dir}:{gate_dir} alpine:3 sh -c '{write}'", check=False)
+    assert not (gate_dir / "caches").exists(), "written through the sidecar's read-only mount"
+    assert agent(env, f"touch {gate_dir}/x", check=False).returncode != 0, "not mounted in the agent"
+    assert not (gate_dir / "x").exists()
+
+
 def test_privileged_nested_container_cannot_reach_host(env):
     marker = Path.home() / f".vivibox-pod-check-{secrets.token_hex(4)}"
     marker.write_text("secret")
@@ -394,6 +408,10 @@ def test_the_gate_does_not_run_what_the_writer_put_in_a_cache(env):
 
     pod = env["pod"]
     marker = f"planted-{secrets.token_hex(4)}"
+    # A gradle.properties the writer of another task may keep there: put back afterwards.
+    kept = "/tmp/gradle.properties.kept"
+    properties = "/cache/gradle/gradle.properties"
+    agent(env, f"rm -f {kept}; test -e {properties} && cp {properties} {kept}; true")
     shim = f"printf '#!/bin/sh\\necho {marker}\\nexec /usr/bin/git \"$@\"\\n' > /cache/mise/shims/git"
     plant = (
         f"mkdir -p /cache/mise/shims /cache/gradle/init.d && {shim} && chmod +x /cache/mise/shims/git"
@@ -429,10 +447,8 @@ def test_the_gate_does_not_run_what_the_writer_put_in_a_cache(env):
             pod.gate_down()
         assert agent(env, "test -e /cache/gradle/init.d/x.gradle", check=False).returncode == 0, "left alone"
     finally:
-        agent(
-            env, "rm -f /cache/mise/shims/git /cache/gradle/init.d/x.gradle /cache/gradle/gradle.properties"
-        )
-        agent(env, f"rm -f /cache/build-cache/{marker}", check=False)
+        agent(env, f"rm -f /cache/mise/shims/git /cache/gradle/init.d/x.gradle {properties}")
+        agent(env, f"test -e {kept} && mv {kept} {properties}; true")
 
 
 def test_pod_restart_keeps_images_and_firewall(env):

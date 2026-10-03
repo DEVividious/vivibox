@@ -30,7 +30,7 @@ from .config import (
     load_config,
 )
 from .harness import HarnessError
-from .pod import Pod
+from .pod import Pod, PodError
 from .task import Task
 
 
@@ -324,23 +324,35 @@ def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
         return manual.Manual()
     side = container_of(role_name, pod, task)
     if role.harness == claudecode.NAME:
-        return claudecode.ClaudeCode(side, role.model)
+        # In the control container claude is given no directory: see ClaudeCode.add_dirs.
+        dirs = () if side is not pod else claudecode.ADD_DIRS
+        return claudecode.ClaudeCode(side, role.model, dirs)
     if role_name == "reviewer":
         return opencode.OpenCode(side, role.model, port=opencode.REVIEW_PORT)
     return opencode.OpenCode(side, role.model, task=task if role_name == "writer" else None)
 
 
 def container_of(role_name: str, pod: Pod, task: Task | None = None):
-    """Where a role's harness runs, as the harness talks to it. The planner of a task with a
-    control container is given that one or nothing (pod.control_side refuses a pod without one),
-    never the writer's container in its place; without a task, the pod says whether it has one."""
+    """Where a role's harness runs, as the harness talks to it. The planner's is decided by what
+    the caller already holds, the pod it made and the flow the task records, never by reading
+    config.toml again: the two disagreeing is an error, and a planner of a flow with a control
+    container is given that container (pod.control_side refuses a pod without one) or nothing,
+    never the writer's in its place."""
     if role_name != "planner":
         return pod
-    if task is not None:
-        apart = orchestration.has_control(task, load_config())
-    else:
-        apart = getattr(pod, "has_control", False)
-    return pod.control_side() if apart else pod
+    wanted, has = orchestration.recorded_control(task), getattr(pod, "has_control", None)
+    if wanted is None and has is None:
+        return pod  # neither says: a caller with no task and a stand-in for a pod
+    if wanted is not None and has is not None and wanted != has:
+        raise PodError(
+            f"{task.id}'s flow {'has' if wanted else 'has no'} container for the planner and its pod "
+            f"{'has one' if has else 'has none'}; stop the task and start it again"
+        )
+    if not (has if wanted is None else wanted):
+        return pod
+    if not hasattr(pod, "control_side"):
+        raise PodError(f"{task.id}: no container for the planner on this pod, and the agent's is not given")
+    return pod.control_side()
 
 
 # The roles whose harness runs in the agent's container where the task has no control container

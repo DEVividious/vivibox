@@ -6,17 +6,21 @@ in supervisor_worker also reads the work, runs in a container of its own for the
 in a network of its own (podspec's recipe for it). Its conversation is kept in a home that only
 that container mounts, its harness server listens in that container's network namespace with a
 password of its own, and its keys are in a directory of its own: nothing the writer runs has a
-path to any of them, so what the planner reads as its own history is what it wrote.
+path to any of them, so what the planner reads as its own history is what it wrote. What the
+writer does write reaches it as data only: the commits, in a copy the host makes (refresh),
+which is never its harness's working directory (podspec.CONTROL_WORK), and the handoff.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from . import brief, claudecode, comments, opencode, providers, repo, reviewing, roles, secrets
 from .config import Config
 from .pod import Mount, Pod
+from .states import State
 from .task import Task
 
 # The planner's harness files in the task's folder, written by the host and mounted read-only
@@ -24,9 +28,7 @@ from .task import Task
 HARNESS = "harness-control"
 ENV = {"OPENCODE_CONFIG": opencode.CONFIG, "CLAUDE_CONFIG_DIR": claudecode.CONFIG_DIR}
 PLANNERS = ("planner",)
-# The copy is checked out as the commits have it: git-lfs of your own configuration, where it is
-# required, would ask a remote the copy does not have and stop the checkout.
-NO_LFS = ("-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false")
+HEX = re.compile(r"[0-9a-f]{40,64}")
 
 
 def secrets_id(task_id: str) -> str:
@@ -83,29 +85,57 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     return before != {p.name: p.read_text() for p in d.iterdir()}
 
 
-def refresh(task: Task, pod: Pod) -> None:
-    """The planner's copy of the committed work, as the task's branch is now: made by git on the
-    host, in a folder of the task's disk that only the control container mounts, read-only. The
-    writer's clone is read as every git of the host's reads it, once it is as recorded
-    (repo.guard) and within a time limit, and only its commits are taken: its .git, where the
-    writer can leave what git follows to a command, is never what the planner's git works in.
-    Before the planner's first turn and before each one after it, so a review reads the commits
-    the verification passed."""
+# git on the host, in the planner's copy, reads no configuration but the copy's own, which is
+# the host's making: your global and system configuration (a filter driver, git-lfs, a submodule
+# setting) would otherwise run your programs on what the writer committed.
+HOST_GIT = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def reviewed_commit(task: Task) -> str:
+    """The commit the planner reads: the one the verification passed while the task is in its
+    review, so the supervisor reads what was verified whatever the branch points at since; ""
+    else (planning), for the branch as it is."""
+    st = task.read_state()
+    return st.verified_commit if st.state is State.REVIEW else ""
+
+
+def refresh(task: Task, pod: Pod, commit: str = "") -> None:
+    """The planner's copy of the committed work: made by git on the host, in a folder of the
+    task's disk that only the control container mounts, read-only. The writer's clone is read
+    as every git of the host's reads it, once it is as recorded (repo.guard) and within a time
+    limit, and only its commits are taken: its .git, where the writer can leave what git follows
+    to a command, is never what the planner's git works in. The copy stands on commit when one
+    is given (the verified one, for a review; not on the task's branch, it is refused), else on
+    the task's branch as it is. Before the planner's first turn and before each one after it."""
     src, branch = pod.control_src, repo.branch_name(task.id)
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"the planner's copy of the work has no folder at {src}; start the task again")
     if not (src / ".git").exists():
-        repo.git("init", "--quiet", "--initial-branch", branch, str(src))
+        repo.git("init", "--quiet", "--initial-branch", branch, str(src), env=HOST_GIT)
     try:
         repo.in_clone(
-            task.repo, "fetch", "--quiet", "--no-tags", str(task.repo), f"refs/heads/{branch}",
-            cwd=src, timeout=repo.COPY_TIMEOUT,
+            task.repo, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", str(task.repo),
+            f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=HOST_GIT,
         )  # fmt: skip
     except repo.GitTimeout as e:
         raise repo.GitTimeout(
             f"the planner's copy of the work could not be brought up to date: {e}"
         ) from None
-    repo.git(*NO_LFS, "reset", "--quiet", "--hard", "FETCH_HEAD", cwd=src)
+    if commit:
+        if not HEX.fullmatch(commit):
+            raise repo.RepoError(f"not a commit to read the work at: {commit[:60]!r}")
+        known = repo.git(
+            "merge-base", "--is-ancestor", commit, "FETCH_HEAD", cwd=src, check=False, env=HOST_GIT
+        )
+        if known.returncode != 0:
+            raise repo.RepoError(
+                f"the verified commit {commit[:7]} is not on the task's branch {branch}, so the "
+                "planner's copy cannot show the work that was verified"
+            )
+    repo.git(
+        "reset", "--quiet", "--hard", "--no-recurse-submodules", commit or "FETCH_HEAD", cwd=src,
+        env=HOST_GIT,
+    )  # fmt: skip
 
 
 class Reader:

@@ -1065,7 +1065,7 @@ def test_a_start_names_the_model_that_writes_in_the_tasks_mode(env, monkeypatch,
     monkeypatch.setattr(actions, "model_missing", lambda *a: "")
     monkeypatch.setattr(actions, "available_models", lambda refresh=False: [])
     monkeypatch.setattr(Pod, "up", lambda self: None)
-    monkeypatch.setattr(actions.control, "refresh", lambda task, pod: None)  # no pod, no copy to make
+    monkeypatch.setattr(actions.control, "refresh", lambda task, pod, commit="": None)  # no pod, no copy
     monkeypatch.setattr(actions.toolchain, "ensure", lambda *a, **kw: None)
     monkeypatch.setattr(actions.prepare, "begin", lambda *a: None)
     monkeypatch.setattr(opencode.OpenCode, "ensure_server", lambda self: None)

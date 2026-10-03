@@ -4492,7 +4492,8 @@ def test_the_cost_is_three_columns_and_review_shows_only_where_someone_reviews(e
         assert str(app.table.get_cell(task.id, app.impl_column)) == "$0.04"
 
     run(without)
-    with_mode(env, "planner_writer_reviewer")
+    with_mode(env, "planner_writer_reviewer")  # the list's columns follow config.toml's flow
+    task.set_orchestration("planner_writer_reviewer")  # a task's flow is its own, from its creation
     task.event("turn", state="review", role="reviewer", cost=0.02, tokens=1)
 
     async def with_(app, pilot):

@@ -487,6 +487,13 @@ def review_command(
 # home, and its copy of the committed work, which the host writes and it only reads.
 CONTROL_HOME = "config-control"
 CONTROL_SRC = "control-src"
+# The working directory of the planner's harness in its control container: an empty, read-only
+# tmpfs. A harness loads project configuration from its working directory and runs what it
+# names (opencode 1.18.31: opencode.json and .opencode/ with their MCP commands and plugins;
+# Claude Code 2.1.278: .claude/settings.json hooks and .mcp.json servers; both seen to run in
+# the image), so that directory holds nothing anyone wrote; the copy of the writer's commits is
+# data beside it, read by its path.
+CONTROL_WORK = "/work"
 
 
 def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[str]:
@@ -497,9 +504,10 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
     the commits that the host makes (control.refresh), read-only, at the path the clone has
     for the writer: the writer's clone itself is not mounted, so git here never follows what
     the writer left in its .git (a commondir, a config of its choosing), and nothing the planner
-    does reaches the writer's tree. Nothing the writer's container mounts is that home, that
-    copy or its secrets, and the host's rules refuse the writer's range and the reviewer's on
-    its bridge, and its range on theirs."""
+    does reaches the writer's tree. The copy is data, never the harness's working directory,
+    which is CONTROL_WORK: harness configuration the writer committed is read, not run. Nothing
+    the writer's container mounts is that home, that copy or its secrets, and the host's rules
+    refuse the writer's range and the reviewer's on its bridge, and its range on theirs."""
     all_mounts = [
         Mount(str(pod.control_src), str(pod.repo), read_only=True),
         Mount(str(pod.control_home), "/config"),
@@ -517,9 +525,10 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
         "--dns", pod.host_ip, "--dns-search", ".",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('control')}",
+        "--tmpfs", f"{CONTROL_WORK}:ro,mode=555,size=65536",
         *pod.limits.flags("control", pod.task_id),
         *(arg for k, v in env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
-        "-w", str(pod.repo),
+        "-w", CONTROL_WORK,
         pod.image, "sleep", "infinity",
     ]  # fmt: skip

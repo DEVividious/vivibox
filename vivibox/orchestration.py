@@ -67,10 +67,26 @@ assert set(MODES) == set(ORCHESTRATION_MODES)
 DEFAULT = MODES[DEFAULT_ORCHESTRATION]
 
 
-def mode_of(task: Task | None, config: Config) -> Mode:
-    """The task's own mode when it chose one, else config.toml's."""
+def recorded(task: Task | None) -> Mode | None:
+    """The flow the task was created with, as its state records it; None for no task, and for
+    one whose state names none (made without actions.create)."""
     chosen = task.read_state().orchestration if task else ""
-    return MODES[current_mode(chosen or config.orchestration)]
+    return MODES.get(current_mode(chosen)) if chosen else None
+
+
+def mode_of(task: Task | None, config: Config) -> Mode:
+    """A task's flow is the one it was created with (actions.create records it), whatever
+    config.toml says since: config.toml's flow is for new tasks, and for a caller without a task."""
+    return recorded(task) or MODES[current_mode(config.orchestration)]
+
+
+def recorded_control(task: Task | None) -> bool | None:
+    """Whether the task's recorded flow has a control container, from the task alone, no
+    configuration read; None when it records none."""
+    mode = recorded(task)
+    if mode is None:
+        return None
+    return mode.control and not task.read_state().box
 
 
 def has_control(task: Task | None, config: Config) -> bool:

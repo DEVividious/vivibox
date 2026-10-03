@@ -63,12 +63,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   its own history, reach its server or use its key. `w` on the planner's conversation opens it
   there. The planner reads the work in a copy of the task's commits that vivibox makes on the
   task's disk and mounts read-only where the writer has its clone; the writer's clone itself is
-  not mounted there. The agent's container holds the writer's key alone (a provider both use is
+  not mounted there, and for a review the copy stands on the commit the verification passed.
+  The planner's harness works in an empty read-only directory, `/work`, and reads that copy as
+  data, by its path. The agent's container holds the writer's key alone (a provider both use is
   in both), and, where a reviewer or the planner reads the work, no longer writes the task's
   review folder, where vivibox reads the verdict. `vivibox stop` stops the control container,
   and `vivibox delete` removes it with its network, its home and its secrets. A Single agent
   task has neither the container nor the network: its planner's range stays reserved. Tasks
   created before this change are from an earlier vivibox: delete them and create them again.
+- A task keeps the flow it was created with: `agent_orchestration_mode` in `config.toml`, and
+  the Flow row under `k`, are for the tasks you create after a change, where a running task
+  followed the file before. Which containers a task's pod has depends on its flow.
 - A task has a network per role instead of one: the writer's, which the sidecar, the
   verification and the pod's own containers share, and the reviewer's, `vivibox-<id>-r`, of its
   own, each on a bridge of its own with rules of its own on your machine, which refuse each

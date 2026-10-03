@@ -24,6 +24,7 @@ NAME = "claude-code"
 # history -- to a per-task place. Sharing one directory between tasks would share the conversations,
 # and a company task's transcript has no business in a personal task's container.
 CONFIG_DIR = "/config/claude"
+ADD_DIRS = ("/task/handoff", HARNESS_MOUNT)
 
 
 def parse_result(output: str) -> Turn:
@@ -75,9 +76,14 @@ def parse_result(output: str) -> Turn:
 class ClaudeCode(Harness):
     name = NAME
 
-    def __init__(self, pod: Pod, model: str):
+    def __init__(self, pod: Pod, model: str, add_dirs: tuple[str, ...] = ADD_DIRS):
         self.pod = pod
         self.model = model
+        # The directories claude is given besides its working directory. It loads the skills
+        # of each one's .claude/ (2.1.278), so the planner in its control container is given
+        # none: the handoff is the writer's to write, and with every permission bypassed claude
+        # reads and writes outside its working directory without them.
+        self.add_dirs = tuple(add_dirs)
 
     def session_exists(self, session: str) -> bool:
         """Whether a conversation can still be carried on. Claude keeps them as files under HOME,
@@ -103,7 +109,7 @@ class ClaudeCode(Harness):
         # --add-dir takes a list, so it swallows anything after it: with the prompt as the last
         # argument claude read it as another directory and refused the turn for having no input.
         # stdin keeps the two apart and takes a prompt of any length or shape.
-        args += ["--add-dir", "/task/handoff", HARNESS_MOUNT]
+        args += ["--add-dir", *self.add_dirs] if self.add_dirs else []
         # The same briefing opencode gets from its config, which claude has no way to read. The
         # file is read in the container, so the shell there substitutes it.
         brief = f'--append-system-prompt "$(cat {INSTRUCTIONS})"'

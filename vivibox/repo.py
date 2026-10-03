@@ -60,17 +60,20 @@ COPY_TIMEOUT = 600.0
 
 def git(
     *args: str, cwd: Path | None = None, check: bool = True, timeout: float | None = None,
-    clone: Path | None = None,
+    clone: Path | None = None, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:  # fmt: skip
     """timeout: seconds git may take, or no limit; past it, GitTimeout says what git was waiting on
-    in clone (cwd when not given)."""
+    in clone (cwd when not given). env: variables over this process's own, for a git that must
+    not read your configuration (control.refresh)."""
     if cwd is not None and not Path(cwd).is_dir():
         # A folder that was moved or deleted since it was configured; say so instead of a stack trace.
         raise RepoError(f"{cwd} does not exist")
     if timeout is None:
-        p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        whole = {**os.environ, **env} if env else None
+        p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=whole)
     else:
-        p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."))
+        own = (env,) if env else ()  # a stand-in for _bounded may know no environment
+        p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."), *own)
     if check and p.returncode != 0:
         # The arguments and what git says of them may carry a name the agent chose in the clone.
         raise RepoError(f"git {display.name(' '.join(args[:3]))}…: {display.name(p.stderr.strip())}")
@@ -78,12 +81,13 @@ def git(
 
 
 def in_clone(
-    clone: Path, *args: str, check: bool = True, cwd: Path | None = None, timeout: float | None = None
-) -> subprocess.CompletedProcess:
+    clone: Path, *args: str, check: bool = True, cwd: Path | None = None, timeout: float | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:  # fmt: skip
     """git on the task's clone, or reading it from cwd, within CLONE_TIMEOUT (or timeout); only
     once guard found the clone as recorded."""
     guard(clone)
-    return git(*args, cwd=cwd or clone, check=check, timeout=timeout or CLONE_TIMEOUT, clone=clone)
+    return git(*args, cwd=cwd or clone, check=check, timeout=timeout or CLONE_TIMEOUT, clone=clone, env=env)
 
 
 def guard(clone: Path) -> None:
@@ -95,14 +99,14 @@ def guard(clone: Path) -> None:
 
 
 def _bounded(
-    command: list[str], cwd: Path | None, timeout: float, clone: Path
+    command: list[str], cwd: Path | None, timeout: float, clone: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess:
     """git in a session of its own, so that on a timeout it goes down with every process it started.
     Without optional locks: git status would write the clone's index in the form your settings ask
     for (a split one), which protection could not read."""
     p = subprocess.Popen(
         command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, start_new_session=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        text=True, start_new_session=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", **(env or {})},
     )  # fmt: skip
     try:
         out, err = p.communicate(timeout=timeout)

@@ -382,13 +382,11 @@ def create(
         modules = MODULES_LINE.format(command=" && ".join(project.verify))
         plan = plan.replace("\nverify = []\n", "\nverify = []\n" + modules, 1)
     task = create_task(config.tasks_dir, project.name, title, plan, after=used_numbers(project))
-    if (orchestration and orchestration != config.orchestration) or (
-        max_rounds and max_rounds != config.max_rounds
-    ):
-        task.set_orchestration(
-            orchestration if orchestration != config.orchestration else "",
-            max_rounds if max_rounds != config.max_rounds else 0,
-        )
+    # The flow is the task's from here on, config.toml's of this moment when none was asked for:
+    # which containers its pod has follows from it, and must not change under a task that runs.
+    task.set_orchestration(
+        orchestration or config.orchestration, max_rounds if max_rounds != config.max_rounds else 0
+    )
     try:
         described = context.attach(description.strip(), found, task.meta / "context", clone=task.repo)
         task.plan_path.write_text(plan.replace("{{goal}}", described))
@@ -533,7 +531,9 @@ def _start(
     on_step("starting the pod…")
     pod.up()
     if pod.has_control:
-        control.refresh(task, pod)  # the commits, for the planner to read, before anything runs
+        # The commits, for the planner to read, before anything of the project runs.
+        on_step("copying the commits for the planner…")
+        control.refresh(task, pod, control.reviewed_commit(task))
     if project.java or project.tools:
         on_step(
             f"installing {', '.join(([f'Java {project.java}'] if project.java else []) + project.tools)}…"

@@ -115,7 +115,7 @@ def make_supervisor(
     current: the settings as they are at each message; the ones given, unless told otherwise."""
     mode = orchestration.mode_of(task, config)
     harness = actions.harness_for("writer", pod, task)
-    if mode.agents["writer"] == "planner":
+    if not mode.control:
         # One agent plans, writes and reviews: the planner's model, on the tool that writes, with
         # the writer's progress recorded from its stream.
         planner = opencode.OpenCode(pod, actions.role_of(task, "planner", config).model, task=task)
@@ -124,7 +124,9 @@ def make_supervisor(
         # date before each of its turns, so a review reads what the verification passed.
         planner = actions.harness_for("planner", pod, task)
         if not getattr(planner, "manual", False):
-            planner = control.Reader(planner, lambda: control.refresh(task, pod))
+            planner = control.Reader(
+                planner, lambda: control.refresh(task, pod, control.reviewed_commit(task))
+            )
     reviewer = None
     if mode.separate_reviewer:
         if "reviewer" in config.roles:

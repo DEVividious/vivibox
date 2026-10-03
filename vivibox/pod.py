@@ -385,6 +385,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         namespace), on the network up() has just made, checked and loaded the rules for. A pod
         without one keeps none from a flow the task had before."""
         if not self.has_control:
+            # A planner's network left with it has nothing on it and no rules (the policy lists
+            # none for it, and a bridge without a policy is refused); delete removes it by name.
             self._run("docker", "rm", "-f", self.control, check=False)
             return
         if self._state(self.control) == "running":

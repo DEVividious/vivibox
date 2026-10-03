@@ -208,27 +208,40 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
     assert flag(cmd, "--memory-swap") == flag(cmd, "--memory")
     assert flag(cmd, "--pids-limit") == "1024"
     assert flag(cmd, "--cgroup-parent") == f"vivibox-{task.id.replace('-', '_')}.slice"
-    assert flag(cmd, "--tmpfs") == f"/tmp:exec,mode=1777,size={3 * 2**28}", "half of its memory"
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tmpfs"] == [
+        f"/tmp:exec,mode=1777,size={3 * 2**28}",  # half of its memory
+        "/work:ro,mode=555,size=65536",  # its harness's working directory: empty, nobody's to write
+    ]
     assert set(variables(cmd)) == {
         "GIT_OPTIONAL_LOCKS=0",
         "OPENCODE_CONFIG=/task/harness/opencode.json",
         "CLAUDE_CONFIG_DIR=/config/claude",
     }, "git never writes to the clone it reads; nothing of the build's"
-    assert cmd[cmd.index("-w") + 1] == str(task.repo) and cmd[-3:] == [pod.image, "sleep", "infinity"]
+    assert cmd[cmd.index("-w") + 1] == "/work" and cmd[-3:] == [pod.image, "sleep", "infinity"]
+    assert not any(m.split(":")[1].startswith("/work") for m in mounted), "nothing is mounted there"
 
 
 @pytest.mark.parametrize(("mode", "has_one"), FLOWS)
-def test_the_agents_container_mounts_nothing_of_the_planners(docker, mode, has_one):
-    """No path in the writer's container leads to the planner's home or its secrets: neither is
-    in its argv, in any flow."""
+def test_no_container_but_the_planners_mounts_anything_of_the_planners(docker, mode, has_one):
+    """No path in a container the writer's code runs in, or in the reviewer's, leads to the
+    planner's home, its copy of the work or its secrets: none of them is anywhere in the argv
+    of the sidecar, the agent, the verification's container or the reviewer's, in any flow."""
+    from vivibox import reviewing
+
     task = actions.create("demo", "Add divide", orchestration=mode)
-    actions.task_pod(task.id).up(timeout=1)
-    agent = " ".join(made(docker, f"vivibox-{task.id}-agent"))
-    sidecar = " ".join(made(docker, f"vivibox-{task.id}-dind"))
-    for argv in (agent, sidecar):
-        assert "config-control" not in argv and f"{task.id}-control" not in argv
-        assert "control-src" not in argv, "nor the planner's copy of the work"
-    assert f"{task.root}/disk/config:/config" in agent, "its own home, as before"
+    pod = actions.task_pod(task.id)
+    pod.up(timeout=1)
+    pod._copying_clone = lambda *cmd, **kw: None  # no clone to copy here
+    pod.gate_up()
+    reviewing.up(task, pod, load_config())
+    runs = {run[4].rsplit("-", 1)[1]: " ".join(run) for run in docker.find("docker", "run", "-d", "--name")}
+    assert set(runs) == {"dind", "agent", "gate", "review"} | ({"control"} if has_one else set())
+    for name, argv in runs.items():
+        if name == "control":
+            continue
+        for planners in ("config-control", "control-src", f"{task.id}-control", "harness-control:"):
+            assert planners not in argv, f"{name} has {planners}"
+    assert f"{task.root}/disk/config:/config" in runs["agent"], "its own home, as before"
 
 
 @pytest.mark.parametrize(("mode", "has_one"), FLOWS)
@@ -588,7 +601,7 @@ def test_a_planner_is_never_given_the_writers_container_in_place_of_its_own(dock
     planner no harness at all."""
     task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
     without = Pod(task.id, task.repo, "img", runner=docker)
-    with pytest.raises(PodError, match="no container for the planner"):
+    with pytest.raises(PodError, match="its pod has none"):
         actions.harness_for("planner", without, task)
     assert actions.harness_for("writer", without, task).pod is without
 
@@ -668,7 +681,9 @@ def turns(docker, monkeypatch):
 
     monkeypatch.setattr(opencode.OpenCode, "turn", turn)
     monkeypatch.setattr(opencode.OpenCode, "start_session", lambda self, title: "")
-    monkeypatch.setattr(control, "refresh", lambda task, pod: seen.append(("copy", "", "refreshed")))
+    monkeypatch.setattr(
+        control, "refresh", lambda task, pod, commit="": seen.append(("copy", commit, "refreshed"))
+    )
     return seen
 
 
@@ -740,7 +755,7 @@ def starting(docker, monkeypatch):
     monkeypatch.setattr(image, "exists", lambda ref: True)
     monkeypatch.setattr(actions, "available_models", lambda refresh=False: {})
     monkeypatch.setattr(Pod, "up", lambda self: order.append("up"))
-    monkeypatch.setattr(control, "refresh", lambda task, pod: order.append("copy"))
+    monkeypatch.setattr(control, "refresh", lambda task, pod, commit="": order.append("copy"))
     monkeypatch.setattr(toolchain, "ensure", lambda pod, java, tools=(): order.append("tools"))
     monkeypatch.setattr(prepare, "begin", lambda task, project, pod: None)
     for what in ("ensure_server", "restart_server"):
@@ -801,3 +816,161 @@ def test_a_stop_and_a_delete_take_the_planners_secrets(starting, monkeypatch):
 def held(directory: str) -> list[str]:
     d = secrets.runtime_dir(directory)
     return sorted(p.name for p in d.iterdir() if p.name != "server-password") if d.exists() else []
+
+
+# --- round 2: the harness's working directory, the task's own flow, the host's git --------------
+
+
+def test_the_planners_harness_never_works_in_the_copy_of_the_writers_commits(docker):
+    """A harness loads project configuration from its working directory and runs what it names
+    (an MCP command, a plugin, a hook), and the copy holds what the writer committed. The
+    control container's working directory is an empty read-only tmpfs; the planner's opencode
+    server and its turns are started there, with no directory of their own; Claude Code is
+    given no directory besides (it loads skills from each, and the handoff is the writer's to
+    write)."""
+    task = actions.create("demo", "Add divide", orchestration="planner_writer_reviewer")
+    pod = actions.task_pod(task.id)
+    pod.up(timeout=1)
+    cmd = made(docker, f"vivibox-{task.id}-control")
+    work = cmd[cmd.index("-w") + 1]
+    assert work == "/work" and f"{work}:ro,mode=555,size=65536" in cmd
+    targets = [m.split(":")[1] for m in binds(cmd)]
+    assert not any(t == work or t.startswith(work + "/") or work.startswith(t + "/") for t in targets)
+    assert str(task.repo) in targets, "the copy is there, as data, by its path"
+    planner = actions.harness_for("planner", pod, task)
+    planner.ensure_server()
+    planner.turn("Plan.", session="ses_1")
+    for call in docker.find("docker", "exec"):
+        if f"vivibox-{task.id}-control" in call:
+            assert "-w" not in call[: call.index(f"vivibox-{task.id}-control")], "the container's own"
+            assert "cd " not in call[-1] and str(task.repo) not in call[-1]
+    actions.choose_role(task, "planner", ("claude-code", "claude-opus"), load_config())
+    on_claude = actions.harness_for("planner", pod, task)
+    on_claude.turn("Plan.")
+    asked = docker.find("docker", "exec", f"vivibox-{task.id}-control", "bash", "-c")[-1][-1]
+    assert "claude" in asked and "--add-dir" not in asked
+    elsewhere = claudecode.ClaudeCode(pod, "claude-opus")
+    elsewhere.turn("Plan.")
+    theirs = docker.find("docker", "exec", f"vivibox-{task.id}-agent", "bash", "-c")[-1][-1]
+    assert "--add-dir /task/handoff /task/harness" in theirs, "outside the control container, as before"
+
+
+def set_flow(mode: str) -> None:
+    from vivibox import configfile
+    from vivibox.config import config_dir
+
+    configfile.set_value(config_dir() / "config.toml", "agent_orchestration_mode", mode)
+
+
+@pytest.mark.parametrize(
+    ("created_under", "changed_to", "where"),
+    [("supervisor_worker", "single_agent", "control"), ("single_agent", "supervisor_worker", "agent")],
+)
+def test_a_tasks_flow_is_the_one_it_was_created_with(docker, created_under, changed_to, where):
+    """config.toml's flow is for new tasks: one created under a flow keeps it, its containers
+    and where its planner runs, whatever the file says later."""
+    set_flow(created_under)
+    task = actions.create("demo", "Add divide")
+    assert task.read_state().orchestration == created_under, "recorded with the task"
+    set_flow(changed_to)
+    config = load_config()
+    assert config.orchestration == changed_to
+    assert orchestration.mode_of(task, config).name == created_under
+    assert orchestration.has_control(task, config) is (where == "control")
+    pod = actions.task_pod(task.id)
+    assert pod.has_control is (where == "control")
+    assert actions.harness_for("planner", pod, task).pod.agent == f"vivibox-{task.id}-{where}"
+    _, project = actions.load(task.id)
+    sup = supervise.make_supervisor(task, project, pod, config)
+    assert sup.mode.name == created_under
+    planner = sup.planner.harness if where == "control" else sup.planner
+    assert planner.pod.agent == f"vivibox-{task.id}-{where}"
+    other = actions.create("demo", "Another")
+    assert orchestration.mode_of(other, config).name == changed_to, "a new task takes the file's"
+
+
+def test_the_planners_container_is_decided_without_reading_the_configuration_again(docker, monkeypatch):
+    """The binding asks the pod it was given and the flow the task records. A config.toml that
+    says another flow by the time the harness is bound changes nothing; a pod and a recorded
+    flow that disagree are an error; and the agent's container is never the answer for a flow
+    with a control container."""
+    from vivibox import roles
+
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    pod = actions.task_pod(task.id)
+    monkeypatch.setattr(roles.orchestration, "has_control", lambda task, config: False)  # were it asked
+    set_flow("single_agent")
+    assert roles.container_of("planner", pod, task).agent == f"vivibox-{task.id}-control"
+    alone = actions.create("demo", "Other", orchestration="single_agent")
+    with_one = Pod(alone.id, alone.repo, "img", runner=docker, control_mounts=[])
+    with pytest.raises(PodError, match="its pod has one"):
+        roles.container_of("planner", with_one, alone)
+    without = Pod(task.id, task.repo, "img", runner=docker)
+    with pytest.raises(PodError, match="its pod has none"):
+        roles.container_of("planner", without, task)
+
+    class NotAPod:
+        agent = f"vivibox-{task.id}-agent"
+
+    with pytest.raises(PodError, match="its pod|agent's is not given"):
+        roles.container_of("planner", NotAPod(), task)
+    assert roles.container_of("writer", pod, task) is pod
+    # A task whose state records no flow (not made by actions.create): the pod's word.
+    bare = create_task(load_config().tasks_dir, "demo", "Bare", TEMPLATE)
+    assert roles.container_of("planner", a_pod(bare.root, control=True), bare).agent.endswith("-control")
+    plain = a_pod(bare.root, control=False)
+    assert roles.container_of("planner", plain, bare) is plain
+
+
+def test_the_hosts_git_in_the_copy_reads_none_of_your_git_configuration(reading, tmp_path, monkeypatch):
+    """A filter driver of your global configuration, picked by a .gitattributes the writer
+    committed, would run your program on the writer's content at the checkout; the copy's git
+    reads the copy's own configuration alone."""
+    task, pod = reading
+    ran = tmp_path / "filter-ran"
+    program = tmp_path / "smudge.sh"
+    program.write_text(f"#!/bin/sh\ntouch {ran}\ncat\n")
+    program.chmod(0o755)
+    yours = tmp_path / "gitconfig"
+    yours.write_text(
+        "[user]\n\tname = T\n\temail = t@example.com\n"
+        f'[filter "mine"]\n\tsmudge = {program}\n\trequired = true\n'
+        "[submodule]\n\trecurse = true\n"
+    )
+    (task.repo / ".gitattributes").write_text("*.txt filter=mine\n")
+    (task.repo / "notes.txt").write_text("notes\n")
+    git(task.repo, "add", ".")
+    git(task.repo, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "Add notes")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(yours))
+    control.refresh(task, pod)
+    assert (pod.control_src / "notes.txt").read_text() == "notes\n"
+    assert not ran.exists(), "your filter ran on what the writer committed"
+
+
+def test_a_review_reads_the_commit_that_was_verified_not_the_branch_as_it_is_now(reading):
+    """The writer leaves HEAD on the verified commit and moves the branch on: the copy for the
+    review stands on the verified commit. One that is not on the task's branch is refused, and
+    while planning the copy is the branch as it is."""
+    from vivibox import repo
+
+    task, pod = reading
+    verified = commit(task.repo, "calc.py", "x = 1\n")
+    later = commit(task.repo, "calc.py", "x = 2  # not verified\n")
+    git(task.repo, "checkout", "-q", "--detach", verified)
+    assert control.reviewed_commit(task) == "", "planning: the branch"
+    control.refresh(task, pod, control.reviewed_commit(task))
+    assert git(pod.control_src, "rev-parse", "HEAD") == later
+    task.set_verified_commit(verified)
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.REVIEW):
+        task.transition(state)
+    assert control.reviewed_commit(task) == verified
+    control.refresh(task, pod, control.reviewed_commit(task))
+    assert git(pod.control_src, "rev-parse", "HEAD") == verified
+    assert "x = 1" in (pod.control_src / "calc.py").read_text()
+    git(task.repo, "checkout", "-q", "--orphan", "elsewhere")
+    stray = commit(task.repo, "stray.py", "y = 1\n")
+    with pytest.raises(repo.RepoError, match="is not on the task's branch"):
+        control.refresh(task, pod, stray)
+    with pytest.raises(repo.RepoError, match="not a commit"):
+        control.refresh(task, pod, "--upload-pack=x")
+    assert git(pod.control_src, "rev-parse", "HEAD") == verified, "left as it was"

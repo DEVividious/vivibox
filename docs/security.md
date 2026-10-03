@@ -135,7 +135,10 @@ providers, its key. The planner reads the work in a copy of the task's commits t
 on your host, from the clone once it is as recorded, into a directory of the task's disk mounted
 read-only in the control container at the path the writer has its clone; the writer's clone itself
 is not mounted there, so git in the planner's container never reads a `.git` the writer can
-write, and uncommitted work is not what the planner reads. The task's review folder, where the planner or the reviewer writes its review and vivibox
+write, and uncommitted work is not what the planner reads. Git on your host works in that copy with none of your git configuration (no global or
+system file, no submodules), so no filter or setting of yours runs on what the writer
+committed; for a review the copy stands on the commit the verification passed, and a verified
+commit that is not on the task's branch stops the task. The task's review folder, where the planner or the reviewer writes its review and vivibox
 reads it, is read-only in the agent's container in the flows where another agent than the
 writer's reviews. A Single agent task has no control container and no planner's network: one
 agent plans and writes in one conversation.
@@ -145,7 +148,15 @@ write: the writer, or a process it left running, can replace the planner's `plan
 `question.md` before vivibox reads it. That is not the planner's history, and the draft comes to
 you to read at the plan's checkpoint; it is a known limit. The planner also reads the
 repository, which is the writer's work: what a file there says is data to it, by its brief, not
-by enforcement.
+by enforcement. What is enforced is where the planner's harness works. It starts in an empty,
+read-only directory of its container, `/work`. The copy of the commits is beside it and is
+read as data, by its path; it is never the harness's working directory, and Claude Code there
+is given no directory besides its own.
+
+The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
+planner's session id in the task's state and the transcripts of its turns in the task's log.
+Knowing them gives no way to the conversation: the store and the server are in the planner's
+container.
 
 With `hub_mirror = true` in `config.toml`, the pods' daemons pull Docker Hub's images through one
 pull-through cache on your Docker, `vivibox-mirror`. What the tasks share there is downloads, not

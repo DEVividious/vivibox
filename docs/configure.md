@@ -69,7 +69,8 @@ name, is read too) or `supervisor_worker`. Roles joined in one agent share one c
 the first role's model, so `single_agent` needs a planner on an opencode model and
 `supervisor_worker` a planner on a model or in an agent's CLI (`--plan-in-cli`), not in a
 browser; a task that cannot run in its mode says so before it starts. The same
-setting is a row under `k` and a row under `n`, for one task.
+setting is a row under `k` and a row under `n`, for one task. A task keeps the flow it was
+created with: a change here is for the tasks you create after it.
 
 A third role, `[roles.reviewer]`, is the reviewer of `planner_writer_reviewer`: it reads the work
 after a green gate in a container of its own, through opencode, on a model of your choice;

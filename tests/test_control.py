@@ -667,6 +667,7 @@ class Seen(list):
     def __init__(self):
         super().__init__()
         self.task: list = []
+        self.prompts: list[tuple[str, str]] = []  # every turn's whole prompt, by its container
 
 
 @pytest.fixture
@@ -679,6 +680,7 @@ def turns(docker, monkeypatch):
     def turn(self, prompt, session="", title="", on_step=None):
         task = seen.task[0]
         seen.append((self.pod.agent.rsplit("-", 1)[1], session, prompt.strip().splitlines()[-1]))
+        seen.prompts.append((seen[-1][0], prompt))
         reviewing = prompt.rstrip().endswith("when the review is written.")
         if seen[-1][0] == "control" and not reviewing:  # a planning turn
             (task.meta / "handoff" / "plan-draft.md").write_text(PLAN)
@@ -1142,3 +1144,48 @@ def test_a_task_always_records_a_flow_and_a_box_has_none(tmp_path):
         orchestration.recorded_control(box) is None
         and orchestration.has_control(box, config("supervisor_worker")) is False
     )
+
+
+# --- round 7: what the planner is told in its own container --------------------------------------
+
+
+@pytest.mark.parametrize(("mode", "has_one"), FLOWS)
+def test_the_planner_in_its_own_container_reads_the_readers_brief_and_everyone_else_the_writers(
+    docker, mode, has_one
+):
+    """The standing instructions of each container are the brief of who runs there: the control
+    container's is the reader's, with the view of the commits at the clone's path; the agent's
+    is the common one, whatever the flow, as before; a single agent has no reader's brief."""
+    from vivibox import brief, repo
+
+    task = actions.create("demo", "Add divide", orchestration=mode)
+    facts = (task.id, task.repo, repo.branch_name(task.id), ["make test"])
+    opencode.prepare(task, "cheap/writes", ["make test"], ["cheap"])
+    assert (task.meta / "harness" / "instructions.md").read_text() == brief.common(*facts)
+    if not has_one:
+        assert not (task.meta / "harness-control").exists()
+        return
+    control.prepare(task, load_config(), ["make test"])
+    told = (task.meta / "harness-control" / "instructions.md").read_text()
+    assert told == brief.reader(*facts) != brief.common(*facts)
+    assert f"`{task.repo}` holds the task's committed work" in told and "`make test`" in told
+    for false in ("Docker, docker compose and Testcontainers work", "mise use", "is done and committed"):
+        assert false not in told, false
+
+
+def test_the_supervisor_is_asked_for_its_review_without_a_repository_to_stand_in(turns):
+    """The review turn of the supervisor, in its control container: the same rules as every
+    reviewer's, and the diff asked for without "the repository you are in"."""
+    from vivibox import prompts
+
+    task, sup = supervised("supervisor_worker", turns)
+    sup.step()  # plan
+    actions.accept_plan(task, actions.load(task.id)[1])
+    for _ in range(3):  # implement, verify, review
+        sup.step()
+    st = task.read_state()
+    assert st.state is State.IMPLEMENT and st.reviews == 1, "the review ran"
+    asked = [prompt for place, prompt in turns.prompts if place == "control"][-1]
+    assert asked.endswith(prompts.SUPERVISOR_REVIEW_PROMPT.format(base=st.base_commit))
+    assert "in the repository you are in" not in asked
+    assert "`git diff " in asked and "and the files it names at the project's path" in asked

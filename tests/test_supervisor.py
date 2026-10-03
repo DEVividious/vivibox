@@ -960,6 +960,9 @@ def test_blocking_notes_go_back_to_the_writer_and_a_clean_review_lets_the_work_t
     assert (task.meta / "handoff" / "review-1.md").read_text() == BLOCKING
     assert sup.lifecycle == ["up", "down"], "the review container lives for the turn"
     assert "git diff" in reviewer.prompts[0] and "/task/review/review.md" in reviewer.prompts[0]
+    assert reviewer.prompts[0].endswith(prompts.REVIEW_PROMPT.format(base=st.base_commit)), (
+        "the reviewer, in its clone of the commits, is asked as before"
+    )
     sup.step()  # the writer, told to fix the notes
     assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT
     (task.meta / "handoff" / "review-1-reply.md").write_text("The lockfile is needed because…\n")
@@ -1346,7 +1349,7 @@ def test_the_supervisor_reads_the_work_after_a_green_gate_in_the_pod_in_the_plan
     st = task.read_state()
     assert (st.state, st.rounds, st.reviews) == (State.IMPLEMENT, 1, 1)
     assert reviewer.prompts[0].startswith(brief.role_text("planner-reviewer"))
-    assert reviewer.prompts[0].endswith(prompts.REVIEW_PROMPT.format(base=st.base_commit))
+    assert reviewer.prompts[0].endswith(prompts.SUPERVISOR_REVIEW_PROMPT.format(base=st.base_commit))
     assert st.sessions.get("planner") == "rev_1", "the supervisor's conversation is the planner's"
     sup.step()  # the worker, with the notes
     assert sup.harness.prompts[-1] == prompts.REVIEW_FIX_PROMPT and task.read_state().state is State.VERIFY

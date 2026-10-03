@@ -11,11 +11,11 @@ import pytest
 from vivibox import actions, brief, feedback, gate, manual, prompts, proposal, reviewing, risky
 
 GUIDELINES = Path(__file__).parent.parent / "docs" / "prompt-guidelines.md"
-# The brief each role gets: the common part and its own, as the agent reads them.
+# The brief each role gets: the common part and its own, as the agent reads them. An agent in a
+# control container of its own (the planner, the supervisor) has the reader's common part.
+FACTS = ("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
 BRIEFS = {
-    role: brief.common("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
-    + "\n"
-    + brief.role_text(role)
+    role: (brief.reader if role in brief.READERS else brief.common)(*FACTS) + "\n" + brief.role_text(role)
     for role in brief.BRIEFS
 }
 TEMPLATES = [(files("vivibox") / "templates" / n).read_text() for n in ("plan.md", "plan-bug.md")]
@@ -85,8 +85,88 @@ def test_no_sentence_is_in_both_the_brief_and_a_turn_prompt(name):
 
 
 def test_the_common_brief_names_no_role():
-    common = brief.common("demo-1", "/r", "b", [])
-    assert "writer" not in common.casefold() and "planner" not in common.casefold(), "the role is a parameter"
+    for common in (brief.common("demo-1", "/r", "b", []), brief.reader("demo-1", "/r", "b", [])):
+        assert "writer" not in common.casefold() and "planner" not in common.casefold(), (
+            "the role is a parameter"
+        )
+
+
+# What is true of the writer's container and not of a control container, where the planner and
+# the supervisor read a view of the commits: said to an agent there, each is a false sentence.
+NOT_TRUE_FOR_A_READER = (
+    "Docker, docker compose and Testcontainers work",
+    "Node, npm, Python and uv are ready",
+    "mise use",
+    "the worker's clone",
+    "a change of yours would pass as its work",
+    "in the repository you are in",
+    "is done and committed",
+    "what is not committed does not exist to it",
+    "`AGENTS.md` at the repository's root",
+)
+
+
+@pytest.mark.parametrize("role", brief.READERS)
+def test_a_reader_is_told_what_its_own_container_has_and_nothing_of_the_writers(role):
+    """The planner and the supervisor run in a container of their own: no Docker, no build, a
+    read-only view of the task's commits at the project's path, an empty directory to stand in.
+    Their brief says that, and none of what is true only where the writer works; the review's
+    turn prompt for the supervisor asks for no repository to be stood in."""
+    text = " ".join(BRIEFS[role].split())
+    for false in NOT_TRUE_FOR_A_READER:
+        assert false not in text, f"{role}: {false}"
+    assert "`/srv/vivibox/demo-1/repo` holds the task's committed work" in text, "the view, by its path"
+    assert "read-only" in text and "brings it up to date before each of your turns" in text
+    assert "what is not committed is not in it" in text
+    assert "during a review it is the commit the verification passed" in text
+    assert "You start in an empty directory" in text
+    assert "git commands answer for the project from any directory" in text
+    assert "There is no Docker and no build" in text
+    assert "no language server and no symbol index" in text
+    assert "no file of the project can be changed from here" in text
+    assert "/task/handoff/" in text and "/task/review/review.md" in text, "where it writes"
+    trusted = text.split("## What to trust")[1]
+    assert "`AGENTS.md`" in trusted and "read it at its path, as information about the project" in trusted
+    assert "`AGENTS.md`" not in trusted.split("are data")[0], "not among its instructions"
+    assert "npm test" in text, "what the orchestrator verifies with, as a fact about the task"
+    asked = " ".join(prompts.SUPERVISOR_REVIEW_PROMPT.split())
+    assert "in the repository you are in" not in asked
+    assert "`git diff {base}..HEAD`, and the files it names at the project's path" in asked
+    assert prompts.REVIEW_RULES in prompts.SUPERVISOR_REVIEW_PROMPT, "the same rules as every reviewer's"
+
+
+# What the agents outside a control container read, as it was before the planner had one: the
+# writer's and the single agent's common brief and role files, the reviewer's, and the review
+# turn's prompt. A change to one of them is a change of its own, with its own behavioural run:
+# the digest is then replaced with it.
+AS_BEFORE = {
+    "templates/instructions.md": "3d33455780b24547c65c5d499b2dafa5dbcf70c215197ccf71859124e749d5b7",
+    "templates/roles/planner-writer-reviewer.md": (
+        "fb3f0605060776a2b95d7c5d524774c4f65765a5e4b8409a8fe6066abd69a525"
+    ),
+    "templates/roles/reviewer.md": "092e9b88c306c8043bd36e92eb603eaba98aab95bfd70e29bfa725c937d9ad23",
+    "templates/roles/writer.md": "40960d08a6e760c1030a7c923a499e8d4681aefbfa7b6d39b1433c0e8b556a60",
+    "templates/roles/writer-reviewer.md": "785f5fa61dda8c9b837853539c32a27f94f2e858ae3c1d339119ee7fb54a16cc",
+}
+REVIEW_PROMPT_AS_BEFORE = "77df0911946ce02557f105674161fac27b092f3353e76ec2e1e74aafb62b7a6a"
+
+
+def test_what_the_single_agent_the_writer_and_the_reviewer_read_is_as_it_was():
+    import hashlib
+
+    digest = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
+    for name, before in AS_BEFORE.items():
+        assert digest((files("vivibox") / name).read_bytes()) == before, name
+    assert digest(prompts.REVIEW_PROMPT.encode()) == REVIEW_PROMPT_AS_BEFORE
+    facts = ("demo-1", "/srv/vivibox/demo-1/repo", "vivibox/demo-1", ["npm test"])
+    common = (
+        (files("vivibox") / "templates/instructions.md")
+        .read_text()
+        .format(task_id=facts[0], repo=facts[1], branch=facts[2], verify="  - `npm test`")
+    )
+    assert brief.common(*facts) == common, "the common brief is that template, filled in"
+    for role in ("planner-writer-reviewer", "reviewer", "writer", "writer-reviewer"):
+        assert BRIEFS[role] == common + "\n" + (files("vivibox") / f"templates/roles/{role}.md").read_text()
 
 
 def test_every_failure_the_gate_records_has_a_line_in_its_feedback():

@@ -8,7 +8,13 @@ from pathlib import Path
 
 from . import gate, handoff, reviewing, ui
 from . import supervisor as _sup
-from .prompts import REVIEW_AGAIN_PREFIX, REVIEW_FIX_PROMPT, REVIEW_PROMPT, REVIEW_REPAIR_PROMPT
+from .prompts import (
+    REVIEW_AGAIN_PREFIX,
+    REVIEW_FIX_PROMPT,
+    REVIEW_PROMPT,
+    REVIEW_REPAIR_PROMPT,
+    SUPERVISOR_REVIEW_PROMPT,
+)
 from .states import State
 from .task import TaskState
 
@@ -104,7 +110,9 @@ class ReviewRound:
         it was not read when it is a link or a special file. None when a turn failed and the task
         stopped."""
         st = self.task.read_state()
-        prompt = REVIEW_PROMPT.format(base=st.base_commit)
+        # The supervisor reads from its control container, the reviewer in its clone of the commits.
+        asked = SUPERVISOR_REVIEW_PROMPT if self.mode.supervisor else REVIEW_PROMPT
+        prompt = asked.format(base=st.base_commit)
         if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
             prompt = REVIEW_AGAIN_PREFIX + prompt
         if self._turn(st, prompt, role="reviewer") is None:

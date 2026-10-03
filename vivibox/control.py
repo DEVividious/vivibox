@@ -97,7 +97,9 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     d = harness_dir(task)
     d.mkdir(exist_ok=True)
     before = {p.name: p.read_text() for p in d.iterdir()}
-    (d / "instructions.md").write_text(brief.common(task.id, task.repo, repo.branch_name(task.id), verify))
+    # The reader's brief: the project as a read-only view at the clone's path, what this
+    # container has not; the writer's brief would describe the writer's container.
+    (d / "instructions.md").write_text(brief.reader(task.id, task.repo, repo.branch_name(task.id), verify))
     if settings:
         (d / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     else:

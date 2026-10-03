@@ -77,6 +77,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   and its secrets. A Single agent task has neither the container nor the network: its planner's
   range stays reserved. Tasks created before this change are from an earlier vivibox: delete
   them and create them again.
+- The planner in a container of its own, and the supervisor of Supervisor ⇄ Worker, are told
+  what that container is: the project is a read-only view of the task's committed work at its
+  path, made by vivibox and brought up to date before each of their turns (uncommitted work is
+  not in it; during a review it is the commit the verification passed); they start in an empty
+  directory and git answers for the project from anywhere; there is no Docker, no build or test
+  run, no way to change the code and no language server there; they write under
+  `/task/handoff` and, for a review, `/task/review`; and the project's `AGENTS.md` is theirs
+  to read as information about the project, not an instruction given to them. Before, they
+  read the writer's brief, which described the writer's container. The writer's, the Single
+  agent's and the reviewer's briefs are as they were.
 - A task keeps the flow it was created with: `agent_orchestration_mode` in `config.toml`, and
   the Flow row under `k`, are for the tasks you create after a change, where a running task
   followed the file before. Which containers a task's pod has depends on its flow. A task that

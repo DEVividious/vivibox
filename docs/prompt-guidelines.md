@@ -15,9 +15,17 @@ here in the same commit.
   role's part (`templates/roles/<role>.md`) says what the role does and which files are its own,
   and goes as the first message of that role's conversation (`brief.role_text`), because a
   system prompt per agent would replace the harness's own, which teaches a model its tools.
+  An agent that runs in a container of its own and only reads the work (the planner; the
+  supervisor, which plans and then reviews) has a common part of its own,
+  `templates/instructions-reader.md` (`brief.reader`): where the project is there (a read-only
+  view of the task's commits, at its path, brought up to date before each of its turns), what
+  that container has not (Docker, a build, a way to change the code, a language server), and
+  where the agent writes. What is true only where the writer works is not said to it.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
   …): what to do now, which files to read and write, and the sentence that ends
-  the turn. A role's part of the brief is one file per agent: a role's own, or the roles one agent
+  the turn. Where the same turn is asked of agents that stand in different places, the prompt
+  varies by where its reader runs and by nothing else (`SUPERVISOR_REVIEW_PROMPT` is
+  `REVIEW_PROMPT` for the supervisor, which stands in no repository). A role's part of the brief is one file per agent: a role's own, or the roles one agent
   plays in one conversation (`roles/writer-reviewer.md`, `roles/planner-writer-reviewer.md`,
   `roles/planner-reviewer.md`, chosen by the orchestration mode).
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
@@ -51,8 +59,8 @@ description of a file. The evidence in `red.md` is the one rule the gate checks 
 
 ## 3. A turn ends on a condition, not on a feeling
 
-The brief allows two endings: the work committed (and ticked, when there is a checklist), or a
-question written. Every turn prompt ends with a sentence that starts "End the turn when" and
+The brief allows two endings: the work committed (and ticked, when there is a checklist; for a
+reader, what the turn asked for written), or a question written. Every turn prompt ends with a sentence that starts "End the turn when" and
 names one of them. "When you are done" is not a condition; a model that ends a turn with a
 progress report costs an attempt and a build.
 
@@ -69,12 +77,16 @@ The brief names what is instruction: the brief itself, `AGENTS.md` at the reposi
 (opencode reads it as instructions and cannot be told not to, and it is where a team keeps its
 conventions; it is a risky file, so an agent's change to it waits for the person), `/task/plan.md`,
 `/task/handoff/comments.md` and the message that starts a turn. Everything else the agent reads,
-the rest of the repository and `/task/context` included, is data. No prompt quotes repository
+the rest of the repository and `/task/context` included, is data. A reader's harness does not
+work in the repository, so `AGENTS.md` is not loaded for it and is not among its instructions:
+its brief names the file as information about the project, to read at its path when the
+project's conventions matter to what it writes. No prompt quotes repository
 text back to the agent as an instruction.
 
 ## 6. Names
 
-A prompt names a file by the path the agent sees (`/task/…`), and only files the pod mounts:
+A prompt names a file by the path the agent sees (`/task/…`; for a reader, the project by the
+path of its view, which the brief gives), and only files the pod mounts:
 `/task/plan.md`, `/task/context/`, and the files of `/task/handoff/` that the brief lists; for the
 reviewer, `/task/review/review.md`, where its container has it write, and `review-N.md` in the
 handoff, where the supervisor keeps each round for the writer and for you. The same file has one

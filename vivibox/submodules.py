@@ -20,8 +20,12 @@ started from and the one the work keeps stay in your submodule, and one of them 
 submodule of its own at a commit the last one no longer points at. So that history is listed,
 once, and each commit of it that adds or moves a pointer is looked at as the last one is. For
 a submodule the work adds there is no commit to count from: the history looked at is the one
-no branch of a remote in your copy of it reaches (refs/remotes), since what a remote of yours
-has was not written in the task's clone alone. A history that cannot be listed is refused.
+no branch of a remote in your copy of it reaches (refs/remotes). The rest is taken on trust,
+not checked: that a history your copy fetched from a remote points at commits a remote has.
+The address of that remote is the one the work's .gitmodules names, the writer's, which the
+refusal prints in its clone command when it is one that only fetches; a remote that serves a
+history pointing at a commit the task's clone alone holds is not caught. A history that
+cannot be listed is refused.
 """
 
 from __future__ import annotations
@@ -370,10 +374,15 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
     ]
     quoted = lambda path: shlex.quote(str(path))  # noqa: E731
     for one in found[:LISTED]:
-        named = f"{display.name(one.path)} at {one.commit}"
+        named, way_out = f"{display.name(one.path)} at {one.commit}", []
         if one.via:  # not where the work leaves the submodule: said, with the commit that needs it
             above = display.name(one.via[0])
             named += f" (needed by {above} at {one.via[1]}, in the history of {above} that the work keeps)"
+            # Its remote may have dropped it, and the task's clone never had it: then no fetch helps.
+            way_out = [
+                f'If neither has it, send the work back with a reply (vivibox reply {task_id} "…") for '
+                f"work that does not keep {above} at {one.via[1]}."
+            ]
         if one.kind == UNCHECKED:
             why = one.why or "vivibox could not check this submodule"
             lines.append(
@@ -418,10 +427,15 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
         elif one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
             where = "" if one.url else " (an address vivibox does not put in a command)"
+            what, whose, kept = "the work adds this submodule", "the work's", "you keep the commit:"
+            if one.via:  # the history's, which the work may not leave there: not said to be the work's
+                what, whose = "that history has a submodule here", "that history's"
+                kept = "you keep the commit; where the work leaves no submodule there, git shows the "
+                kept += "folder as one it does not track:"
             lines += [
-                f"{named}: the work adds this submodule, and your checkout has no copy of it. Clone it "
-                f"to {display.name(str(mine))} from the remote the work's .gitmodules names{where}, so that "
-                "you keep the commit:",
+                f"{named}: {what}, and your checkout has no copy of it. Clone it "
+                f"to {display.name(str(mine))} from the remote {whose} .gitmodules names{where}, so that "
+                f"{kept}",
                 f"git clone -- {one.url or '<its remote>'} {quoted(mine)}",
             ]
         elif one.kind == LOOSE:
@@ -437,6 +451,7 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
                 init,
                 fetch,
                 from_task,
+                *way_out,
             ]
         else:
             lines += [
@@ -444,6 +459,7 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
                 f"task's clone ({keeps}):",
                 fetch,
                 from_task,
+                *way_out,
             ]
     if len(found) > LISTED:
         lines.append(f"And {len(found) - LISTED} more submodule commits, said once these are kept.")

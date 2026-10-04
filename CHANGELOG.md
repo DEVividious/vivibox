@@ -308,10 +308,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   submodule that a later one moved back stays in your submodule, and the commit it points at
   went with the task. The submodule's new history is listed once in your repository (since the
   commit the task started from; for a submodule the work adds, what no branch of a remote in
-  your copy reaches); the refusal names the commit of that history and the commit it needs,
-  with the same commands. A history that cannot be listed is refused as what vivibox could not
-  check: with the fetch that brings the commit the task started from, where your submodule
-  lacks it, or the git that says why; so is one not read within the check's time.
+  your copy reaches, the rest being trusted to the remote the work names); the refusal names
+  the commit of that history and the commit it needs, with the same commands, and the reply
+  that is left where neither the remote nor the task has it. A history that cannot be listed
+  is refused as what vivibox could not check: with the fetch that brings the commit the task
+  started from, where your submodule lacks it, or the git that says why; so is one not read
+  within the check's time.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

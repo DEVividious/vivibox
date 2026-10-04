@@ -635,6 +635,88 @@ def test_a_submodule_the_history_points_into_that_you_have_not_checked_out_is_re
     assert not task.root.exists()
 
 
+def moved_at_remote(remote: Path, name: str, to: str, said: str) -> str:
+    """The submodule's remote moves its own submodule `name` to a commit, with a commit."""
+    git(remote / name, "fetch", "-q", "origin")
+    git(remote / name, "checkout", "-q", to)
+    git(remote, "commit", "-qam", said)
+    return git(remote, "rev-parse", "HEAD")
+
+
+def test_a_commit_the_history_needs_that_neither_the_remote_nor_the_task_has_says_the_way_out(project):
+    """lib's remote went through a commit that points lib/deep at a commit its remote has
+    dropped since, and on to one that points at its newest. The work only moves lib to the
+    remote's last commit. You fetch lib, then lib/deep: the dropped commit comes with neither,
+    and the task's clone never had it. The range stays: refused. The refusal says, after the
+    two commands, what is left when neither has the commit: a reply to the task."""
+    lib = project.source / "lib"
+    git(project.deep, "checkout", "-q", "-b", "gone")
+    (project.deep / "README.md").write_text("on a branch the remote drops\n")
+    git(project.deep, "commit", "-qam", "Soon gone")
+    gone = git(project.deep, "rev-parse", "HEAD")
+    through = moved_at_remote(project.lib, "deep", gone, "Through a commit that will go")
+    git(project.deep, "checkout", "-q", "main")
+    git(project.deep, "branch", "-q", "-D", "gone")
+    git(project.deep, "reflog", "expire", "--expire=now", "--all")
+    cleaned_up(project.deep)
+    newest = newer_at(project.deep)
+    moved_at_remote(project.lib, "deep", newest, "On to the newest")
+    task = actions.create("demo", "Goal")
+    last = moved_to_remotes(task, "lib")
+    at_final(task, project)
+    said = refused(task, project)
+    assert f"lib at {last} is not in your submodule." in said
+    as_told(commands(said)[0])  # from lib's remote
+    said = refused(task, project)
+    assert f"lib/deep at {newest} is not in your submodule." in said
+    as_told(commands(said)[0])  # from lib/deep's remote: the newest comes, the dropped one cannot
+    said = refused(task, project)
+    way_out = (
+        f'If neither has it, send the work back with a reply (vivibox reply {task.id} "…") for work '
+        f"that does not keep lib at {through}."
+    )
+    assert said.splitlines()[1:] == [
+        f"lib/deep at {gone}{needed_by('lib', through)} is not in your submodule. Fetch it from the "
+        f"submodule's remote, or from the task's clone ({ref_of(task, gone)} keeps it there, and may be "
+        "deleted once its remote has it):",
+        f"git -C {lib / 'deep'} fetch --no-recurse-submodules",
+        from_task(task, lib / "deep", task.repo / "lib" / "deep", gone),
+        way_out,
+        "Then accept the work again.",
+    ]
+    as_told(commands(said)[0])
+    served = subprocess.run(["sh", "-c", commands(said)[1]], capture_output=True)
+    assert served.returncode != 0 and refused(task, project) == said, "neither has it, and nothing changed"
+
+
+def test_a_submodule_only_the_history_has_is_not_said_to_be_added_by_the_work(project):
+    """lib's remote added a submodule in one commit and removed it in the next; the work moves
+    lib to the last. Neither the commit the task started from nor the one the work keeps has
+    the submodule: it is the history's, said so, with the clone that keeps its commit."""
+    lib = project.source / "lib"
+    git(project.lib, "submodule", "add", "-q", str(project.tools), "old-dep")
+    git(project.lib, "commit", "-qm", "A library it will drop")
+    had, commit = git(project.lib, "rev-parse", "HEAD"), git(project.tools, "rev-parse", "HEAD")
+    git(project.lib, "rm", "-qf", "old-dep")
+    git(project.lib, "commit", "-qm", "Dropped")
+    task = actions.create("demo", "Goal")
+    moved_to_remotes(task, "lib")
+    at_final(task, project)
+    as_told(commands(refused(task, project))[0])  # lib's last commit, from its remote
+    said = refused(task, project)
+    assert "the work adds" not in said
+    assert (
+        f"lib/old-dep at {commit}{needed_by('lib', had)}: that history has a submodule here, and your "
+        f"checkout has no copy of it. Clone it to {lib / 'old-dep'} from the remote that history's "
+        ".gitmodules names (an address vivibox does not put in a command), so that you keep the commit; "
+        "where the work leaves no submodule there, git shows the folder as one it does not track:"
+    ) in said
+    assert commands(said) == [f"git clone -- <its remote> {lib / 'old-dep'}"]
+    as_told(commands(said)[0].replace("<its remote>", str(project.tools)))
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
 NOT_KNOWN = (
     "vivibox could not check that you keep every submodule commit its work keeps. The task's clone may "
     "hold the only copy of one, and accepting deletes the task."

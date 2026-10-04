@@ -362,3 +362,22 @@ def the_view_is_waited_for_until_it_is_at_rest(monkeypatch):
 
     monkeypatch.setattr(textual.pilot, "wait_for_idle", at_rest)
     monkeypatch.setattr(textual.app, "wait_for_idle", at_rest)
+
+
+@pytest.fixture(autouse=True)
+def a_tests_view_closes_as_quit_closes_it(monkeypatch):
+    """Textual's run_test takes the app down at the end of its block without the exit that q
+    is. A running view that exits is marked so first, and from then on Textual's timers call
+    nothing back; the test's was not, so its two-second refresh could fall due while its
+    screens were being removed, and refilled a list whose screen was gone (NoMatches: '#empty',
+    on a busy machine, in whichever test the refresh fell in). Here the test's app is marked
+    as one that exited before it is taken down, as the running view is."""
+    from textual.app import App
+
+    take_down = App._shutdown
+
+    async def exit_then_take_down(app):
+        app._exit = True
+        await take_down(app)
+
+    monkeypatch.setattr(App, "_shutdown", exit_then_take_down)

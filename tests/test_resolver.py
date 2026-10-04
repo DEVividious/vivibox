@@ -3,6 +3,7 @@
 test's own stands for the host's."""
 
 import contextlib
+import itertools
 import os
 import signal
 import socket
@@ -31,12 +32,13 @@ class Stub:
 
     def __init__(self, tcp: bool = False):
         self.got: list[bytes] = []
+        # One number for UDP and TCP: the kernel's choice for the one may be taken for the other.
+        self.port = free_port()
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.bind(("127.0.0.1", 0))
-        self.port = self.udp.getsockname()[1]
+        self.udp.bind((HERE, self.port))
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp.bind(("127.0.0.1", self.port))
+        self.tcp.bind((HERE, self.port))
         self.tcp.listen(8)
         threading.Thread(target=self.serve_udp, daemon=True).start()
         threading.Thread(target=self.serve_tcp, daemon=True).start()
@@ -81,7 +83,7 @@ def stub():
 
 
 def forwarding(upstream, **kw):
-    f = resolver.Forwarder(("127.0.0.1", 0), upstream, **kw)
+    f = resolver.Forwarder((HERE, free_port()), upstream, **kw)
     threading.Thread(target=f.serve, daemon=True).start()
     return f
 
@@ -91,6 +93,7 @@ QUERY = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00
 
 def ask(address, data=QUERY, timeout=2.0) -> bytes | None:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("127.0.0.1", 0))  # who asks, said: not left to the route the machine has to HERE
         s.settimeout(timeout)
         s.sendto(data, address)
         try:
@@ -100,7 +103,7 @@ def ask(address, data=QUERY, timeout=2.0) -> bytes | None:
 
 
 def test_a_query_is_relayed_to_the_stub_and_its_answer_back_unchanged(stub):
-    f = forwarding(("127.0.0.1", stub.port))
+    f = forwarding((HERE, stub.port))
     try:
         answer = ask(f.address)
         assert stub.got == [QUERY], "the query as the pod sent it, byte for byte"
@@ -112,7 +115,7 @@ def test_a_query_is_relayed_to_the_stub_and_its_answer_back_unchanged(stub):
 
 
 def test_a_query_over_tcp_is_relayed_too(stub):
-    f = forwarding(("127.0.0.1", stub.port))
+    f = forwarding((HERE, stub.port))
     try:
         with socket.create_connection(f.address, timeout=2) as s:
             s.sendall(struct.pack("!H", len(QUERY)) + QUERY)
@@ -126,15 +129,11 @@ def test_a_query_over_tcp_is_relayed_too(stub):
 
 
 def test_a_dead_stub_means_no_answer_and_the_forwarder_goes_on(stub):
-    dead = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    dead.bind(("127.0.0.1", 0))
-    nobody = dead.getsockname()[1]
-    dead.close()
-    f = forwarding(("127.0.0.1", nobody), timeout=0.5)
+    f = forwarding((HERE, free_port()), timeout=0.5)  # nobody listens there, and nobody will
     try:
         assert ask(f.address, timeout=1.0) is None
         assert ask(f.address, timeout=1.0) is None, "still serving"
-        f.upstream = ("127.0.0.1", stub.port)
+        f.upstream = (HERE, stub.port)
         assert ask(f.address) == Stub.answer(QUERY)
     finally:
         f.stop()
@@ -142,7 +141,7 @@ def test_a_dead_stub_means_no_answer_and_the_forwarder_goes_on(stub):
 
 def test_it_tells_who_asked(stub):
     seen = []
-    f = forwarding(("127.0.0.1", stub.port), on_query=lambda peer, how: seen.append((peer[0], how)))
+    f = forwarding((HERE, stub.port), on_query=lambda peer, how: seen.append((peer[0], how)))
     try:
         ask(f.address)
         assert seen == [("127.0.0.1", "udp")]
@@ -162,7 +161,7 @@ def test_the_stub_is_the_hosts_first_nameserver(tmp_path):
 
 
 def test_a_probe_query_says_whether_it_is_answered(stub):
-    f = forwarding(("127.0.0.1", stub.port))
+    f = forwarding((HERE, stub.port))
     try:
         assert hostd.check(f.address[0], f.address[1]) == ""
         assert stub.got and stub.got[-1][12:] == b"\x09localhost\x00\x00\x01\x00\x01"
@@ -247,7 +246,7 @@ def test_the_teardown_never_waits_forever_for_a_kill_that_did_not_land(runtime, 
     landed, and waitpid without a bound waited for it. The teardown waits a few seconds, then
     fails, naming the pid and what it is, and the run goes on."""
     port = free_port()
-    hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+    hostd.ensure(HERE, port, upstream=f"{HERE}:{stub.port}")
     pid = hostd.running()
     outcome: dict[str, str] = {}
 
@@ -290,7 +289,7 @@ def test_the_fixture_leaves_no_forwarder_behind_even_when_stop_is_broken(runtime
     hostd.stop(), and the fixture's teardown was that call. The teardown ends what the pid file
     names and every forwarder a test started, on its own, whatever the code under test does."""
     port = free_port()
-    hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+    hostd.ensure(HERE, port, upstream=f"{HERE}:{stub.port}")
     pid = hostd.running()
     monkeypatch.setattr(hostd, "stop", lambda: False)
     reap(STARTED)
@@ -299,46 +298,84 @@ def test_the_fixture_leaves_no_forwarder_behind_even_when_stop_is_broken(runtime
     assert not (runtime / "hostd.pid").exists()
 
 
+def own_address() -> str:
+    """A loopback address of this process's alone: 127.x.y.z from its pid, which no other live
+    process has. All of 127.0.0.0/8 is this machine's, so nothing has to be set up."""
+    pid = os.getpid()
+    return f"127.{64 + (pid >> 16)}.{(pid >> 8) & 0xFF}.{pid & 0xFF}"
+
+
+# Where a test's own forwarder listens, and what it is asked on.
+HERE = own_address()
+KERNELS_PORTS = Path("/proc/sys/net/ipv4/ip_local_port_range")
+PORTS = itertools.count(int(KERNELS_PORTS.read_text().split()[0]) - 8000)
+
+
 def free_port() -> int:
+    """A port on HERE for a forwarder the test starts as a process, which binds it a second
+    later; or for nothing at all, where a test needs a port nobody listens on. Still free then.
+
+    This used to bind port 0 on 127.0.0.1 and let go. The kernel hands such a port to the next
+    socket that asks for any, and under load another worker's stub or query got it before the
+    forwarder did: "cannot listen on 127.0.0.1:45994: Address already in use". A port for
+    nothing came to belong to a stub that answers. So: a port below those the kernel hands out
+    by itself, on an address only this process uses, and never the same one twice."""
+    for port in PORTS:
+        assert port < int(KERNELS_PORTS.read_text().split()[0]), "no port left below the kernel's own"
+        try:
+            for kind in (socket.SOCK_DGRAM, socket.SOCK_STREAM):
+                with socket.socket(socket.AF_INET, kind) as s:
+                    s.bind((HERE, port))
+        except OSError:
+            continue  # a service of this machine's listens there on every address
+        return port
+
+
+def test_a_port_for_a_forwarder_is_one_nobody_else_is_given():
+    """Not one the kernel gives the next socket that asks for any port, and not on an address
+    another process binds: both were so, and the port was taken while the forwarder started."""
+    low, high = (int(n) for n in KERNELS_PORTS.read_text().split())
+    ports = [free_port() for _ in range(3)]
+    assert len(set(ports)) == 3 and not [p for p in ports if low <= p <= high]
+    assert HERE.startswith("127.") and HERE != "127.0.0.1"
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        s.bind((HERE, ports[0]))  # the machine takes the address as its own
 
 
 def test_hostd_starts_once_answers_and_stops(runtime, stub):
     port = free_port()
-    upstream = f"127.0.0.1:{stub.port}"
-    hostd.ensure("127.0.0.1", port, upstream=upstream)
+    upstream = f"{HERE}:{stub.port}"
+    hostd.ensure(HERE, port, upstream=upstream)
     pid = int((runtime / "hostd.pid").read_text())
-    assert hostd.running() == pid and hostd.check("127.0.0.1", port) == ""
-    hostd.ensure("127.0.0.1", port, upstream=upstream)
+    assert hostd.running() == pid and hostd.check(HERE, port) == ""
+    hostd.ensure(HERE, port, upstream=upstream)
     assert hostd.running() == pid, "idempotent: the one that answers stays"
-    assert hostd.problem("127.0.0.1", port) == ""
+    assert hostd.problem(HERE, port) == ""
     assert hostd.stop() is True
     assert not (runtime / "hostd.pid").exists() and hostd.running() is None
-    assert hostd.problem("127.0.0.1", port) == "", "stopped on purpose, or never started: nothing to say"
+    assert hostd.problem(HERE, port) == "", "stopped on purpose, or never started: nothing to say"
 
 
 def test_a_forwarder_that_died_is_named_in_the_header_and_started_again(runtime, stub):
     from vivibox import roles
 
     port = free_port()
-    upstream = f"127.0.0.1:{stub.port}"
-    hostd.ensure("127.0.0.1", port, upstream=upstream)
+    upstream = f"{HERE}:{stub.port}"
+    hostd.ensure(HERE, port, upstream=upstream)
     pid = hostd.running()
     os.kill(pid, signal.SIGKILL)
     for _ in range(50):
         if hostd.running() is None:
             break
         time.sleep(0.05)
-    said = hostd.problem("127.0.0.1", port)
+    said = hostd.problem(HERE, port)
     assert said.startswith("DNS forwarder not running: ")
     assert f"process {pid}" in said and "vivibox hostd start" in said
     base = tmp_config(runtime.parent.parent)
     assert roles.machine_problem(load_config(base), docker_ok=True, forwarder=said) == said
     assert roles.machine_problem(load_config(base), docker_ok=False, forwarder=said).startswith("Docker")
-    hostd.ensure("127.0.0.1", port, upstream=upstream)
-    assert hostd.running() not in (None, pid) and hostd.problem("127.0.0.1", port) == ""
+    hostd.ensure(HERE, port, upstream=upstream)
+    assert hostd.running() not in (None, pid) and hostd.problem(HERE, port) == ""
 
 
 def test_the_pid_file_names_a_pid_at_every_moment_it_is_rewritten(runtime, monkeypatch):
@@ -389,8 +426,8 @@ def test_a_forwarder_that_runs_and_does_not_answer_is_named(runtime):
         runtime.mkdir(parents=True)
         (runtime / "hostd.pid").write_text(str(sleeper.pid))
         assert hostd.running() == sleeper.pid
-        said = hostd.problem("127.0.0.1", port, timeout=0.3)
-        assert said.startswith("DNS forwarder not running: ") and f"127.0.0.1:{port}" in said
+        said = hostd.problem(HERE, port, timeout=0.3)
+        assert said.startswith("DNS forwarder not running: ") and f"{HERE}:{port}" in said
     finally:
         sleeper.kill()
         sleeper.wait()
@@ -507,12 +544,13 @@ class Quiet:
     def __init__(self):
         self.got: list[bytes] = []
         self.held: list[socket.socket] = []
+        # One number for UDP and TCP: the kernel's choice for the one may be taken for the other.
+        self.port = free_port()
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.bind(("127.0.0.1", 0))
-        self.port = self.udp.getsockname()[1]
+        self.udp.bind((HERE, self.port))
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp.bind(("127.0.0.1", self.port))
+        self.tcp.bind((HERE, self.port))
         self.tcp.listen(64)
         threading.Thread(target=self.serve_udp, daemon=True).start()
         threading.Thread(target=self.serve_tcp, daemon=True).start()
@@ -567,7 +605,7 @@ def settled(check, seconds: float = 2.0) -> None:
 
 
 def test_one_source_holds_at_most_its_share_of_the_waiting_queries(quiet):
-    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    f = forwarding((HERE, quiet.port), pending_limit=8, per_source=2)
     try:
         for n in range(10):
             send_from("127.0.0.2", f.address, b"q%d" % n)
@@ -578,7 +616,7 @@ def test_one_source_holds_at_most_its_share_of_the_waiting_queries(quiet):
 
 
 def test_all_sources_together_hold_at_most_the_forwarders_room(quiet):
-    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    f = forwarding((HERE, quiet.port), pending_limit=8, per_source=2)
     try:
         for source in range(2, 8):
             for n in range(2):
@@ -592,7 +630,7 @@ def test_all_sources_together_hold_at_most_the_forwarders_room(quiet):
 def test_a_flood_of_unanswered_queries_from_one_pod_leaves_room_for_another(quiet):
     """The review's case: one task asking random names whose servers never answer took every
     waiting slot, and another task's DNS went unanswered."""
-    f = forwarding(("127.0.0.1", quiet.port), pending_limit=8, per_source=2)
+    f = forwarding((HERE, quiet.port), pending_limit=8, per_source=2)
     try:
         for n in range(50):
             send_from("127.0.0.2", f.address, b"q%d" % n)
@@ -614,7 +652,7 @@ def connect_from(source: str, address) -> socket.socket:
 
 
 def test_tcp_connections_are_held_to_a_share_and_to_the_forwarders_room(quiet):
-    f = forwarding(("127.0.0.1", quiet.port), tcp_limit=4, tcp_per_source=1)
+    f = forwarding((HERE, quiet.port), tcp_limit=4, tcp_per_source=1)
     mine = []
     try:
         mine += [connect_from("127.0.0.2", f.address) for _ in range(3)]
@@ -637,11 +675,9 @@ def test_a_forwarder_without_its_pid_file_is_named_while_a_pod_runs(runtime):
     resolves nothing. The header says so whenever a pod runs and the forwarder does not answer."""
     port = free_port()
     assert hostd.recorded() is None
-    said = hostd.problem("127.0.0.1", port, timeout=0.3, pods_up=lambda: True)
+    said = hostd.problem(HERE, port, timeout=0.3, pods_up=lambda: True)
     assert said.startswith("DNS forwarder not running: ") and "vivibox hostd start" in said
-    assert hostd.problem("127.0.0.1", port, timeout=0.3, pods_up=lambda: False) == "", (
-        "no pod: nothing to say"
-    )
+    assert hostd.problem(HERE, port, timeout=0.3, pods_up=lambda: False) == "", "no pod: nothing to say"
 
 
 def test_the_header_asks_whether_a_pod_runs(monkeypatch):
@@ -693,7 +729,7 @@ def test_two_starts_at_once_leave_one_forwarder_that_answers(runtime, stub):
 
     def start():
         try:
-            hostd.ensure("127.0.0.1", port, upstream=f"127.0.0.1:{stub.port}")
+            hostd.ensure(HERE, port, upstream=f"{HERE}:{stub.port}")
         except hostd.HostdError as e:
             failed.append(str(e))
 
@@ -703,17 +739,17 @@ def test_two_starts_at_once_leave_one_forwarder_that_answers(runtime, stub):
     for t in starts:
         t.join()
     assert failed == []
-    assert hostd.check("127.0.0.1", port) == "" and hostd.running() is not None
+    assert hostd.check(HERE, port) == "" and hostd.running() is not None
 
 
 def test_a_forwarder_on_another_address_is_replaced_not_left_behind(runtime, stub):
     """network.host_address changed: the forwarder on the old one goes, it is not left answering."""
     old, new = free_port(), free_port()
-    upstream = f"127.0.0.1:{stub.port}"
-    hostd.ensure("127.0.0.1", old, upstream=upstream)
-    hostd.ensure("127.0.0.1", new, upstream=upstream)
-    assert hostd.check("127.0.0.1", new) == ""
-    assert hostd.check("127.0.0.1", old, timeout=0.5) != "", "the old one is gone"
+    upstream = f"{HERE}:{stub.port}"
+    hostd.ensure(HERE, old, upstream=upstream)
+    hostd.ensure(HERE, new, upstream=upstream)
+    assert hostd.check(HERE, new) == ""
+    assert hostd.check(HERE, old, timeout=0.5) != "", "the old one is gone"
 
 
 def test_no_runtime_folder_is_a_reason_not_a_crash(tmp_path, monkeypatch):
@@ -722,6 +758,6 @@ def test_no_runtime_folder_is_a_reason_not_a_crash(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(shut))
     try:
         with pytest.raises(hostd.HostdError, match="XDG_RUNTIME_DIR"):
-            hostd.ensure("127.0.0.1", free_port(), upstream="127.0.0.1:53", timeout=1)
+            hostd.ensure(HERE, free_port(), upstream="127.0.0.1:53", timeout=1)
     finally:
         shut.chmod(0o700)

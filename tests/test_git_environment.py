@@ -465,28 +465,98 @@ def test_only_the_fetch_of_a_new_clones_submodules_is_handed_how_you_reach_your_
     assert not list(site.left.iterdir()), "no program of yours ran: nothing here is behind ssh"
 
 
-def test_a_submodule_you_reach_through_your_ssh_command_is_fetched(site, tmp_path, monkeypatch):
-    """A project whose submodule is behind ssh, reached by the command your shell names
-    (GIT_SSH_COMMAND, as a jump host or a key of its own needs): the task's clone has it."""
+@dataclass
+class BehindSsh:
+    """Your repository with a submodule checked out whose remote answers only to the ssh
+    command your shell names."""
+
+    lib: Path  # the remote, as a folder the stand-in ssh serves
+    yours: Path  # what your ssh command was asked, a line per call
+    plain: Path  # what an ssh found on PATH was asked: it is refused, as without your key
+    ssh: Path
+
+
+# Your own git settings that make git go into submodules without being asked.
+RECURSE = "[fetch]\n\trecurseSubmodules = true\n[submodule]\n\trecurse = true\n"
+recursing = pytest.mark.parametrize("settings", ["", RECURSE], ids=["as git is", "told to recurse"])
+
+
+@pytest.fixture
+def behind_ssh(site, tmp_path, monkeypatch) -> BehindSsh:
     lib = make_repo(tmp_path / "lib")
     git(site.mine, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "lib")
     git(site.mine, "config", "--file", ".gitmodules", "submodule.lib.url", f"ssh://git.example.invalid{lib}")
+    git(site.mine, "submodule", "--quiet", "sync")
     git(site.mine, "commit", "-qam", "A library, behind ssh")
-    asked = tmp_path / "asked-of-ssh"
+    yours, plain = tmp_path / "asked-of-your-ssh", tmp_path / "asked-of-plain-ssh"
     # ssh as git runs it: the host, then the command for the far side, which is run here.
     ssh = script(
-        tmp_path / "yours" / "ssh", f'echo "$*" >> "{asked}"\nfor far; do :; done\nexec sh -c "$far"'
+        tmp_path / "yours" / "ssh", f'echo "$*" >> "{yours}"\nfor far; do :; done\nexec sh -c "$far"'
     )
+    refused = f'echo "$*" >> "{plain}"\necho "Permission denied (publickey)." >&2\nexit 255'
+    script(tmp_path / "plain" / "ssh", refused)
     monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
-    monkeypatch.setenv("PATH", f"{site.spy}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PATH", f"{site.spy}{os.pathsep}{tmp_path / 'plain'}{os.pathsep}{os.environ['PATH']}")
+    return BehindSsh(lib, yours, plain, ssh)
+
+
+@recursing
+def test_a_submodule_you_reach_through_your_ssh_command_is_fetched(
+    site, behind_ssh, tmp_path, monkeypatch, settings
+):
+    """A project whose submodule is behind ssh, reached by the command your shell names
+    (GIT_SSH_COMMAND, as a jump host or a key of its own needs): the task's clone has it, and
+    the fetch of its submodules is the one git that went there, whatever your settings say of
+    going into submodules."""
+    global_git_config(monkeypatch, tmp_path / "home", IDENTITY + settings)
     meta = tmp_path / "task" / ".task"
     meta.mkdir(parents=True)
     clone = tmp_path / "task" / "repo"
     repo.prepare(site.mine, clone, "demo-1", meta)
     assert (clone / "lib" / "README.md").read_text() == "demo\n", "the submodule, in the task's clone"
-    assert f"git.example.invalid git-upload-pack '{lib}'" in asked.read_text()
-    handed = [command for command, variables in site.ran() if f"GIT_SSH_COMMAND={ssh}" in variables]
+    asked = behind_ssh.yours.read_text().splitlines()
+    assert len(asked) == 1 and asked[0].endswith(f"git.example.invalid git-upload-pack '{behind_ssh.lib}'")
+    assert not behind_ssh.plain.exists(), "an ssh that is not yours was tried"
+    handed = [c for c, variables in site.ran() if f"GIT_SSH_COMMAND={behind_ssh.ssh}" in variables]
     assert handed == [SUBMODULES]
+
+
+@recursing
+@pytest.mark.parametrize("moved_to", ["a commit its remote has", "a commit the writer made in it"])
+def test_work_that_moved_a_submodule_is_brought_back_without_going_to_the_submodules_remote(
+    site, behind_ssh, tmp_path, monkeypatch, moved_to, settings
+):
+    """The task moved the pointer of a submodule you have checked out. Bringing its commits to
+    your repository reads the task's clone, which the agent wrote, and goes nowhere else: git
+    is told not to go into your submodule, where it would fetch from the submodule's remote
+    (it does on its own when a pointer moves, and always when your settings say so). The
+    pointer moves in the work; your submodule is as it was, its new commits not fetched."""
+    task = a_task(site, tmp_path / "task")
+    at_first = git(site.mine / "lib", "rev-parse", "HEAD")
+    writers = ("-c", "user.name=Writer", "-c", "user.email=writer@example.com")
+    if moved_to == "a commit its remote has":
+        (behind_ssh.lib / "README.md").write_text("newer\n")
+        git(behind_ssh.lib, "commit", "-qam", "Newer, at the remote")
+        git(task.clone / "lib", "fetch", "-q", str(behind_ssh.lib), "main")
+        git(task.clone / "lib", "checkout", "-q", "FETCH_HEAD")
+    else:
+        (task.clone / "lib" / "README.md").write_text("the writer's\n")
+        git(task.clone / "lib", *writers, "commit", "-qam", "In the library")
+    moved = git(task.clone / "lib", "rev-parse", "HEAD")
+    git(task.clone, *writers, "commit", "-qam", "Move the library")
+    work = git(task.clone, "rev-parse", "HEAD")
+    behind_ssh.yours.unlink()  # asked once, for the task's clone
+    global_git_config(monkeypatch, tmp_path / "home", IDENTITY + settings)
+    assert repo.fetch_to(site.mine, task.clone, task.meta, "demo-1") == work
+    assert git(site.mine, "rev-parse", repo.review_ref("demo-1")) == work
+    assert git(site.mine, "rev-parse", f"{work}:lib") == moved != at_first, "the pointer, in the work"
+    copy = repo.update_review_worktree(site.mine, task.root, work, task.base)
+    staged = git(copy, "diff", "--cached", "--name-only").splitlines()
+    assert staged == ["lib", "src/calc.py"], "the review copy shows the pointer moved"
+    assert not behind_ssh.yours.exists() and not behind_ssh.plain.exists(), "an ssh was run for it"
+    assert git(site.mine / "lib", "rev-parse", "HEAD") == at_first
+    missing = subprocess.run([REAL_GIT, "-C", str(site.mine / "lib"), "cat-file", "-e", moved])
+    assert missing.returncode != 0, "your submodule was given commits"
 
 
 def test_how_you_reach_your_remotes_is_a_list_of_names_and_passes_only_when_asked(monkeypatch):
@@ -509,6 +579,18 @@ def test_what_vivibox_sets_for_a_git_wins_over_what_passes_from_your_shell(monke
     own = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes", "LESS": "R"}
     found = repo.git_environment(own, to_remotes=True)
     assert {name: found[name] for name in own} == own
+
+
+def test_how_you_reach_your_remotes_is_asked_for_by_name_and_never_for_the_tasks_clone(site):
+    """to_remotes is a keyword alone, so the structural test counts every place that says it
+    (tests/test_structure.py); and a git with a time limit, which reads the clone the agent
+    writes, is refused it outright instead of losing it without a word."""
+    with pytest.raises(TypeError):
+        repo.git_environment(None, True)
+    with pytest.raises(ValueError, match="task's clone"):
+        repo.git("status", cwd=site.mine, timeout=5, to_remotes=True)
+    with pytest.raises(TypeError):
+        repo.in_clone(site.mine, "status", to_remotes=True)
 
 
 @pytest.fixture
@@ -552,12 +634,18 @@ def test_the_identity_hint_sets_it_where_vivibox_reads_it_when_your_shell_names_
     assert elsewhere.read_text() == IDENTITY, "your own file is as it was"
 
 
-@pytest.mark.parametrize("named", ["nothing", "~/.gitconfig"])
+@pytest.mark.parametrize("named", ["nothing", "~/.gitconfig", "$XDG_CONFIG_HOME/git/config"])
 def test_the_identity_hint_is_git_config_global_where_that_writes_what_vivibox_reads(
     unnamed, tmp_path, monkeypatch, named
 ):
+    """Your shell names no file for git's global settings, or one of the two git reads them in
+    anyway: `git config --global` writes what vivibox's git reads, and the hint is the plain one."""
     if named == "nothing":
         monkeypatch.delenv("GIT_CONFIG_GLOBAL")
+    elif named == "$XDG_CONFIG_HOME/git/config":
+        (tmp_path / "xdg" / "git").mkdir(parents=True)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "xdg" / "git" / "config"))
     with pytest.raises(repo.RepoError) as refused:
         repo.identity(unnamed)
     said = str(refused.value)

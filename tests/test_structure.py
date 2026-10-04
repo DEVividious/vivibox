@@ -92,9 +92,10 @@ def constant(value):
 def test_one_git_on_the_host_is_handed_how_you_reach_your_remotes():
     """repo.TO_YOUR_REMOTES (your ssh command, your askpass, your certificates) pass to a git
     that is asked for with to_remotes: the fetch of a new clone's submodules in repo.prepare,
-    and no other. The rest of repo.py only hands the choice down (git to run_git)."""
+    and no other. The rest of repo.py only hands the choice down, and only by name: the
+    functions take it as a keyword alone, so no call says it out of this count's sight."""
     assert keyword_sites("to_remotes", unless=lambda node: not constant(True)(node)) == {"repo.py": 1}
-    assert keyword_sites("to_remotes", unless=constant(True)) == {"repo.py": 1}, "handed down, once"
+    assert keyword_sites("to_remotes", unless=constant(True)) == {"repo.py": 2}, "git to run_git to there"
 
 
 def test_nothing_is_run_through_a_shell():

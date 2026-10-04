@@ -66,9 +66,9 @@ PASSED_ON = (
     # names no path and no program.
     "GIT_TERMINAL_PROMPT",
 )
-# And, to the one git on the host that reaches your remotes, how you reach them: the fetch of a
-# new clone's submodules (prepare), from the URLs your own .gitmodules names at the commit the
-# task starts from. None of these says which repository, index, object store or configuration
+# And, to the one git vivibox sends to your remotes, how you reach them: the fetch of a new
+# clone's submodules (prepare), from the URLs named by the .gitmodules of the commit the task
+# starts from. None of these says which repository, index, object store or configuration
 # git works on, and each has a twin in your configuration files that this git reads anyway
 # (core.sshCommand, core.askPass, http.sslCAInfo). Never GIT_ALLOW_PROTOCOL, which widens what a
 # URL there may do, nor GIT_SSL_NO_VERIFY, nor a trace.
@@ -85,7 +85,7 @@ TO_YOUR_REMOTES = (
 )
 
 
-def git_environment(own: dict[str, str] | None = None, to_remotes: bool = False) -> dict[str, str]:
+def git_environment(own: dict[str, str] | None = None, *, to_remotes: bool = False) -> dict[str, str]:
     """The environment of every git vivibox runs on the host: this process's own without git's
     variables (every GIT_* but PASSED_ON), then what vivibox sets for the call (own), which
     wins. git takes them before its working directory and -C, so one your shell carries
@@ -93,8 +93,8 @@ def git_environment(own: dict[str, str] | None = None, to_remotes: bool = False)
     repository, index or object store of yours (GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY),
     hand it configuration that runs a program (GIT_CONFIG_COUNT, GIT_CONFIG_GLOBAL), or name
     one outright (GIT_EXTERNAL_DIFF, GIT_EXEC_PATH). Your configuration files are read where
-    git keeps them. to_remotes: for the one git that reaches your remotes, TO_YOUR_REMOTES pass
-    too."""
+    git keeps them. to_remotes: for the one git vivibox sends to your remotes, TO_YOUR_REMOTES
+    pass too; said by name, so that every place that says it can be counted."""
     passed = PASSED_ON + (TO_YOUR_REMOTES if to_remotes else ())
     kept = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in passed}
     return {**kept, **(own or {})}
@@ -105,7 +105,7 @@ def run_git(args: list[str] | tuple[str, ...], **how) -> subprocess.CompletedPro
     what vivibox sets for the call and to_remotes what git_environment takes. For a caller that
     reads git's answer in its own way (as bytes, within its own time); the rest call git or
     in_clone."""
-    env = git_environment(how.pop("env", None), how.pop("to_remotes", False))
+    env = git_environment(how.pop("env", None), to_remotes=how.pop("to_remotes", False))
     return subprocess.run(["git", *args], env=env, **how)
 
 
@@ -115,8 +115,10 @@ def git(
 ) -> subprocess.CompletedProcess:  # fmt: skip
     """timeout: seconds git may take, or no limit; past it, GitTimeout says what git was waiting on
     in clone (cwd when not given). env: variables over git_environment, for a git that must
-    not read your configuration (control.refresh). to_remotes: this git reaches your remotes
+    not read your configuration (control.refresh). to_remotes: this git is sent to your remotes
     (git_environment); never one with a timeout, which reads the task's clone."""
+    if to_remotes and timeout is not None:
+        raise ValueError("git on the task's clone is not handed how you reach your remotes")
     if cwd is not None and not Path(cwd).is_dir():
         # A folder that was moved or deleted since it was configured; say so instead of a stack trace.
         raise RepoError(f"{cwd} does not exist")
@@ -382,7 +384,7 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = 
     # --no-hardlinks: the agent must not be able to modify objects shared with your repository.
     git("clone", "--quiet", "--no-hardlinks", "--no-checkout", str(source), str(repo))
     git("switch", "--quiet", "-c", branch_name(task_id), base, cwd=repo)
-    # The one git on the host that reaches your remotes: as you reach them (TO_YOUR_REMOTES).
+    # The one git vivibox sends to your remotes: as you reach them (TO_YOUR_REMOTES).
     git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo, to_remotes=True)
     if origin:
         git("remote", "set-url", "origin", origin, cwd=repo)
@@ -507,11 +509,17 @@ def review_ref(task_id: str) -> str:
 
 
 def fetch_to(source: Path, repo: Path, meta: Path, task_id: str) -> str:
-    """Brings the task's commits into your repository under refs/vivibox/<id>. Returns the commit."""
+    """Brings the task's commits into your repository under refs/vivibox/<id>. Returns the commit.
+    From the task's clone and nowhere else: where the work moved the pointer of a submodule you
+    have checked out, git would go into that submodule and fetch from its remote (on its own,
+    and always when your settings say fetch.recurseSubmodules), so it is told not to. The
+    submodule's new commits are yours to fetch, with git submodule update, once you have the work."""
     check_protection(repo, meta)
     refspec = f"+refs/heads/{branch_name(task_id)}:{review_ref(task_id)}"
     try:  # run in your checkout, but upload-pack reads the clone: its refs may be a pipe the agent made
-        in_clone(repo, "fetch", "--quiet", "--no-tags", str(repo), refspec, cwd=source)
+        in_clone(
+            repo, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", str(repo), refspec, cwd=source
+        )
     except GitTimeout as e:
         raise GitTimeout(
             f"the work could not be brought back from the task's clone: {e}; then try again, or see "

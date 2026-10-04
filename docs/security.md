@@ -220,12 +220,13 @@ copies alike, runs without the git variables of your shell (every `GIT_*` but
 `GIT_TERMINAL_PROMPT`), so a `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` or
 `GIT_CONFIG_COUNT` exported there neither aims it at another repository of yours nor hands it
 configuration; your git configuration is read from the files where git keeps it, never from
-one `GIT_CONFIG_GLOBAL` names, and it alone says who a commit is by. The one git that reaches
-your remotes, the fetch of a new clone's submodules from the URLs your own `.gitmodules` names
-at the commit the task starts from, is also handed how you reach them (`GIT_SSH`,
-`GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
-`GIT_SSL_CERT`, `GIT_SSL_KEY`, `GIT_PROXY_COMMAND`), and never `GIT_ALLOW_PROTOCOL` or
-`GIT_SSL_NO_VERIFY`.
+one `GIT_CONFIG_GLOBAL` names, and it alone says who a commit is by. The one git vivibox sends
+to your remotes, the fetch of a new clone's submodules from the URLs named by the
+`.gitmodules` of the commit the task starts from, is also handed how you reach them
+(`GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`,
+`GIT_SSL_CAPATH`, `GIT_SSL_CERT`, `GIT_SSL_KEY`, `GIT_PROXY_COMMAND`), and never
+`GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`. Bringing a task's commits to your repository
+fetches from the task's clone alone, without going into your submodules.
 
 ## Limits of the boundary
 
@@ -236,6 +237,10 @@ remains open, and the DNS forwarder applies no policy: any name resolves. The ag
 The check of the task's clone guards the git vivibox runs, at the moment it runs it. Git you run
 yourself in the clone, or an IDE you open on it, is not checked: open the review copy instead, which
 holds only what was committed.
+
+A checkout that is a partial clone (`git clone --filter=…`) is not supported as a project: a
+task's clone would lack the objects your checkout lacks, and the git vivibox runs in your
+checkout is not handed how you reach its promisor remote.
 
 The gate checks the accepted checklist and whether changed test files are named in `red.md`;
 it does not independently prove that each criterion is satisfied or that the recorded test

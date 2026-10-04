@@ -208,6 +208,9 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   It refuses while you have staged changes. Files that conflict with your branch are left for you
   to resolve, and the work is kept on branch `vivibox/<id>` too. `--branch` skips your checkout
   and only creates that branch.
+- **Submodules**: work that moved a submodule to another commit brings the new pointer to the
+  review copy and to your checkout, not the submodule's commits; vivibox fetches nothing into
+  your submodules. After accepting, `git submodule update` fetches them.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.
 
 An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it

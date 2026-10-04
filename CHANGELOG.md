@@ -257,7 +257,7 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   files where git keeps it (`~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, the system's, the
   repository's own); a file your shell names in `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` is
   not, and when your identity is only there, vivibox says so and names the commands that set
-  it where it is read. The one git that reaches your remotes, the fetch of a new task's
+  it where it is read. The one git vivibox sends to your remotes, the fetch of a new task's
   submodules, is still handed how you reach them, and it alone: `GIT_SSH`, `GIT_SSH_COMMAND`,
   `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_CERT`,
   `GIT_SSL_KEY` and `GIT_PROXY_COMMAND`; never `GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`.
@@ -265,6 +265,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   committed as your git configuration names you, as the task's own commits and its branch
   always were, so every commit vivibox makes as you has one source for who you are. For an
   identity of its own in one folder, use `includeIf "gitdir:…"` in your git configuration.
+- Work that moved a submodule you have checked out comes back for review without git going to
+  the submodule's remote: bringing a task's commits to your repository reads the task's clone
+  and nothing else, so it no longer fails where that remote does not answer, or lacks a commit
+  the writer made in the submodule. vivibox no longer fetches the submodule's new commits into
+  your checkout on the way: after accepting such work, `git submodule update` does.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

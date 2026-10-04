@@ -67,3 +67,21 @@ def test_an_archive_whose_events_cannot_be_read_does_not_end_l(env):
     kept = archived(env, WHY, WHY)
     (kept / "events.jsonl").write_text("{not json\n")
     assert said_of_the_review(kept) == "review 1 · not a review: the section ## Blocking is missing"
+
+
+def test_a_round_the_supervisor_recorded_as_read_is_counted_whatever_sections_it_has(env):
+    """The archive's events say the round was read: its notes are counted, and what the text
+    lacks is not held against it (the review's M42: only a round with no record is judged by
+    its text)."""
+    one_section = "## Blocking\n\n- a.py:1 — wrong\n"
+    assert said_of_the_review(archived(env, one_section, "")) == "review 1 · 1 blocking · 0 not blocking"
+    assert said_of_the_review(archived(env, one_section, "", events=False)) == (
+        "review 1 · not a review: the section ## Not blocking is missing"
+    )
+
+
+def test_a_kept_review_with_bytes_that_are_no_text_does_not_end_l(env):
+    """Read as far as it is text (the review's M44): l lists the task's other logs all the same."""
+    kept = archived(env, A_REVIEW, "")
+    (kept / "review-1.md").write_bytes(b"## Blocking\n\n- a.py:3 \xff\xfe wrong\n\n## Not blocking\n")
+    assert said_of_the_review(kept) == "review 1 · 1 blocking · 0 not blocking"

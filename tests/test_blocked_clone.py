@@ -273,11 +273,39 @@ def test_a_name_the_agent_chose_is_in_no_command_the_writer_or_you_would_run(tas
     nested(task.repo, name)
     _, notes, _ = at_the_gate(task)
     fed = (task.meta / "handoff" / "verify-feedback.md").read_text()
-    for said in (fed, ui.environment_problem(task), notes[-1]):
+    log = (task.meta / "handoff" / "verify.log").read_text()
+    for said in (fed, log, ui.environment_problem(task), notes[-1]):
         commands = re.findall(r"`([^`]*)`", said) + re.findall(r"\(vivibox [^)]*\)", said)
         assert not [c for c in commands if "PWNED" in c or "$(" in c], said
+        assert_named_only_as_found(said, name)
     assert f"{name}/.git was added" in fed, "the name as text, whole"
     assert not (tmp_path / "PWNED").exists()
+
+
+def assert_named_only_as_found(said: str, name: str) -> None:
+    """The name stands in said only where vivibox says what it found (the finding's own
+    sentence, or its start where a notification was cut), never anywhere else: a command line
+    made of it needs no backticks to be one ("Run: git rm -f --cached <name>")."""
+    if "PWNED" not in said and "$(" not in said:
+        return  # cut before what was found: the name is not said at all
+    finding = f"{name}/.git was added, a repository git would go into"
+    cut = next((finding[:n] for n in range(len(finding), 0, -1) if finding[:n] + "…" in said), "")
+    rest = said.replace(finding, "").replace(cut + "…" if cut else finding, "")
+    assert name not in rest and "PWNED" not in rest and "$(" not in rest, rest
+    before = said.split(name)[0].rsplit(".", 1)[-1]
+    assert before.strip().endswith(("Found:", "could not run:", "added to it:")), before
+
+
+def test_the_rule_sees_a_command_line_that_has_no_backticks():
+    name = "$(touch /tmp/PWNED) x; y"
+    finding = f"{name}/.git was added, a repository git would go into"
+    assert_named_only_as_found(f"Verification could not run: {finding}. Take it out.", name)
+    for made_of_the_name in (
+        f"Verification could not run: {finding}. Run: git rm -f --cached {name}",
+        f"Run git rm -f --cached {name}/.git was added, a repository git would go into",
+    ):
+        with pytest.raises(AssertionError):
+            assert_named_only_as_found(made_of_the_name, name)
 
 
 def test_control_characters_in_the_name_reach_neither_of_you(task):

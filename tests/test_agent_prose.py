@@ -6,7 +6,7 @@ from test_tui import new_task, run
 from test_untrusted_text import opening, plan_with, show
 from ux import screen_text
 
-from vivibox import display, markdown, sections
+from vivibox import blocks, display, markdown, sections
 
 RULE = "┃"
 
@@ -720,7 +720,7 @@ def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on
         monkeypatch.setattr(
             MarkdownBulletList,
             "compose",
-            lambda self: fail() if isinstance(self.parent, markdown.Quote) else compose(self),
+            lambda self: fail() if isinstance(self.parent, blocks.Quote) else compose(self),
         )
     else:
         real = MarkdownParagraph.build_from_token
@@ -749,12 +749,11 @@ def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on
 
 
 def test_an_error_that_drawing_the_source_does_not_cure_ends_the_view_as_before(env, monkeypatch):
-    from vivibox import markdown
 
     task = new_task()
     plan_with(task, "```\ncode\n```")
     opening(monkeypatch)
-    monkeypatch.setattr(markdown.Fence, "folded", lambda self: 1 / 0)
+    monkeypatch.setattr(blocks.Fence, "folded", lambda self: 1 / 0)
 
     async def scenario(app, pilot):
         await show(app, pilot)

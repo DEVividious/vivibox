@@ -14,8 +14,8 @@ from textual.events import Resize
 from textual.widgets import Static
 
 from . import actions, display, look, orchestration, ui
+from .blocks import Kept
 from .dialogs import NO_PROJECTS
-from .markdown import Kept
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
 

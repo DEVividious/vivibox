@@ -8,7 +8,7 @@ from test_tui import new_task, run
 from test_untrusted_text import opening, plan_with, show
 from ux import screen_text
 
-from vivibox import display
+from vivibox import blocks, display, markdown
 
 WIDTHS = [80, 100, 140]
 MARK = "↳"
@@ -96,10 +96,8 @@ def test_vivibox_risky_and_the_panel_show_the_same_line(env, monkeypatch, capsys
 def test_a_row_is_cut_by_the_cells_its_characters_take():
     from textual.content import Content
 
-    from vivibox import markdown
-
     def rows(text: str, width: int) -> list[str]:
-        return [row.plain for row in markdown._rows(Content(text), width)]
+        return [row.plain for row in blocks._rows(Content(text), width)]
 
     assert rows("abcdef", 4) == ["abcd", "ef"] and rows("abcd", 4) == ["abcd"] and rows("", 4) == [""]
     assert rows("x漢漢漢", 4) == ["x漢", "漢漢"], "a character of two cells goes to the next row whole"
@@ -225,12 +223,10 @@ def test_every_code_block_of_the_panel_is_folded(env, monkeypatch, width):
 def test_a_row_the_fold_left_too_wide_is_wrapped_and_never_cut(env, monkeypatch):
     """The block's text has the block's width and wraps: were a fold ever a cell wrong, the row
     would go on below, and nothing of it would be past the edge."""
-    from vivibox import markdown
-
     task = new_task()
     risky(task, LONG)
     opening(monkeypatch)
-    monkeypatch.setattr(markdown, "_rows", lambda line, width: [line])
+    monkeypatch.setattr(blocks, "_rows", lambda line, width: [line])
 
     async def scenario(app, pilot):
         await show(app, pilot)
@@ -442,8 +438,6 @@ def test_a_piece_with_a_block_that_has_no_room_at_80_columns_is_its_source(shape
 def test_the_deepest_piece_drawn_as_markdown_has_ten_columns_for_every_block_at_80(env, monkeypatch, shape):
     """The count of columns is the widgets' own: what the rule above reckons for 80 columns is
     what each block of the piece is given there."""
-    from vivibox import markdown
-
     task = new_task()
     last = f"{WORDS}\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| c | d |"
     plan_with(task, SHAPES[shape](DEEPEST[shape], last))
@@ -481,11 +475,10 @@ def test_a_table_in_numbered_lists_does_not_end_the_view(env, monkeypatch, width
 def test_a_grid_is_mounted_only_where_it_has_room(env, monkeypatch):
     """Not first and looked at after: a table with no room for its columns never has a grid, at
     its first drawing or when the terminal is made narrower under one that had room."""
-    from vivibox import markdown
 
     made = []
     monkeypatch.setattr(
-        markdown.Cells, "on_mount", lambda self: made.append(self.parent.size.width), raising=False
+        blocks.Cells, "on_mount", lambda self: made.append(self.parent.size.width), raising=False
     )
     task = new_task()
     plan_with(task, f"{table(30)}\n\n{numbered(3, table(4, 'LAST-OF-4'))}")

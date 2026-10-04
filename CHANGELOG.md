@@ -794,6 +794,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The widgets the details panel's text is drawn with (the panel, the frame, the code block, the
+  table) are in `vivibox/blocks.py`; `vivibox/markdown.py` keeps what reads the text.
 - A test holds that a tool's stderr becomes a message only through `display.said`
   (`tests/test_structure.py`): every other read of it is listed there with why.
 - The command line's commands for your decisions on a task (`accept`, `plan`, `reply`,

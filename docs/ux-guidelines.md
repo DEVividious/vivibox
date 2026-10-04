@@ -1,7 +1,7 @@
 # UX guidelines
 
 Read this before changing anything a person sees: the view (`vivibox/tui.py`, `vivibox/table.py`,
-`vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/markdown.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
+`vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/markdown.py`, `vivibox/blocks.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
 `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
 `vivibox/branches.py`, `vivibox/usage_view.py`), their look (`vivibox/look.py`, `vivibox/vivibox.tcss`),
 `vivibox/cli.py` and the commands apart from it in `vivibox/cli_*.py`, notification texts, the README
@@ -333,19 +333,19 @@ looks like an empty cache.
   and its numbered lists (their longest number and three more) take (`markdown._whole`). That
   is decided on what the parser found, for 80 columns, whatever the terminal's width. An
   error raised while a piece is drawn does not end the view either: the pieces of that text
-  are drawn again as their source, and a notification says so (`markdown.Kept`).
+  are drawn again as their source, and a notification says so (`blocks.Kept`).
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
   A table in that text has columns of equal width and cells folded onto as many rows as they
-  take, never cut with an ellipsis, and no tooltip (`markdown.Cells`): an address in a cell is
+  take, never cut with an ellipsis, and no tooltip (`blocks.Cells`): an address in a cell is
   on the screen whole, at 80 columns too. Where the panel is too narrow to give each column
   room for four characters of text a row, reckoned with the panel's scrollbar shown, the
-  table is drawn as its source in a code block instead (`markdown.Table`), and as a grid
+  table is drawn as its source in a code block instead (`blocks.Table`), and as a grid
   again once there is room; a grid is mounted only after its width is known.
 - Nothing an agent wrote lies past the panel's right edge, at any width from 80 columns. A line
   of a code block (a diff, a risky file,
   a log, a block in a plan) longer than the block is folded onto further rows, each with `↳`
   in the first of the two columns before the text, which are the block's own
-  (`markdown.Fence`): no text of the block is drawn there, and the same character in a block's
+  (`blocks.Fence`): no text of the block is drawn there, and the same character in a block's
   text is shown as its code point (`‹U+21B3›`), so no line passes for the rest of the line
   above it and none hides that it goes on. A fold counts the cells a character takes (two for
   a wide one, none for a combining mark, a tab to its stop) and is made again on every change

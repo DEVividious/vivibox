@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, display, gate, handoff, ide, look, markdown, probe, skill, ui
+from . import actions, blocks, code, display, gate, handoff, ide, look, probe, skill, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -176,7 +176,7 @@ class Vivibox(
         )  # the cursor keeps a row's own colours: a status reads the same under it
         yield Static("", id="empty")  # in the table's place while there is nothing to list
         with VerticalScroll(id="detail", classes="hidden"):
-            yield markdown.Panel(id="detail-text")
+            yield blocks.Panel(id="detail-text")
         yield LiveFooter(compact=True)
 
     def on_mount(self) -> None:

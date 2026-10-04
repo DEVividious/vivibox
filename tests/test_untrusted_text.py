@@ -502,7 +502,7 @@ def test_no_code_block_of_the_panel_is_fenced_by_hand():
 
     package = Path(markdown.__file__).parent
     found = {}
-    for name in ("panel.py", "panels.py", "sections.py", "panel_resources.py", "markdown.py"):
+    for name in ("panel.py", "panels.py", "sections.py", "panel_resources.py", "markdown.py", "blocks.py"):
         nodes = ast.walk(ast.parse((package / name).read_text()))
         texts = [n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)]
         if fenced := [text for text in texts if "```" in text or "~~~" in text]:

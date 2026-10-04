@@ -5,6 +5,7 @@ so, as it says of any file that is not committed. What is ordinary is left alone
 of the task's base, checked out or not, moved or not, and one the work adds with its entry in
 `.gitmodules`."""
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,7 +16,7 @@ from test_blocked_start import Watched
 from test_gate import PLAN, FakePod
 from test_submodule_commits import project  # noqa: F401 (the fixture)
 
-from vivibox import feedback, gate
+from vivibox import feedback, gate, protection
 from vivibox import repo as r
 from vivibox.risky import Approvals
 from vivibox.task import create_task
@@ -178,6 +179,81 @@ def test_the_same_pointer_without_the_entry_is_what_is_refused(task):
     git(task.repo, "commit", "-q", "-m", "A pointer")
     (task.repo / "vendor" / "lib").mkdir(parents=True, exist_ok=True)
     assert gate.uncommitted(task.repo) == [SAID.format("vendor/lib")]
+
+
+@pytest.mark.parametrize("included", ["a file outside the clone", "a named pipe"])
+def test_the_works_gitmodules_is_read_without_what_it_includes(task, tmp_path, monkeypatch, included):
+    """The commit's .gitmodules is the writer's, and may name another file to include: any file
+    of this machine. Read with its includes, a file elsewhere that gives the folder as a
+    submodule's path would have the folder left alone, and a named pipe would have git wait on
+    it. It is read as data, without them: the folder is said, and the pipe is never opened."""
+    monkeypatch.setattr(r, "CLONE_TIMEOUT", 5)  # were the pipe opened: a failure, not a minute's wait
+    elsewhere = tmp_path / "elsewhere.gitconfig"
+    if included == "a named pipe":
+        os.mkfifo(elsewhere)
+    else:
+        elsewhere.write_text('[submodule "web"]\n\tpath = web\n')
+    (task.repo / ".gitmodules").write_text(f"[include]\n\tpath = {elsewhere}\n")
+    git(task.repo, "add", ".gitmodules")
+    half_repaired(task.repo)
+    r.check_protection(task.repo, task.meta)
+    assert gate.uncommitted(task.repo) == [SAID.format("web")]
+
+
+def long_pointers(monkeypatch, names: list[str]) -> list[int]:
+    """The clone's index as listing names as submodules, each a folder with no repository in
+    it, without making them: what the check reads of the index and of the folders says so.
+    Returns the list that fills with the length of each command line git is run with."""
+    made, real, bounded, handed = set(names), protection.look, r._bounded, []
+
+    def look(root, rel, read=True, mode=False):
+        if rel in made or rel.removesuffix("/.git") in made:
+            return protection.FOLDER if rel in made else protection.ABSENT
+        return real(root, rel, read, mode)
+
+    def run(command, *rest):
+        handed.append(sum(len(argument) + 1 for argument in command))
+        return bounded(command, *rest)
+
+    listed = protection.index_gitlinks
+    monkeypatch.setattr(protection, "index_gitlinks", lambda root: [*listed(root), *names])
+    monkeypatch.setattr(protection, "look", look)
+    monkeypatch.setattr(r, "_bounded", run)
+    return handed
+
+
+def test_many_pointers_with_long_names_are_asked_of_git_a_handful_at_a_time(with_a_submodule, monkeypatch):
+    """Six hundred folders listed as submodules, with names of four thousand characters: in one
+    command line they are more than a command line holds, and git was not run at all
+    (Argument list too long). git is asked of them a handful at a time, and each is answered
+    as before: the base's own, whichever handful it is in, is left alone, and the rest are said."""
+    task = with_a_submodule
+    not_checked_out(task)
+    names = [f"{n:03}" + "x" * 3997 for n in range(600)]
+    handed = long_pointers(monkeypatch, names)
+    said = r.gitlinks_left(task.repo)
+    assert max(handed) < 100_000, "git was handed every pointer's path in one command line"
+    assert said == [SAID.format(name) for name in names], "lib is the base's; the others are the work's"
+    assert len(handed) > 2 and sum(handed) > 600 * 4000, "each was asked of git"
+    assert r._handfuls(["a" * 20_000, "b" * 12_000, "c", "d" * 40_000, "e"]) == [
+        ["a" * 20_000, "b" * 12_000],
+        ["c"],
+        ["d" * 40_000],
+        ["e"],
+    ]
+
+
+def test_a_pointer_at_a_path_longer_than_a_command_line_stops_the_verification_with_why(task, monkeypatch):
+    """One path that is longer than a single argument may be: git cannot be asked of it. The
+    verification stops on a reason, as it does for a clone it cannot read, not on what the
+    system said of the command line."""
+    long_pointers(monkeypatch, ["x" * 200_000])
+    with pytest.raises(r.RepoError) as why:
+        gate.uncommitted(task.repo)
+    assert str(why.value) == (
+        "the work lists a submodule at a path of 200000 characters, which is longer than git can be asked "
+        "about, so the verification cannot check its submodule pointers: take that path out of the index"
+    )
 
 
 def test_a_pointer_whose_folder_is_gone_is_gits_own_to_say(task):

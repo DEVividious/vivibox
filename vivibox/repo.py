@@ -11,6 +11,7 @@ clone only through in_clone, which compares it with the record first.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import re
 import signal
@@ -550,6 +551,24 @@ NO_SUBMODULE = (
     "ordinary files and commit"
 )
 COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# Characters of paths git is handed in one command line: a fraction of what one may hold, so
+# that pointers past counting, with names as long as the agent made them, are asked a few at a time.
+PATHS_AT_ONCE = 32_000
+
+
+def _handfuls(paths: list[str]) -> list[list[str]]:
+    """paths in their order, in lists of no more than PATHS_AT_ONCE characters; a path longer
+    than that in a list of its own."""
+    found: list[list[str]] = []
+    held = 0  # characters in the last list
+    for path in paths:
+        if found and held + len(path) <= PATHS_AT_ONCE:
+            found[-1].append(path)
+        else:
+            found.append([path])
+            held = 0
+        held += len(path)
+    return found
 
 
 def gitlinks_left(clone: Path) -> list[str]:
@@ -562,7 +581,8 @@ def gitlinks_left(clone: Path) -> list[str]:
 
     Only on a clone the protection check passes (guard): the index and the folders are looked
     at as files, and git is asked, through in_clone, what the base listed and what .gitmodules
-    names, and only when there is such a folder."""
+    names, and only when there is such a folder; of the base a handful of paths at a time
+    (_handfuls), since all of them at once may be more than a command line holds."""
     guard(clone)
     left = [
         path
@@ -578,12 +598,21 @@ def gitlinks_left(clone: Path) -> list[str]:
         base = Task(clone.parent).read_state().base_commit
     except (OSError, ValueError, KeyError, TypeError):
         base = ""
-    listed = ""
-    if COMMIT_ID.fullmatch(base):  # the paths as names, never as patterns
-        listed = in_clone(
-            clone, "--literal-pathspecs", "ls-tree", "-z", base, "--", *left, check=False
-        ).stdout
-    in_base = {entry.partition("\t")[2] for entry in listed.split("\0") if entry.startswith("160000 ")}
+    in_base: set[str] = set()
+    for some in _handfuls(left) if COMMIT_ID.fullmatch(base) else []:
+        try:  # the paths as names, never as patterns
+            listed = in_clone(
+                clone, "--literal-pathspecs", "ls-tree", "-z", base, "--", *some, check=False
+            ).stdout
+        except OSError as e:
+            if e.errno != errno.E2BIG:
+                raise
+            raise RepoError(
+                f"the work lists a submodule at a path of {len(some[0])} characters, which is longer than "
+                "git can be asked about, so the verification cannot check its submodule pointers: take "
+                "that path out of the index"
+            ) from None
+        in_base |= {entry.partition("\t")[2] for entry in listed.split("\0") if entry.startswith("160000 ")}
     names = in_clone(
         clone, "config", "--no-includes", "--blob", "HEAD:.gitmodules", "-z", "--get-regexp",
         r"^submodule\..*\.path$", check=False,

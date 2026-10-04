@@ -577,6 +577,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   is refused as what vivibox could not check: with the fetch that brings the commit the task
   started from, where your submodule lacks it, or the git that says why; so is one not read
   within the check's time.
+- The verification no longer stops on "Argument list too long" where the work lists many
+  folders as submodules that hold no repository (six hundred, with names of four thousand
+  characters): git was handed every such path in one command line, the task stopped on the
+  system's words and `vivibox verify` ended in a traceback. git is asked of them a handful at
+  a time, and each is answered as before. A single path longer than a command line holds
+  stops the verification with that reason.
 - A refused accept leaves your repository's refs as they were: accepting brings the work
   under `refs/vivibox/<id>` before it checks its submodules, and where no review copy had
   brought it there already, a refusal left that ref behind. It now takes back the ref it

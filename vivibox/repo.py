@@ -68,7 +68,8 @@ PASSED_ON = (
 )
 # And, to the one git vivibox sends to your remotes, how you reach them: the fetch of a new
 # clone's submodules (prepare), from the URLs named by the .gitmodules of the commit the task
-# starts from. None of these says which repository, index, object store or configuration
+# starts from, when that commit is your own (yours); never to a later git on what the agent
+# wrote. None of these says which repository, index, object store or configuration
 # git works on, and each has a twin in your configuration files that this git reads anyway
 # (core.sshCommand, core.askPass, http.sslCAInfo). Never GIT_ALLOW_PROTOCOL, which widens what a
 # URL there may do, nor GIT_SSL_NO_VERIFY, nor a trace.
@@ -374,6 +375,17 @@ def branch_exists(source: Path, name: str) -> bool:
     )
 
 
+def yours(source: Path, commit: str) -> bool:
+    """Whether commit is your own work in your repository at source: on the branch you are on, or
+    reachable from a ref of yours, which is any but refs/vivibox/, where a task's work waits
+    until you accept it. A task started from such work (vivibox new --base refs/vivibox/<id>, or
+    its commit by id) starts from a .gitmodules the agent may have written."""
+    if git("merge-base", "--is-ancestor", commit, "HEAD", cwd=source, check=False).returncode == 0:
+        return True
+    refs = git("for-each-ref", "--format=%(refname)", "--contains", commit, cwd=source, check=False).stdout
+    return any(not ref.startswith("refs/vivibox/") for ref in refs.split())
+
+
 def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = "") -> str:
     """Clones source into repo on a new task branch. Returns the base commit."""
     if (source / ".gitattributes").exists() and "filter=lfs" in (source / ".gitattributes").read_text():
@@ -384,8 +396,9 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = 
     # --no-hardlinks: the agent must not be able to modify objects shared with your repository.
     git("clone", "--quiet", "--no-hardlinks", "--no-checkout", str(source), str(repo))
     git("switch", "--quiet", "-c", branch_name(task_id), base, cwd=repo)
-    # The one git vivibox sends to your remotes: as you reach them (TO_YOUR_REMOTES).
-    git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo, to_remotes=True)
+    # The one git vivibox sends to your remotes: as you reach them (TO_YOUR_REMOTES), when the
+    # commit whose .gitmodules names them is your own.
+    git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo, to_remotes=yours(source, base))
     if origin:
         git("remote", "set-url", "origin", origin, cwd=repo)
     else:

@@ -521,6 +521,32 @@ def test_a_submodule_you_reach_through_your_ssh_command_is_fetched(
     assert handed == [SUBMODULES]
 
 
+@pytest.mark.parametrize("base", ["the review ref", "its commit", "accepted as a branch"])
+def test_how_you_reach_your_remotes_is_handed_only_for_a_commit_of_your_own(site, behind_ssh, tmp_path, base):
+    """A task started from work you have not accepted (vivibox new --base refs/vivibox/<id>, or
+    that commit by its id) starts from a .gitmodules the agent may have written: the fetch of
+    its submodules gets no ssh command, askpass or certificate of yours. Once the same commit
+    is on a branch of yours, it is your own, and they pass."""
+    task = a_task(site, tmp_path / "task", bring_back=True)
+    if base == "accepted as a branch":
+        repo.create_branch(site.mine, "demo-1", task.work)
+    behind_ssh.yours.unlink()  # asked once, for the first task's clone
+    site.log.unlink()
+    meta = tmp_path / "next" / ".task"
+    meta.mkdir(parents=True)
+    start = task.work if base == "its commit" else repo.review_ref("demo-1")
+    handed = lambda: [c for c, variables in site.ran() if f"GIT_SSH_COMMAND={behind_ssh.ssh}" in variables]  # noqa: E731
+    if base == "accepted as a branch":
+        repo.prepare(site.mine, tmp_path / "next" / "repo", "demo-2", meta, base_ref=start)
+        assert handed() == [SUBMODULES] and behind_ssh.yours.exists() and not behind_ssh.plain.exists()
+        return
+    with pytest.raises(repo.RepoError, match="Permission denied"):
+        repo.prepare(site.mine, tmp_path / "next" / "repo", "demo-2", meta, base_ref=start)
+    assert handed() == [], "your ssh command went to a git on what the agent wrote"
+    assert not behind_ssh.yours.exists() and behind_ssh.plain.exists(), "the plain ssh, refused, and no other"
+    assert not repo.yours(site.mine, task.work) and repo.yours(site.mine, task.base)
+
+
 @recursing
 @pytest.mark.parametrize("moved_to", ["a commit its remote has", "a commit the writer made in it"])
 def test_work_that_moved_a_submodule_is_brought_back_without_going_to_the_submodules_remote(

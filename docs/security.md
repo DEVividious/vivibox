@@ -225,8 +225,11 @@ to your remotes, the fetch of a new clone's submodules from the URLs named by th
 `.gitmodules` of the commit the task starts from, is also handed how you reach them
 (`GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`,
 `GIT_SSL_CAPATH`, `GIT_SSL_CERT`, `GIT_SSL_KEY`, `GIT_PROXY_COMMAND`), and never
-`GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`. Bringing a task's commits to your repository
-fetches from the task's clone alone, without going into your submodules.
+`GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`; and only when that commit is your own, on the
+branch you are on or reachable from a ref of yours other than `refs/vivibox/`, where a task's
+work waits until you accept it. No later git on what the agent wrote is handed them. Bringing
+a task's commits to your repository fetches from the task's clone alone, without going into
+your submodules.
 
 ## Limits of the boundary
 

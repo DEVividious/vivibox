@@ -260,7 +260,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   it where it is read. The one git vivibox sends to your remotes, the fetch of a new task's
   submodules, is still handed how you reach them, and it alone: `GIT_SSH`, `GIT_SSH_COMMAND`,
   `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_CERT`,
-  `GIT_SSL_KEY` and `GIT_PROXY_COMMAND`; never `GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`.
+  `GIT_SSL_KEY` and `GIT_PROXY_COMMAND`; never `GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`,
+  and only when the task starts from a commit of your own: one started from work you have
+  not accepted (`--base refs/vivibox/<id>`) gets none of them.
   `GIT_AUTHOR_*` and `GIT_COMMITTER_*` are taken out everywhere: the accepted work is
   committed as your git configuration names you, as the task's own commits and its branch
   always were, so every commit vivibox makes as you has one source for who you are. For an

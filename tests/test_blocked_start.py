@@ -242,3 +242,45 @@ def test_any_other_refusal_of_the_clone_still_stops_the_start(machine, flow):
     with pytest.raises(r.RepoError, match="delete the task"):
         actions.start(task.id, supervise=False)
     assert task.read_state().problem.startswith("could not start: git files in the task's clone changed")
+
+
+# --- the paths this round changed, watched the same way ----------------------------------------------
+
+
+def test_the_gate_the_views_and_the_reply_run_no_git_in_a_clone_with_both_additions(
+    tmp_path, watched, monkeypatch
+):
+    """A worktree and a hostile repository at once: the index is now read beside the added
+    worktree (by vivibox, as a file), the reply looks at the clone again to write the feedback,
+    and the status and the panel read the question and the reason. None of it is git's doing."""
+    from test_blocked_clone import at_the_gate, worktree
+    from test_gate import PLAN
+
+    from vivibox import panel
+    from vivibox.risky import Approvals
+    from vivibox.task import create_task
+
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(tmp_path / "config"))  # never your projects
+    source = make_repo(tmp_path / "source")
+    task = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    task.set_base_commit(r.prepare(source, task.repo, task.id, task.meta))
+    Approvals(task.meta, task.repo).approve()
+    worktree(task.repo, tmp_path / "elsewhere")
+    watched.hostile(task.repo)
+    watched.start()
+    sup, notes, pod = at_the_gate(task)
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_BLOCKED and pod.commands == []
+    assert notes[-1].startswith("verification could not run: the task added a repository of its own and a ")
+    ui.view(task, st, True, 3)
+    ui.task_detail(task, lambda t: "0/1", 3, 5, ui.Style(False), True)
+    panel.detail(task, st, 3, running=False, pod=panel.PodView())
+    actions.verify_again(task)
+    sup.step()
+    actions.reply(task, "please go on")
+    fed = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert "`git rm -f --cached`" in fed and "`git worktree remove`" in fed
+    sup.step()  # the writer's turn
+    sup.step()  # verified again: still blocked
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    watched.nothing_ran_in(task.repo)

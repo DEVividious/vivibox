@@ -268,6 +268,19 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Refusals to approve risky files say what is true and what to do in more cases. A file that
+  became a named pipe or a link out of the repository between the look at it and `p` is said
+  to be one whose change cannot be approved, with what undoes it, as the other refusals are. A
+  removed file vivibox kept no approved copy of is listed as `removed`, with that reason,
+  instead of `(empty)`. When vivibox cannot tell whose the unchecked files are, the message
+  ends with the step: repair what it names and verify again (`vivibox verify-again <id>`), or
+  delete the task. In a box, which has no writer, a refusal names whoever works in the box
+  instead of telling you to reply. When git warns before it fails in your repository, the
+  reason given is its error, not the warning.
+- A line of a build's output that says a verification could not run is said to be the build's,
+  between `«` and `»` (`the build said «Cannot connect to the Docker daemon»`), in the
+  notification, the status, the panel and the writer's feedback: nothing the build printed
+  reads as a sentence of vivibox's.
 - `l` on a finished task no longer says `0 blocking · 0 not blocking` of a round whose review
   vivibox could not read: it says `unreadable` and why, as it does while the task lives, from
   the events the archive kept; in an archive without them, a text with no Blocking or Not

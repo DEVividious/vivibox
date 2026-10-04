@@ -1361,7 +1361,11 @@ def test_the_budget_notification_is_one_whole_sentence_with_a_way_out(task, monk
         "verification could not run: 2 risky files not checked, scan budget exceeded (3 MiB): vivibox "
         "could not tell whose they are: the project file "
     )
-    assert notes[-1].endswith("is gone; if you renamed it, give it its name back"), "whole, no g"
+    assert notes[-1].endswith(
+        "is gone; if you renamed it, give it its name back; once that is repaired, verify again "
+        f"(vivibox verify-again {task.id}), and where it cannot be, delete the task "
+        f"(vivibox delete {task.id})"
+    ), "whole, with its own way on: the scan runs again once whose the files are can be told"
 
 
 def test_your_own_risky_files_past_the_budget_say_delete_in_one_sentence(env, monkeypatch):

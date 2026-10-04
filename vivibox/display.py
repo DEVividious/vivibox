@@ -111,6 +111,14 @@ def said(text: str) -> str:
     return "\n    ".join(name(line) for line in found if line.strip())
 
 
+def quoted(who: str, line: str) -> str:
+    """A line someone else said (a build's output, which the agent's code prints), inside a
+    sentence of vivibox's: said to be theirs, between « and », which the line cannot close (its
+    own are shown as their code points), so nothing in it reads as what vivibox says after it.
+    Nothing for no line."""
+    return f"{who} said «{re.sub('[«»]', lambda m: code_point(m.group()), line)}»" if line else ""
+
+
 def lines(text: str) -> list[str]:
     """text's lines, each with its \\n: a line ends there alone. What another tool may take for a
     line break (\\r for bash; FF, VT, NEL or U+2028 for Groovy, which takes them for spaces) stays

@@ -122,7 +122,12 @@ def stop_said(stop: dict[str, str], task_id: str) -> str:
             f"{_stopped(stop)}: reply, and the writer undoes its large risky changes "
             f"(vivibox risky {task_id} lists them)"
         )
-    return f"{_stopped(stop)}: vivibox could not tell whose they are: {whose}"
+    # whose: why it could not read your repository at the task's base, which says what to repair.
+    return (
+        f"{_stopped(stop)}: vivibox could not tell whose they are: {whose}; once that is repaired, "
+        f"verify again (vivibox verify-again {task_id}), and where it cannot be, delete the task "
+        f"(vivibox delete {task_id})"
+    )
 
 
 def stop_for_the_writer(stop: dict[str, str]) -> str:
@@ -178,11 +183,12 @@ def _digest(repo: Path, path: Path, budget: clone_read.Budget | None = None) -> 
     return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
 
 
-def _spent() -> str:
-    """Why a pass read no more of the clone, and what undoes it without touching your files."""
+def _spent(who: str) -> str:
+    """Why a pass read no more of the clone, and what undoes it without touching your files.
+    who: the one that takes a change back, and how you get them to (repo.undoes)."""
     return (
         f"the risky files together are more than vivibox reads at a time "
-        f"({clone_read.size_of(clone_read.SCAN_BUDGET)}); reply, and the writer restores the large risky "
+        f"({clone_read.size_of(clone_read.SCAN_BUDGET)}); {who} restores the large risky "
         "files it changed as they were when the task started, and removes the ones it added"
     )
 
@@ -207,11 +213,15 @@ def _undo(path: str, base: baseline.Baseline) -> str:
     return "restores it as it was when the task started" if there else "removes it"
 
 
-def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False) -> str:
+def _cannot(
+    path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False,
+    who: str = git_repo.WRITER,
+) -> str:  # fmt: skip
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
     link it had is tolerated by its target alone: never followed, never read. A file the scan had
-    no budget left for: heavy, when your risky files were past the budget at the base commit."""
+    no budget left for: heavy, when your risky files were past the budget at the base commit.
+    who: the one that takes the change back (repo.undoes): the writer, or in a box you."""
     unknown, name = _unknown(base), display.name(path)
     if digest.startswith(UNCHECKED) and heavy:
         return (
@@ -224,7 +234,7 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
     if digest.startswith(UNCHECKED):
         return (
             f"{name} was not checked: {digest.removeprefix(UNCHECKED)}, so vivibox cannot tell whether "
-            f"the task changed it, and it cannot be approved: {_spent()}{unknown}"
+            f"the task changed it, and it cannot be approved: {_spent(who)}{unknown}"
         )
     if digest.startswith(TOO_LARGE):
         if base.sizes.get(path, 0) > clone_read.HASH_LIMIT:  # yours: nothing for the writer to do
@@ -236,13 +246,13 @@ def _cannot(path: str, digest: str, base: baseline.Baseline, task_id: str, heavy
             )
         return (
             f"{name} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
-            f"task's change to it cannot be approved: reply, and the writer {_undo(path, base)}{unknown}"
+            f"task's change to it cannot be approved: {who} {_undo(path, base)}{unknown}"
         )
     if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
             f"{name} is a link that leads out of the repository "
             f"({display.name(digest.removeprefix(OUT_LINK))}), and "
-            "vivibox cannot check what it points to, so it cannot be approved: reply, and the writer "
+            f"vivibox cannot check what it points to, so it cannot be approved: {who} "
             f"removes the link or makes it a file in the repository{unknown}"
         )
     return ""
@@ -339,8 +349,8 @@ class Approvals:
         if not any(d.startswith((OUT_LINK, TOO_LARGE, UNCHECKED)) for d in now.values()):
             return {}
         base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
-        heavy = self._heavy(base)
-        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id, heavy))}
+        heavy, who = self._heavy(base), git_repo.undoes(self.dir.parent)
+        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id, heavy, who))}
 
     def _heavy(self, base: baseline.Baseline) -> bool:
         """Whether your risky files at the start, as last approved, were past the budget together,
@@ -462,7 +472,13 @@ class Approvals:
             if e.kind == clone_read.OVER_BUDGET:
                 return f"{linked}{head}: not shown: {e.kind}, as {self._unseen(change.path)}\n", False
             if e.kind != clone_read.too_large(clone_read.CHECK_LIMIT):
-                return f"{linked}{head} ({display.name(str(e))})\n", want is None
+                if want is None:
+                    return f"{linked}{head} ({display.name(str(e))})\n", True
+                # Hashed as a file and no file now (a FIFO, a link out, swapped in since): refused.
+                return (
+                    f"{linked}{head}: not shown: {self._unseen(change.path, display.name(str(e)))}\n",
+                    False,
+                )
             view, seen = self._view(change.path, budget, want)
             return f"{linked}{head}: {e.kind}, too large to show here; {view}\n", seen
         except OSError:  # gone, or a folder
@@ -487,6 +503,8 @@ class Approvals:
         name = display.name(change.path)
         if diff := display.diff(difflib.unified_diff(a, b, f"approved/{name}", f"task/{name}")):
             return (linked + note or f"{head}\n") + diff, True
+        if change.kind == "removed" and not old.exists():  # a removal, and nothing kept to show of it
+            return f"{head} (vivibox kept no copy of what was approved, so there is nothing to show)\n", True
         if not b:  # nothing to show, and nothing in it unshown
             return f"{linked}{head} (empty)\n", True
         # Never a change taken as seen with nothing of it shown.
@@ -501,9 +519,9 @@ class Approvals:
             "the risky files together are more than vivibox reads at a time "
             f"({clone_read.size_of(clone_read.SCAN_BUDGET)})"
         )
+        who = git_repo.undoes(self.dir.parent)  # the writer after your reply; in a box, you
         return (
-            f"{why}, so the task's change to it cannot be approved: reply, and the writer "
-            f"{_undo(path, base)}{_unknown(base)}"
+            f"{why}, so the task's change to it cannot be approved: {who} {_undo(path, base)}{_unknown(base)}"
         )
 
     def _not_text(self, path: str, e: clone_read.NotText) -> str:

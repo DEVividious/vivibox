@@ -89,13 +89,15 @@ def read(source: Path, commit: str) -> Baseline:
 
 
 def _git(source: Path, *args: str, input: bytes = b"") -> tuple[bytes | None, str]:
-    """git's output in your checkout, or None and the first line git said of why; an argument
-    list, never a shell."""
+    """git's output in your checkout, or None and the first line git said of why (its error,
+    when it also warned); an argument list, never a shell."""
     try:
         done = repo.run_git(["-C", str(source), *args], input=input, capture_output=True, check=False)
     except OSError as e:
         return None, f"git could not run: {e.strerror}"
     if done.returncode == 0:
         return done.stdout, ""
-    said = done.stderr.decode(errors="replace").splitlines()
-    return None, next((line for line in said if line.strip()), f"git exited with {done.returncode}")
+    said = [line for line in done.stderr.decode(errors="replace").splitlines() if line.strip()]
+    # Why it failed, not what it warned of before (a global attributes file it could not read).
+    failed = [line for line in said if line.startswith(("fatal:", "error:"))]
+    return None, next(iter(failed or said), f"git exited with {done.returncode}")

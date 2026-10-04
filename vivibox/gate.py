@@ -700,7 +700,7 @@ def _build(
                 else:
                     ok = code == 0
                     if not ok:
-                        result.environment = environment_problem("".join(said))
+                        result.environment = display.quoted("the build", environment_problem("".join(said)))
                     if said and not said[-1].endswith("\n"):
                         out.write("\n")
                 took = round(time.monotonic() - started, 1)

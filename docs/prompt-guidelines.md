@@ -130,7 +130,7 @@ Mechanical, in `tests/test_prompt_rules.py`:
   texts replaces its digest, with its own behavioural run), and the review turn's prompt is the
   one the supervisor's run read;
 - the reviewer's common brief is the reader's, differing from the planner's in the one clause
-  on the handoff.
+  on the handoff; it and the reviewer's role file are what the reviewer's run read (by digest).
 
 Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
 models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,

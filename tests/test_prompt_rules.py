@@ -228,6 +228,11 @@ PROMPTS_AS_BEFORE = {
 # The review turn's prompt as the supervisor's behavioural run of 2026-10-03 read it; the reviewer
 # in its own container is asked with the same words.
 REVIEW_PROMPT_AS_RUN = "10b080b19afeca4f3e372498752daa1e6f8c977ff519473111d885f8e2e0f398"
+# What the reviewer in its own container read in its behavioural run of 2026-10-04: its role
+# file, and its common brief with a command (the reader's, the handoff its to read). A change to
+# either is a prompt change, with a run of its own.
+REVIEWERS_ROLE_AS_RUN = "5fcb77c4ddee261749da940853cedd306077a4843ff1be46956f81050b001773"
+REVIEWERS_BRIEF_AS_RUN = "3bf09723822184ddb069f0dec2b3fcab47289539baa593242426c8285c8e1665"
 
 
 def test_what_the_single_agent_and_the_writer_read_is_as_it_was():
@@ -399,3 +404,13 @@ def test_a_plan_made_in_a_chat_asks_for_criteria_with_values():
 
     plain = " ".join(manual.READER.split())
     assert "names the input and what it must give" in plain
+
+
+def test_what_the_reviewer_reads_is_what_its_behavioural_run_read():
+    import hashlib
+
+    digest = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
+    role = (files("vivibox") / "templates/roles/reviewer.md").read_bytes()
+    assert digest(role) == REVIEWERS_ROLE_AS_RUN
+    assert digest(brief.reader(*FACTS, writes_handoff=False).encode()) == REVIEWERS_BRIEF_AS_RUN
+    assert BRIEFS["reviewer"] == brief.reader(*FACTS, writes_handoff=False) + "\n" + role.decode()

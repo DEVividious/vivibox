@@ -229,6 +229,9 @@ def test_harness_configuration_the_writer_committed_runs_nothing_for_the_reviewe
         for name in ("mcp", "dotdir-mcp", "plugin", "tool"):
             assert name in ran, f"opencode in the clone ran {ran}: the method"
         assert "hook" in ran, f"Claude Code in the clone ran {ran}: the method"
+        assert "claude-mcp" in ran, (
+            f"Claude Code in the clone started the .mcp.json server, {ran}: the method"
+        )
         theirs = json.dumps(asked(pod)[before_writer:])
         assert PLANTED_RULE in theirs and PLANTED_TOOL in theirs, "and its model was told both"
     finally:
@@ -339,6 +342,71 @@ def test_git_configuration_the_writer_planted_runs_nothing_for_the_review(live, 
         (task.repo / ".git" / "commondir").unlink(missing_ok=True)
         shutil.rmtree(task.repo / EVIL, ignore_errors=True)
         restore(task.repo, before)
+        control.refresh(task, pod)
+
+
+def test_a_committed_link_and_a_committed_folder_like_a_repository_lead_nowhere_for_the_reviewer(live):
+    """Two things a writer can commit for a reader to follow. A symbolic link to the reader's
+    own secret: in the view it is a plain file holding the path, so reading it, by the shell or
+    by the harness's read tool, gives the path and never the secret; the positive control is
+    the same link in the writer's container, where it is a link and gives the writer's own
+    secret. And a folder with all a bare repository has and a config that names a command: git
+    in the review container, also with GIT_DIR taken out of a command's environment, refuses to
+    take it for a repository; in the writer's container git there runs the command."""
+    task, pod = live.task, live.pod
+    before = sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+    there = shlex.quote(str(pod.repo))
+    target = f"{secrets.MOUNT}/{secrets.PASSWORD}"
+    try:
+        (task.repo / "secret-link").symlink_to(target)
+        nested = task.repo / "nested"
+        for folder in ("objects/info", "refs/heads"):
+            (nested / folder).mkdir(parents=True)
+            (nested / folder / "keep").write_text("")
+        (nested / "HEAD").write_text("ref: refs/heads/main\n")
+        (nested / "fsmonitor").write_text(f"#!/bin/sh\n{MARK.format('nested')}\nexit 0\n")
+        (nested / "fsmonitor").chmod(0o755)
+        (nested / "config").write_text(
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n"
+            "\tfsmonitor = ./fsmonitor\n"
+        )
+        head = commit_all(task, "Add a link and a folder")
+        round_ = review_round(task, pod, head)
+        reviewer = round_.side
+        theirs = (secrets.runtime_dir(reviewing.secrets_id(task.id)) / secrets.PASSWORD).read_text()
+        mine = bash(pod, f"cat {target}").stdout
+        assert bash(reviewer, f"cat {target}").stdout == theirs != mine, "the reviewer's own secret, there"
+        # The link: a link for the writer, a plain file for the reviewer.
+        assert bash(pod, f"test -L {there}/secret-link").returncode == 0
+        assert bash(pod, f"cat {there}/secret-link").stdout == mine, "the method: a link is followed"
+        assert bash(reviewer, f"test -L {there}/secret-link").returncode != 0, "a plain file in the view"
+        read = bash(reviewer, f"cat {there}/secret-link")
+        assert read.stdout == target and theirs not in read.stdout, "the path it names, not the secret"
+        assert bash(reviewer, "git status --porcelain").stdout == "", "and the view is clean to git"
+        assert "secret-link" in bash(reviewer, f"git diff --stat {task.base}..HEAD").stdout
+        provider_up(reviewer)
+        assert (
+            bash(reviewer, f"echo {pod.repo}/secret-link > {mock_provider.reads(MOCK_LOG)}").returncode == 0
+        )
+        turn(round_.harness, "Reviewer: read the link.")
+        told = json.dumps(asked(reviewer))
+        assert target in told, "the harness read the file: the path came back to the model"
+        assert theirs.strip() not in told, "the reviewer's secret reached its model through a committed link"
+        # The folder: taken for a repository in the writer's container, refused in the reviewer's.
+        bash(pod, f"cd {there}/nested && git status")
+        assert "nested" in marks(task, pod), "the method: git in the writer's clone takes the folder for one"
+        clear_marks(task, pod)
+        env = json.loads(inspect(pod, "{{json .Config.Env}}"))
+        assert "GIT_CONFIG_KEY_0=safe.bareRepository" in env and "GIT_CONFIG_VALUE_0=explicit" in env
+        inside = bash(reviewer, f"cd {there}/nested && git status && git rev-parse --show-toplevel")
+        assert inside.returncode == 0 and inside.stdout.strip().endswith(str(pod.repo)), inside.stderr
+        lost = bash(reviewer, f"cd {there}/nested && env -u GIT_DIR -u GIT_WORK_TREE git status")
+        assert lost.returncode != 0 and "cannot use bare repository" in lost.stderr, lost.stderr
+        assert marks(task, pod) == [], "git in the review container ran what the committed folder names"
+    finally:
+        pod.review_down()
+        restore(task.repo, before)
+        clear_marks(task, pod)
         control.refresh(task, pod)
 
 

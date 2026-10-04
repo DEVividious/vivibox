@@ -105,13 +105,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   them. Their `.git` is made without git's templates and has no hook, whatever
   `GIT_TEMPLATE_DIR` or your configuration says. A symbolic link the writer committed is a
   plain file there, holding the path it names, so reading it in the planner's or the reviewer's
-  container never reads a file of that container's own, such as its key; a copy made before is
-  made over at its next refresh. Git on your machine fetches nothing lazily for a copy,
-  whatever remote the clone names. Git in both containers uses a directory as a repository only
-  when it is pointed at it (`safe.bareRepository=explicit` in their environment), so a folder
-  committed to look like a bare repository is not one there. And the reviewer's round is
-  made only of a commit the verification passed: for a task that records none no reviewer is
-  started, and the reason names `vivibox verify <id>`.
+  container never reads a file of that container's own, such as its key. After every refresh a
+  copy holds the files of its commit and nothing else: what is untracked or ignored there is
+  removed, so a copy made before this change keeps no link and no file its branch has deleted.
+  Git on your machine works on a copy with that folder named as its repository, whatever
+  `GIT_DIR` your shell carries, and fetches nothing lazily for it, whatever remote the clone
+  names. Git in both containers uses a directory as a repository only when it is pointed at it
+  (`safe.bareRepository=explicit` in their environment), so a folder committed to look like a
+  bare repository is not one there. And the reviewer's round is made only of a commit the
+  verification passed: a task in its review that records none is sent back to the verification
+  first, which records the commit it passes.
 - The reviewer in its own container is told what that container is, in the words the planner
   and the supervisor read: the project is a read-only view of the task's committed work at its
   path, on the commit the verification passed; it starts in an empty directory and git answers

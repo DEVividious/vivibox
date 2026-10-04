@@ -182,13 +182,16 @@ Both copies, the planner's and the reviewer's, are made the same way. Their `.gi
 without git's templates and holds no hook. A symbolic link the writer committed is checked out
 there as a plain file holding the path it names (`core.symlinks=false` in the copy's own
 configuration), so a link to a file of the reader's container, its secrets among them, is not
-followed when the planner or the reviewer reads it. Git on your host fetches nothing lazily for
-a copy (`GIT_NO_LAZY_FETCH=1`), whatever remote the writer's clone names. And git in both
+followed when the planner or the reviewer reads it. After every refresh a copy holds the files
+of its commit and nothing else: what is untracked or ignored there is removed. Git on your host
+works on a copy with that folder named as its repository, whatever `GIT_DIR` your shell
+carries, and fetches nothing lazily for it (`GIT_NO_LAZY_FETCH=1`), whatever remote the
+writer's clone names. And git in both
 containers takes a directory for a repository only when it is pointed at it
 (`safe.bareRepository=explicit`, set in their environment): a folder committed to look like a
 bare repository is not one to a git command there that was not given `--git-dir`. The
 reviewer's round is made of the commit the verification passed and of nothing else: for a task
-that records none, no reviewer is started.
+that records none, no reviewer is started, and the task is verified first.
 
 The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
 planner's session id in the task's state and the transcripts of its turns in the task's log.

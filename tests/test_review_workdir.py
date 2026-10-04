@@ -9,6 +9,7 @@ import pytest
 from conftest import as_verified
 from test_control import FLOWS, a_large_repository, binds, commit, git, made, variables
 from test_control import docker as docker  # noqa: F401  (the fixture: a machine and a recording Docker)
+from test_control import starting as starting  # noqa: F401  (the fixture: a start on stand-ins)
 from test_pod import flag
 
 from vivibox import actions, claudecode, control, opencode, providers, reading, repo, reviewing, secrets
@@ -319,6 +320,9 @@ def test_a_view_and_a_working_directory_hold_no_hook_and_run_none_of_yours(tmp_p
     templates = tmp_path / "templates"
     for hook in ("reference-transaction", "post-checkout", "post-commit"):
         program(templates / "hooks" / hook, ran)
+    (templates / "info").mkdir()
+    (templates / "info" / "exclude").write_text("calc.py\n")
+    (templates / "description").write_text("yours\n")
     for hook in ("reference-transaction", "pre-commit", "post-commit", "post-checkout"):
         program(tmp_path / "yours" / hook, ran)
     signer = program(tmp_path / "sign.sh", ran, "exit 1")
@@ -336,6 +340,9 @@ def test_a_view_and_a_working_directory_hold_no_hook_and_run_none_of_yours(tmp_p
     reading.view(clone, BRANCH, view, whose="the reviewer's")
     assert not (view / ".git" / "hooks").exists(), "the view's .git is the host's: no hook, not even a sample"
     assert not (work / ".git" / "hooks").exists()
+    for folder in (view, work):
+        for from_a_template in ("description", "info"):
+            assert not (folder / ".git" / from_a_template).exists(), f"{folder.name}: {from_a_template}"
     assert not ran.exists(), "a hook or a program of yours ran while the host made them"
     assert (view / "calc.py").read_text() == "x = 1\n"
     assert subprocess.run(["git", "-C", str(work), "rev-list", "--count", "HEAD"], capture_output=True).stdout
@@ -456,6 +463,65 @@ def test_a_link_the_writer_committed_is_a_plain_file_in_the_view(tmp_path):
     assert git(older, "status", "--porcelain") == "" and not (older / ".git" / "hooks").exists()
 
 
+def no_links(folder: Path) -> list[str]:
+    """Every symbolic link under folder, its .git aside."""
+    found = []
+    for path in folder.rglob("*"):
+        if ".git" not in path.relative_to(folder).parts and path.is_symlink():
+            found.append(str(path.relative_to(folder)))
+    return sorted(found)
+
+
+def an_older_view(clone: Path, where: Path) -> Path:
+    """A view as it was made before links were kept as plain files: git's own checkout."""
+    where.mkdir()
+    git(where, "init", "-q", "-b", BRANCH)
+    git(where, "fetch", "-q", str(clone), f"refs/heads/{BRANCH}")
+    git(where, "reset", "-q", "--hard", "FETCH_HEAD")
+    return where
+
+
+def test_a_view_is_exactly_the_commit_whatever_was_in_its_folder(tmp_path):
+    """After a refresh the view holds the commit's files and nothing else: nothing untracked,
+    nothing ignored. A view made before (links checked out as links) whose branch has since
+    deleted a link and a file keeps neither, and keeps no link at all; a link that pointed out
+    of the view goes without what it pointed at being touched."""
+    clone, _ = a_clone(tmp_path / "repo")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "kept.txt").write_text("not the view's\n")
+    (clone / "link-in").symlink_to("calc.py")
+    (clone / "link-out").symlink_to(outside)
+    (clone / "old.py").write_text("old = 1\n")
+    (clone / ".gitignore").write_text("*.log\n")
+    git(clone, "add", "-A")
+    git(clone, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "A")
+    older = an_older_view(clone, tmp_path / "older")
+    assert (older / "link-in").is_symlink() and (older / "link-out" / "kept.txt").exists(), "the method"
+    current = tmp_path / "current"
+    current.mkdir()
+    reading.view(clone, BRANCH, current, whose="the planner's")
+    for name in ("link-in", "link-out", "old.py"):
+        git(clone, "rm", "-q", name)
+    b = git(clone, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "B")
+    head = git(clone, "rev-parse", "HEAD")
+    for view in (older, current):
+        # What only a process with the folder could have left: an ignored file, a stray folder
+        # with a link out of the view in it.
+        (view / "build.log").write_text("ignored\n")
+        (view / "stray").mkdir()
+        (view / "stray" / "out").symlink_to(outside)
+        (view / "stray" / "file.txt").write_text("x\n")
+        reading.view(clone, BRANCH, view, whose="the planner's")
+        assert git(view, "rev-parse", "HEAD") == head, b
+        for gone in ("link-in", "link-out", "old.py", "build.log", "stray"):
+            assert not (view / gone).exists() and not (view / gone).is_symlink(), f"{view.name}: {gone}"
+        assert git(view, "status", "--porcelain", "--ignored") == "", view.name
+        assert no_links(view) == [], view.name
+        assert sorted(p.name for p in view.iterdir()) == [".git", ".gitignore", "calc.py"]
+    assert (outside / "kept.txt").read_text() == "not the view's\n", "nothing outside the view was touched"
+
+
 def test_both_readers_views_have_links_as_plain_files_and_git_kept_to_the_view(docker, verified):  # noqa: F811
     """The planner's copy and the reviewer's are made by the same code, and both containers get
     the same environment for git."""
@@ -487,7 +553,7 @@ def test_a_review_of_a_task_with_no_verified_commit_is_refused(docker):  # noqa:
     commit(task.repo, "calc.py", "x = 1\n")
     with pytest.raises(repo.RepoError, match="the review could not start: .*no commit that passed") as e:
         reviewing.up(task, pod, load_config())
-    assert str(e.value).endswith(f"verify it again: vivibox verify {task.id}"), "what to do"
+    assert str(e.value).endswith(f"start the task again: vivibox start {task.id}"), "what to do"
     assert not (Path(pod.review_src) / ".git").exists(), "no view of the branch as it is"
     assert not docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-review")
 
@@ -536,3 +602,99 @@ def test_a_reviewer_put_on_claude_code_stops_before_any_container(docker):  # no
         reviewing.up(task, pod, load_config())
     assert not docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-review")
     assert not pod.review_dir.exists(), "nothing made for the round"
+
+
+@pytest.mark.real_start
+def test_starting_a_task_refused_its_review_for_no_verified_commit_leads_to_a_review(
+    docker,  # noqa: F811
+    starting,  # noqa: F811
+    monkeypatch,
+):
+    """The refusal names a way out, and it is one: a task in its review with no verified commit,
+    stopped on that refusal, is started again as the message says; the supervisor then sends it
+    back to the verification, which records the commit it passed, and the review after it
+    starts on that commit and is read. (`vivibox verify` would not do: it records nothing.)"""
+    from pathlib import Path as P
+
+    from conftest import networks_up
+    from test_control import CLEAN
+
+    from vivibox import gate, supervise
+    from vivibox.harness import Turn
+    from vivibox.states import State
+
+    task = actions.create("demo", "Add divide", orchestration="planner_writer_reviewer")
+    pod = actions.task_pod(task.id)
+    networks_up(pod)
+    head = commit(task.repo, "calc.py", "def divide(a, b):\n    return a / b\n")
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.REVIEW):
+        task.transition(state)
+    assert task.read_state().verified_commit == ""
+    with pytest.raises(repo.RepoError) as refused:
+        reviewing.up(task, pod, load_config())
+    said = str(refused.value)
+    assert said.endswith(f"start the task again: vivibox start {task.id}")
+    task.set_paused(True, problem=f"stopped on an error: {said}")  # as the supervisor leaves it
+    assert not docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-review")
+
+    actions.start(task.id, supervise=False)  # what the message says
+    st = task.read_state()
+    assert not st.paused and st.state is State.REVIEW
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        assert self.pod.agent == pod.review, "the reviewer's turn, in its container"
+        (pod.review_dir / "out" / "review.md").write_text(CLEAN)
+        return Turn("ses_review", True, 0.01, 10, "done")
+
+    monkeypatch.setattr(opencode.OpenCode, "turn", turn)
+    monkeypatch.setattr(opencode.OpenCode, "start_session", lambda self, title: "")
+    _, project = actions.load(task.id)
+    sup = supervise.make_supervisor(task, project, pod, load_config())
+    verified = []
+    sup.ports.run_gate = lambda t: verified.append(head) or gate.GateResult(P("/dev/null"), commit=head)
+    sup.ports.prepare_review = lambda: None
+    sup.ports.head = lambda: head
+    sup.step()  # the review: nothing verified to read, back to the verification
+    st = task.read_state()
+    assert st.state is State.VERIFY and verified == [], "sent back, with no reviewer started"
+    assert not docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-review")
+    sup.step()  # the verification: passes, and records what it passed
+    st = task.read_state()
+    assert st.state is State.REVIEW and st.verified_commit == head and verified == [head]
+    sup.step()  # the review, of that commit
+    assert docker.find("docker", "run", "-d", "--name", f"vivibox-{task.id}-review"), "a review started"
+    assert git(P(pod.review_src), "rev-parse", "HEAD") == head
+    st = task.read_state()
+    assert st.reviews == 1 and (task.meta / "handoff" / "review-1.md").read_text() == CLEAN
+    assert st.state in (State.CHECKPOINT_FINAL, State.APPROVAL_RISKY) and not st.paused
+
+
+def test_the_hosts_git_for_a_view_works_in_the_view_whatever_repository_your_shell_names(
+    tmp_path, monkeypatch
+):
+    """git takes GIT_DIR and GIT_WORK_TREE from the environment before the folder it is run in
+    (a shell inside a git hook has them set). The host's git for a view and for a working
+    directory is told its own folder, so its reset and its clean, which delete, reach nothing
+    of another repository's: not its commits, not its untracked files."""
+    clone, _ = a_clone(tmp_path / "repo")
+    yours, _ = a_clone(tmp_path / "yours")
+    (yours / "notes.txt").write_text("untracked, and yours\n")
+    (yours / "calc.py").write_text("x = 'changed, not committed'\n")
+    before = git(yours, "rev-parse", "HEAD"), git(yours, "status", "--porcelain")
+    head = commit(clone, "calc.py", "x = 2\n")
+    monkeypatch.setenv("GIT_DIR", str(yours / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(yours))
+    work, view = tmp_path / "work", tmp_path / "view"
+    work.mkdir()
+    view.mkdir()
+    reading.workdir(work, "the reviewer's")
+    reading.view(clone, BRANCH, view, head, "the reviewer's")
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    assert (yours / "notes.txt").read_text() == "untracked, and yours\n", "the clean reached your files"
+    assert (git(yours, "rev-parse", "HEAD"), git(yours, "status", "--porcelain")) == before
+    assert "changed, not committed" in (yours / "calc.py").read_text(), "the reset reached your work"
+    assert git(view, "rev-parse", "HEAD") == head and (view / "calc.py").read_text() == "x = 2\n"
+    assert (
+        git(work, "rev-list", "--count", "HEAD") == "1" and git(yours, "rev-list", "--count", "HEAD") == "1"
+    )

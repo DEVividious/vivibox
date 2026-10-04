@@ -58,6 +58,15 @@ def made(folder: Path) -> bool:
     return folder.is_dir() and not folder.is_symlink() and git_dir.is_dir() and not git_dir.is_symlink()
 
 
+def _in(folder: Path) -> dict[str, str]:
+    """The environment of the host's git for one folder of its own making: HOST_GIT, and that
+    folder as its repository and its work tree, said outright. git takes both from the
+    environment before the directory it is run in, so a GIT_DIR your shell carries (inside a
+    git hook, say) would otherwise aim the reset and the clean below, which delete, at another
+    repository."""
+    return {**HOST_GIT, "GIT_DIR": f"{folder}/.git", "GIT_WORK_TREE": str(folder)}
+
+
 def workdir(work: Path, whose: str) -> None:
     """The working directory of a reader's harness, made once: a git repository of the host's
     with one empty commit and nothing else, no hook and no file. Mounted read-only in the
@@ -68,10 +77,11 @@ def workdir(work: Path, whose: str) -> None:
         raise repo.RepoError(f"{whose} working directory has no folder at {work}; start the task again")
     if (work / ".git").exists():
         return
-    repo.git("init", "--quiet", "--template=", "--initial-branch", "main", str(work), env=HOST_GIT)
+    own = _in(work)
+    repo.git("init", "--quiet", "--template=", "--initial-branch", "main", str(work), env=own)
     who = ("-c", "user.name=vivibox", "-c", "user.email=vivibox@localhost")
     message = f"{whose[0].upper()}{whose[1:]} working directory"
-    repo.git(*who, "commit", "--quiet", "--allow-empty", "-m", message, cwd=work, env=HOST_GIT)
+    repo.git(*who, "commit", "--quiet", "--allow-empty", "-m", message, cwd=work, env=own)
 
 
 def _own_settings(src: Path) -> None:
@@ -80,9 +90,9 @@ def _own_settings(src: Path) -> None:
     checkout that follows writes every file again, a link among them as a plain file."""
     shutil.rmtree(src / ".git" / "hooks", ignore_errors=True)
     key, value = LINKS_AS_FILES
-    has = repo.git("config", "--local", "--get", key, cwd=src, check=False, env=HOST_GIT)
+    has = repo.git("config", "--local", "--get", key, cwd=src, check=False, env=_in(src))
     if has.stdout.strip() != value:
-        repo.git("config", "--local", key, value, cwd=src, env=HOST_GIT)
+        repo.git("config", "--local", key, value, cwd=src, env=_in(src))
         (src / ".git" / "index").unlink(missing_ok=True)
 
 
@@ -94,31 +104,35 @@ def view(clone: Path, branch: str, src: Path, commit: str = "", whose: str = "th
     never what the reader's git works in. The view's .git holds no hook, made without git's
     templates, and a committed link is a plain file there (LINKS_AS_FILES). The copy stands on
     commit when one is given (the verified one, for a review; not on the task's branch, it is
-    refused), else on the task's branch as it is."""
+    refused), else on the task's branch as it is, and holds that commit's files and nothing
+    else."""
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"{whose} copy of the work has no folder at {src}; start the task again")
+    own = _in(src)
     if not (src / ".git").exists():
-        repo.git("init", "--quiet", "--template=", "--initial-branch", branch, str(src), env=HOST_GIT)
+        repo.git("init", "--quiet", "--template=", "--initial-branch", branch, str(src), env=own)
     _own_settings(src)
     try:
         repo.in_clone(
             clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", str(clone),
-            f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=HOST_GIT,
+            f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=own,
         )  # fmt: skip
     except repo.GitTimeout as e:
         raise repo.GitTimeout(f"{whose} copy of the work could not be brought up to date: {e}") from None
     if commit:
         if not HEX.fullmatch(commit):
             raise repo.RepoError(f"not a commit to read the work at: {commit[:60]!r}")
-        known = repo.git(
-            "merge-base", "--is-ancestor", commit, "FETCH_HEAD", cwd=src, check=False, env=HOST_GIT
-        )
+        known = repo.git("merge-base", "--is-ancestor", commit, "FETCH_HEAD", cwd=src, check=False, env=own)
         if known.returncode != 0:
             raise repo.RepoError(
                 f"the verified commit {commit[:7]} is not on the task's branch {branch}, so "
                 f"{whose} copy cannot show the work that was verified"
             )
     repo.git(
-        "reset", "--quiet", "--hard", "--no-recurse-submodules", commit or "FETCH_HEAD", cwd=src,
-        env=HOST_GIT,
-    )  # fmt: skip
+        "reset", "--quiet", "--hard", "--no-recurse-submodules", commit or "FETCH_HEAD", cwd=src, env=own
+    )
+    # Exactly the commit: nothing untracked or ignored stays (what the branch has deleted since
+    # a view made before lost its index, a link among it). The clean is of this view and no
+    # other folder (_in); git removes a link itself, never what it names, and walks into none,
+    # so nothing outside the view is touched.
+    repo.git("clean", "-ffdxq", cwd=src, env=own)

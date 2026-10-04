@@ -36,7 +36,14 @@ class ReviewRound:
             (out / "review.md").unlink(missing_ok=True)  # the last round's, or the supervisor reads it
             said = self._review_turns(st, n, out)
         else:
-            out = self.ports.review_up()
+            try:
+                out = self.ports.review_up()
+            except reviewing.Unverified:
+                # The reviewer's round is of the commit the verification passed, and the task
+                # records none: verified first, for no round of the writer's.
+                self.task.event("unverified_review")
+                self._go(State.VERIFY, "no verified commit to review")
+                return
             try:
                 self.task.set_session("reviewer", "")  # the last round's server is gone with its container
                 said = self._review_turns(st, n, out)

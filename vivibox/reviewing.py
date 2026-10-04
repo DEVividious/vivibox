@@ -210,6 +210,12 @@ def forget(task_id: str) -> None:
 REVIEWERS_OWN = "the reviewer's"
 
 
+class Unverified(repo.RepoError):
+    """The task records no commit that passed the verification, so there is nothing a reviewer's
+    round could be made of. The supervisor answers it by verifying first (review_round), which
+    is why a start of the task leads out of it."""
+
+
 def env(task: Task) -> dict[str, str]:
     """The review container's environment: its harness's configuration, git answering for the
     view of the commits from wherever it is run (the harness stands in a directory of the
@@ -220,13 +226,14 @@ def env(task: Task) -> dict[str, str]:
 def view(task: Task, pod: Pod) -> None:
     """The round's working directory for the reviewer's harness and its view of the commits,
     made on the host in the review directory (reading), before its container: on the commit the
-    verification passed. One that cannot be made stops the review with the reason, and so does
-    a task that records no verified commit: its branch as it happens to be is not reviewed."""
+    verification passed. One that cannot be made stops the review with the reason. A task
+    that records no verified commit gets none (Unverified): its branch as it happens to be is
+    not reviewed, and the supervisor verifies it first."""
     verified = task.read_state().verified_commit
     if not verified:
-        raise repo.RepoError(
+        raise Unverified(
             f"the review could not start: {task.id} records no commit that passed the verification; "
-            f"verify it again: vivibox verify {task.id}"
+            f"start the task again: vivibox start {task.id}"
         )
     try:
         reading.workdir(pod.review_work, REVIEWERS_OWN)

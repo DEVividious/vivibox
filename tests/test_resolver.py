@@ -416,11 +416,15 @@ def test_the_pid_file_names_a_pid_at_every_moment_it_is_rewritten(runtime, monke
 
 def test_a_forwarder_that_runs_and_does_not_answer_is_named(runtime):
     port = free_port()
+    program = "import time; print('up', flush=True); time.sleep(30)"
     sleeper = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)", "vivibox", "hostd", "run"],
+        [sys.executable, "-c", program, "vivibox", "hostd", "run"],
         start_new_session=True,
+        stdout=subprocess.PIPE,
     )
     try:
+        # Its command line is there once its program runs; just started, a process has none yet.
+        assert sleeper.stdout.readline() == b"up\n"
         runtime.mkdir(parents=True)
         (runtime / "hostd.pid").write_text(str(sleeper.pid))
         assert hostd.running() == sleeper.pid

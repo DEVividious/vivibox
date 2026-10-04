@@ -625,7 +625,7 @@ def test_a_name_cannot_spell_an_escape_with_brackets_that_look_like_vivibox_s(pa
 def test_those_brackets_around_anything_else_read_as_they_are():
     from vivibox import display
 
-    for text in ("〈重要〉.md", "a ⟨b⟩ c", "x ＜ y ＞ z", "❯ run", "˂U+12˃", "〈U+XYZW〉", "〈u+001b〉"):
+    for text in ("〈重要〉.md", "a ⟨b⟩ c", "x ＜ y ＞ z", "❯ run", "˂U+12˃", "〈U+XYZW〉", "〈x+001b〉"):
         assert display.name(text) == text and display.content(text + "\n") == text + "\n"
     assert display.name("U+001B〉") == "U+001B‹U+3009›", "after a code point it closes one"
     assert display.name("〈U+001B") == "‹U+3008›U+001B", "before one it opens one"
@@ -928,3 +928,47 @@ def test_a_link_around_a_picture_keeps_its_own_title(env, monkeypatch):
         assert f'p q ({EVIL}/deep "DEEP-T") ({EVIL}/mid "MID-T") r ({EVIL}/top "TOP-T")' in shown
 
     run(scenario, size=(140, 100))
+
+
+def test_a_code_point_spelled_in_small_letters_is_one_too():
+    from vivibox import display
+
+    for spelled in ("U+001b", "u+001B", "u+001b", "U+e0041"):
+        assert display.name(f"a˂{spelled}˃.gradle") == f"a‹U+02C2›{spelled}‹U+02C3›.gradle", spelled
+        assert display.content(f"a˂{spelled}˃\n") == f"a‹U+02C2›{spelled}‹U+02C3›\n"
+    assert display.name("〈u+12〉 〈x+001b〉") == "〈u+12〉 〈x+001b〉"
+
+
+def blocked_with(task, environment: str) -> str:
+    """The panel of a task whose verification could not run, for what the gate recorded."""
+    for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(state)
+    task.event("gate", passed=False, environment=environment)
+    task.transition(State.CHECKPOINT_BLOCKED)
+    return panel.detail(task, task.read_state(), 3, False, panel.PodView())
+
+
+def test_the_frame_around_a_build_s_line_is_vivibox_s_and_the_line_inside_is_escaped(env):
+    """display.quoted: the line is escaped first, as a tool's words are, and the frame put around
+    it after. Escaped as a name once more with its frame on (the panel did), » after a spelled
+    code point became a code point itself, and a name escaped where it was made twice over."""
+    from vivibox import display
+
+    line = "mvn: invalid non-printable character U+00A0"
+    assert display.quoted("the build", line) == f"the build said «{line}»"
+    odd = display.quoted("the build", "x\x1b[2K\t» ˂U+001B˃ ‹U+0041› U+00A0")
+    inside = "x‹U+001B›[2K‹U+0009›‹U+00BB› ‹U+02C2›U+001B‹U+02C3› ‹U+2039›U+0041‹U+203A› U+00A0"
+    assert odd == f"the build said «{inside}»"
+    assert display.quoted("the build", "") == ""
+    task = new_task()
+    shown = blocked_with(task, f"{display.quoted('the build', line)}; {odd}")
+    assert f"**Verification could not run:** `the build said «{line}»; {odd}`" in shown
+    assert not hidden(shown)
+
+
+def test_a_name_escaped_where_the_gate_made_it_is_not_escaped_again_in_the_panel(env):
+    from vivibox import display
+
+    task = new_task()
+    shown = blocked_with(task, f"{display.name('web' + chr(0x1B) + '[2K/.git')} was added")
+    assert "**Verification could not run:** `web‹U+001B›[2K/.git was added`" in shown, shown

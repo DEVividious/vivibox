@@ -611,7 +611,8 @@ def detail(
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = agents_question(task, "**The agent asks:**")
-        broken = display.code(display.name(said)) if (said := ui.environment_problem(task)) else ""
+        # Its names were escaped where it was made, a build's line inside its frame (display.quoted).
+        broken = display.code(display.terminal(said, "")) if (said := ui.environment_problem(task)) else ""
         body = (
             question
             if question

@@ -281,6 +281,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A code point spelled in small letters (`˂U+001b˃`, `˂u+001B˃`) is one for the character
+  beside it too. In the panel of a verification that could not run, the frame vivibox puts
+  around a build's line (`the build said «…»`) stays as it is when the line ends in a spelled
+  code point (the closing mark was shown as `‹U+00BB›`), and a name escaped where the reason
+  was made is not escaped a second time (`‹U+2039›U+001B‹U+203A›`): the line is escaped before
+  its frame is put around it, and the panel shows the sentence as text.
 - A link whose label is a picture (a badge) keeps its own title in the details panel: the
   picture's title, or its lack of one, took the link's place, so the link's was drawn nowhere.
 - Texts of a verification that could not run. A line of the build cut short in a notification

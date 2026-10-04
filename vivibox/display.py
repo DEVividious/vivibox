@@ -44,14 +44,14 @@ HIDDEN = re.compile(
 )
 # A code point as the notation spells it between ‹ and ›, and how one may be spelled to read
 # the same: U, a plus sign (any character outside ASCII in its place: a fullwidth plus, a small
-# one), four to six digits. A character outside ASCII that touches one, before it or after it,
-# would read as the bracket of an escape that is not there (˂U+001B˃, ❬U+001B❭, ≺U+001B≻), so it
-# is shown as the character it is (name, content). The rule is the neighbour, not a list of
-# brackets: what is drawn like ‹ and › is more than any list holds, letters of other scripts
-# among it. What no rule here closes is a letter drawn like U or like a digit (an Armenian Ս, a
-# Cyrillic В) in the spelling itself.
-_CODE = re.compile(r"U(?:\+|[^\x00-\x7f])[0-9A-F]{4,6}")
-_CODE_BEFORE = re.compile(r"U(?:\+|[^\x00-\x7f])[0-9A-F]{4,6}\Z")
+# one), four to six digits, in capitals or small letters. A character outside ASCII that touches
+# one, before it or after it, would read as the bracket of an escape that is not there (˂U+001B˃,
+# ❬U+001B❭, ≺U+001B≻), so it is shown as the character it is (name, content). The rule is the
+# neighbour, not a list of brackets: what is drawn like ‹ and › is more than any list holds,
+# letters of other scripts among it. What no rule here closes is a letter drawn like U or like
+# a digit (an Armenian Ս, a Cyrillic В) in the spelling itself.
+_CODE = re.compile(r"[Uu](?:\+|[^\x00-\x7f])[0-9A-Fa-f]{4,6}")
+_CODE_BEFORE = re.compile(r"[Uu](?:\+|[^\x00-\x7f])[0-9A-Fa-f]{4,6}\Z")
 # The selectors of a character's text and emoji form, and what ends a keycap (1, U+FE0F, U+20E3).
 EMOJI_SELECTORS, KEYCAP = "\ufe0e\ufe0f", "\u20e3"
 NO_NEWLINE = "\\ No newline at end of file"
@@ -128,8 +128,11 @@ def quoted(who: str, line: str) -> str:
     """A line someone else said (a build's output, which the agent's code prints), inside a
     sentence of vivibox's: said to be theirs, between « and », which the line cannot close (its
     own are shown as their code points), so nothing in it reads as what vivibox says after it.
-    Nothing for no line."""
-    return f"{who} said «{re.sub('[«»]', lambda m: code_point(m.group()), line)}»" if line else ""
+    The line is escaped first, as a tool's words are (name), and the frame put around it after:
+    the frame is vivibox's, and is not escaped with it. What shows the sentence escapes it no
+    further than text put on the screen whole is (terminal, under), which leaves both as they
+    are. Nothing for no line."""
+    return f"{who} said «{re.sub('[«»]', lambda m: code_point(m.group()), name(line))}»" if line else ""
 
 
 def lines(text: str) -> list[str]:

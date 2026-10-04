@@ -385,6 +385,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   The planner's copy of the commits is not brought up to date from a blocked clone (no git of
   your machine reads one): it stays as it was, the timeline says so, and the planner gets no
   turn until the clone is as recorded again.
+- A clone found blocked while its task is still planned (a repository or a worktree added
+  there before a plan was accepted) stopped the task with a message that told you to reply,
+  where no reply is taken and no writer has had a turn. It names what works there: take it
+  out in the task's pod (`vivibox pod shell <id>`), then start the task.
 - Any character outside ASCII that touches a code point's spelling in a name or a line of a
   file is shown as its own code point, not only the brackets of a list: `❬U+001B❭`,
   `⧼U+001B⧽`, `≺U+001B≻` read as an escape that is not there, as did a spelling with a

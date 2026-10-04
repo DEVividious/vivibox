@@ -49,7 +49,16 @@ def worktree(clone: Path, where: Path) -> None:
     git(clone, "worktree", "add", "-q", str(where))
 
 
+def implementing(t) -> None:
+    """Past its plan, where a writer works: before that the message is another (nobody is sent
+    to a clone while its task is planned; test_blocked_start)."""
+    if t.read_state().state is State.PLAN:
+        for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
+            t.transition(s)
+
+
 def blocked(t) -> str:
+    implementing(t)
     with pytest.raises(r.Blocked) as e:
         r.check_protection(t.repo, t.meta)
     return str(e.value)
@@ -144,8 +153,7 @@ def test_a_hook_named_worktrees_is_no_worktree(task):
 
 def at_the_gate(t, monkeypatch=None):
     """The supervisor after the writer's turn and the verification of t."""
-    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
-        t.transition(s)
+    implementing(t)
     notes, pod = [], FakePod()
     ports = supervisor.Ports(
         run_gate=lambda x: gate.run_gate(x, pod, ["make test"], []),
@@ -379,6 +387,7 @@ def test_the_reviews_view_keeps_what_blocks_the_clone_apart_from_other_refusals(
 
     from vivibox import reviewing
 
+    implementing(task)
     nested(task.repo)
     task.set_verified_commit(git(task.repo, "rev-parse", "HEAD"))
     for folder in ("work", "src"):

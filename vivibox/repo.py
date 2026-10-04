@@ -495,11 +495,21 @@ def check_protection(repo: Path, meta: Path) -> None:
             what = " and ".join(sorted({change.what for change in changed}))
             # The state and the step first: a notification holds the first 150 characters.
             found = f"Found: {named}. git on your machine would run what its settings say, so until then"
-            if undoes(meta) == IN_A_BOX:
+            box, planned = _stage(meta)
+            if box:
                 how = "; ".join(IN_A_BOX_HOW[kind] for kind in sorted({change.what for change in changed}))
                 raise Blocked(
                     f"this box's clone has {what} in it and the box cannot close until it is out: "
                     f"{how}. {found} vivibox runs no git in the clone, and the work is not brought back",
+                    changed,
+                )
+            if planned:  # no reply is taken here, and no writer has a turn before a plan is accepted
+                task_id = meta.parent.name
+                raise Blocked(
+                    f"the task's clone has {what} in it, added while the task is planned, and no turn is "
+                    f"given until it is out: take it out in the task's pod (vivibox pod shell {task_id}), "
+                    f"then start the task (vivibox start {task_id}). {found} vivibox runs no git in the "
+                    "clone, and the planner reads none of it",
                     changed,
                 )
             raise Blocked(
@@ -604,12 +614,20 @@ IN_A_BOX_HOW = {
 
 def undoes(meta: Path) -> str:
     """WRITER or IN_A_BOX, for the task whose metadata folder is meta."""
+    return IN_A_BOX if _stage(meta)[0] else WRITER
+
+
+def _stage(meta: Path) -> tuple[bool, bool]:
+    """Of the task whose metadata folder is meta: whether it is a box, and whether it is being
+    planned (before its plan is accepted, when no writer has a turn and no reply sends one)."""
+    from .states import State
     from .task import Task  # here, not at the top: task reads its version through this module
 
     try:
-        return IN_A_BOX if Task(meta.parent).read_state().box else WRITER
+        st = Task(meta.parent).read_state()
     except (OSError, ValueError, KeyError, TypeError):  # no state to read: said as for a task
-        return WRITER
+        return False, False
+    return st.box, st.state in (State.PLAN, State.CHECKPOINT_PLAN)
 
 
 def agent_mounts(repo: Path, meta: Path) -> list[Mount]:

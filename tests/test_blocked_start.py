@@ -322,3 +322,58 @@ def test_a_worktree_the_index_lists_is_told_apart_with_no_git_of_the_hosts(
     sup.step()  # verified again: still blocked
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
     watched.nothing_ran_in(task.repo)
+
+
+# --- review round 2: while the task is planned --------------------------------------------------------
+
+
+@pytest.mark.real_start
+@pytest.mark.parametrize("flow", CONTROL_FLOWS)
+def test_a_clone_blocked_while_the_task_is_planned_names_a_step_that_is_there(
+    machine, watched, flow, monkeypatch
+):
+    """No reply is taken while a task is planned, and no writer has a turn before a plan is
+    accepted: the message that said "reply, and the writer removes it" named a step that was
+    not there. It names the pod's shell, where what was added is taken out, and the start."""
+    task = actions.create("demo", "Add divide", orchestration=flow)
+    actions.start(task.id, supervise=False)
+    watched.hostile(task.repo)  # by hand under w, say: nothing of the task's own work is here yet
+    watched.start()
+    actions.start(task.id, supervise=False)  # the start goes through, the planner's copy left as it was
+    sup, turns, _ = supervised(task, monkeypatch)
+    with pytest.raises(r.Blocked) as refused:
+        sup.step()
+    said = str(refused.value)
+    assert said.startswith(
+        "the task's clone has a repository of its own in it, added while the task is planned, and no "
+        f"turn is given until it is out: take it out in the task's pod (vivibox pod shell {task.id}), "
+        f"then start the task (vivibox start {task.id}). Found: web/.git was added, a repository git "
+        "would go into."
+    )
+    assert "reply" not in said and "the writer" not in said
+    assert turns["planner"].prompts == [] and task.read_state().state is State.PLAN
+    watched.nothing_ran_in(task.repo)
+    shutil.rmtree(task.repo / "web" / ".git")  # in the pod's shell, as the message says
+    sup.step()  # after the start the message names: the planner's copy is asked for, and made
+    assert turns["planner"].prompts, "the planner has its turn once the clone is as recorded"
+
+
+def test_once_the_plan_is_accepted_the_message_is_the_writers_again(tmp_path, monkeypatch):
+    from test_blocked_clone import nested
+    from test_gate import PLAN
+
+    from vivibox.risky import Approvals
+    from vivibox.task import create_task
+
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(tmp_path / "config"))  # never your projects
+    task = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    task.set_base_commit(r.prepare(make_repo(tmp_path / "source"), task.repo, task.id, task.meta))
+    Approvals(task.meta, task.repo).approve()
+    nested(task.repo)
+    for state, step in (
+        (State.CHECKPOINT_PLAN, "take it out in the task's pod"),
+        (State.IMPLEMENT, "reply, and the writer removes it"),
+    ):
+        task.transition(state)
+        with pytest.raises(r.Blocked, match=step):
+            r.check_protection(task.repo, task.meta)

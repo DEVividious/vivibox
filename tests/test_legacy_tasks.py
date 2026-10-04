@@ -582,6 +582,24 @@ def test_docker_that_does_not_answer_is_said_and_not_waited_for(earlier, monkeyp
     assert main(["status", "demo-1"]) == 0 and "could not tell" in capsys.readouterr().out
 
 
+def test_docker_not_answering_is_said_of_the_task_it_is_with_what_to_do(other, monkeypatch, capsys):
+    """Of a newer vivibox's task, or one whose state is unreadable, "earlier" would be a guess;
+    and what vivibox could not tell comes with how to ask again."""
+    from vivibox import pod
+
+    def stuck(sidecars, timeout=None, **kw):
+        raise subprocess.TimeoutExpired(["docker", "inspect"], timeout)
+
+    monkeypatch.setattr(pod, "addresses", stuck)
+    for argv in (["status"], ["status", "demo-1"]):
+        assert main(argv) == 0
+        said = capsys.readouterr().out.splitlines()[-1]
+        assert said == (
+            "Docker did not answer in 5 s: vivibox could not tell whether the pods of the tasks it "
+            "does not run are still up; ask again (vivibox status) once `docker ps` answers."
+        )
+
+
 def test_the_view_says_a_pod_an_earlier_vivibox_left_up(earlier, monkeypatch):
     from ux import screen_text
 

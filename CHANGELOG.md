@@ -268,6 +268,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- When Docker does not answer `vivibox status` in time, the line that says so no longer calls
+  every task this vivibox does not run one "from an earlier vivibox" (a newer one's is among
+  them), and says how to ask again.
 - Refusals to approve risky files say what is true and what to do in more cases. A file that
   became a named pipe or a link out of the repository between the look at it and `p` is said
   to be one whose change cannot be approved, with what undoes it, as the other refusals are. A

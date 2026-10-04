@@ -166,8 +166,8 @@ def still_running(tasks: list[Task]) -> tuple[Callable[[Task], bool], str]:
         up = set(pod_module.addresses(sorted(others), timeout=DOCKER_SECONDS))
     except subprocess.TimeoutExpired:
         unknown = (
-            f"Docker did not answer in {DOCKER_SECONDS} s: vivibox could not tell whether the pods"
-            " of tasks from an earlier vivibox still run.\n"
+            f"Docker did not answer in {DOCKER_SECONDS} s: vivibox could not tell whether the pods of the"
+            " tasks it does not run are still up; ask again (vivibox status) once `docker ps` answers.\n"
         )
     except OSError:  # no docker, and so no pod
         pass

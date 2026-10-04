@@ -158,3 +158,33 @@ def test_a_runner_at_the_root_gets_the_modules_as_paths(tmp_path):
     write(npm / "package.json", json.dumps({"workspaces": ["p/*"], "scripts": {"test": "jest"}}))
     write(npm / "p" / "a" / "package.json", "{}")
     assert init.scoped("npm test", npm) == "npm test -- {modules:%s}"
+
+
+# What a project's package.json may name as a workspace that is no folder of the project: an
+# absolute pattern, one that leaves through .., none at all. pathlib refuses the first and the
+# last (NotImplementedError, ValueError), which ended vivibox init and a verification with a
+# traceback; the second named a folder outside as a module.
+OUTSIDE = ["/etc/*", "/", "../*", "packages/../../*", "", "  "]
+
+
+@pytest.mark.parametrize("pattern", OUTSIDE, ids=repr)
+@pytest.mark.parametrize("declared", ["a list", "under packages"])
+def test_a_workspace_pattern_that_leaves_the_project_is_ignored(tmp_path, pattern, declared):
+    repo = tmp_path / "project"
+    patterns = [pattern, "packages/*"]
+    workspaces = patterns if declared == "a list" else {"packages": patterns}
+    write(repo / "package.json", json.dumps({"workspaces": workspaces}))
+    write(repo / "packages" / "a" / "package.json", json.dumps({"scripts": {"test": "jest"}}))
+    write(tmp_path / "outside" / "package.json", json.dumps({"scripts": {"test": "steal"}}))
+    assert init.modules(repo) == ["packages/a"], "the project's own folders, and nothing outside"
+    assert init.candidates(repo) == [("cd packages/a && npm ci && npm test", "packages/a/package.json")]
+
+
+@pytest.mark.parametrize("pattern", OUTSIDE[:4], ids=repr)
+def test_a_pnpm_pattern_that_leaves_the_project_is_ignored(tmp_path, pattern):
+    repo = tmp_path / "project"
+    write(repo / "package.json", "{}")
+    write(repo / "pnpm-workspace.yaml", f"packages:\n  - '{pattern}'\n  - 'packages/*'\n")
+    write(repo / "packages" / "a" / "package.json", json.dumps({"scripts": {"test": "jest"}}))
+    write(tmp_path / "outside" / "package.json", "{}")
+    assert init.modules(repo) == ["packages/a"]

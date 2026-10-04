@@ -183,6 +183,19 @@ def _scripts(repo: Path, folder: Path) -> dict | None:
         return None
 
 
+def _matching(repo: Path, pattern: object) -> list[Path]:
+    """The project's folders a workspace pattern names, sorted. A pattern that is no folder of
+    the project's matches nothing: an absolute one, one that leaves through .., none at all, or
+    one that is no text. The file is the project's, and what it names outside is not looked at."""
+    named = pattern.strip().rstrip("/") if isinstance(pattern, str) else ""
+    if not named or named.startswith("/") or ".." in named.split("/"):
+        return []
+    try:
+        return sorted(repo.glob(named))
+    except (ValueError, NotImplementedError, OSError):  # a pattern pathlib does not take
+        return []
+
+
 def _workspaces(repo: Path) -> list[Path]:
     """The packages of a monorepo, each with a package.json: the globs `workspaces` names in the
     root package.json, else the usual folders."""
@@ -195,7 +208,7 @@ def _workspaces(repo: Path) -> list[Path]:
     globs = named if isinstance(named, list) else USUAL_WORKSPACES
     found = []
     for pattern in globs:
-        found += sorted(p for p in repo.glob(str(pattern)) if clone_read.is_file(repo, p / "package.json"))
+        found += [p for p in _matching(repo, pattern) if clone_read.is_file(repo, p / "package.json")]
     return found
 
 
@@ -530,7 +543,7 @@ def _declared_workspaces(repo: Path) -> list[str]:
     for pattern in patterns:
         if pattern.startswith("!"):
             continue
-        for folder in sorted(repo.glob(pattern.strip().rstrip("/"))):
+        for folder in _matching(repo, pattern):
             name = folder.relative_to(repo).as_posix()
             if clone_read.is_file(repo, folder / "package.json") and name not in found:
                 found.append(name)

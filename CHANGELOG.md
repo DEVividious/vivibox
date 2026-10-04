@@ -295,6 +295,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A table with more columns than the details panel has room for is drawn as its source, in a
+  code block, every cell's words on the screen: thirty columns at 80 were an empty grid. A
+  table is a grid while each column has room for four characters of text a row (ten columns
+  at 80, eighteen at 140), and that is decided again when the terminal's width changes.
 - A line of a code block longer than the details panel is on the screen whole. It was drawn as
   one row, and what was past the panel's edge was not shown, with no sign that the line went
   on: where you approve risky files "as shown", a line of `build.gradle` with 200 spaces after

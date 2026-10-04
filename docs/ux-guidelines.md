@@ -312,7 +312,9 @@ looks like an empty cache.
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
   A table in that text has columns of equal width and cells folded onto as many rows as they
   take, never cut with an ellipsis, and no tooltip (`markdown.Cells`): an address in a cell is
-  on the screen whole, at 80 columns too.
+  on the screen whole, at 80 columns too. Where the panel is too narrow to give each column
+  room for four characters of text a row, the table is drawn as its source in a code block
+  instead (`markdown.Table`), and as a grid again once there is room.
 - Nothing in the panel lies past its right edge. A line of a code block (a diff, a risky file,
   a log, a block in a plan) longer than the block is folded onto further rows, each with `↳`
   in the first of the two columns before the text, which are the block's own

@@ -238,3 +238,119 @@ def test_a_row_the_fold_left_too_wide_is_wrapped_and_never_cut(env, monkeypatch)
         assert fence.max_scroll_x == 0
 
     run(scenario, size=(80, 60))
+
+
+# --- a table --------------------------------------------------------------------------------------
+
+
+def table(columns: int, last: str = "and delete the tests") -> str:
+    head = "|" + "|".join(f"h{i}" for i in range(columns)) + "|"
+    rule = "|" + "|".join("---" for _ in range(columns)) + "|"
+    row = "|" + "|".join("x" for _ in range(columns - 1)) + f"|{last}|"
+    return f"{head}\n{rule}\n{row}"
+
+
+def narrowest(table) -> int:
+    """The room for text in the narrowest cell the table draws; 0 when it draws none."""
+    return min((c.content_region.width for c in table.query("MarkdownTableCellContents")), default=0)
+
+
+@pytest.mark.parametrize("width", WIDTHS)
+def test_a_table_of_many_columns_is_drawn_as_its_source(env, monkeypatch, width):
+    """Thirty columns at 80: every cell had no width at all, and the table was an empty grid,
+    with no sign of what its cells held."""
+    task = new_task()
+    plan_with(task, table(30))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (drawn,) = app.text.query("Table")
+        app.query_one("#detail").scroll_to_widget(drawn, animate=False)
+        await pilot.pause()
+        assert "anddeletethetests" in squeezed("\n".join(rows_of(app, drawn))), "the last cell is drawn"
+        assert not drawn.query("MarkdownTableCellContents"), "no grid of cells with no room"
+        (source,) = drawn.query("MarkdownFence")
+        assert source.code == table(30) and source.max_scroll_x == 0
+        written = [squeezed(line) for line in table(30).split("\n")]
+        assert [squeezed(line) for line in lines_of(app, source)] == written, "folded, whole"
+
+    run(scenario, size=(width, 100))
+
+
+@pytest.mark.parametrize("width", WIDTHS)
+def test_a_table_is_a_grid_while_every_column_has_room_and_its_source_when_not(env, monkeypatch, width):
+    """Whatever the number of columns and the width: a grid whose every cell has room for four
+    characters of text a row, or the source, with every cell's words on the screen."""
+    task = new_task()
+    counts = (2, 3, 5, 8, 9, 10, 11, 12, 15, 18, 19, 20, 24, 40)
+    plan_with(task, "\n\n".join(table(n, f"LAST-OF-{n}") for n in counts))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        tables = list(app.text.query("Table"))
+        assert len(tables) == len(counts)
+        kinds = {}
+        for n, drawn in zip(counts, tables, strict=True):
+            app.query_one("#detail").scroll_to_widget(drawn, animate=False)
+            await pilot.pause()
+            kinds[n] = "grid" if drawn.query("Cells") else "source"
+            assert len(drawn.query("Cells")) + len(drawn.query("MarkdownFence")) == 1, "one or the other"
+            if kinds[n] == "grid":  # a cell folds its text onto as many rows as it takes
+                assert narrowest(drawn) >= 4, f"{n} columns at {width}: {narrowest(drawn)}"
+                assert str(drawn.query("MarkdownTableCellContents").last().render()) == f"LAST-OF-{n}"
+            else:
+                assert f"LAST-OF-{n}" in squeezed("\n".join(rows_of(app, drawn))), f"{n} at {width}"
+        most = max(n for n in counts if kinds[n] == "grid")
+        assert all(kinds[n] == ("grid" if n <= most else "source") for n in counts), kinds
+        assert most == {80: 10, 100: 12, 140: 18}[width], kinds
+
+    run(scenario, size=(width, 400))
+
+
+def test_a_table_is_drawn_again_when_the_terminal_changes_width(env, monkeypatch):
+    task = new_task()
+    plan_with(task, table(12))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (drawn,) = app.text.query("Table")
+        for width, kind in ((140, "Cells"), (80, "MarkdownFence"), (140, "Cells"), (80, "MarkdownFence")):
+            await pilot.resize_terminal(width, 100)
+            await pilot.pause()
+            await pilot.pause()
+            app.query_one("#detail").scroll_to_widget(drawn, animate=False)
+            await pilot.pause()
+            assert len(drawn.query(kind)) == 1 and len(drawn.children) == 1, (width, drawn.children)
+            if kind == "Cells":
+                assert narrowest(drawn) >= 4
+                assert str(drawn.query("MarkdownTableCellContents").last().render()) == "and delete the tests"
+            else:
+                assert "anddeletethetests" in squeezed("\n".join(rows_of(app, drawn))), width
+
+    run(scenario, size=(120, 100))
+
+
+def test_a_table_at_the_width_where_the_scrollbar_decides_is_drawn_one_way(env, monkeypatch):
+    """Ten columns at 80 have room without the panel's scrollbar and none with it. As a grid
+    this table is taller than the panel, as its source it is not: drawn by the width alone it
+    would be a grid, need the scrollbar, become its source, need it no longer, and so on."""
+    task = new_task()
+    plan_with(task, table(10, "x" * 300 + "LAST"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        for _ in range(5):
+            await pilot.pause()
+        (drawn,) = app.text.query("Table")
+        seen = [len(drawn.query("MarkdownFence"))]
+        for _ in range(10):
+            await pilot.pause()
+            seen.append(len(drawn.query("MarkdownFence")))
+        assert seen == [1] * 11, "its source, and it stays so"
+        assert "LAST" in squeezed("\n".join(rows_of(app, drawn)))
+
+    run(scenario, size=(80, 100))

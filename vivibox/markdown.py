@@ -66,6 +66,7 @@ RULE = "rule"
 # What says of a row of a code block that it goes on from the row above (Fence), in a column of
 # the block's own; the same character in a block's text is shown as its code point.
 MARK = "\u21b3"
+_MARKED = display.code_point(MARK)
 
 
 def prose(text: str) -> str:
@@ -148,18 +149,18 @@ def _cells(line: str) -> int:
 
 
 def _table(state: StateBlock, start: int, end: int, silent: bool) -> bool:
-    """The parser's rule for a table, which also says of a table whether one of its rows has
-    more cells than the table has columns: markdown drops those cells without a word. The lines
-    are the table's own, as the parser reads them inside a list or a quote, kept on the table
-    for _whole_tables."""
+    """The parser's rule for a table, which also keeps the table's source on it, and whether one
+    of its rows has more cells than the table has columns (cut): markdown drops those cells
+    without a word. The lines are the table's own, as the parser reads them inside a list or a
+    quote; _whole_tables and Table draw them where the table cannot be drawn whole."""
     first = len(state.tokens)
     if silent:
         return table(state, start, end, silent)
     if not table(state, start, end, silent):
         return False
     lines = [getLine(state, n) for n in range(start, state.line)]
-    if any(_cells(line) > _cells(lines[1]) for line in lines[2:]):
-        state.tokens[first].meta = {"source": "\n".join(lines)}
+    cut = any(_cells(line) > _cells(lines[1]) for line in lines[2:])
+    state.tokens[first].meta = {"source": "\n".join(lines), "cut": cut}
     return True
 
 
@@ -169,9 +170,9 @@ def _whole_tables(tokens: list[Token]) -> list[Token]:
     out: list[Token] = []
     skip = False
     for token in tokens:
-        if token.type == "table_open" and (source := (token.meta or {}).get("source")):
+        if token.type == "table_open" and (token.meta or {}).get("cut"):
             skip = True
-            out.append(_block("fence", display.terminal(source) + "\n"))
+            out.append(_block("fence", display.terminal(token.meta["source"]) + "\n"))
         if not skip:
             out.append(token)
         skip = skip and token.type != "table_close"
@@ -218,7 +219,7 @@ def as_text(state: StateCore) -> None:
         elif token.type == "hr":  # the widget draws an hr above whatever it stands in: Panel
             token.type = RULE
         elif token.type in ("fence", "code_block"):  # the mark of a folded line is Fence's alone
-            token.content = token.content.replace(MARK, display.code_point(MARK))
+            token.content = token.content.replace(MARK, _MARKED)
 
 
 def _rules() -> MarkdownIt:
@@ -311,11 +312,46 @@ class Cells(MarkdownTableContent):
 
 
 class Table(MarkdownTable):
-    """A table of the panel: Textual's, its cells drawn by Cells."""
+    """A table of the panel: Textual's, its cells drawn by Cells, while every column has room
+    for COLUMN characters of text a row. Columns share the width, and with many of them a cell
+    is a character wide, or has no width at all: thirty columns at 80 were an empty grid. On a
+    panel too narrow for its columns the table is drawn as its source, in a code block, where
+    every cell is on the screen whatever the width (Fence). Decided again whenever the width
+    changes."""
+
+    COLUMN = 4
+    DEFAULT_CSS = """
+    Table > Fence {
+        margin: 0;
+    }
+    """
+
+    def __init__(self, markdown: Markdown, token: Token, *args, **kwargs) -> None:
+        super().__init__(markdown, token, *args, **kwargs)
+        self._as_source = False
 
     def compose(self) -> ComposeResult:
         for made in super().compose():
             yield Cells(made.headers, made.rows)
+
+    def room(self, width: int) -> int:
+        """The room a cell's text has at that width: a column's share of it, less the line
+        between two columns and a cell's padding."""
+        columns = len(self._headers) or 1
+        return (width - columns - 1) // columns - 2
+
+    async def on_resize(self, event: events.Resize) -> None:
+        """A table drawn as its source is a grid again only at a width with room to spare for
+        the panel's scrollbar: the two differ in height, and one that needs the scrollbar while
+        the other does not would be drawn in turn for ever."""
+        spare = self._markdown.parent.styles.scrollbar_size_vertical if self._as_source else 0
+        narrow = self.room(event.size.width - spare) < self.COLUMN
+        if narrow != self._as_source:
+            self._as_source = narrow
+            source = display.terminal((self._token.meta or {}).get("source", "")).replace(MARK, _MARKED)
+            await self.remove_children()
+            shown = Fence(self._markdown, _block("fence", source), source) if narrow else None
+            await self.mount(shown or Cells(self._headers, self._rows))
 
 
 def _rows(line: Content, width: int) -> list[Content]:

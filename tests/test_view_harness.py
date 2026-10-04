@@ -1,15 +1,17 @@
-"""How the tests drive the view (conftest: at_rest, the close as on quit): each stands in for
-something of Textual's test harness that made a test pass or fail by how busy the machine was.
-Each case here plants the moment that used to come only under load, so it fails every time
-without its stand-in."""
+"""How the tests drive the view (conftest: at_rest, threads_done, the close as on quit): each
+stands in for something of Textual's test harness that made a test pass or fail by how busy the
+machine was. Each case here plants the moment that used to come only under load, so it fails
+every time without its stand-in."""
 
 import asyncio
+import threading
 
 from test_tui import new_task, run
 from textual.app import App
 from textual.widgets import TextArea
 
-from vivibox import newtask
+from vivibox import newtask, tui
+from vivibox.tui import Vivibox
 
 
 def test_a_key_and_a_pause_wait_for_the_view_however_little_cpu_the_process_got(env, monkeypatch):
@@ -55,3 +57,47 @@ def test_no_refresh_runs_while_a_tests_view_is_taken_down(env, monkeypatch):
 
     run(scenario)
     assert len(due) == 1, "the refresh timer was there to fall due"
+
+
+def test_waiting_for_the_views_threads_takes_a_cancelled_worker_as_ended_and_waits_for_its_thread(
+    env, monkeypatch
+):
+    """A refresh that arrives while the view looks at the pods replaces that look: the earlier
+    worker is cancelled, its thread still on its way. Planted here: the first look held until
+    the second is asked for."""
+    task = new_task()
+    held, release = threading.Event(), threading.Event()
+    looked = []
+
+    def slow(ids):
+        held.set()
+        release.wait(10)
+        looked.append(ids)
+        return {}
+
+    async def scenario(app, pilot):
+        monkeypatch.setattr(tui, "pod_views", slow)
+        first = app.look_at_pods([task.id])
+        assert await asyncio.to_thread(held.wait, 10)
+        app.look_at_pods([task.id])
+        assert first.is_cancelled
+        release.set()
+        await app.workers.wait_for_complete()
+        assert len(looked) == 2 and app.executor.unfinished() == 0, "both threads are back"
+
+    run(scenario)
+
+
+def test_a_worker_that_failed_still_fails_the_wait(env, monkeypatch):
+    import pytest
+    from textual.worker import WorkerFailed
+
+    async def go():
+        app = Vivibox()
+        async with app.run_test():
+            worker = app.run_worker(lambda: 1 / 0, thread=True, exit_on_error=False)
+            with pytest.raises(WorkerFailed):
+                await app.workers.wait_for_complete()
+            assert isinstance(worker.error, ZeroDivisionError)
+
+    asyncio.run(go())

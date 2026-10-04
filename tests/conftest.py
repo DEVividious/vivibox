@@ -1,3 +1,4 @@
+import contextlib
 import os
 import subprocess
 import tempfile
@@ -381,3 +382,37 @@ def a_tests_view_closes_as_quit_closes_it(monkeypatch):
         await take_down(app)
 
     monkeypatch.setattr(App, "_shutdown", exit_then_take_down)
+
+
+async def threads_done(workers, chosen=None) -> None:
+    """Until the view's workers have ended and no thread of its executor is at work, one the
+    view cancelled included; a worker that failed raises, as it does in Textual's wait.
+
+    In place of WorkerManager.wait_for_complete, which raises WorkerCancelled when one of the
+    workers was cancelled: the view cancels its own on purpose (a refresh that arrives while one
+    looks at the pods replaces it, a dialog that closes drops the thread reading its branch),
+    and whether the earlier one had ended by then was a matter of how busy the machine was. A
+    cancelled worker's thread runs on and may still report back; it is waited for too, so that
+    what it says lands before the test looks, not while."""
+    import asyncio
+
+    from textual.worker import WorkerCancelled
+
+    loop = asyncio.get_running_loop()
+    give_up = loop.time() + REST_WITHIN
+    executor = getattr(workers._app, "executor", None)
+    while loop.time() < give_up:
+        for worker in list(chosen or workers):
+            with contextlib.suppress(WorkerCancelled):
+                await worker.wait()
+        if executor is None or not executor.unfinished():
+            return
+        await asyncio.sleep(0.001)  # nothing to do here until the thread is back
+    raise AssertionError(f"a thread of the view was still at work after {REST_WITHIN:g} s")
+
+
+@pytest.fixture(autouse=True)
+def a_cancelled_worker_is_one_that_ended(monkeypatch):
+    from textual.worker_manager import WorkerManager
+
+    monkeypatch.setattr(WorkerManager, "wait_for_complete", threads_done)

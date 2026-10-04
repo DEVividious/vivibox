@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import subprocess
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1247,10 +1248,13 @@ def test_an_accepted_task_leaves_its_instruction_for_the_next_one(env):
     assert actions.demo_from_history("other-project") == ""
 
 
-async def until(pilot, check, tries: int = 60):
+async def until(pilot, check, within: float = 30.0):
     """The pod is asked in a worker, and an exclusive worker may be replaced by the next refresh;
-    what matters is that the answer lands, not which run delivered it."""
-    for _ in range(tries):
+    what matters is that the answer lands, not which run delivered it. Waited for as long as it
+    takes: the view asks again every two seconds, and a busy machine takes its time over each.
+    The bound only ends a test whose answer never comes."""
+    give_up = time.monotonic() + within
+    while time.monotonic() < give_up:
         if check():
             return True
         await asyncio.sleep(0.05)

@@ -15,6 +15,7 @@ from textual.widgets import Static
 
 from . import actions, display, look, orchestration, ui
 from .dialogs import NO_PROJECTS
+from .markdown import Kept
 from .panel import CODE_CHANGED, PROJECT_ROW, SPINNER, criteria
 from .task import TaskState
 
@@ -41,7 +42,7 @@ NONE = look.faint("·")
 EMPTY_PROJECT = f"[i {look.MUTED}]no tasks yet[/]  [{look.ACCENT}]n[/] [{look.MUTED}]new task[/]"
 
 
-class TaskTable:
+class TaskTable(Kept):
     # The columns a terminal has room for, narrowest first: task, status and goal always. What a
     # task cost is one figure where the terminal has room for one more column (COST), and each
     # role's share apart where it has room for all (PLAN, IMPL, REVIEW), not a sum to read.

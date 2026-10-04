@@ -326,6 +326,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- What an agent wrote that the details panel cannot draw whole is drawn as its source, in a
+  code block behind the rule: one rule for a piece nested deeper than the parser reads and for
+  one whose quotes and lists leave a block fewer than ten columns in a terminal of 80. Six
+  numbered lists one in another, each numbered `123456789.`, took twelve columns a level, and
+  the words or the code block in the last were drawn nowhere, at any place of the scroll.
+- A table in such lists no longer ends the view. Its grid had no width, Textual's layout
+  divided by zero, and the view closed each time that task's panel was opened. A table is
+  drawn as a grid only once its width is known and has room, never first and looked at after,
+  and a grid is never laid out narrower than a grid with room is.
+- An error raised while the panel draws what an agent wrote no longer ends the view: the
+  agent's pieces in that text are drawn again as their source, and a notification says so,
+  with the error's name. An error that is raised again after that ends the view as before.
 - Why a review was not read (`Review n: unreadable`) quotes the note it could not act on as
   inline code. The quote was read as markdown in vivibox's own sentence, and a note of the
   right width drew `Next: a accept` on a row of its own, bold, the key in the accent, with no
@@ -344,8 +356,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   code block.
 - A table with more columns than the details panel has room for is drawn as its source, in a
   code block, every cell's words on the screen: thirty columns at 80 were an empty grid. A
-  table is a grid while each column has room for four characters of text a row (ten columns
-  at 80, eighteen at 140), and that is decided again when the terminal's width changes.
+  table is a grid while each column has room for four characters of text a row with the
+  panel's scrollbar shown (nine columns at 80, eighteen at 140), and that is decided again
+  when the terminal's width changes.
 - A line of a code block longer than the details panel is on the screen whole. It was drawn as
   one row, and what was past the panel's edge was not shown, with no sign that the line went
   on: where you approve risky files "as shown", a line of `build.gradle` with 200 spaces after

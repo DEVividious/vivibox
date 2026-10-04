@@ -679,3 +679,87 @@ def test_a_note_quoted_in_vivibox_s_reason_draws_no_row_of_vivibox_s(env, monkey
         assert "**Next:** `a` accept" in rows[at : at + 6], "as it was written, in a span of code"
 
     run(scenario, size=(80, 60))
+
+
+def said(rows: list[str]) -> str:
+    """What rows of the panel say, without the marks vivibox draws beside it or white space."""
+    text = "".join(rows)
+    for mark in "↳┃▌│▁▂▃▄▅▆▇█":
+        text = text.replace(mark, "")
+    return "".join(text.split())
+
+
+# --- an error while a piece is drawn --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("failing", ["the grid's layout", "a list's widgets", "a paragraph's text"])
+def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on(env, monkeypatch, failing):
+    """Textual ends the app on an error of any widget, in the layout too: whatever an agent
+    wrote that a widget cannot draw would end your view each time its task is opened."""
+    from textual.layouts.grid import GridLayout
+    from textual.widgets._markdown import MarkdownBulletList, MarkdownParagraph
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("forced")
+
+    task = new_task()
+    written = "WORDS before\n\n- an item\n\n| a | b |\n|---|---|\n| CELL | d |"
+    plan_with(task, written)
+    opening(monkeypatch)
+    if failing == "the grid's layout":
+        arrange = GridLayout.arrange
+        monkeypatch.setattr(
+            GridLayout,
+            "arrange",
+            lambda self, parent, *rest, **how: (fail if type(parent).__name__ == "Cells" else arrange)(
+                self, parent, *rest, **how
+            ),
+        )
+    elif failing == "a list's widgets":  # the agent's list: vivibox's own sections are lists too
+        compose = MarkdownBulletList.compose
+        monkeypatch.setattr(
+            MarkdownBulletList,
+            "compose",
+            lambda self: fail() if isinstance(self.parent, markdown.Quote) else compose(self),
+        )
+    else:
+        real = MarkdownParagraph.build_from_token
+        monkeypatch.setattr(
+            MarkdownParagraph,
+            "build_from_token",
+            lambda self, token: fail() if "WORDS" in token.content else real(self, token),
+        )
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        for _ in range(5):
+            await pilot.pause()
+        drawn = said(await every_row(app, pilot))
+        assert "WORDSbefore" in drawn and "|CELL|d|" in drawn, "all of it, as it was written"
+        (frame,) = app.text.query("Quote.prose")
+        (source,) = frame.query("MarkdownFence")
+        assert written in source.code and len(frame.children) == 1, "one code block behind the rule"
+        assert [b._content.plain for b in app.text.query("MarkdownH4")] == ["Roles", "Resources"]
+        told = [str(n.message) for n in app._notifications]
+        assert told == [
+            "What an agent wrote could not be drawn as markdown (RuntimeError): it is shown as its source."
+        ]
+
+    run(scenario, size=(80, 110), notifications=True)
+
+
+def test_an_error_that_drawing_the_source_does_not_cure_ends_the_view_as_before(env, monkeypatch):
+    from vivibox import markdown
+
+    task = new_task()
+    plan_with(task, "```\ncode\n```")
+    opening(monkeypatch)
+    monkeypatch.setattr(markdown.Fence, "folded", lambda self: 1 / 0)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        for _ in range(5):
+            await pilot.pause()
+
+    with pytest.raises(ZeroDivisionError):
+        run(scenario, size=(80, 60))

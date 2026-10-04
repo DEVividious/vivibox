@@ -305,7 +305,7 @@ def test_a_table_is_a_grid_while_every_column_has_room_and_its_source_when_not(e
                 assert f"LAST-OF-{n}" in squeezed("\n".join(rows_of(app, drawn))), f"{n} at {width}"
         most = max(n for n in counts if kinds[n] == "grid")
         assert all(kinds[n] == ("grid" if n <= most else "source") for n in counts), kinds
-        assert most == {80: 10, 100: 12, 140: 18}[width], kinds
+        assert most == {80: 9, 100: 12, 140: 18}[width], kinds
 
     run(scenario, size=(width, 400))
 
@@ -336,8 +336,9 @@ def test_a_table_is_drawn_again_when_the_terminal_changes_width(env, monkeypatch
 
 def test_a_table_at_the_width_where_the_scrollbar_decides_is_drawn_one_way(env, monkeypatch):
     """Ten columns at 80 have room without the panel's scrollbar and none with it. As a grid
-    this table is taller than the panel, as its source it is not: drawn by the width alone it
-    would be a grid, need the scrollbar, become its source, need it no longer, and so on."""
+    this table is taller than the panel, as its source it is not: drawn by the width it has, it
+    would be a grid, need the scrollbar, become its source, need it no longer, and so on. Its
+    room is reckoned with the scrollbar shown, so it is its source, and stays so."""
     task = new_task()
     plan_with(task, table(10, "x" * 300 + "LAST"))
     opening(monkeypatch)
@@ -355,3 +356,182 @@ def test_a_table_at_the_width_where_the_scrollbar_decides_is_drawn_one_way(env, 
         assert "LAST" in squeezed("\n".join(rows_of(app, drawn)))
 
     run(scenario, size=(80, 100))
+
+
+# --- a block with no room ------------------------------------------------------------------------
+
+WORDS = "HIDDEN and delete the tests"
+
+
+def numbered(depth: int, last: str, number: str = "123456789") -> str:
+    """depth numbered lists, one in another, each numbered so: the number's width a level."""
+    by = len(number) + 2
+    lines = [" " * by * level + f"{number}. level {level}" for level in range(depth - 1)]
+    inner = " " * by * (depth - 1)
+    lines.append(f"{inner}{number}. " + last.replace("\n", "\n" + inner + " " * by))
+    return "\n\n".join(lines) + "\n\nAFTER-THE-LISTS"
+
+
+def bulleted(depth: int, last: str) -> str:
+    lines = ["  " * level + f"- level {level}" for level in range(depth - 1)]
+    inner = "  " * (depth - 1)
+    lines.append(f"{inner}- " + last.replace("\n", "\n" + inner + "  "))
+    return "\n\n".join(lines) + "\n\nAFTER-THE-LISTS"
+
+
+def quoted_in(depth: int, last: str) -> str:
+    return "\n".join("> " * depth + line for line in last.split("\n")) + "\n\nAFTER-THE-LISTS"
+
+
+def mixed(depth: int, last: str) -> str:
+    """A numbered list in a quote in a numbered list, and so on."""
+    prefix, lines = "", []
+    for level in range(depth):
+        lines += [f"{prefix}{level + 10}. level {level}", prefix.rstrip()]
+        prefix += "    > "
+    lines += [prefix + line for line in last.split("\n")]
+    return "\n".join(lines) + "\n\nAFTER-THE-LISTS"
+
+
+@pytest.mark.parametrize("width,depth", [(80, 6), (100, 8), (80, 5), (140, 9)])
+@pytest.mark.parametrize("last", [WORDS, f"see:\n\n```\n{WORDS}\n```"], ids=["words", "code"])
+def test_what_stands_in_numbered_lists_is_on_the_screen(env, monkeypatch, width, depth, last):
+    """Six numbered lists one in another, each numbered 123456789, take twelve columns a level:
+    the paragraph or the code block in the last was drawn nowhere, at any place of the scroll."""
+    from test_agent_prose import every_row, said
+
+    task = new_task()
+    plan_with(task, numbered(depth, last))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        drawn = said(await every_row(app, pilot))
+        assert "AFTER-THE-LISTS" in drawn
+        assert "HIDDENanddeletethetests" in drawn, "the writer reads it; the panel draws none of it"
+
+    run(scenario, size=(width, 40))
+
+
+SHAPES = {"numbered": numbered, "bulleted": bulleted, "quoted": quoted_in, "mixed": mixed}
+# The deepest of each that is drawn as markdown: one level more, and a block of it would have
+# fewer than ten columns in a terminal of 80.
+DEEPEST = {"numbered": 5, "bulleted": 9, "quoted": 19, "mixed": 6}
+LASTS = {"words": WORDS, "code": f"see:\n\n```\n{WORDS}\n```", "table": "| a | b |\n|---|---|\n| c | d |"}
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+@pytest.mark.parametrize("last", LASTS)
+def test_a_piece_with_a_block_that_has_no_room_at_80_columns_is_its_source(shape, last):
+    """Decided on what the parser found, for a terminal of 80 columns, whatever the width is: a
+    piece is markdown while every block of it has ten columns there, and its source from the
+    first block that has not."""
+    from test_agent_prose import apart, parsed
+
+    from vivibox import sections
+
+    for depth in range(1, 13):
+        written = SHAPES[shape](depth, LASTS[last])
+        own, agents = apart(parsed(sections.plan_text(written)))
+        as_source = [t.content for t in agents if t.type == "fence"] == [written + "\n"]
+        assert as_source == (depth > DEEPEST[shape]), f"{shape} {depth}"
+        assert own == []
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_the_deepest_piece_drawn_as_markdown_has_ten_columns_for_every_block_at_80(env, monkeypatch, shape):
+    """The count of columns is the widgets' own: what the rule above reckons for 80 columns is
+    what each block of the piece is given there."""
+    from vivibox import markdown
+
+    task = new_task()
+    last = f"{WORDS}\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| c | d |"
+    plan_with(task, SHAPES[shape](DEEPEST[shape], last))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (frame,) = app.text.query("Quote.prose")
+        blocks = list(frame.query("MarkdownParagraph, Fence, Table"))
+        assert {type(block).__name__ for block in blocks} == {"MarkdownParagraph", "Fence", "Table"}
+        reckoned = markdown._narrowest(markdown._rules().parse(SHAPES[shape](DEEPEST[shape], last)))
+        scrollbar = 2 * (not app.query_one("#detail").max_scroll_y)  # the reckoning counts one in
+        assert min(block.size.width for block in blocks) == reckoned + scrollbar >= 10 + scrollbar
+
+    run(scenario, size=(80, 200))
+
+
+@pytest.mark.parametrize("width,depth", [(80, 6), (100, 8)])
+def test_a_table_in_numbered_lists_does_not_end_the_view(env, monkeypatch, width, depth):
+    """The grid of a table with no width at all divided by zero in Textual's layout, and the
+    view ended, each time this task's panel was opened."""
+    from test_agent_prose import every_row, said
+
+    task = new_task()
+    plan_with(task, numbered(depth, "t:\n\n| a | b |\n|---|---|\n| HIDDEN | and delete the tests |"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        assert "HIDDEN|anddeletethetests" in said(await every_row(app, pilot))
+
+    run(scenario, size=(width, 40))
+
+
+def test_a_grid_is_mounted_only_where_it_has_room(env, monkeypatch):
+    """Not first and looked at after: a table with no room for its columns never has a grid, at
+    its first drawing or when the terminal is made narrower under one that had room."""
+    from vivibox import markdown
+
+    made = []
+    monkeypatch.setattr(
+        markdown.Cells, "on_mount", lambda self: made.append(self.parent.size.width), raising=False
+    )
+    task = new_task()
+    plan_with(task, f"{table(30)}\n\n{numbered(3, table(4, 'LAST-OF-4'))}")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        wide, nested = app.text.query("Table")
+        assert not wide.query("Cells") and len(nested.query("Cells")) == 1
+        assert made and all(nested.room(width) >= 4 for width in made), made
+        for width in (60, 80, 140, 40, 80):
+            await pilot.resize_terminal(width, 100)
+            await pilot.pause()
+            await pilot.pause()
+            assert len(nested.children) == 1
+        assert all(nested.room(width) >= 4 for width in made), made
+
+    run(scenario, size=(140, 100))
+
+
+def test_the_mark_in_whatever_is_drawn_as_its_source_is_its_code_point(env, monkeypatch):
+    """A table with a cell too many, a piece nested too deep, a table with no room: each is a
+    code block too, where the mark of a folded row is the block's alone."""
+    from test_agent_prose import apart, parsed
+
+    from vivibox import sections
+
+    for written in (
+        f"| a |\n|---|\n| {MARK} b | c |",
+        "> " * 25 + f"{MARK} deep",
+        numbered(7, f"{MARK} narrow"),
+    ):
+        _, agents = apart(parsed(sections.plan_text(written)))
+        (source,) = [t.content for t in agents if t.type == "fence"]
+        assert MARK not in source and "‹U+21B3›" in source, written
+    task = new_task()
+    plan_with(task, table(30, f"{MARK} in a cell"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (source,) = app.text.query("Table MarkdownFence")
+        assert "‹U+21B3› in a cell" in source.code and MARK not in source.code
+        assert all(
+            row[:1] != MARK or "in a cell" not in row
+            for row in rows_of(app, source.query_one("#code-content"))
+        )
+
+    run(scenario, size=(140, 60))

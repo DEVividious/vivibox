@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from contextlib import suppress
 
 from markdown_it import MarkdownIt
@@ -235,12 +235,19 @@ def _rules() -> MarkdownIt:
     return found
 
 
-def _frame(nesting: int) -> Token:
+def _frame(nesting: int, source: str = "") -> Token:
     """One end of the frame around a piece: a quote's token, which the widget knows how to nest,
-    marked as vivibox's (PROSE), which a quote written as text never is."""
+    marked as vivibox's (PROSE), which a quote written as text never is; the piece's source
+    with it, for where its widgets cannot be made (Panel)."""
     token = Token("blockquote_open" if nesting > 0 else "blockquote_close", "blockquote", nesting)
-    token.block, token.meta = True, {PROSE: True}
+    token.block, token.meta = True, {PROSE: True, "source": source}
     return token
+
+
+def _source(text: str) -> Token:
+    """A piece, or a table, as its source: a code block, the mark of a folded row in it as its
+    code point, as in every block."""
+    return _block("fence", text.replace(MARK, _MARKED) + "\n")
 
 
 def _demoted(tokens: list[Token]) -> list[Token]:
@@ -269,34 +276,90 @@ def _apart(state: StateCore) -> None:
             state.md.block.parse(part, state.md, state.env, state.tokens)
 
 
-def _piece(text: str) -> list[Token]:
-    """What an agent wrote, parsed as a document of its own, its headings bold lines. The parser
-    reads so many levels deep (its maxNesting) and leaves out what a quote or a list item past
-    that holds, and everything after it to the end, without a word: a piece nested that deep is
-    its source, in a code block, where nothing of it is left out."""
+# What a piece's text has in a terminal of 80 columns: the terminal's width less the panel's
+# padding (2), its text's (4), a scrollbar (2) and the frame (2). And the fewest columns a block
+# of a piece is drawn in; a table asks for more by its columns, and settles that itself (Table).
+AT_80 = 70
+ROOM = 10
+_BLOCKS = ("paragraph_open", "heading_open", "fence", "code_block", "table_open", "hr", RULE)
+
+
+def _narrowest(tokens: list[Token]) -> int:
+    """The columns the narrowest block among a piece's tokens has in a terminal of 80, by what it
+    stands in, as the widgets draw each: a quote takes three columns (its bar, its padding), a
+    list's item the two of its bullet, a numbered list's item the digits of the list's last
+    number and three more (123456789. takes twelve, a level)."""
+    taken: list[int] = []  # by each quote and list item a block stands in
+    numbers: list[int] = []  # the width of the numbers of each numbered list it stands in
+    least = AT_80
+    for at, token in enumerate(tokens):
+        if token.type == "ordered_list_open":
+            items = [
+                t for t in _inside(tokens, at) if t.type == "list_item_open" and t.level == token.level + 1
+            ]
+            first = int(items[0].info) if items and items[0].info.isdigit() else 1
+            numbers.append(len(str(first + len(items) - 1)) + 3)
+        elif token.type == "ordered_list_close":
+            numbers.pop()
+        elif token.type in ("blockquote_open", "list_item_open"):
+            taken.append(3 if token.type == "blockquote_open" else numbers[-1] if token.info else 2)
+        elif token.type in ("blockquote_close", "list_item_close"):
+            taken.pop()
+        elif token.type in _BLOCKS:
+            least = min(least, AT_80 - sum(taken))
+    return least
+
+
+def _inside(tokens: list[Token], at: int) -> list[Token]:
+    """The tokens between the one that opens at at and the one that closes it."""
+    end = next(
+        i for i in range(at + 1, len(tokens)) if tokens[i].level == tokens[at].level and tokens[i].nesting < 0
+    )
+    return tokens[at + 1 : end]
+
+
+def _whole(tokens: list[Token], deepest: int) -> bool:
+    """Whether a piece is on the screen whole when drawn as markdown, in a terminal of 80 columns
+    or wider. Not when the parser left some of it out: it reads so many levels deep (its
+    maxNesting) and drops what a quote or a list item past that holds, with everything after it
+    to the end, without a word. And not when a block of it has fewer than ROOM columns: six
+    numbered lists one in another leave the last none, and its words were drawn nowhere."""
+    dropped = any(t.type in ("blockquote_open", "list_item_open") and t.level >= deepest for t in tokens)
+    return not dropped and _narrowest(tokens) >= ROOM
+
+
+def _piece(text: str, as_source: bool = False) -> list[Token]:
+    """What an agent wrote, parsed as a document of its own, its headings bold lines; and what
+    cannot be drawn whole (_whole), or was found to make the widgets raise (as_source), as its
+    source, in a code block, where nothing of it is left out and nothing is read as markdown."""
     rules = _rules()
-    tokens = rules.parse(text, {PROSE: True})
-    deepest = rules.options["maxNesting"] - 1
-    if any(t.type in ("blockquote_open", "list_item_open") and t.level >= deepest for t in tokens):
-        return [_block("fence", text.replace(MARK, _MARKED) + "\n")]
+    tokens = [] if as_source else rules.parse(text, {PROSE: True})
+    if as_source or not _whole(tokens, rules.options["maxNesting"] - 1):
+        return [_source(text)]
     return _demoted(tokens)
 
 
-def _spliced(state: StateCore) -> None:
-    """The parser's last rule: each piece an agent wrote is put where it stood, in a frame."""
-    out: list[Token] = []
-    for token in state.tokens:
-        out += [_frame(1), *_piece(token.content), _frame(-1)] if token.type == PROSE else [token]
-    state.tokens = out
-
-
-def parser() -> MarkdownIt:
+def parser(as_source: Collection[str] = ()) -> MarkdownIt:
     """The panel's text as it is read: by _rules, vivibox's own lines apart from every piece an
-    agent wrote (_apart, _spliced)."""
+    agent wrote (_apart), each put where it stood, in a frame. as_source: the pieces to draw as
+    their source, whatever they hold (Panel.gives_up)."""
+
+    def spliced(state: StateCore) -> None:
+        out: list[Token] = []
+        for token in state.tokens:
+            piece = token.type == PROSE and _piece(token.content, token.content in as_source)
+            out += [_frame(1, token.content), *piece, _frame(-1)] if token.type == PROSE else [token]
+        state.tokens = out
+
     found = _rules()
     found.core.ruler.at("block", _apart)
-    found.core.ruler.push("spliced", _spliced)
+    found.core.ruler.push("spliced", spliced)
     return found
+
+
+COLUMN = 4
+# What you are told when a piece is drawn as its source because its widgets raised.
+COULD_NOT = "What an agent wrote could not be drawn as markdown ({}): it is shown as its source."
 
 
 class Cells(MarkdownTableContent):
@@ -314,6 +377,12 @@ class Cells(MarkdownTableContent):
     }
     """
 
+    def __init__(self, headers: list[Content], rows: list[list[Content]]) -> None:
+        super().__init__(headers, rows)
+        # Never laid out narrower than a grid with room is (Table): in fewer columns than it has
+        # lines between its cells, Textual's grid divides by zero, and the view ends.
+        self.styles.min_width = len(headers) * (COLUMN + 3) + 1
+
     def compose(self) -> ComposeResult:
         for cell in super().compose():
             cell.tooltip = None  # before it is on the screen: nothing of it is ever a tooltip
@@ -325,10 +394,11 @@ class Table(MarkdownTable):
     for COLUMN characters of text a row. Columns share the width, and with many of them a cell
     is a character wide, or has no width at all: thirty columns at 80 were an empty grid. On a
     panel too narrow for its columns the table is drawn as its source, in a code block, where
-    every cell is on the screen whatever the width (Fence). Decided again whenever the width
-    changes."""
+    every cell is on the screen whatever the width (Fence). Decided when its width is first
+    known, before anything of it is mounted, and again whenever the width changes: a grid is
+    never mounted where it has no room."""
 
-    COLUMN = 4
+    COLUMN = COLUMN
     DEFAULT_CSS = """
     Table > Fence {
         margin: 0;
@@ -337,11 +407,11 @@ class Table(MarkdownTable):
 
     def __init__(self, markdown: Markdown, token: Token, *args, **kwargs) -> None:
         super().__init__(markdown, token, *args, **kwargs)
-        self._as_source = False
+        self._as_source: bool | None = None  # neither yet
 
     def compose(self) -> ComposeResult:
-        for made in super().compose():
-            yield Cells(made.headers, made.rows)
+        self._headers, self._rows = self._get_headers_and_rows()
+        return ()
 
     def room(self, width: int) -> int:
         """The room a cell's text has at that width: a column's share of it, less the line
@@ -350,16 +420,18 @@ class Table(MarkdownTable):
         return (width - columns - 1) // columns - 2
 
     async def on_resize(self, event: events.Resize) -> None:
-        """A table drawn as its source is a grid again only at a width with room to spare for
-        the panel's scrollbar: the two differ in height, and one that needs the scrollbar while
-        the other does not would be drawn in turn for ever."""
-        spare = self._markdown.parent.styles.scrollbar_size_vertical if self._as_source else 0
+        """Reckoned with the panel's scrollbar shown, whether it is or not: a grid and the
+        source differ in height, and a table that had room only without the scrollbar, and
+        needed it only as a grid, would be drawn as one and the other in turn for ever. So what
+        a table is drawn as depends on the terminal's width alone."""
+        panel = self._markdown.parent
+        spare = 0 if panel.show_vertical_scrollbar else panel.styles.scrollbar_size_vertical
         narrow = self.room(event.size.width - spare) < self.COLUMN
         if narrow != self._as_source:
             self._as_source = narrow
-            source = display.terminal((self._token.meta or {}).get("source", "")).replace(MARK, _MARKED)
+            source = _source((self._token.meta or {}).get("source", ""))
             await self.remove_children()
-            shown = Fence(self._markdown, _block("fence", source), source) if narrow else None
+            shown = Fence(self._markdown, source, source.content.rstrip()) if narrow else None
             await self.mount(shown or Cells(self._headers, self._rows))
 
 
@@ -490,4 +562,64 @@ class Panel(Markdown):
         return MarkdownHorizontalRule(self, token) if token.type == RULE else None
 
     def __init__(self, **kwargs) -> None:
-        super().__init__("", parser_factory=parser, **kwargs)
+        self._as_source: frozenset[str] = frozenset()
+        self._redrawing = False
+        super().__init__("", parser_factory=lambda: parser(self._as_source), **kwargs)
+
+    def _parse_markdown(self, tokens: Iterable[Token]) -> Iterable[MarkdownBlock]:
+        """Textual's widgets for the tokens, those of each piece an agent wrote made apart: a
+        piece whose widgets cannot be made is drawn as its source, in its frame, and the rest
+        of the panel as it is."""
+        own: list[Token] = []
+        piece: list[Token] = []
+        for token in tokens:
+            framing = token.type.startswith("blockquote_") and (token.meta or {}).get(PROSE)
+            (piece if piece or framing else own).append(token)
+            if framing and token.nesting < 0:
+                yield from super()._parse_markdown(own)
+                try:
+                    made = list(super()._parse_markdown(piece))
+                except Exception as error:
+                    self.notify(COULD_NOT.format(type(error).__name__), severity="warning", markup=False)
+                    made = list(super()._parse_markdown([piece[0], _source(piece[0].meta["source"]), token]))
+                yield from made
+                own, piece = [], []
+        yield from super()._parse_markdown(own + piece)
+
+    def gives_up(self, error: Exception) -> bool:
+        """After an error while this text was drawn: every piece an agent wrote in it is drawn
+        again as its source, which no widget reads as anything, and stays so while the panel
+        shows it; you are told once. The widgets that raised are taken out at once, and what
+        else is raised until they are gone is the same error (a layout that fails does so
+        wherever a size is asked for). False when there is no piece to draw so, or they were so
+        drawn already: the error is not theirs."""
+        pieces = frozenset(_PIECE.findall(self.source))
+        if self._redrawing or pieces <= self._as_source:
+            return self._redrawing
+        self._as_source, self._redrawing = pieces, True
+        self.call_later(self._redraw, type(error).__name__)
+        return True
+
+    async def _redraw(self, error: str) -> None:
+        try:
+            await self.remove_children()
+        finally:
+            self._redrawing = False  # what is raised from here on is not theirs
+        await self.update(self.source)
+        self.notify(COULD_NOT.format(error), severity="warning", markup=False)
+
+
+class Kept:
+    """For the app the panel is in: an error raised while the panel draws what an agent wrote
+    does not end the view. Textual ends the app on any error of a widget, in its layout too,
+    which no widget of the panel can catch for the others; here the panel draws the agent's
+    pieces as their source instead (Panel.gives_up), once for a text, and says so. An error
+    that is still raised after that ends the view as before."""
+
+    def _handle_exception(self, error: Exception) -> None:
+        try:
+            given_up = any(panel.gives_up(error) for panel in self.screen_stack[0].query(Panel))
+        except Exception:  # no screen left to ask, or the panel itself is what fails
+            given_up = False
+        if not given_up:
+            super()._handle_exception(error)

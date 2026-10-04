@@ -93,6 +93,7 @@ VIVIBOX_MARKUP: dict[tuple[str, str, str, str], str] = {
     ("table.py", "TaskTable.fill_table", "from_markup", "cells.get('GOAL', '')"): "the goal, escaped there",
     ("table.py", "TaskTable.fill_table", "update", "'' if ids else NO_PROJECTS"): "a constant of vivibox's",
     ("table.py", "TaskTable.cell", "from_markup", "markup"): "a cell of the list, as above",
+    ("markdown.py", "Panel._redraw", "update", "self.source"): "the panel's own text again: markdown",
     ("table.py", "TaskTable.spin", "update", "datetime.now().strftime('%H:%M')"): "the clock",
     ("tui.py", "Vivibox.check_code", "notify", "CODE_CHANGED.capitalize() + '.'"): "a constant of vivibox's",
     (

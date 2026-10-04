@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import about, actions, answers, reviewing, skill, ui, waiting
+from . import about, actions, answers, display, reviewing, skill, ui, waiting
 from .config import load_config
 from .task import SHOW
 from .waiting import JSON_VERSION, TIMED_OUT
@@ -37,7 +37,8 @@ def cmd_wait(args: argparse.Namespace) -> int:
     elif not found:
         print(f"Still working after {args.timeout:g} s: {', '.join(args.task)}.")
     for task in [] if args.json else shown:
-        why = f" ({task['problem']})" if task["problem"] else ""
+        # The words of a tool or of an agent's failed turn: text, under the task's own line.
+        why = f" ({display.under(task['problem'])})" if task["problem"] else ""
         then = f"; next: {task['next'][0]}" if task["next"] else ""
         print(f"{task['id']}: {task['status']}{why}{then}")
     return 0 if found else TIMED_OUT
@@ -73,7 +74,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         try:
             review = reviewing.import_answer(task, text)
         except reviewing.ReviewError as e:
-            print(f"vivibox: {e}", file=sys.stderr)
+            print(f"vivibox: {display.under(str(e))}", file=sys.stderr)  # it quotes a note
             return 1
         notes = ui.count(len(review.blocking), "blocking note")
         went = (

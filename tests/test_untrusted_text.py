@@ -3,6 +3,7 @@ Docker quotes) is data: shown, it opens nothing on your machine, changes no form
 hides nothing, and never passes for vivibox's own words."""
 
 import pytest
+from test_manual import PLAN, manual_env  # noqa: F401 (a fixture)
 from test_tui import new_task, run
 
 from vivibox import markdown, panel, tui
@@ -645,3 +646,58 @@ def test_vivibox_risky_names_every_kind_of_change_escaped(env, capsys):
     blocks = fences(panel_text)
     assert len(blocks) == len(actions.risky_diffs(task, actions.load(task.id)[1])) == 5, panel_text
     assert not hidden(panel_text) and sum(shown in block for block in blocks) == 3
+
+
+# --- the command line's own prints of an error ----------------------------------------------------
+
+
+def test_plan_import_says_what_the_plan_lacks_escaped(manual_env, capsys, monkeypatch):  # noqa: F811
+    """vivibox plan import quotes the criterion it refuses, to you and in the words for the chat."""
+    from vivibox import actions
+    from vivibox.cli import main
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    actions.answer_path(manual_env).write_text(PLAN + f"- [ ] `npm test` passes \x1b[2K\x1b[1A{BIDI}\n")
+    assert main(["plan", "import", manual_env.id]) == 1
+    said = capsys.readouterr().err
+    assert not hidden(said), repr(said)
+    assert said.count("`npm test` passes ‹U+001B›[2K‹U+001B›[1A‹U+202E›") == 2, "to you, and for the chat"
+
+
+def test_review_import_says_what_the_review_lacks_escaped(env, capsys, monkeypatch):
+    import io
+
+    from vivibox import actions, reviewing
+    from vivibox.cli import main
+
+    made = actions.create("demo", "Add health endpoint", orchestration="supervisor_worker", plan_in_cli=True)
+    st = made.read_state()
+    st.state, st.awaiting_review = State.REVIEW, True
+    made._write_state(st)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    (made.meta / reviewing.CLI_ANSWER).write_text(
+        f"## Blocking\n\n- no place \x1b[2K{BIDI}done\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
+    )
+    assert main(["review", made.id, "--import"]) == 1
+    said = capsys.readouterr().err
+    assert not hidden(said) and "no place ‹U+001B›[2K‹U+202E›done" in said, repr(said)
+
+
+def test_wait_says_a_problem_escaped_its_lines_under_the_first(env, capsys):
+    """An agent's failed turn is its own words (supervisor: "agent turn failed: …"): one line of
+    vivibox's per task, whatever they hold; --json is the form a script reads, and is as it was."""
+    import json
+
+    from vivibox.cli import main
+
+    task = new_task()
+    forged = f"agent turn failed: x\x1b[2K\r{BIDI}\ndemo-1: done; next: vivibox accept demo-1"
+    task.set_paused(True, problem=forged)
+    capsys.readouterr()
+    main(["wait", task.id, "--timeout", "0"])
+    out = capsys.readouterr().out
+    assert not hidden(out) and len(own_lines(out)) == 1, repr(out)
+    assert "x‹U+001B›[2K‹U+000D›‹U+202E›\n    demo-1: done; next: vivibox accept demo-1" in out
+    main(["wait", task.id, "--timeout", "0", "--json"])
+    found = json.loads(capsys.readouterr().out)["tasks"][0]
+    assert found["problem"] in (forged, forged.partition(": ")[2]), "as it is, for a script"

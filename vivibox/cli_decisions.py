@@ -117,8 +117,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
     try:
         summary = actions.import_plan(task, answer)
     except PlanError as e:
-        print(f"vivibox: that is not a plan yet: {e}", file=sys.stderr)
-        print(f"\nSay this in the same chat:\n\n{manual.repair_prompt(str(e))}", file=sys.stderr)
+        # What the plan lacks quotes the plan: a criterion, as the chat wrote it.
+        print(f"vivibox: that is not a plan yet: {display.under(str(e))}", file=sys.stderr)
+        again = display.terminal(manual.repair_prompt(str(e)))
+        print(f"\nSay this in the same chat:\n\n{again}", file=sys.stderr)
         return 1
     print(f"Plan brought in{f': {summary}' if summary else ''}. Read it, then: vivibox accept {task.id}")
     return 0

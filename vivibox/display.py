@@ -154,6 +154,13 @@ def terminal(text: str, keep: str = "\n\t") -> str:
     return _escape(text, keep, prose=True)
 
 
+def under(text: str, by: int = 4) -> str:
+    """Text of an agent's or a tool's inside a line of vivibox's own (why a task stopped, what a
+    plan lacks): escaped as terminal escapes it, a tab too, and each of its lines after the first
+    indented by so many columns, so none starts at the left edge, where vivibox's own lines do."""
+    return terminal(text, "\n").replace("\n", "\n" + " " * by)
+
+
 def own_folder() -> Path:
     """A folder of yours alone under the temporary one, for what vivibox writes only to show it."""
     folder = Path(tempfile.gettempdir()) / f"vivibox-{os.getuid()}"

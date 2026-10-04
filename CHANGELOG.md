@@ -270,6 +270,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Three prints of the command line showed text of an agent's or a chat's as it came, control
+  characters and all: `vivibox plan import` naming the criterion it refuses (to you, and in
+  the words for the chat), `vivibox review <id> --import` naming a note without a place, and
+  `vivibox wait` saying why a task stopped (an agent's failed turn is its own words). They are
+  escaped now, and what takes several lines stands indented under the first, never at the left
+  edge. `vivibox wait --json` is as it was.
 - A project whose `package.json` or `pnpm-workspace.yaml` names a workspace outside it (an
   absolute pattern such as `/etc/*`, one that leaves through `..`, or an empty one) no longer
   ends `vivibox init`, the new-project dialog or a verification with a traceback, nor has a

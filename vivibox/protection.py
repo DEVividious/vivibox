@@ -455,25 +455,72 @@ def _varint(data: bytes, pos: int) -> tuple[int, int]:
     raise ValueError("a prefix length of more bytes than any name needs")
 
 
-def _home(root: Path, rel: str, dirs: list[str]) -> str | None:
-    """The git dir among dirs that the .git file at rel names, as git reads it; None for another
-    place, or for a .git that is no such file."""
-    data = _read(root, rel, LIMIT)
+def _named(data: bytes | str, root: Path, rel: str) -> list[str]:
+    """Where the .git file at rel, of content data, sends git, as a path from root: the place its
+    one line names (gitdir: …), taken by the names alone. Two answers where root is reached
+    through a link (git in the pod writes the path it is at); none for a .git that is no such
+    file."""
     if isinstance(data, str) or not data.startswith(b"gitdir: "):
-        return None
+        return []
     target = os.fsdecode(data.removeprefix(b"gitdir: ").rstrip(b"\r\n"))
     if not target or "\n" in target:
-        return None
-    path = os.path.normpath(os.path.join(root, os.path.dirname(rel), target))
-    home = os.path.relpath(path, root)
-    return home if home in dirs else None
+        return []
+    bases = dict.fromkeys((str(root), os.path.realpath(root)))
+    return [
+        os.path.relpath(os.path.normpath(os.path.join(base, os.path.dirname(rel), target)), base)
+        for base in bases
+    ]
 
 
-def gitfiles(root: Path, dirs: list[str], allowed: Callable[[str], bool]) -> tuple[list[str], list[str]]:
+def _home(data: bytes | str, root: Path, rel: str, dirs: list[str]) -> str | None:
+    """The git dir among dirs that the .git file at rel names, as git reads it; None for another
+    place, or for a .git that is no such file."""
+    return next((home for home in _named(data, root, rel)[:1] if home in dirs), None)
+
+
+def _worktrees_own(data: bytes | str, root: Path, rel: str, dirs: list[str], seen: dict[str, str]) -> bool:
+    """Whether the .git at rel is the file git wrote in the folder of a worktree it added to one
+    of dirs, and nothing else: it names <git dir>/worktrees/<name>, an entry that seen (the look
+    at the git dirs that the changes were told from) has as a folder under a folder, with no
+    settings of its own, whose commondir is git's own (../..) and whose gitdir leads back to
+    this very file. The entry's two files are read here and held to what seen hashed, and the
+    .git file is read once more: whatever differs between two reads is not what was looked at,
+    and is not taken for a worktree's. Files only; no git."""
+    for entry in _named(data, root, rel):
+        git_dir, _, name = entry.rpartition("/worktrees/")
+        if git_dir not in dirs or not name or "/" in name or name in (".", ".."):
+            continue
+        folders = (f"{git_dir}/worktrees", entry)
+        if any(seen.get(key) != FOLDER for key in folders) or seen.get(f"{entry}/config.worktree") != ABSENT:
+            continue
+        read = {name: _read(root, f"{entry}/{name}", LIMIT) for name in ("commondir", "gitdir")}
+        if any(
+            isinstance(content, str)
+            or seen.get(f"{entry}/{name}") != f"{FILE} {hashlib.sha256(content).hexdigest()}"
+            for name, content in read.items()
+        ):
+            continue
+        if read["commondir"].strip() != b"../..":
+            continue
+        back = os.fsdecode(read["gitdir"].rstrip(b"\r\n"))
+        leads = {
+            os.path.normpath(os.path.join(base, entry, back)) == os.path.normpath(os.path.join(base, rel))
+            for base in (str(root), os.path.realpath(root))
+        }
+        if "\n" not in back and True in leads and _read(root, rel, LIMIT) == data:
+            return True
+    return False
+
+
+def gitfiles(
+    root: Path, dirs: list[str], allowed: Callable[[str], bool], seen: dict[str, str] | None = None
+) -> tuple[list[str], list[str]]:
     """The .git of every submodule git goes into, from the clone's index down, as paths from root;
     and what is wrong: a submodule whose .git allowed does not allow, or that leads to no git dir
     among dirs, which vivibox checked. Each index is read only once its git dir was found as
-    recorded; vivibox runs no git for it."""
+    recorded; vivibox runs no git for it. Each .git is read once, and what it is is told from
+    that read. seen: the look at the git dirs (fingerprint) that goes with this one, for
+    telling the folder of a worktree git added (_worktrees_own); without it, none is."""
     found, problems, todo, read = [], [], [("", ".git")], set()
     while todo:
         worktree, git_dir = todo.pop()
@@ -487,14 +534,21 @@ def gitfiles(root: Path, dirs: list[str], allowed: Callable[[str], bool]) -> tup
             continue
         for path in listed:
             rel = f"{worktree}/{path}/.git".lstrip("/")
-            if look(root, rel, read=False) == ABSENT:
+            data = _read(root, rel, LIMIT)
+            if data == ABSENT:
                 continue  # not checked out: git does not go into it
-            home = _home(root, rel, dirs)
+            home = _home(data, root, rel, dirs)
             if home is None or not allowed(rel):
                 said = f"{display.name(rel)} was added, a repository git would go into"
-                # As git init and git add leave one: a folder, under a name git itself writes.
-                ordinary = look(root, rel, read=False) == FOLDER and not set(rel.split("/")) & {"", ".", ".."}
-                problems.append(_added(said, REPOSITORY) if ordinary else said)
+                if set(rel.split("/")) & {"", ".", ".."}:  # no name git itself writes
+                    problems.append(said)
+                elif data == FOLDER:  # as git init and git add leave one
+                    problems.append(_added(said, REPOSITORY))
+                elif seen is not None and _worktrees_own(data, root, rel, dirs, seen):
+                    listed = f"{display.name(rel)} was added, the folder of a worktree, which the index lists"
+                    problems.append(_added(listed, WORKTREE))
+                else:
+                    problems.append(said)
                 continue
             found.append(rel)
             todo.append((rel.removesuffix("/.git"), home))
@@ -555,14 +609,16 @@ def check(root: Path, meta: Path) -> list[str]:
     if "format" not in recorded:
         return _upgrade(root, meta, recorded)
     files = {k: v for k, v in recorded.items() if k not in ABOUT}
-    found = differences(files, fingerprint(root, recorded["gitfiles"]), recorded["git_dirs"])
+    now = fingerprint(root, recorded["gitfiles"])
+    found = differences(files, now, recorded["git_dirs"])
     if any(not isinstance(change, Added) for change in found):
         return found
     # The git dirs as recorded, or with a worktree added and nothing else: the index is read
     # too, and what it has is said first, so that what the task can take out is never said
-    # before what it cannot.
+    # before what it cannot. A worktree's own folder, which git lists there once it is added,
+    # is told by the look the changes above came from (now), and is the worktree, no more.
     known = set(recorded["gitfiles"])
-    return [*gitfiles(root, recorded["git_dirs"], lambda rel: rel in known)[1], *found]
+    return [*gitfiles(root, recorded["git_dirs"], lambda rel: rel in known, now)[1], *found]
 
 
 # --- A clone recorded by an earlier vivibox, which recorded each git dir's config and hooks' names

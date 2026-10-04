@@ -32,7 +32,8 @@ TAKE_OUT = {
         "That is a worktree of this repository, which the orchestrator's git does not go into. "
         "Remove it (`git worktree remove` with its path, which `git worktree list` names), then run "
         "`git worktree prune`, so that `.git/worktrees` is gone, and work in the repository's own "
-        "folder."
+        "folder. Where the index lists the worktree's folder, take it out of the index as well "
+        "(`git rm -f --cached` with its path) and commit."
     ),
 }
 

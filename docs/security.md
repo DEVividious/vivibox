@@ -216,8 +216,10 @@ in the index). vivibox records them when it makes the clone, and before every gi
 on your machine in the clone, and before the verification's and the review's copies of it, checks
 that each is as recorded; when one is not, it runs no git there. Nothing approves such a change. A
 repository of its own that the task tracks (`git init` in a folder, then `git add`) or a worktree it
-added blocks the task until it is gone: the verification does not run, the task waits for you, and
-your reply sends the writer to take it out. Alternates are read-only in the pod.
+added (inside the clone too, where git lists its folder in the index once it is added) blocks the
+task until it is gone: the verification does not run, the task waits for you, and your reply sends
+the writer to take it out. What is told apart is only what is said: no git runs in either case.
+Alternates are read-only in the pod.
 Every git command vivibox runs on your machine, in the clone, in your repository and in the
 copies alike, runs without the git variables of your shell (every `GIT_*` but
 `GIT_TERMINAL_PROMPT`), so a `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` or

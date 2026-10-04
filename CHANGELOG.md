@@ -337,6 +337,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   A clone with a worktree the task added and, beside it, a change no ordinary work makes is
   refused for good at once, not first "blocked until it is out"; a worktree and a repository
   of its own are named together.
+- A worktree the writer makes inside the clone (`git worktree add .worktrees/feature`) and
+  then adds with everything else (`git add -A`) blocks the task until it is removed, like any
+  worktree it adds: git lists the worktree's folder in the index as a submodule, and that
+  had the task refused for good ("delete the task") since the index is read beside an added
+  worktree. The folder is told to be the worktree's own from files alone: its `.git` names
+  the clone's `worktrees/<name>`, and that entry is as git wrote it (its `commondir` git's
+  own, its `gitdir` leading back, no settings of its own). Anything else beside an added
+  worktree is still refused for good. The feedback also says to take the folder out of the
+  index.
 - A `question.md` with bytes that are no UTF-8 no longer ends the view with `UnicodeDecodeError`
   while its task's panel is open, nor stops the task on that error's text: the bytes are shown
   as their codes (`\xff`). The list, `vivibox status`, the panel and the supervisor now read

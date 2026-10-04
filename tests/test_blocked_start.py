@@ -284,3 +284,41 @@ def test_the_gate_the_views_and_the_reply_run_no_git_in_a_clone_with_both_additi
     sup.step()  # verified again: still blocked
     assert task.read_state().state is State.CHECKPOINT_BLOCKED
     watched.nothing_ran_in(task.repo)
+
+
+@pytest.mark.parametrize("state", ["added", "added and committed"])
+def test_a_worktree_the_index_lists_is_told_apart_with_no_git_of_the_hosts(
+    tmp_path, watched, monkeypatch, state
+):
+    """Telling the worktree's own folder from a repository reads three files (its .git, and the
+    entry's commondir and gitdir) and runs nothing: the gate, the views, g and the reply on such
+    a clone leave no call of the host's git in it."""
+    from test_blocked_clone import at_the_gate, worktree_inside
+    from test_gate import PLAN
+
+    from vivibox import panel
+    from vivibox.risky import Approvals
+    from vivibox.task import create_task
+
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(tmp_path / "config"))  # never your projects
+    source = make_repo(tmp_path / "source")
+    task = create_task(tmp_path / "tasks", "demo", "goal", PLAN)
+    task.set_base_commit(r.prepare(source, task.repo, task.id, task.meta))
+    Approvals(task.meta, task.repo).approve()
+    worktree_inside(task.repo, ".worktrees/feature", state)
+    watched.start()
+    sup, notes, pod = at_the_gate(task)
+    st = task.read_state()
+    assert st.state is State.CHECKPOINT_BLOCKED and pod.commands == []
+    assert notes[-1].startswith("verification could not run: the task added a worktree to its clone")
+    ui.view(task, st, True, 3)
+    ui.task_detail(task, lambda t: "0/1", 3, 5, ui.Style(False), True)
+    panel.detail(task, st, 3, running=False, pod=panel.PodView())
+    actions.verify_again(task)
+    sup.step()
+    actions.reply(task, "please go on")
+    assert "`git worktree remove`" in (task.meta / "handoff" / "verify-feedback.md").read_text()
+    sup.step()  # the writer's turn
+    sup.step()  # verified again: still blocked
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    watched.nothing_ran_in(task.repo)

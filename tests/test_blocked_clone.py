@@ -237,7 +237,9 @@ def test_the_writer_reads_how_to_remove_a_worktree(task, tmp_path):
         " and 1 more. That is a worktree of this repository, which the orchestrator's git does not go "
         "into. Remove it (`git worktree remove` with its path, which `git worktree list` names), "
         "then run `git worktree prune`, so that `.git/worktrees` is gone, and work in the "
-        "repository's own folder. Nothing is verified until then.\n"
+        "repository's own folder. Where the index lists the worktree's folder, take it out of the "
+        "index as well (`git rm -f --cached` with its path) and commit. Nothing is verified until "
+        "then.\n"
     )
 
 
@@ -589,3 +591,179 @@ def test_a_worktree_beside_what_no_ordinary_work_adds_is_refused_for_good_at_onc
         r.check_protection(task.repo, task.meta)
     assert not isinstance(e.value, r.Blocked) and "delete the task" in str(e.value)
     assert "read another repository: web/.git was added, a repository git would go into; " in str(e.value)
+
+
+# --- review round 2: a worktree made inside the clone, and listed by the index ----------------------
+
+LISTED = [
+    (path, state)
+    for path in (".worktrees/feature", "wt")
+    for state in ("not added", "added", "added and committed")
+]
+
+
+def worktree_inside(clone: Path, path: str, state: str) -> None:
+    """As a writer makes one where it can write, and as git add -A then lists it: the worktree's
+    folder a gitlink in the index, its .git a file that names the clone's own worktrees/<name>."""
+    git(clone, "worktree", "add", "-q", path)
+    (clone / path / "new.txt").write_text("work in the worktree\n")
+    if state != "not added":
+        git(clone, "-c", "advice.addEmbeddedRepo=false", "add", "-A")
+    if state == "added and committed":
+        git(clone, "commit", "-q", "-m", "Add everything")
+
+
+@pytest.mark.parametrize(("path", "state"), LISTED)
+def test_a_worktree_inside_the_clone_blocks_until_it_is_removed_listed_or_not(task, path, state):
+    """The ordinary way to one: the clone is the only place the writer writes. git lists the
+    worktree's folder as a submodule once it is added, and that is still the worktree: the two
+    commands the writer is told take it out, and the check passes."""
+    worktree_inside(task.repo, path, state)
+    said = blocked(task)
+    assert said.startswith("the task added a worktree to its clone and is blocked until it is out: reply, ")
+    assert "delete" not in said
+    listed = f"{path}/.git was added, the folder of a worktree, which the index lists" in said
+    assert listed == (state != "not added")
+    git(task.repo, "worktree", "remove", "--force", path)
+    git(task.repo, "worktree", "prune")
+    r.check_protection(task.repo, task.meta)
+
+
+@pytest.mark.parametrize("state", ["added", "added and committed"])
+def test_the_writer_reads_the_commands_for_a_worktree_the_index_lists(task, state):
+    worktree_inside(task.repo, ".worktrees/feature", state)
+    sup, notes, pod = at_the_gate(task)
+    st = task.read_state()
+    assert (st.state, st.paused, st.rounds) == (State.CHECKPOINT_BLOCKED, False, 0), "where a reply is taken"
+    fed = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert fed.startswith(
+        "# Verification failed\n\n- Verification could not run: .worktrees/feature/.git was added, the "
+        "folder of a worktree, which the index lists; .git/worktrees was added; "
+    )
+    assert fed.endswith(
+        " That is a worktree of this repository, which the orchestrator's git does not go into. Remove it "
+        "(`git worktree remove` with its path, which `git worktree list` names), then run `git worktree "
+        "prune`, so that `.git/worktrees` is gone, and work in the repository's own folder. Where the "
+        "index lists the worktree's folder, take it out of the index as well (`git rm -f --cached` with "
+        "its path) and commit. Nothing is verified until then.\n"
+    )
+    assert "`git rm -f --cached`" in fed and "a `.git` of its own" not in fed, "no repository's instruction"
+
+
+def test_the_commands_the_writer_is_told_leave_a_clone_the_verification_runs_on(task):
+    worktree_inside(task.repo, ".worktrees/feature", "added and committed")
+    blocked(task)
+    git(task.repo, "worktree", "remove", "--force", ".worktrees/feature")
+    git(task.repo, "worktree", "prune")
+    git(task.repo, "rm", "-q", "-f", "--cached", ".worktrees/feature")
+    git(task.repo, "commit", "-q", "-m", "Take the worktree's folder out")
+    r.check_protection(task.repo, task.meta)
+    assert gate.uncommitted(task.repo) == []
+
+
+def admin(clone: Path, name: str = "feature") -> Path:
+    return clone / ".git" / "worktrees" / name
+
+
+def rewrite(path: Path, text: str) -> None:
+    path.chmod(0o644)
+    path.write_text(text)
+
+
+# What is not the worktree git made, though a worktree was added beside it: each stays refused
+# for good. clone: the task's; all of them start from a worktree inside it that the index lists.
+HOSTILE = {
+    "its .git names a git dir elsewhere": lambda clone: rewrite(
+        clone / "wt" / ".git", "gitdir: /elsewhere/.git\n"
+    ),
+    "its .git names the clone's own git dir": lambda clone: rewrite(
+        clone / "wt" / ".git", f"gitdir: {clone}/.git\n"
+    ),
+    "its .git names a worktree that is not there": lambda clone: rewrite(
+        clone / "wt" / ".git", f"gitdir: {clone}/.git/worktrees/other\n"
+    ),
+    "its .git names something inside the worktree's entry": lambda clone: rewrite(
+        clone / "wt" / ".git", f"gitdir: {clone}/.git/worktrees/wt/logs\n"
+    ),
+    "its .git leaves through ..": lambda clone: rewrite(
+        clone / "wt" / ".git", f"gitdir: {clone}/.git/worktrees/wt/../../../elsewhere\n"
+    ),
+    "its .git has a second line": lambda clone: rewrite(
+        clone / "wt" / ".git", f"gitdir: {clone}/.git/worktrees/wt\ngitdir: /elsewhere\n"
+    ),
+    "its .git is a link": lambda clone: (
+        (clone / "wt" / ".git").rename(clone / "kept"),
+        (clone / "wt" / ".git").symlink_to("../kept"),
+    ),
+    "the entry's commondir is not git's own": lambda clone: rewrite(
+        admin(clone, "wt") / "commondir", "/elsewhere/.git\n"
+    ),
+    "the entry's gitdir does not lead back": lambda clone: rewrite(
+        admin(clone, "wt") / "gitdir", "/elsewhere/wt/.git\n"
+    ),
+    "the entry has settings of its own": lambda clone: (admin(clone, "wt") / "config.worktree").write_text(
+        "[core]\n\tfsmonitor = /elsewhere/run\n"
+    ),
+    "another gitlink beside it names a git dir elsewhere": gitfile_elsewhere,
+}
+
+
+@pytest.mark.parametrize("what", list(HOSTILE))
+def test_a_worktree_beside_what_git_did_not_write_for_it_is_refused_for_good(task, what):
+    worktree_inside(task.repo, "wt", "added")
+    blocked(task)  # as git left it: repairable
+    HOSTILE[what](task.repo)
+    with pytest.raises(r.RepoError) as refused:
+        r.check_protection(task.repo, task.meta)
+    assert not isinstance(refused.value, r.Blocked), what
+    assert "delete the task" in str(refused.value)
+
+
+def test_what_a_file_said_when_the_clone_was_looked_at_decides_not_what_it_says_later(task, monkeypatch):
+    """The entry's files are hashed when the clone's git dirs are looked at, and read again to
+    tell a worktree's own folder: a file the writer swaps between the two is not what was
+    hashed, and the stricter class wins, whichever way it was swapped."""
+    from vivibox import protection
+
+    worktree_inside(task.repo, "wt", "added")
+    commondir = admin(task.repo, "wt") / "commondir"
+    real = protection.fingerprint
+
+    def swap_after(to: str):
+        def looked(root, files):
+            found = real(root, files)
+            commondir.write_text(to)  # after the look that hashed it
+            return found
+
+        return looked
+
+    commondir.write_text("/elsewhere/.git\n")  # hostile when hashed, git's own when read again
+    monkeypatch.setattr(protection, "fingerprint", swap_after("../..\n"))
+    with pytest.raises(r.RepoError) as refused:
+        r.check_protection(task.repo, task.meta)
+    assert not isinstance(refused.value, r.Blocked), "the hash is of what was hostile"
+    commondir.write_text("../..\n")  # git's own when hashed, hostile when read again
+    monkeypatch.setattr(protection, "fingerprint", swap_after("/elsewhere/.git\n"))
+    with pytest.raises(r.RepoError) as refused:
+        r.check_protection(task.repo, task.meta)
+    assert not isinstance(refused.value, r.Blocked)
+
+
+def test_a_git_file_swapped_while_it_is_classified_is_not_taken_for_a_worktrees(task, monkeypatch):
+    """Read once to decide and once more to hold the decision: not the same twice, not repairable."""
+    from vivibox import protection
+
+    worktree_inside(task.repo, "wt", "added")
+    real, reads = protection._read, []
+
+    def swapping(root, rel, limit):
+        data = real(root, rel, limit)
+        if rel == "wt/.git":
+            reads.append(rel)
+            rewrite(task.repo / "wt" / ".git", "gitdir: /elsewhere/.git\n")  # after it was read as git's own
+        return data
+
+    monkeypatch.setattr(protection, "_read", swapping)
+    with pytest.raises(r.RepoError) as refused:
+        r.check_protection(task.repo, task.meta)
+    assert reads and not isinstance(refused.value, r.Blocked)

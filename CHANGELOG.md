@@ -303,6 +303,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   full and the rest counted, and leaves the task as it was. Then you accept again. It holds
   for every way of accepting: `vivibox accept`, `--branch`, the view's `a` (which says it
   briefly and names the command that says it whole), and a box's work.
+- Accepting work also refuses while the history of a submodule commit it keeps points a
+  submodule of its own at a commit that no repository of yours keeps: an earlier commit of the
+  submodule that a later one moved back stays in your submodule, and the commit it points at
+  went with the task. The submodule's new history is listed once in your repository (since the
+  commit the task started from; for a submodule the work adds, what no branch of a remote in
+  your copy reaches); the refusal names the commit of that history and the commit it needs,
+  with the same commands, and a history that cannot be listed in the check's time is refused.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

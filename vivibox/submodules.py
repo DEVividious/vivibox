@@ -14,6 +14,14 @@ reachable from HEAD or a ref of the submodule as you have it checked out, or as 
 kept it (.git/modules/<name>): a commit that is there as an object alone goes with git's next
 clean-up. Asked of your repositories alone, never of the task's clone, by git that reads
 objects, fetches nothing and follows no include of a .gitmodules, within a time limit.
+
+A submodule commit you keep brings its history with it: the commits between the one the task
+started from and the one the work keeps stay in your submodule, and one of them may point a
+submodule of its own at a commit the last one no longer points at. So that history is listed,
+once, and each commit of it that adds or moves a pointer is looked at as the last one is. For
+a submodule the work adds there is no commit to count from: the history looked at is the one
+no branch of a remote in your copy of it reaches (refs/remotes), since what a remote of yours
+has was not written in the task's clone alone. A history that cannot be listed is refused.
 """
 
 from __future__ import annotations
@@ -35,6 +43,11 @@ DEEPEST = 8
 SECONDS = repo.CLONE_TIMEOUT
 # Submodules a refusal says in full; the rest are counted.
 LISTED = 10
+# The listing of a history: each commit's id, then what it changed, a line for a path with
+# its modes. A merge: what differs from every parent (-c). Each setting of yours that changes
+# what git log prints is said here, so that none hides a pointer or adds a line.
+HISTORY = ("log", "--format=%H", "--raw", "-r", "-c", "--root", "--no-renames")
+HISTORY += ("--ignore-submodules=none", "--no-show-signature", "--no-color")
 # git here fetches nothing: a submodule of yours that is a partial clone would otherwise go to
 # its remote for a commit it lacks.
 NOT_LAZY = {"GIT_NO_LAZY_FETCH": "1"}
@@ -59,7 +72,7 @@ class Unkept(gate.GateError):
 
 
 class Late(Exception):
-    """The check ran out of its time."""
+    """The check ran out of its time. Its text: what it was reading then, where that is known."""
 
 
 @dataclass(frozen=True)
@@ -100,6 +113,31 @@ class Repository:
                 found[path.decode()] = oid
             except UnicodeDecodeError:
                 found[path.decode("utf-8", "backslashreplace")] = f"not text: {oid}"
+        return found
+
+    def history(self, before: str, commit: str) -> list[str] | None:
+        """The commits of commit's history that add or move a submodule pointer (a merge: to
+        where no parent of it points), commit itself left out: those since before, or, with
+        no before, those no branch of a remote here reaches. None when git cannot list them,
+        or prints what is no such listing. One git, whatever the history holds."""
+        since = [f"{before}..{commit}"] if before else [commit, "--not", "--remotes"]
+        code, listed = self.git(*HISTORY, *since, "--")
+        if code != 0:
+            return None
+        found, last = [], ""
+        for line in filter(None, listed.split(b"\n")):
+            parents = len(line) - len(line.lstrip(b":"))
+            if not parents:
+                last = line.decode("ascii", "replace")
+                if not COMMIT.fullmatch(last):
+                    return None
+                continue
+            # :<mode of each parent> <mode> <id of each parent> <id> <what changed>, a tab, the path
+            fields = line[parents:].split(b"\t")[0].split()
+            if not last or len(fields) != 2 * parents + 3:
+                return None
+            if fields[parents] == GITLINK.encode() and last != commit and last not in found:
+                found.append(last)
         return found
 
     def modules(self, commit: str) -> dict[str, tuple[str, str]]:
@@ -176,7 +214,8 @@ class Kept:
     root; held: your repository of the submodule, where there is one; above: the repository it
     is a submodule of, and inside: its path in that one; url: for one the work adds, where its
     .gitmodules says it comes from, when that is an address for a command; why: for one
-    vivibox could not check."""
+    vivibox could not check; via: for one that only a submodule's history needs, the path of
+    that submodule and the commit of its history that needs it."""
 
     path: str
     commit: str
@@ -186,6 +225,7 @@ class Kept:
     inside: str
     url: str = ""
     why: str = ""
+    via: tuple[str, str] | None = None
 
 
 @dataclass
@@ -197,14 +237,24 @@ class Found:
 
 
 def look(
-    yours: Repository, before: str, afters: list[str], found: Found, prefix: str = "", depth: int = 0
+    yours: Repository,
+    before: str,
+    afters: list[str],
+    found: Found,
+    prefix: str = "",
+    depth: int = 0,
+    past: tuple[str, ...] = (),
+    via: tuple[str, str] | None = None,
 ) -> None:
     """Adds to found the submodule commits the commits `afters` add or move, compared with
     `before` ("" for nothing to compare with), that no repository of yours keeps; and, where
-    you keep one, those its own commit adds or moves."""
+    you keep one, those its own commit and the commits of its new history add or move. past:
+    the commits of this repository's own new history to look at as `afters` are; via: what
+    Kept.via says of a commit found under `afters`."""
     was = (yours.gitlinks(before) if before else None) or {}
     names = yours.modules(before) if before and was else {}
-    for after in afters:
+    for after in [*afters, *past]:
+        via = (prefix.rstrip("/"), after) if after in past else via
         now, named = yours.gitlinks(after), None  # named: what after's .gitmodules says, read once
         if now is None or depth > DEEPEST:
             deep = f"submodules more than {DEEPEST} deep are not followed" if now is not None else ""
@@ -216,24 +266,38 @@ def look(
                 continue
             found.seen.add((path, commit))
             if not plain(inside) or not COMMIT.fullmatch(commit):
-                found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside))
+                found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside, via=via))
             elif (held := yours.submodule(inside, names.get(inside, ("", ""))[0])) is None and inside in was:
-                found.unkept.append(Kept(path, commit, NOT_CHECKED_OUT, None, yours, inside))
+                found.unkept.append(Kept(path, commit, NOT_CHECKED_OUT, None, yours, inside, via=via))
             elif held is None:
                 named = yours.modules(after) if named is None else named
                 url = named.get(inside, ("", ""))[1]
                 url = url if ADDRESS.fullmatch(url) else ""
-                found.unkept.append(Kept(path, commit, ADDED, None, yours, inside, url))
+                found.unkept.append(Kept(path, commit, ADDED, None, yours, inside, url, via=via))
             elif state := held.keeps(commit):
                 kind = state if held.tree else NOT_CHECKED_OUT
-                found.unkept.append(Kept(path, commit, kind, held, yours, inside))
+                found.unkept.append(Kept(path, commit, kind, held, yours, inside, via=via))
+            elif (more := _history(held, was.get(inside, ""), commit, path, depth)) is None:
+                since = f" since {was[inside]}" if inside in was else ""
+                why = f"vivibox could not list the commits of its history in your repository{since}"
+                found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside, why=why, via=via))
             else:
-                look(held, was.get(inside, ""), [commit], found, path + "/", depth + 1)
+                look(held, was.get(inside, ""), [commit], found, path + "/", depth + 1, tuple(more), via)
+
+
+def _history(held: Repository, before: str, commit: str, path: str, depth: int) -> list[str] | None:
+    """held.history, for the submodule at path that look found at depth; none is listed for
+    one too deep to be followed, which look refuses. Out of time, it says what was read."""
+    try:
+        return held.history(before, commit) if depth < DEEPEST else []
+    except Late:
+        raise Late(f"reading the history of {display.name(path)}") from None
 
 
 def check(task_id: str, source: Path, clone: Path, base: str, commit: str, history: bool = False) -> None:
     """Refuses (Unkept) to accept commit, the task's work brought to your repository at source,
-    while a submodule commit it adds or moves since base is kept by no repository of yours.
+    while a submodule commit it adds or moves since base is kept by no repository of yours, or
+    one that the new history of a submodule commit you keep adds or moves.
     history: the accepting keeps every commit of the work (a branch), not its last tree alone,
     so each of them is looked at. Nothing is changed, here or in the task. clone: the task's,
     named in what to do, never read."""
@@ -248,8 +312,9 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
             code, listed = yours.git("rev-list", f"{base}..{commit}")
             kept = _text(listed).split() if code == 0 else []
         look(yours, base, kept or [commit], found)
-    except Late:
+    except Late as reading:
         late = f"vivibox did not finish checking the work's submodules in {SECONDS:g} s"
+        late += f" ({reading})" if str(reading) else ""
     if found.unkept or late:
         raise Unkept(
             briefly(task_id, found.unkept, late), refusal(task_id, source, clone, found.unkept, late)
@@ -279,6 +344,9 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
     quoted = lambda path: shlex.quote(str(path))  # noqa: E731
     for one in found[:LISTED]:
         named = f"{display.name(one.path)} at {one.commit}"
+        if one.via:  # not where the work leaves the submodule: said, with the commit that needs it
+            above = display.name(one.via[0])
+            named += f" (needed by {above} at {one.via[1]}, in the history of {above} that the work keeps)"
         if one.kind == UNCHECKED:
             why = one.why or "vivibox could not check this submodule"
             lines.append(
@@ -295,7 +363,8 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
             f"GIT_NO_LAZY_FETCH=1 git -C {quoted(mine)} -c protocol.version=2 fetch --no-tags "
             f"--no-recurse-submodules {quoted(theirs)} {one.commit}:{ref}"
         )
-        keeps = f"{ref} keeps it there, and may be deleted once the submodule is on that commit or "
+        keeps = f"{ref} keeps it there, and may be deleted once "
+        keeps += "" if one.via else "the submodule is on that commit or "
         keeps += "its remote has it"
         if one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.

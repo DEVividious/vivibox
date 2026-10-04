@@ -224,7 +224,12 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   have it (`git -C <submodule> show <commit>`). The commit is then yours alone: push it to the
   submodule's remote for others to have it, and delete the ref when it is there. Accepting
   with `--branch`, or where your branch has moved since the task started, keeps every commit
-  of the work, so each commit's submodules are checked, not the last one's alone.
+  of the work, so each commit's submodules are checked, not the last one's alone. A submodule
+  commit you keep brings its history too: where an earlier commit of the submodule pointed a
+  submodule of its own at a commit, and a later one moved it back, that commit is checked as
+  well, and the refusal names the commit of the history that needs it. The history checked is
+  the submodule's since the commit the task started from; for a submodule the work adds, the
+  part of it that no branch of a remote in your copy reaches.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.
 
 An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it

@@ -224,9 +224,12 @@ Accepting work is refused while a submodule commit it keeps is kept by no reposi
 (accepting deletes the task, whose clone may hold the only copy). On the command line the
 refusal names each submodule and the whole commit id, then the commands that keep the commit,
 each on a line of its own, whole, with the folders in full; ten submodules at most, the rest
-counted. The view's notification wraps a long line and is gone in seconds, so there the
-refusal is its short form: what was refused, which submodules by path (three, the rest
-counted), why, and the one command that says the whole in a terminal. It fits 80 by 24.
+counted. A commit that the work no longer points at, and that the history of a submodule it
+keeps still does, is refused the same, and named with what needs it: the submodule and the
+commit of its history that points there. The view's notification wraps a long line and is
+gone in seconds, so there the refusal is its short form: what was refused, which submodules
+by path (three, the rest counted), why, and the one command that says the whole in a
+terminal. It fits 80 by 24.
 
 Every error has three parts, in this order:
 

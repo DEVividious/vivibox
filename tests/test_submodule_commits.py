@@ -98,7 +98,8 @@ def at_final(task, project, risky: bool = False) -> None:
 
 def everything(task, project) -> dict:
     """The task and your repository as they are: every file of the task's folder (its state, its
-    events, its clone, the review copy), your refs, your checkout and your submodules' commits."""
+    events, its clone, the review copy), your refs, your checkout, your submodules' commits and
+    their refs."""
     source = project.source
     return {
         "task": snapshot(task.root),
@@ -106,6 +107,7 @@ def everything(task, project) -> dict:
         "head": git(source, "rev-parse", "HEAD"),
         "status": git(source, "status", "--porcelain"),
         "submodules": git(source, "submodule", "status", "--recursive"),
+        "kept": git(source, "submodule", "foreach", "--recursive", "git for-each-ref"),
         "history": actions.history(),
     }
 
@@ -491,6 +493,331 @@ def test_a_commit_an_earlier_commit_of_the_work_pointed_at_is_checked_where_it_i
     as_told(commands(said)[1])
     actions.finish(task, project.demo, branch_only=kept == "as a branch")
     assert not task.root.exists()
+
+
+def moved_and_back(task, top: str = "lib", name: str = "deep", to_remotes: bool = False) -> SimpleNamespace:
+    """In the task's clone, the submodule `name` of `top` moved and moved back, each time with a
+    commit of top: below, the commit it was moved to (the writer's own, or the newest of its
+    remote); then, the commit of top that points at below; last, the one that points where it
+    stood, and where top is left."""
+    above = task.repo / top
+    start = git(above / name, "rev-parse", "HEAD")
+    below = (
+        moved_to_remotes(task, f"{top}/{name}")
+        if to_remotes
+        else written_in(above / name, "the writer's, below\n")
+    )
+    git(above, "add", name)
+    then = written_in(above, "pointing below\n")
+    git(above / name, "checkout", "-q", start)
+    git(above, "add", name)
+    return SimpleNamespace(below=below, then=then, last=written_in(above, "and back\n"))
+
+
+def kept_from(theirs: Path, mine: Path, commit: str) -> None:
+    """You keep a commit of the task's clone in your submodule, under a branch of yours."""
+    git(mine, "fetch", "-q", "--no-tags", "--no-recurse-submodules", str(theirs), f"{commit}:refs/heads/kept")
+
+
+def needed_by(path: str, commit: str) -> str:
+    return f" (needed by {path} at {commit}, in the history of {path} that the work keeps)"
+
+
+@pytest.mark.parametrize("kept", ["squashed", "as a branch", "squashed on a branch of yours that moved"])
+def test_a_commit_only_a_submodules_history_points_at_is_kept_before_the_task_goes(project, kept):
+    """In lib, the writer's first commit points lib/deep at a commit the writer made there, and
+    its second moves lib/deep back; the work leaves lib on the second. You keep that one: the
+    first stays in your lib as its parent, and the commit it points at is in the task's clone
+    alone. Refused, naming lib's history, the commit of it, lib/deep and the commit there, with
+    nothing changed; the command that fetches from the task's clone is run; accepted, the task
+    gone; and after git's clean-up in both, your lib checked out at its first commit gets what
+    it points at from git submodule update."""
+    source, lib = project.source, project.source / "lib"
+    how = ("accept", "--branch") if kept == "as a branch" else ("accept",)
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    if kept == "squashed on a branch of yours that moved":
+        (source / "yours.txt").write_text("since the task started\n")
+        git(source, "add", "yours.txt")
+        git(source, "commit", "-qm", "Yours, meanwhile")
+    said = refused(task, project, how)
+    assert f"lib at {made.last} is not in your submodule." in said and "lib/deep" not in said
+    as_told(commands(said)[1])  # as the refusal says: the last commit of lib, under a ref
+    said = refused(task, project, how)
+    assert said.startswith(
+        f"{task.id} was not accepted: its work keeps a submodule commit that no repository of yours "
+        "keeps. The task's clone may hold the only copy, and accepting deletes the task.\n"
+    )
+    assert f"lib/deep at {made.below}{needed_by('lib', made.then)} is not in your submodule." in said
+    assert f"({ref_of(task, made.below)} keeps it there, and may be deleted once its remote has it)" in said
+    assert commands(said) == [
+        f"git -C {lib / 'deep'} fetch --no-recurse-submodules",
+        from_task(task, lib / "deep", task.repo / "lib" / "deep", made.below),
+    ]
+    assert said.endswith("\nThen accept the work again.")
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo, branch_only=kept == "as a branch")
+    assert not task.root.exists(), "accepted, and the task gone with its clone"
+    cleaned_up(lib)
+    cleaned_up(lib / "deep")
+    git(lib, "checkout", "-q", made.then)
+    git(lib, "submodule", "update")
+    assert git(lib / "deep", "rev-parse", "HEAD") == made.below
+    assert (lib / "deep" / "README.md").read_text() == "the writer's, below\n"
+
+
+def test_a_history_that_moves_no_pointer_costs_one_listing_and_no_submodule_none(project, monkeypatch):
+    """Two commits of the writer's in lib, neither touching lib/deep, and you keep the last:
+    accepted, for one listing of lib's new history and no look at its first commit. Work that
+    touches no submodule is checked by the five gits it always was."""
+    task = actions.create("demo", "Goal")
+    first, last = written_in(task.repo / "lib", "one\n"), written_in(task.repo / "lib", "two\n")
+    start = git(project.source / "lib", "rev-parse", "HEAD")
+    at_final(task, project)
+    kept_from(task.repo / "lib", project.source / "lib", last)
+    plain = actions.create("demo", "No submodule in it")
+    (plain.repo / "calc.py").write_text("x = 1\n")
+    at_final(plain, project)
+    ran, real = [], repo.run_git
+    limits = []
+    monkeypatch.setattr(
+        repo, "run_git", lambda args, **how: ran.append(args) or limits.append(how) or real(args, **how)
+    )
+    work = git(task.repo, "rev-parse", "HEAD")
+    submodules.check(task.id, project.source, task.repo, task.read_state().base_commit, work)
+    listings = [args for args in ran if "log" in args]
+    assert len(listings) == 1 and f"{start}..{last}" in listings[0], listings
+    assert not [args for args in ran if first in " ".join(args)], "a commit that moves no pointer was read"
+    assert not [args for args in ran if str(task.repo) in " ".join(args)], "asked of the task's clone"
+    for how in limits:  # the listing as every other git of the check: nothing fetched, and a time limit
+        assert how["env"] == {"GIT_NO_LAZY_FETCH": "1"} and 0 < how["timeout"] <= submodules.SECONDS
+    ran.clear()
+    work = git(plain.repo, "rev-parse", "HEAD")
+    submodules.check(plain.id, project.source, plain.repo, plain.read_state().base_commit, work)
+    assert len(ran) == 5 and not [args for args in ran if "log" in args], ran
+
+
+def test_a_commit_the_history_points_at_that_you_keep_is_accepted(project):
+    """lib/deep moved to the newest commit of its remote, which you have fetched, and back."""
+    task = actions.create("demo", "Goal")
+    newer_at(project.deep)
+    git(project.source / "lib" / "deep", "fetch", "-q")
+    made = moved_and_back(task, to_remotes=True)
+    at_final(task, project)
+    kept_from(task.repo / "lib", project.source / "lib", made.last)
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+def test_a_submodule_the_history_points_into_that_you_have_not_checked_out_is_refused(project):
+    """Your lib has no copy of lib/deep, checked out or kept: refused, with the command that
+    checks it out before the one that fetches; run, they make the accepting pass."""
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    kept_from(task.repo / "lib", lib, made.last)
+    git(lib, "submodule", "deinit", "-f", "deep")
+    subprocess.run(["rm", "-rf", git(lib, "rev-parse", "--absolute-git-dir") + "/modules/deep"], check=True)
+    said = refused(task, project)
+    named = f"lib/deep at {made.below}{needed_by('lib', made.then)}"
+    assert f"{named}: your checkout has no copy of this submodule." in said
+    assert commands(said) == [
+        f"git -C {lib} submodule update --init -- deep",
+        f"git -C {lib / 'deep'} fetch --no-recurse-submodules",
+        from_task(task, lib / "deep", task.repo / "lib" / "deep", made.below),
+    ]
+    as_told(commands(said)[0])
+    as_told(commands(said)[2])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+@pytest.mark.parametrize("listing", ["takes longer than the check has", "fails"])
+def test_a_history_vivibox_cannot_list_is_refused_and_said(project, monkeypatch, listing):
+    """You keep every commit, the one lib's history points at too: only the listing of that
+    history is in the way. One that outlasts the check's time, or that git refuses, is no
+    history without pointers: refused, saying which."""
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    kept_from(task.repo / "lib", project.source / "lib", made.last)
+    kept_from(task.repo / "lib" / "deep", project.source / "lib" / "deep", made.below)
+    real = repo.run_git
+
+    def run_git(args, **how):
+        if "log" not in args:
+            return real(args, **how)
+        if listing == "fails":
+            return subprocess.CompletedProcess(args, 128, b"", b"")
+        raise subprocess.TimeoutExpired(args, how["timeout"])
+
+    monkeypatch.setattr(repo, "run_git", run_git)
+    said = refused(task, project)
+    if listing == "fails":
+        start = git(project.source / "lib", "rev-parse", "HEAD")
+        why = f"vivibox could not list the commits of its history in your repository since {start}"
+        assert f"lib at {made.last}: {why}, so the work is not accepted with it" in said
+    else:
+        late = f"vivibox did not finish checking the work's submodules in {submodules.SECONDS:g} s"
+        assert f"{late} (reading the history of lib): there may be more." in said
+    assert commands(said) == [] and "Then accept the work again" not in said
+    monkeypatch.setattr(repo, "run_git", real)
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+def test_your_settings_for_what_a_log_shows_hide_no_pointer_from_the_check(project):
+    """Settings of your lib that hide submodules from a diff, or add lines to a log, change
+    what git log prints for you; the check's listing overrides them."""
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    kept_from(task.repo / "lib", lib, made.last)
+    for setting in ("diff.ignoreSubmodules=all", "log.showSignature=true", "log.showRoot=false",
+                    "color.ui=always", "core.quotePath=false", "log.diffMerges=first-parent"):  # fmt: skip
+        git(lib, "config", *setting.split("="))
+    assert f"lib/deep at {made.below}{needed_by('lib', made.then)}" in refused(task, project)
+
+
+@pytest.mark.parametrize("history", ["its remote's", "not its remote's"])
+def test_the_history_of_a_submodule_the_work_adds_is_checked_where_no_remote_of_yours_has_it(
+    project, env, history
+):
+    """The work adds the submodule extra, which you clone as the refusal says. There is no
+    commit of it the task started from to count its new history from, so the commits counted
+    are those no branch of a remote in your extra reaches: only those can be a writer's alone.
+    Here extra's history points extra/inner at a commit you do not keep, and moves it back.
+    Where that history is the remote's, the remote answers for it: accepted. Where you have it
+    under a ref of your own and no remote's branch reaches it: refused, until you keep the
+    commit it points at."""
+    source, inner, extra = project.source, make_repo(env / "inner"), make_repo(env / "extra")
+    git(extra, "submodule", "add", "-q", str(inner), "inner")
+    git(extra, "commit", "-qm", "A library of its own")
+    written = env / "written"  # where extra's further history was written
+    git(env, "clone", "-q", "--recurse-submodules", str(extra), str(written))
+    made = moved_and_back(SimpleNamespace(repo=env), top="written", name="inner")
+    if history == "its remote's":
+        git(extra, "pull", "-q", "--no-recurse-submodules", str(written), "HEAD")
+    git(env, "clone", "-q", "--recurse-submodules", str(extra), str(source / "extra"))
+    if history != "its remote's":
+        git(
+            source / "extra",
+            "fetch",
+            "-q",
+            "--no-recurse-submodules",
+            str(written),
+            f"{made.last}:refs/yours",
+        )
+    task = actions.create("demo", "Goal")
+    added(task, "extra", made.last, str(extra))
+    at_final(task, project, risky=True)
+    if history != "its remote's":
+        said = refused(task, project)
+        named = f"extra/inner at {made.below}{needed_by('extra', made.then)}"
+        assert f"{named} is not in your submodule." in said and said.count(" is not in your ") == 1
+        kept_from(written / "inner", source / "extra" / "inner", made.below)
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+    there = subprocess.run(["git", "-C", str(source / "extra" / "inner"), "cat-file", "-e", made.below])
+    assert (there.returncode == 0) == (history != "its remote's"), (
+        "accepted without it only where vouched for"
+    )
+
+
+def test_the_history_of_a_commit_the_history_points_at_is_checked_too(project, env):
+    """Three deep: top, top/s, top/s/s. top's history points top/s at a commit whose own
+    history points top/s/s at a commit of the writer's; both moved back. Each is refused in
+    turn as you keep the one above it, by its path and with the commit that needs it."""
+    source = project.source
+    chain = [make_repo(env / f"level-{n}") for n in range(3)]
+    for above, below in ((chain[1], chain[2]), (chain[0], chain[1])):
+        git(above, "submodule", "add", "-q", str(below), "s")
+        git(above, "commit", "-qm", "One below")
+    git(source, "submodule", "add", "-q", str(chain[0]), "top")
+    git(source, "submodule", "update", "-q", "--init", "--recursive")
+    git(source, "commit", "-qm", "Three deep")
+    task = actions.create("demo", "Goal")
+    top, middle = task.repo / "top", task.repo / "top" / "s"
+    start = git(middle, "rev-parse", "HEAD")
+    lower = moved_and_back(task, top="top/s", name="s")
+    git(top, "add", "s")
+    then = written_in(top, "pointing at the middle's new history\n")
+    git(middle, "checkout", "-q", start)
+    git(top, "add", "s")
+    last = written_in(top, "and back\n")
+    at_final(task, project)
+    kept_from(top, source / "top", last)
+    said = refused(task, project)
+    assert f"top/s at {lower.last}{needed_by('top', then)} is not in your submodule." in said
+    assert "top/s/s" not in said
+    as_told(commands(said)[1])
+    said = refused(task, project)
+    assert f"top/s/s at {lower.below}{needed_by('top/s', lower.then)} is not in your submodule." in said
+    assert commands(said)[1] == from_task(task, source / "top/s/s", task.repo / "top/s/s", lower.below)
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+    for mine in (source / "top", source / "top/s", source / "top/s/s"):
+        cleaned_up(mine)
+    git(source / "top", "checkout", "-q", then)
+    git(source / "top", "submodule", "update")
+    git(source / "top/s", "checkout", "-q", lower.then)
+    git(source / "top/s", "submodule", "update")
+    assert git(source / "top/s/s", "rev-parse", "HEAD") == lower.below
+
+
+def test_the_listing_names_the_commits_that_move_a_pointer_and_no_other(env):
+    """A history with a commit that adds a pointer, one that changes a file whose name is no
+    text, a merge that carries the pointer of one side, a merge that moves it to a commit of
+    its own, and a commit that removes it: the first and the second merge are listed. With
+    nothing to count from, a remote's branch that reaches a commit takes it out; a start that
+    is no commit of the repository is said, not taken for a history without pointers."""
+    there = make_repo(env / "there")
+    start, other = git(there, "rev-parse", "HEAD"), "1" * 40
+    git(there, "config", "core.quotePath", "false")
+
+    def committed(*args: str) -> str:
+        git(there, *args)
+        return git(there, "rev-parse", "HEAD")
+
+    git(there, "update-index", "--add", "--cacheinfo", f"160000,{start},sub")
+    adds = committed("commit", "-qm", "A pointer")
+    blob = git(there, "hash-object", "-w", "README.md")
+    git(there, "update-index", "-z", "--index-info", input=f"100644 {blob}".encode() + b"\tcaf\xe9\0")
+    committed("commit", "-qm", "A name that is no text")
+    git(there, "checkout", "-q", "-b", "side", start)
+    (there / "side.txt").write_text("side\n")
+    git(there, "add", "side.txt")
+    committed("commit", "-qm", "A side")
+    git(there, "checkout", "-q", "main")
+    carries = committed("merge", "-q", "--no-edit", "side")
+    git(there, "checkout", "-q", "-b", "more", start)
+    (there / "more.txt").write_text("more\n")
+    git(there, "add", "more.txt")
+    committed("commit", "-qm", "More")
+    git(there, "checkout", "-q", "main")
+    git(there, "merge", "-q", "--no-commit", "more")
+    git(there, "update-index", "--cacheinfo", f"160000,{other},sub")
+    moves = committed("commit", "-qm", "A merge that moves the pointer")
+    git(there, "update-index", "--force-remove", "sub")
+    last = committed("commit", "-qm", "No pointer")
+    yours = submodules.at(there, soon())
+    assert yours.history(start, last) == [moves, adds] == yours.history("", last)
+    assert yours.history(carries, last) == [moves] and yours.history(last, last) == []
+    git(there, "update-ref", "refs/remotes/origin/main", carries)
+    assert yours.history("", last) == [moves]
+    git(there, "update-ref", "refs/remotes/origin/main", last)
+    assert yours.history("", last) == []
+    assert yours.history("0" * 40, last) is None and yours.history(start, "0" * 40) is None
+    # A first commit that has a pointer adds it, whatever log.showRoot says of first commits.
+    git(there, "config", "log.showRoot", "false")
+    tree = git(there, "mktree", input=f"160000 commit {start}\tsub\n".encode())
+    first = git(there, "commit-tree", tree, "-m", "A first commit with a pointer")
+    tree = git(there, "mktree", input=f"160000 commit {start}\tsub\n100644 blob {blob}\tfile\n".encode())
+    assert yours.history("", git(there, "commit-tree", tree, "-p", first, "-m", "And a file")) == [first]
 
 
 def test_a_refusal_says_ten_submodules_in_full_and_counts_the_rest(project):

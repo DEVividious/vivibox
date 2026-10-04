@@ -5,7 +5,7 @@ feedback is written; tests/test_prompt_rules.py holds every failure the gate rec
 
 from __future__ import annotations
 
-from . import clone_read, handoff, risky
+from . import clone_read, handoff, protection, repo, risky
 from .gate import DEBUG_OUTPUT, MAX_LISTED, SELECTS_TESTS, GateResult
 from .task import Task
 
@@ -17,11 +17,40 @@ def _listed(items: list[str], line: str) -> list[str]:
     return shown
 
 
+# How the writer takes out what blocks its clone (repo.Blocked), by what it added. Never a
+# command line made of a name: the names are the agent's, and are quoted before these as text.
+TAKE_OUT = {
+    protection.REPOSITORY: (
+        "A folder named there has a `.git` of its own and the index lists it as a submodule, which "
+        "the orchestrator's git does not go into. Take the folder out of the index (`git rm -f "
+        "--cached` with its path, which leaves its files), delete the `.git` inside it, then add its "
+        "files as ordinary files and commit; or delete the folder, when the task does not need it."
+    ),
+    protection.WORKTREE: (
+        "That is a worktree of this repository, which the orchestrator's git does not go into. "
+        "Remove it (`git worktree remove` with its path, which `git worktree list` names), then run "
+        "`git worktree prune`, so that `.git/worktrees` is gone, and work in the repository's own "
+        "folder."
+    ),
+}
+
+
+def blocked(found: list[protection.Added]) -> str:
+    """For the writer, of a clone its own additions block: which, quoted, and how each kind is
+    taken out; never what you are told to do."""
+    how = " ".join(TAKE_OUT[what] for what in sorted({change.what for change in found}))
+    return f"- Verification could not run: {repo.named_changes(found)}. {how} Nothing is verified until then."
+
+
 def feedback(result: GateResult) -> str:
     """What the agent reads in handoff/ before the next iteration: each failure with the lines
     that say why, so the log is there to consult, not to read through."""
     parts = ["# Verification failed\n"]
-    if said := "; ".join(filter(None, [risky.stop_for_the_writer(result.risky_stopped), result.environment])):
+    if found := getattr(result.environment, "found", None):
+        parts.append(blocked(found))
+    elif said := "; ".join(
+        filter(None, [risky.stop_for_the_writer(result.risky_stopped), result.environment])
+    ):
         parts.append(
             f"- Verification could not run: {said}. That is outside the code; the user"
             " has been told and will run the verification again. Do not change code for it."

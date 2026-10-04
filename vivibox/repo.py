@@ -43,6 +43,29 @@ class RepoError(Exception):
     pass
 
 
+class Blocked(RepoError):
+    """The task added to its clone what git on the host goes into (protection.Added): no git
+    runs there until it is gone, which is the task's to see to; found: those additions."""
+
+    def __init__(self, said: str, found: list[protection.Added]):
+        super().__init__(said)
+        self.found = found
+
+    @property
+    def why(self) -> BlockedBy:
+        """What it says, as a verification's reason, with the additions for the writer's feedback."""
+        why = BlockedBy(self)
+        why.found = self.found
+        return why
+
+
+class BlockedBy(str):
+    """Why a verification could not run, as you read it, and the additions that block the clone
+    (found), of which the writer is told how each is taken out (feedback.blocked)."""
+
+    found: list[protection.Added] = []  # noqa: RUF012 (set on each; never appended to)
+
+
 class GitTimeout(RepoError):
     """git did not answer in time in the task's clone: what asked stops there, and never goes on as
     if git had answered."""
@@ -440,13 +463,44 @@ def check_protection(repo: Path, meta: Path) -> None:
     except (OSError, ValueError) as e:  # the clone gone, or a record vivibox cannot read
         raise RepoError(f"vivibox could not check the task's clone, so it runs no git in it: {e}") from None
     if changed:
-        more = f" and {len(changed) - 3} more" if len(changed) > 3 else ""
+        named = named_changes(changed)
+        if all(isinstance(change, protection.Added) for change in changed):
+            # What ordinary work adds: the task is blocked while it is there, not lost.
+            what = " and ".join(sorted({change.what for change in changed}))
+            raise Blocked(
+                f"the task added {what} to its clone, and git on your machine would run what its "
+                f"settings say: {named}. vivibox runs no git in the clone while it is there, so the "
+                f"work is neither verified nor brought back until then: {undoes(meta)} removes it, or "
+                "takes it out of what git tracks",
+                changed,
+            )
         raise RepoError(
             f"git files in the task's clone changed that would make git on your machine run a program "
-            f"or read another repository: {'; '.join(changed[:3])}{more}. vivibox runs no git in the "
+            f"or read another repository: {named}. vivibox runs no git in the "
             "clone now, so its work can be neither verified nor brought back: see what the agent did "
             "in its log, and delete the task"
         )
+
+
+def named_changes(changed: list[str]) -> str:
+    """The first three, and how many more: a notification holds no more."""
+    more = f" and {len(changed) - 3} more" if len(changed) > 3 else ""
+    return f"{'; '.join(changed[:3])}{more}"
+
+
+# Who takes back what a task changed in its clone, and how you get them to, as the start of the
+# sentence that says what they do: your reply sends the writer; a box has no writer.
+WRITER, IN_A_BOX = "reply, and the writer", "whoever works in this box, which has no writer,"
+
+
+def undoes(meta: Path) -> str:
+    """WRITER or IN_A_BOX, for the task whose metadata folder is meta."""
+    from .task import Task  # here, not at the top: task reads its version through this module
+
+    try:
+        return IN_A_BOX if Task(meta.parent).read_state().box else WRITER
+    except (OSError, ValueError, KeyError, TypeError):  # no state to read: said as for a task
+        return WRITER
 
 
 def agent_mounts(repo: Path, meta: Path) -> list[Mount]:

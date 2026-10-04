@@ -159,7 +159,9 @@ def with_lib(tmp_path, monkeypatch):
 
 
 def refused(repo: Path, meta: Path) -> str:
-    with pytest.raises(r.RepoError, match="changed") as e:
+    """What vivibox says when it runs no git in the clone: of a change, and of what the task added
+    that blocks it until it is gone (a repository of its own, a worktree: test_blocked_clone)."""
+    with pytest.raises(r.RepoError, match="vivibox runs no git in the clone") as e:
         r.check_protection(repo, meta)
     return str(e.value)
 
@@ -280,7 +282,7 @@ def test_a_repository_the_agent_adds_to_the_index_runs_nothing_on_the_host(clone
     assert marker.exists(), "the attack is real: plain git on the host runs the agent's program"
     marker.unlink()
     assert "nested/.git" in refused(repo, meta)
-    with pytest.raises(r.RepoError, match="changed"):
+    with pytest.raises(r.RepoError, match="vivibox runs no git in the clone"):
         r.in_clone(repo, "status")
     assert not marker.exists()
 
@@ -644,7 +646,9 @@ def test_an_index_entry_that_leaves_the_clone_is_refused(cloned):
     git(repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},zz")
     index = repo / ".git" / "index"
     index.write_bytes(index.read_bytes().replace(b"zz\0", b"..\0"))
-    assert "../.git was added" in refused(repo, meta), "not looked up outside the clone"
+    said = refused(repo, meta)
+    assert "../.git was added" in said, "not looked up outside the clone"
+    assert "delete the task" in said, "no ordinary addition: nothing the writer is sent to take out"
 
 
 def test_a_record_vivibox_cannot_read_runs_no_git(cloned, monkeypatch):

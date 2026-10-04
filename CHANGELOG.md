@@ -47,6 +47,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A task that tracks a repository of its own (`git init` in a folder, then `git add`) or adds a
+  worktree is still stopped, with no way to approve either, but is no longer told to be deleted:
+  it is blocked until what it added is removed or taken out of what git tracks. The
+  verification does not run and the task waits for you with `verification could not run`, no
+  round spent, instead of stopping on an error nothing but a delete got it out of; `r` sends the
+  writer back, which reads in `verify-feedback.md` how to take the repository or the worktree
+  out, in words that hold no command made of a name it chose, and `g` verifies again. In a box
+  the message names whoever works in it, not a writer. Any other change to the clone's git files
+  is refused in the words it was.
 - The verification refuses, in a line the work adds, the Hangul fillers (U+115F, U+1160,
   U+3164, U+FFA0: letters drawn as nothing, so a name of their own nobody sees) and the
   combining grapheme joiner (U+034F), as it does zero-width and bidi characters. A variation

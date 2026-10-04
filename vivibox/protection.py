@@ -74,6 +74,24 @@ class _TooMany(Exception):
     pass
 
 
+# What a task adds in the course of ordinary work and can take back: a repository of its own in
+# a folder the index lists (git init there, then git add), a worktree (git worktree add).
+REPOSITORY, WORKTREE = "a repository of its own", "a worktree"
+
+
+class Added(str):
+    """A line of what changed that is such an addition, and which (what). git on the host goes
+    into it no more than into any other change; it is told apart only for what is said."""
+
+    what = ""
+
+
+def _added(line: str, what: str) -> Added:
+    found = Added(line)
+    found.what = what
+    return found
+
+
 @contextlib.contextmanager
 def _folder(root: Path, rel: str) -> Iterator[int | str]:
     """A descriptor of the folder at rel under root, reached without a link; else what is there."""
@@ -473,7 +491,10 @@ def gitfiles(root: Path, dirs: list[str], allowed: Callable[[str], bool]) -> tup
                 continue  # not checked out: git does not go into it
             home = _home(root, rel, dirs)
             if home is None or not allowed(rel):
-                problems.append(f"{display.name(rel)} was added, a repository git would go into")
+                said = f"{display.name(rel)} was added, a repository git would go into"
+                # As git init and git add leave one: a folder, under a name git itself writes.
+                ordinary = look(root, rel, read=False) == FOLDER and not set(rel.split("/")) & {"", ".", ".."}
+                problems.append(_added(said, REPOSITORY) if ordinary else said)
                 continue
             found.append(rel)
             todo.append((rel.removesuffix("/.git"), home))
@@ -501,9 +522,11 @@ def write(meta: Path, recorded: dict) -> None:
     (meta / RECORD).write_text(json.dumps(recorded, indent=2) + "\n")
 
 
-def differences(recorded: dict[str, str], now: dict[str, str]) -> list[str]:
-    """What changed, a line each, as text to read."""
+def differences(recorded: dict[str, str], now: dict[str, str], dirs: list[str] | tuple = ()) -> list[str]:
+    """What changed, a line each, as text to read. dirs: the git dirs, whose worktrees, when one
+    was added as a folder and its plain files, are told apart as that (Added)."""
     found = []
+    worktrees = tuple(f"{d}/worktrees" for d in dirs)
     for key in sorted(set(recorded) | set(now)):
         was, value = recorded.get(key, ABSENT), now.get(key, ABSENT)
         name = display.name(key)
@@ -514,7 +537,10 @@ def differences(recorded: dict[str, str], now: dict[str, str]) -> list[str]:
         elif value == ABSENT:
             found.append(f"{name} was deleted")
         elif was == ABSENT:
-            found.append(f"{name} was added")
+            of_worktree = key in worktrees or key.startswith(tuple(f"{w}/" for w in worktrees))
+            plain = value in (FOLDER, FILE) or value.startswith(f"{FILE} ")  # no link: one leads elsewhere
+            said = f"{name} was added"
+            found.append(_added(said, WORKTREE) if of_worktree and plain else said)
         elif value.startswith("link -> ") and " at " not in value:
             found.append(f"{name} is now a link to {display.name(value.removeprefix('link -> '))}")
         else:
@@ -529,7 +555,7 @@ def check(root: Path, meta: Path) -> list[str]:
     if "format" not in recorded:
         return _upgrade(root, meta, recorded)
     files = {k: v for k, v in recorded.items() if k not in ABOUT}
-    found = differences(files, fingerprint(root, recorded["gitfiles"]))
+    found = differences(files, fingerprint(root, recorded["gitfiles"]), recorded["git_dirs"])
     if found:
         return found
     known = set(recorded["gitfiles"])

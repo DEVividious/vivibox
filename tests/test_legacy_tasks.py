@@ -782,3 +782,31 @@ def test_a_newer_tasks_state_that_cannot_be_read_is_unreadable_not_newer(env, mo
     assert task_module.layout(task.read_state()) == "unreadable"
     monkeypatch.setattr(Pod, "remove", lambda self: None)
     assert main(["delete", "demo-1", "--yes"]) == 0 and not task.root.exists()
+
+
+# --- a supervisor already running when the state stops being one it runs --------------------------
+
+
+@pytest.mark.parametrize("change", ["a field gone", "a newer version", "no version"])
+def test_a_running_supervisor_gives_no_turn_to_a_task_it_no_longer_runs(env, change, monkeypatch):
+    """The start refuses such a task; a supervisor that was already running read its state at
+    every step and went on. With a state that is now read instead of raising, it would have
+    paid for a turn before its first write was refused."""
+    from test_supervisor import FakeHarness, make
+
+    task = implementing("Add health endpoint")
+    harness = FakeHarness(task)
+    sup, notes = make(task, harness)
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    if change == "a field gone":
+        del data["created"]
+    elif change == "a newer version":
+        data["task_schema_version"] = task_module.TASK_SCHEMA_VERSION + 1
+    else:
+        data["task_schema_version"] = "6"
+    path.write_text(json.dumps(data))
+    before = snapshot(task)
+    assert sup.step() is False, "nothing to do until you act: delete it, or use the vivibox that runs it"
+    assert harness.prompts == [] and notes == []
+    assert snapshot(task) == before, "and nothing written"

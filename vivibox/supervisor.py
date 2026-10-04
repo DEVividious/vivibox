@@ -36,7 +36,7 @@ from .prompts import (
 from .review_round import ReviewRound
 from .risky import Change, stop_said
 from .states import State, waits_for_user
-from .task import Task, TaskState
+from .task import CURRENT, Task, TaskState, layout
 
 NEXT_PROMPT = "next-prompt.md"
 QUESTION = "question.md"
@@ -280,6 +280,8 @@ class Supervisor(ReviewRound):
             p = self.current_project()
             self.project_verify, self.project_no_build, self.prepared = p.verify, p.no_build, p.prepare
         st = self.task.read_state()
+        if layout(st) != CURRENT:  # no longer one this vivibox runs: no turn, and nothing written
+            return False
         if st.state is State.CHECKPOINT_PLAN and st.awaiting_plan and not st.paused:
             self._watch_answer()
             return False

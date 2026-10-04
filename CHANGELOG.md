@@ -304,7 +304,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   state.json is not a task's state as vivibox writes one … delete it and create it again"),
   and deleted by `vivibox delete` and `x`. A file that cannot be read says nothing of the
   vivibox that wrote it, so a newer vivibox's task with a damaged state is deleted here like
-  any other, of what this vivibox knows a task to have.
+  any other, of what this vivibox knows a task to have. A supervisor already running when a
+  task's state stops being one this vivibox runs gives it no turn and writes nothing.
 - A review whose work is no longer what the verification passed (its commits moved, or the task
   added what blocks its clone) goes back to the verification once. The second time in a row,
   with no turn of the writer's and no decision of yours between, the task stops for you with

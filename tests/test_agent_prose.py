@@ -748,17 +748,32 @@ def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on
     run(scenario, size=(80, 110), notifications=True)
 
 
-def test_an_error_that_drawing_the_source_does_not_cure_ends_the_view_as_before(env, monkeypatch):
-
+def test_an_error_after_the_pieces_are_drawn_as_their_source_ends_the_view_as_before(env, monkeypatch):
+    """Once for a text: the error that comes when its pieces are their source already is not
+    theirs, and neither is one that comes while the panel shows no piece at all."""
     task = new_task()
-    plan_with(task, "```\ncode\n```")
+    plan_with(task, "- an item")
     opening(monkeypatch)
-    monkeypatch.setattr(blocks.Fence, "folded", lambda self: 1 / 0)
 
     async def scenario(app, pilot):
         await show(app, pilot)
-        for _ in range(5):
+        app._handle_exception(RuntimeError("first"))
+        for _ in range(3):
             await pilot.pause()
+        assert app._exception is None and len(app.text.query("Quote.prose MarkdownFence")) == 1
+        assert not app.text.query("Quote.prose MarkdownBulletList"), "the piece is its source now"
+        again = ValueError("again")
+        app._handle_exception(again)
+        assert app._exception is again
 
-    with pytest.raises(ZeroDivisionError):
+    with pytest.raises(ValueError, match="again"):
         run(scenario, size=(80, 60))
+
+    async def with_no_piece(app, pilot):
+        await pilot.press("up")  # the project's row: its panel holds nothing an agent wrote
+        await pilot.press("enter")
+        await pilot.pause()
+        app._handle_exception(KeyError("no piece"))
+
+    with pytest.raises(KeyError):
+        run(with_no_piece, size=(80, 60))

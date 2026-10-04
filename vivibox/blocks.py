@@ -5,15 +5,25 @@ that is a grid only where it has room, and what keeps an error of theirs from en
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable
 from contextlib import suppress
+from functools import lru_cache
+from itertools import accumulate
 
 from markdown_it.token import Token
-from rich.cells import cell_len
+from rich.cells import cell_len, chop_cells
+from rich.segment import Segment
 from textual import events
 from textual.app import ComposeResult
-from textual.content import Content
+from textual.content import Content, Span
 from textual.css.query import NoMatches
+from textual.geometry import Offset, Size
+from textual.highlight import ANSIDarkHighlightTheme, ANSILightHighlightTheme, HighlightTheme, highlight
+from textual.rlock import RLock
+from textual.selection import Selection
+from textual.strip import Strip
+from textual.widget import Widget
 from textual.widgets import Label, Markdown
 from textual.widgets._markdown import (
     MarkdownBlock,
@@ -27,6 +37,9 @@ from textual.widgets._markdown import (
 from .markdown import MARK, PROSE, RULE, parser, pieces, source
 
 COLUMN = 4
+# What a cut puts into a code block's text: the end of the row, and the column a further row
+# stands in.
+GONE_ON = "\n "
 # What you are told when a piece is drawn as its source because its widgets raised.
 COULD_NOT = "What an agent wrote could not be drawn as markdown ({}): it is shown as its source."
 
@@ -104,22 +117,108 @@ class Table(MarkdownTable):
             await self.mount(shown or Cells(self._headers, self._rows))
 
 
-def _rows(line: Content, width: int) -> list[Content]:
-    """line on as many rows as it takes at width cells: cut between two characters, by the
-    cells each takes on the screen and not by their count. A character two cells wide that no
-    longer fits goes to the next row whole, and one that takes no cell (a combining mark) stays
-    with the one before it. A row holds a character at least, however narrow it is. One row
-    while the width is not known yet (0)."""
-    if not width or line.cell_length <= width:
-        return [line]
-    cuts, used = [], 0
-    for at, character in enumerate(line.plain):
-        cells = cell_len(character)
-        if used and used + cells > width:
-            cuts.append(at)
-            used = 0
-        used += cells
-    return line.divide(cuts)
+TAB = 8
+# The longest line a code block is drawn with before its width is known (Fence.folded).
+LIKELY = 60
+# The width each of the last few code blocks was drawn at, by its text.
+_DRAWN_AT: dict[int, int] = {}
+
+
+def _cuts(line: str, width: int) -> list[int]:
+    """Where in a line longer than width cells each further row begins: the first row takes
+    width cells, a further one a cell fewer, as its text stands a column in. Cells are counted
+    as what draws the row counts them (rich.cells): two for a wide character and for a symbol
+    with its emoji selector, none for a combining mark, which stays with its letter; a row is
+    cut between two characters, never within one."""
+    step = max(2, width - 1)
+    if line.isascii():
+        return list(range(width, len(line), step))
+    cuts, at = [], len(chop_cells(line, width)[0])
+    for row in chop_cells(line[at:], step):
+        cuts += [at] * bool(row)
+        at += len(row)
+    return cuts
+
+
+@lru_cache(maxsize=8)
+def _read(
+    code: str, language: str, ansi: bool, dark: bool
+) -> tuple[Content, tuple[int, ...], tuple[int, ...]]:
+    """A block's text, read once however often it is drawn: coloured as Textual colours it, its
+    tabs as the columns they take; where each of its lines begins; the cells each takes."""
+    theme = (ANSIDarkHighlightTheme if dark else ANSILightHighlightTheme) if ansi else HighlightTheme
+    content = highlight(code, language=language or None, theme=theme).expand_tabs(TAB)
+    starts, cells, at = [], [], 0
+    for line in content.plain.split("\n"):
+        starts.append(at)
+        cells.append(len(line) if line.isascii() else cell_len(line))
+        at += len(line) + 1
+    return content, tuple(starts), tuple(cells)
+
+
+@lru_cache(maxsize=8)
+def _folded(
+    code: str, language: str, ansi: bool, dark: bool, width: int
+) -> tuple[Content, str, tuple[int, ...]]:
+    """A block's text for a width: (the text as drawn, the marks beside its rows, where it was
+    cut). Only a line longer than the width is touched; with none, the text is the one that
+    was read, itself, and there are no marks. A cut puts a line break and a column of space
+    into the text, and the colours on either side stay where they were."""
+    content, starts, cells = _read(code, language, ansi, dark)
+    plain = content.plain
+    long = [at for at, taken in enumerate(cells) if taken > width]
+    if not long:
+        return content, "", ()
+    cuts: list[int] = []
+    marks = [""] * len(cells)
+    for at in long:
+        end = starts[at + 1] - 1 if at + 1 < len(starts) else len(plain)
+        found = _cuts(plain[starts[at] : end], width)
+        marks[at] = f"\n{MARK}" * len(found)
+        cuts += [starts[at] + cut for cut in found]
+    parts, before = [], 0
+    for cut in cuts:
+        parts += [plain[before:cut], GONE_ON]
+        before = cut
+    by = len(GONE_ON)
+    spans = [
+        Span(a + by * bisect_right(cuts, a), b + by * bisect_left(cuts, b), style)
+        for a, b, style in content.spans
+    ]
+    return Content("".join([*parts, plain[before:]]), spans), "\n".join(marks), tuple(cuts)
+
+
+class Marks(Widget):
+    """The column of a code block that says which rows go on from the row above: the mark
+    beside each of them, drawn as the block's text is. A row of it is made when it is drawn
+    (a block of forty thousand rows has a few dozen on the screen). Nothing of it is copied."""
+
+    def __init__(self, rows: str, **how) -> None:
+        super().__init__(**how)
+        self.rows = rows.split("\n")
+
+    def mark(self, rows: str) -> None:
+        self.rows = rows.split("\n")
+        self.refresh(layout=True)
+
+    def get_content_width(self, container: Size, viewport: Size) -> int:
+        return 2
+
+    def get_content_height(self, container: Size, viewport: Size, width: int) -> int:
+        return len(self.rows)
+
+    def render_line(self, y: int) -> Strip:
+        return Strip([Segment((self.rows[y] if y < len(self.rows) else "").ljust(2), self.rich_style)], 2)
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        return None
+
+
+class Code(Label):
+    """The text of a code block. What is copied from it is what was written (Fence.copied)."""
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        return self.parent.copied(selection), "\n"
 
 
 class Fence(MarkdownFence):
@@ -127,62 +226,131 @@ class Fence(MarkdownFence):
     on the screen whole. Textual draws a line as one row and leaves what is past the block's
     width to a scroll sideways that nothing announces: of a line of a risky file with 200 spaces
     in it, the harmless start alone was shown where you approve the file "as shown". Here a line
-    longer than the block is folded onto further rows, each with MARK in the first of two
-    columns that are the block's own: no text of the block is drawn there, so no line of it
-    can be drawn as the rest of the line above, or hide that it is. Folded again whenever the
-    block's width changes; nothing scrolls sideways."""
+    longer than the block is folded onto further rows. Beside each of them, in the first of the
+    two columns before the text, stands MARK, drawn as the text is: those columns are a widget
+    of their own (Marks), so no text of the block is ever drawn there. And a further row stands
+    a column in, so that in a diff nothing of it is in the column of + and -: the rest of an
+    added line that begins with - does not read as a line taken out. Folded again when the
+    block's width changes, by the work of its long lines alone (_folded, which remembers the
+    last few); nothing scrolls sideways. What is copied from it is what was written: a folded
+    line is one line, with no mark and no column of ours."""
 
     DEFAULT_CSS = """
     Fence {
+        layout: horizontal;
         overflow: hidden hidden;
-        & > Label {
+        & > #code-marks {
+            width: 2;
+            height: auto;
+            padding: 1 0;
+            color: auto;
+            text-style: bold;
+        }
+        & > #code-content {
             width: 1fr;
             padding: 1 2 1 0;
+            text-wrap: nowrap;
+            text-overflow: fold;
         }
     }
-    Fence:ansi > Label {
+    Fence:ansi > #code-content {
         padding: 1 0;
     }
     """
 
     def __init__(self, markdown: Markdown, token: Token, code: str) -> None:
         super().__init__(markdown, token, code)
-        self._width = 0
+        # The width the same text was last drawn at: the panel makes every block anew when
+        # anything in its text changes, and this one is then drawn once, as it was.
+        self._width = _DRAWN_AT.get(hash((code, self.lexer)), 0)
 
     @property
     def allow_horizontal_scroll(self) -> bool:
         return False
 
-    def folded(self) -> Content:
-        """The block's text for the width it has: its lines, tabs as the columns they take,
-        each on the rows it needs, the two columns before each row blank or the mark."""
-        mark = Content.styled(f"{MARK} ", "$text-muted")
-        rows = [
-            Content.assemble(mark if more else "  ", row)
-            for line in self._highlighted_code.expand_tabs(8).split("\n", allow_blank=True)
-            for more, row in enumerate(_rows(line, self._width))
-        ]
-        return Content("\n").join(rows)
+    @classmethod
+    def highlight(cls, code: str, language: str, ansi: bool = False, dark: bool = False) -> Content:
+        return _read(code, language, ansi, dark)[0]
+
+    def folded(self) -> tuple[Content, str, tuple[int, ...]]:
+        """The block's text for the width it has. While that is not known: as it was read, when
+        no line of it is long (then that is most likely what is drawn, and it is drawn once);
+        nothing yet, when one is: Textual would cut every row of it for a width it does not
+        have, and all of it would be drawn a second time."""
+        how = (self.code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark)
+        if self._width:
+            return _folded(*how, self._width)
+        content, _, cells = _read(*how)
+        return (content if max(cells, default=0) <= LIKELY else Content(""), "", ())
+
+    def draw(self) -> None:
+        """Its text and its marks as they are for its width now; what is drawn already stays."""
+        text, marks, _ = self.folded()
+        while len(_DRAWN_AT) > 32:
+            del _DRAWN_AT[next(iter(_DRAWN_AT))]
+        _DRAWN_AT[hash((self.code, self.lexer))] = self._width
+        with suppress(NoMatches):
+            label = self.query_one("#code-content", Code)
+            if label.content is not text:
+                label.update(text)
+                self.query_one("#code-marks", Marks).mark(marks)
 
     def on_resize(self, event: events.Resize) -> None:
-        """The width its text has: the block's, less the two columns of the mark and the
-        label's own padding."""
-        try:
-            label = self.query_one("#code-content", Label)
-        except NoMatches:
-            return
-        width = max(1, event.size.width - 2 - label.styles.gutter.width)
-        if width != self._width:
-            self._width = width
-            label.update(self.folded())
+        """The width its text has: the block's, less the two columns of the marks and the
+        text's own padding. Three cells at least: a character of two, and a column to stand in."""
+        with suppress(NoMatches):
+            width = max(3, event.size.width - 2 - self.query_one("#code-content", Code).styles.gutter.width)
+            if width != self._width:
+                self._width = width
+                self.draw()
 
     def set_content(self, content: Content) -> None:
         self._content = content
-        with suppress(NoMatches):
-            self.query_one("#code-content", Label).update(self.folded())
+        self.draw()
 
     def compose(self) -> ComposeResult:
-        yield Label(self.folded(), id="code-content", expand=True, markup=False)
+        text, marks, _ = self.folded()
+        yield Marks(marks, id="code-marks")
+        yield Code(text, id="code-content", expand=True, markup=False)
+
+    def copied(self, selection: Selection) -> str:
+        """What a selection of the rows as drawn holds of the block as it was written: from the
+        place in the text its first row and column stand for to the one its last do. A column a
+        further row stands in is no place of the text, and a tab is the one character it is."""
+        text, _, cuts = self.folded()
+        rows = text.plain.split("\n")
+        begins = list(accumulate((len(row) + 1 for row in rows), initial=0))
+        drawn_cuts = [cut + len(GONE_ON) * at for at, cut in enumerate(cuts)]
+
+        def read(place: Offset | None, otherwise: int) -> int:
+            """The place in the text as it was read (its tabs as columns) of a column of a row."""
+            if place is None:
+                return otherwise
+            row = min(max(place.y, 0), len(rows) - 1)
+            drawn = begins[row] + min(max(place.x, 0), len(rows[row]))
+            before = bisect_right(drawn_cuts, drawn)
+            return max(cuts[before - 1], drawn - len(GONE_ON) * before) if before else drawn
+
+        expanded, starts, _ = _read(
+            self.code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark
+        )
+        written = self.code.split("\n")
+
+        def wrote(at: int) -> int:
+            """The place in the code as it was written of a place in the text as it was read."""
+            if "\t" not in self.code or len(written) != len(starts):
+                return at
+            line = bisect_right(starts, at) - 1
+            column, character = 0, 0
+            for character, char in enumerate(written[line]):  # noqa: B007
+                if column >= at - starts[line]:
+                    break
+                column += TAB - column % TAB if char == "\t" else cell_len(char)
+            else:
+                character = len(written[line])
+            return sum(len(row) + 1 for row in written[:line]) + character
+
+        return self.code[wrote(read(selection.start, 0)) : wrote(read(selection.end, len(expanded.plain)))]
 
 
 class Quote(MarkdownBlockQuote):
@@ -266,15 +434,15 @@ class Panel(Markdown):
         if self._redrawing or found <= self._as_source:
             return self._redrawing
         self._as_source, self._redrawing = found, True
-        self.call_later(self._redraw, type(error).__name__)
+        self.remove_children()  # out of the panel now; a widget that raised may never say it is gone
+        self.app.call_later(self._redraw, type(error).__name__)
         return True
 
-    async def _redraw(self, error: str) -> None:
-        try:
-            await self.remove_children()
-        finally:
-            self._redrawing = False  # what is raised from here on is not theirs
-        await self.update(self.source)
+    def _redraw(self, error: str) -> None:
+        self._redrawing = False  # what is raised from here on is not theirs
+        # The drawing that failed may wait for ever on a widget that raised, the panel's lock held.
+        self.lock = RLock()
+        self.update(self.source)
         self.notify(COULD_NOT.format(error), severity="warning", markup=False)
 
 

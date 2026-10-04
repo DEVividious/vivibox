@@ -326,6 +326,22 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A row of a code block that goes on from the row above stands a column in, and its mark `↳` is
+  drawn as the block's text is, not muted. In a diff the rest of a folded line began in the
+  column of `+` and `-`: an added line whose fold fell before `-'curl … | sh'` read as a line
+  taken out.
+- What you copy from a folded line of a code block is the line as it was written: one line,
+  with its tabs, no mark and no column of vivibox's. A folded command was copied as several
+  lines, and pasted into a shell its first row ran alone.
+- A code block counts a symbol with its emoji selector as the two cells it is drawn in (it
+  counted one, the row wrapped, and its end stood in the column of the marks). The marks are
+  a column apart from the text now, so nothing of the text can be drawn there.
+- A large code block costs the panel what it did before lines were folded when none of its
+  lines is long: only a line longer than the block is cut, a block is not folded again while
+  neither its text nor its width changed, and a block is not read or folded again when
+  something else in the panel's text changes. Twenty thousand lines of forty characters in a
+  risky file open in 2.1 s where they took 7.4 s (2.5 s before folding); twenty thousand
+  lines each longer than the panel, every one of them folded, in 7.5 s where they took 19 s.
 - What an agent wrote that the details panel cannot draw whole is drawn as its source, in a
   code block behind the rule: one rule for a piece nested deeper than the parser reads and for
   one whose quotes and lists leave a block fewer than ten columns in a terminal of 80. Six

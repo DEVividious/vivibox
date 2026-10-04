@@ -342,14 +342,16 @@ looks like an empty cache.
   table is drawn as its source in a code block instead (`blocks.Table`), and as a grid
   again once there is room; a grid is mounted only after its width is known.
 - Nothing an agent wrote lies past the panel's right edge, at any width from 80 columns. A line
-  of a code block (a diff, a risky file,
-  a log, a block in a plan) longer than the block is folded onto further rows, each with `↳`
-  in the first of the two columns before the text, which are the block's own
-  (`blocks.Fence`): no text of the block is drawn there, and the same character in a block's
-  text is shown as its code point (`‹U+21B3›`), so no line passes for the rest of the line
-  above it and none hides that it goes on. A fold counts the cells a character takes (two for
-  a wide one, none for a combining mark, a tab to its stop) and is made again on every change
-  of width; a code block never scrolls sideways.
+  of a code block (a diff, a risky file, a log, a block in a plan) longer than the block is
+  folded onto further rows (`blocks.Fence`). Beside each further row stands `↳`, drawn as the
+  block's text is, in the first of the two columns before the text: they are a widget of
+  their own, so no text of the block is ever drawn there, and the same character in a block's
+  text is shown as its code point (`‹U+21B3›`). A further row stands a column in, so that in a
+  diff nothing of it is in the column of `+` and `-`. A fold counts cells as what draws the
+  row counts them (two for a wide character and for a symbol with its emoji selector, none
+  for a combining mark, a tab to its stop) and is made again when the width changes, by the
+  work of the long lines alone; a code block never scrolls sideways. What is copied from a
+  folded line is the line as it was written, with no mark.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

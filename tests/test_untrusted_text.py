@@ -475,3 +475,46 @@ def test_the_panel_draws_no_character_with_nothing_to_see_from_a_plan(env, monke
         assert "a‹U+3164›b ⚠\ufe0f c‹U+FE0F›d e‹U+034F›f ‹U+2800›g" in drawn(app)
 
     run(scenario, size=(140, 60))
+
+
+# --- vivibox's own notation -----------------------------------------------------------------------
+
+# Brackets many fonts draw like ‹ and ›, in pairs: modifier arrowheads, the angle brackets of
+# mathematics and of CJK, the small and the fullwidth signs, the ornaments, Canadian syllabics.
+LOOKALIKES = [
+    chr(left) + chr(right)
+    for left, right in [
+        (0x02C2, 0x02C3), (0x2329, 0x232A), (0x3008, 0x3009), (0x27E8, 0x27E9), (0xFE64, 0xFE65),
+        (0xFF1C, 0xFF1E), (0x276E, 0x276F), (0x1438, 0x1433),
+    ]
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("pair", LOOKALIKES)
+def test_a_name_cannot_spell_an_escape_with_brackets_that_look_like_vivibox_s(pair):
+    """˂U+001B˃ in a name read as an escape sequence that is not there: the brackets around a
+    code point are shown as the characters they are, as ‹ and › always were."""
+    from vivibox import display
+
+    left, right = pair
+    spelled = f"a{left}U+001B{right}.gradle"
+    shown = f"a{display.code_point(left)}U+001B{display.code_point(right)}.gradle"
+    assert display.name(spelled) == shown
+    assert display.content(spelled + "\n") == shown + "\n"
+    assert display.said(spelled) == shown
+    assert display.name(f"‹U+202E{right}") == f"‹U+2039›U+202E{display.code_point(right)}", "half of each"
+    assert display.name(f"{left}U+202E›") == f"{display.code_point(left)}U+202E‹U+203A›"
+    assert (
+        display.name(f"{left}U+E0041{right}")
+        == f"{display.code_point(left)}U+E0041{display.code_point(right)}"
+    )
+
+
+def test_those_brackets_around_anything_else_read_as_they_are():
+    from vivibox import display
+
+    for text in ("〈重要〉.md", "a ⟨b⟩ c", "x ＜ y ＞ z", "❯ run", "˂U+12˃", "〈U+XYZW〉", "〈u+001b〉"):
+        assert display.name(text) == text and display.content(text + "\n") == text + "\n"
+    assert display.name("U+001B〉") == "U+001B‹U+3009›", "after a code point it closes one"
+    assert display.name("〈U+001B") == "‹U+3008›U+001B", "before one it opens one"
+    assert display.terminal("˂U+001B˃ ‹U+001B›") == "˂U+001B˃ ‹U+001B›", "prose, where ‹ and › stay too"

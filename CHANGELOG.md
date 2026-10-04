@@ -259,6 +259,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A name or a line of a file cannot spell an escape that is not there with brackets drawn like
+  vivibox's own (`˂U+001B˃`, `〈U+001B〉`, `＜U+001B＞`): such a bracket before or after a code point
+  is shown as its own code point, as `‹` and `›` always were. Around anything else it reads
+  as it is.
 - More characters with nothing to see are shown as their code points wherever a name, a line
   of a file or a tool's words are shown: the Hangul fillers, the variation selectors (U+FE00
   to U+FE0F, U+E0100 to U+E01EF, the Mongolian ones), the combining grapheme joiner, the Khmer

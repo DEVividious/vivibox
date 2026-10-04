@@ -16,6 +16,7 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.widgets import (
     Button,
     Input,
@@ -504,7 +505,7 @@ class CommitWork(Dialog):
         self.done = done
 
     def compose(self) -> ComposeResult:
-        choices = actions.branch_choices(self.done)
+        choices = [(Content(said), where) for said, where in actions.branch_choices(self.done)]
         self.frame_title = f"Commit · {self.done.task_id}"
         with Vertical(classes="dialog form plain"):
             yield Label(

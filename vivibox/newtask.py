@@ -67,7 +67,7 @@ class DescriptionArea(TextArea):
             if partial is not None
             else []
         )
-        self.suggestions.set_options(found)
+        self.suggestions.set_options([Content(path) for path in found])  # a file's name: text
         self.suggestions.display = bool(found)
         if found:
             self.suggestions.highlighted = 0
@@ -200,7 +200,7 @@ class NewTask(Dialog):
                     with Horizontal(classes="row"):
                         yield Label("Project", classes="key")
                         yield Select(
-                            [*((n, n) for n in names), (NEW_PROJECT, NEW_PROJECT)],
+                            [*((Content(n), n) for n in names), (NEW_PROJECT, NEW_PROJECT)],
                             value=chosen, allow_blank=False, compact=True, id="project",
                         )  # fmt: skip
                     with Horizontal(classes="row", id="kind-row"):
@@ -268,7 +268,8 @@ class NewTask(Dialog):
                         configured = actions.configured_choice(config, name)
                         with Horizontal(classes="row agent"):
                             yield Label(name.capitalize(), classes="key", id=f"agent-{name}")
-                            options = [(actions.choice_label(c, configured), c) for c in offered]
+                            # A model's name is its provider's: text, never markup.
+                            options = [(Content(actions.choice_label(c, configured)), c) for c in offered]
                             yield Select(
                                 options, value=configured, allow_blank=False, compact=True,
                                 id=f"role-{name}", classes="model",

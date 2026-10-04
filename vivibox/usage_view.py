@@ -31,9 +31,9 @@ class Usage(Dialog):
             table = DataTable(id="usage", cursor_type="row")
             table.add_columns(*usage.COLUMNS)
             yield table
-            yield Label("", id="usage-caches", classes="spaced wrap")
+            yield Label("", id="usage-caches", classes="spaced wrap", markup=False)
             yield Label("", id="usage-problem", classes="files", markup=False)  # Docker's words
-            yield Label("Reading the tasks' events…", id="usage-note", classes="files")
+            yield Label("Reading the tasks' events…", id="usage-note", classes="files", markup=False)
 
     def on_mount(self) -> None:
         self.query_one(DataTable).focus()

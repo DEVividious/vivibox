@@ -138,7 +138,7 @@ class Dialog(ModalScreen):
         frame = next(iter(self.query(".dialog").results()), None)
         if frame is None:
             return
-        frame.border_title = self.frame_title or None
+        frame.border_title = escape(self.frame_title) or None  # a task's id, a project's name: text
         said = look.hints(*self.hint_keys) if self.hint_keys else ""
         if found := frame.query(".keys"):
             found.first(Static).update(said)
@@ -239,7 +239,7 @@ class Confirm(Dialog):
                 display.terminal(self.question), classes="wrap", markup=False
             )  # a command the agent wrote
             with Horizontal(classes="buttons"):
-                yield Button(self.yes, variant="error" if self.destructive else "primary", id="yes")
+                yield Button(escape(self.yes), variant="error" if self.destructive else "primary", id="yes")
                 yield Button("Cancel", id="no")
 
     @on(Button.Pressed)

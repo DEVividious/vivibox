@@ -259,6 +259,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A model's name with brackets in it, from a provider's catalogue, no longer ends the view with
+  `MarkupError` when the new-task form opens: in the form's lists a model's name is text, as is
+  a file's name offered after `@` (a name with `[black on black]` in it hid its own rest).
 - A name or a line of a file cannot spell an escape that is not there with brackets drawn like
   vivibox's own (`˂U+001B˃`, `〈U+001B〉`, `＜U+001B＞`): such a bracket before or after a code point
   is shown as its own code point, as `‹` and `›` always were. Around anything else it reads
@@ -517,6 +520,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The test that keeps text vivibox did not write from being read as markup
+  (`tests/test_markup_rules.py`) looks at more shapes: an update of a widget, an Option, a
+  Selection, a Select's options, an option list filled later, a Button and its label,
+  `from_markup`, a border's title. An exception names the function it is in and is counted, so
+  a second call of the same words elsewhere is not covered by it. A dialog's title and a
+  yes-button's label are escaped, the usage view's notes are made with markup off, and the
+  branches of the commit dialog are text objects.
 - A task's allocation file (`.task/network.json`) records three ranges, one per role (`w`, `r`,
   `p`), cut from one /27 block of the pool (`pod_network.split_block`); the policy given to the
   root helper lists the networks that have a bridge (`pod_network.MADE_ROLES`: the writer's and

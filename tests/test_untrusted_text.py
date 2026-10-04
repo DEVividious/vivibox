@@ -518,3 +518,84 @@ def test_those_brackets_around_anything_else_read_as_they_are():
     assert display.name("U+001B〉") == "U+001B‹U+3009›", "after a code point it closes one"
     assert display.name("〈U+001B") == "‹U+3008›U+001B", "before one it opens one"
     assert display.terminal("˂U+001B˃ ‹U+001B›") == "˂U+001B˃ ‹U+001B›", "prose, where ‹ and › stay too"
+
+
+# --- markup ---------------------------------------------------------------------------------------
+
+MARKUP = "x[/b] [black on black]hidden[/] [link=https://evil.invalid]y[/link]"
+
+
+def test_a_models_name_from_a_providers_catalogue_is_text_in_the_new_task_form(env):
+    """A model's name is the provider's (the catalogue is read from the network). In a list of the
+    form it was markup: [/b] ended the view, [black on black] hid the rest of the name."""
+    from ux import screen_text
+
+    from vivibox import newtask
+
+    new_task()
+    model = "deepseek/m[/b][black on black]x"
+
+    async def scenario(app, pilot):
+        app.available = {"deepseek": [model, "deepseek/plain"]}
+        app.reload()
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, newtask.NewTask)
+        writer = app.screen.query_one("#role-writer")
+        writer.value = next(c for c in writer._legal_values if model in str(c))
+        await pilot.pause()
+        assert model in screen_text(app), "the picked model, whole, as text"
+        writer.focus()
+        writer.expanded = True
+        await pilot.pause()
+        assert screen_text(app).count(model) >= 2, "and in the open list"
+
+    run(scenario, size=(160, 50))
+
+
+def test_a_file_s_name_offered_after_an_at_sign_is_text(env):
+    """The files of your repository are offered as you type @: a name in it may be one a task
+    brought."""
+    from ux import screen_text
+
+    from vivibox import newtask
+
+    name = "docs [bold]x [black on black]hidden.md"
+    (env / "repo" / name).write_text("x\n")
+    new_task()
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("n")
+        await pilot.pause()
+        area = app.screen.query_one(newtask.DescriptionArea)
+        area.focus()
+        area.insert("@docs")
+        await pilot.pause()
+        assert name in screen_text(app), "offered whole, as text"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert f"@{name}" in area.text or name.split()[0] in area.text
+
+    run(scenario, size=(160, 50))
+
+
+def test_a_dialog_s_title_and_its_button_are_text(env):
+    from ux import screen_text
+
+    from vivibox import widgets
+
+    odd = "odd[bold]name[black on black]x"
+
+    async def scenario(app, pilot):
+        app.push_screen(widgets.Confirm("Go on?", f"Start {odd}", title=f"Start · {odd}-1"))
+        await pilot.pause()
+        shown = screen_text(app)
+        assert f"Start · {odd}-1" in shown and f"Start {odd}" in shown, shown
+        await pilot.press("escape")
+        await pilot.pause()
+        app.push_screen(widgets.Choose(f"Model for {odd}", [("one", "said")]))
+        await pilot.pause()
+        assert f"Model for {odd}" in screen_text(app)
+
+    run(scenario, size=(160, 50))

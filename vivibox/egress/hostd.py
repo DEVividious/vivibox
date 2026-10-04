@@ -102,6 +102,17 @@ def running() -> int | None:
     return pid if b"hostd" in cmdline else None
 
 
+def ended(pid: int) -> bool:
+    """Whether the forwarder this process started has ended. Asked of the process itself, never
+    of its command line (running): just started, a process has none for a moment, while its
+    program is loaded, and a start that asked then took a forwarder coming up for one that
+    ended."""
+    try:
+        return os.waitpid(pid, os.WNOHANG) != (0, 0)
+    except ChildProcessError:  # collected already, by whatever else waits for children here
+        return not Path(f"/proc/{pid}").exists()
+
+
 def check(address: str, port: int = PORT, timeout: float = 2.0) -> str:
     """ "" when the forwarder answers a query (through to the stub resolver it asks); else why not."""
     query_id = secrets.token_bytes(2)
@@ -190,7 +201,7 @@ def ensure(address: str, port: int = PORT, upstream: str = "", timeout: float = 
         deadline = time.monotonic() + timeout
         why = "it did not answer"
         while time.monotonic() < deadline:
-            if running() != pid:
+            if ended(pid):
                 why = "it ended"
                 break
             if not (why := check(address, port, timeout=0.5)):

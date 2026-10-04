@@ -256,8 +256,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   still under way reports while the view is closing.
 - A task's start on a busy machine no longer fails with `the DNS forwarder … did not start: it
   ended` while the forwarder was in fact coming up. The forwarder wrote its pid file in place,
-  so the file was empty for a moment, and the start that read it just then took the forwarder
-  for ended and left it running with no pid file. The file is now put in place whole.
+  so the file was empty for a moment, and a process just started has no command line for a
+  moment either: the start that looked just then took the forwarder for ended, and stopped it
+  or left it running with no pid file. The pid file is now put in place whole, and the start
+  asks the process it started whether it has ended.
 - Git variables exported in the shell vivibox is started from no longer redirect the git it
   runs on your machine. Every `GIT_*` variable but `GIT_TERMINAL_PROMPT` is taken out of that
   git's environment: a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` (set inside a git

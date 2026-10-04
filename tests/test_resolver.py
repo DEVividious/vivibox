@@ -414,6 +414,19 @@ def test_the_pid_file_names_a_pid_at_every_moment_it_is_rewritten(runtime, monke
     assert [p.name for p in runtime.iterdir() if p.name.startswith("hostd.pid")] == [], "nothing left"
 
 
+def test_a_start_does_not_take_a_forwarder_still_coming_up_for_ended(runtime, stub, monkeypatch):
+    """A process just started has no command line for a moment, while its program is loaded, and
+    the start asked at once whether its forwarder still ran, by its command line: on a busy
+    machine it read none, said "did not start: it ended" and stopped a forwarder that was coming
+    up. Planted here: no process has a command line to read while the start waits."""
+    port = free_port()
+    read_bytes = Path.read_bytes
+    with monkeypatch.context() as during:
+        during.setattr(Path, "read_bytes", lambda path: b"" if path.name == "cmdline" else read_bytes(path))
+        hostd.ensure(HERE, port, upstream=f"{HERE}:{stub.port}")
+    assert hostd.check(HERE, port) == "" and hostd.running() == STARTED[-1]
+
+
 def test_a_forwarder_that_runs_and_does_not_answer_is_named(runtime):
     port = free_port()
     program = "import time; print('up', flush=True); time.sleep(30)"

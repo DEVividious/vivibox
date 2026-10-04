@@ -51,7 +51,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   worktree is still stopped, with no way to approve either, but is no longer told to be deleted:
   it is blocked until what it added is removed or taken out of what git tracks. The
   verification does not run and the task waits for you with `verification could not run`, no
-  round spent, instead of stopping on an error nothing but a delete got it out of; `r` sends the
+  round spent, instead of stopping on an error nothing but a delete got it out of; the message
+  says what to do before it says why, so a notification cut short still has it; `r` sends the
   writer back, which reads in `verify-feedback.md` how to take the repository or the worktree
   out, in words that hold no command made of a name it chose, and `g` verifies again. Found at
   a review instead (added after the verification passed), it sends the task back to the

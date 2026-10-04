@@ -17,9 +17,11 @@ from vivibox.risky import Approvals
 from vivibox.states import State
 from vivibox.task import create_task
 
-UNTIL = (
-    "vivibox runs no git in the clone while it is there, so the work is neither verified nor "
-    "brought back until then: reply, and the writer removes it, or takes it out of what git tracks"
+# What you do, right after what happened: a notification holds the first 150 characters.
+REPLY = "is blocked until it is out: reply, and the writer removes it, or takes it out of what git tracks."
+WHY = (
+    "git on your machine would run what its settings say, so until then vivibox runs no git in the "
+    "clone, and the work is neither verified nor brought back"
 )
 
 
@@ -56,8 +58,8 @@ def blocked(t) -> str:
 def test_a_repository_the_task_tracks_blocks_it_until_it_is_out(task):
     nested(task.repo)
     assert blocked(task) == (
-        "the task added a repository of its own to its clone, and git on your machine would run what "
-        f"its settings say: web/.git was added, a repository git would go into. {UNTIL}"
+        f"the task added a repository of its own to its clone and {REPLY} Found: web/.git was added, a "
+        f"repository git would go into. {WHY}"
     )
     git(task.repo, "rm", "-q", "-f", "--cached", "web")  # out of what git tracks: the folder stays
     assert (task.repo / "web" / ".git").is_dir()
@@ -77,10 +79,10 @@ def test_a_worktree_the_task_added_blocks_it_until_it_is_removed(task, tmp_path)
     worktree(task.repo, tmp_path / "elsewhere")
     said = blocked(task)
     assert said.startswith(
-        "the task added a worktree to its clone, and git on your machine would run what its settings "
-        "say: .git/worktrees was added; .git/worktrees/elsewhere was added; "
+        f"the task added a worktree to its clone and {REPLY} Found: .git/worktrees was added; "
+        ".git/worktrees/elsewhere was added; "
     )
-    assert said.endswith(f" and 1 more. {UNTIL}")
+    assert said.endswith(f" and 1 more. {WHY}")
     git(task.repo, "worktree", "remove", str(tmp_path / "elsewhere"))
     r.check_protection(task.repo, task.meta)
 
@@ -90,9 +92,9 @@ def test_with_both_each_is_said_in_its_turn(task, tmp_path):
     recorded: the worktree is named, and with it gone the repository."""
     nested(task.repo)
     worktree(task.repo, tmp_path / "elsewhere")
-    assert blocked(task).startswith("the task added a worktree to its clone, ")
+    assert blocked(task).startswith("the task added a worktree to its clone and is blocked ")
     git(task.repo, "worktree", "remove", str(tmp_path / "elsewhere"))
-    assert blocked(task).startswith("the task added a repository of its own to its clone, ")
+    assert blocked(task).startswith("the task added a repository of its own to its clone and is blocked ")
 
 
 @pytest.mark.parametrize("added", ["a repository", "a worktree"])
@@ -115,10 +117,10 @@ def test_in_a_box_nobody_is_said_to_be_replied_to(task):
     nested(task.repo)
     said = blocked(task)
     assert "reply" not in said and "the writer" not in said
-    assert said.endswith(
-        "until then: whoever works in this box, which has no writer, removes it, or takes it out of what "
-        "git tracks"
-    )
+    assert (
+        "is blocked until it is out: whoever works in this box, which has no writer, removes it, or "
+        "takes it out of what git tracks. Found: web/.git was added"
+    ) in said
 
 
 CHANGES = {
@@ -177,8 +179,11 @@ def test_the_task_waits_for_you_and_your_reply_sends_the_writer_back(task):
     assert pod.commands == [], "nothing was built, and no git ran in the clone"
     assert ui.view(task, st, True, 3).status == "verification could not run"
     whole = ui.environment_problem(task)
-    assert whole.startswith("the task added a repository of its own to its clone") and whole.endswith(UNTIL)
-    assert notes[-1].startswith("verification could not run: the task added a repository of its own")
+    assert whole.startswith("the task added a repository of its own to its clone") and whole.endswith(WHY)
+    assert notes[-1].startswith(
+        "verification could not run: the task added a repository of its own to its clone and is blocked "
+        "until it is out: reply, and the writer removes it, or takes it out of"
+    ), "cut short, the notification still says what to do"
     offered = ui.view(task, st, True, 3).commands
     assert f'vivibox reply {task.id} "…"' in offered, "r sends the writer back"
     assert f"vivibox verify-again {task.id}" in offered, "g, once it is out by hand"

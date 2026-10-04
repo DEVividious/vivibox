@@ -475,11 +475,12 @@ def check_protection(repo: Path, meta: Path) -> None:
         if all(isinstance(change, protection.Added) for change in changed):
             # What ordinary work adds: the task is blocked while it is there, not lost.
             what = " and ".join(sorted({change.what for change in changed}))
+            # The state and the step first: a notification holds the first 150 characters.
             raise Blocked(
-                f"the task added {what} to its clone, and git on your machine would run what its "
-                f"settings say: {named}. vivibox runs no git in the clone while it is there, so the "
-                f"work is neither verified nor brought back until then: {undoes(meta)} removes it, or "
-                "takes it out of what git tracks",
+                f"the task added {what} to its clone and is blocked until it is out: {undoes(meta)} "
+                f"removes it, or takes it out of what git tracks. Found: {named}. git on your machine "
+                "would run what its settings say, so until then vivibox runs no git in the clone, and "
+                "the work is neither verified nor brought back",
                 changed,
             )
         raise RepoError(

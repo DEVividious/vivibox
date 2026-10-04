@@ -127,9 +127,18 @@ class TaskTable:
         parts += [look.secondary(f"{done} done")] * bool(done)
         return look.muted(" · ").join(parts) or EMPTY_PROJECT
 
+    def reload(self) -> None:
+        """The list as the tasks are now (read_tasks). A task deleted while its files are read
+        (accepted in a shell or from a notification, removed by a step still under way) leaves
+        the list as it was drawn, for the next refresh to draw whole: the two-second timer's,
+        or the one its removal asks for."""
+        try:
+            self.read_tasks()
+        except FileNotFoundError:
+            self.drawn = ()
+
     def fill_table(self, pairs: list, selected: str | None) -> None:
         table = self.table
-        table.clear()
         planned: list[tuple[dict[str, str], str]] = []
         for name in self.project_order(pairs):
             own = [(t, st) for t, st in pairs if st.project == name]
@@ -186,6 +195,7 @@ class TaskTable:
         # ever held past clear(), which kept a long status gone from the list pushing the goal off
         # the screen; and the table measures new rows only when idle, so a width left for it to
         # measure was drawn narrow for a frame on every refill.
+        table.clear()  # only now: reading the tasks above may stop short (reload), the rows stay
         taken = 0
         for name in self.columns:
             if name != "GOAL":

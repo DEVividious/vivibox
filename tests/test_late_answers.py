@@ -95,3 +95,35 @@ def test_a_thread_that_reports_once_the_view_has_closed_is_not_run(env):
 
     asyncio.run(go())
     assert late == ["while it runs"]
+
+
+def test_a_task_deleted_while_the_list_is_refreshed_is_gone_at_the_next_refresh(env, monkeypatch):
+    """The refresh lists the tasks, then reads each one's files; a task whose files go in between
+    (accepted in a shell or from a notification, removed by a step of the view still under way)
+    raised FileNotFoundError out of the two-second timer, and the view ended with a traceback.
+    Planted here: the task is deleted after the refresh listed it."""
+    import shutil
+
+    from test_tui import new_task, rows
+
+    from vivibox import tui
+
+    task = new_task("Accepted elsewhere")
+    projects = tui.projects
+
+    def deleted_meanwhile():
+        shutil.rmtree(task.root, ignore_errors=True)
+        return projects()
+
+    async def scenario(app, pilot):
+        assert rows(app) == ["demo", task.id]
+        task.event("turn", state="plan", cost=0.1, tokens=1)  # something to draw again
+        with monkeypatch.context() as during:
+            during.setattr(tui, "projects", deleted_meanwhile)
+            app.reload()
+        await pilot.pause()
+        app.reload()
+        await pilot.pause()
+        assert rows(app) == ["demo"], "listed as it is now"
+
+    run(scenario)

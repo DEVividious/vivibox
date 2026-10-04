@@ -318,8 +318,8 @@ class Vivibox(
             tuple(sorted(self.starting.items())),
         )
 
-    def reload(self) -> None:
-        """Re-reads every task; the only place that does, so key checks stay cheap."""
+    def read_tasks(self) -> None:
+        """Re-reads every task; the only place that does (for reload), so key checks stay cheap."""
         self.check_code()
         selected = self.selected_id()
         pairs = [(t, t.read_state()) for t in list_tasks(self.config.tasks_dir)]

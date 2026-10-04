@@ -254,6 +254,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   background and, on a busy machine or a slow repository, back only after Esc. The answer is
   dropped (the list of providers is still kept for the next time), and so is what a step
   still under way reports while the view is closing.
+- The view no longer ends with a traceback (`FileNotFoundError: …/.task/state.json`) when a
+  task is deleted at the moment the list is refreshed: accepted or deleted in a shell or from
+  a notification, or by the view's own removal still under way. The list stays as it was and
+  the next refresh draws it without the task.
 - A task's start on a busy machine no longer fails with `the DNS forwarder … did not start: it
   ended` while the forwarder was in fact coming up. The forwarder wrote its pid file in place,
   so the file was empty for a moment, and a process just started has no command line for a

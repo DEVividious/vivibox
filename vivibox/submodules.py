@@ -24,10 +24,11 @@ once, and each commit of it that adds or moves a pointer is looked at as the las
 a submodule the work adds there is no commit to count from: the history looked at is the one
 no branch of a remote in your copy of it reaches (refs/remotes). The rest is taken on trust,
 not checked: that a history your copy fetched from a remote points at commits a remote has.
-The address of that remote is the one the work's .gitmodules names, the writer's, which the
-refusal prints in its clone command when it is one that only fetches; a remote that serves a
-history pointing at a commit the task's clone alone holds is not caught. A history that
-cannot be listed is refused.
+The address of that remote is the one the work's .gitmodules names, the writer's: the refusal
+prints it whole and says whose it is and that vivibox has not checked it, in its clone command
+when it is one that only fetches (ADDRESS), as text in no command when it is anything else. A
+remote that serves a history pointing at a commit the task's clone alone holds is not caught.
+A history that cannot be listed is refused.
 """
 
 from __future__ import annotations
@@ -60,9 +61,20 @@ HISTORY += ("--ignore-submodules=none", "--no-show-signature", "--no-color")
 # git here fetches nothing: a submodule of yours that is a partial clone would otherwise go to
 # its remote for a commit it lacks.
 NOT_LAZY = {"GIT_NO_LAZY_FETCH": "1"}
-# An address vivibox puts in a command for you to run: a URL of a protocol that runs nothing
-# here, or user@host:path; no option, no space, nothing a shell reads as more than a word.
-ADDRESS = re.compile(r"(?:(?:https|ssh|git)://|[A-Za-z0-9_][A-Za-z0-9._-]*@)[A-Za-z0-9][A-Za-z0-9._~:/@%+-]*")
+# An address vivibox puts in a command for you to run, said there to be the writer's: a URL of
+# a protocol that runs nothing here (https, git, ssh) or user@host:path, with a host, an
+# optional port and a path, each of plain characters. Nothing that git, ssh or you would read
+# as other than the address it looks like: no option (a host, a user or a part of the path
+# that starts with a hyphen), no transport helper (ext::, any name::), no file of this
+# machine, no password and no user in a URL but ssh's own (https://host@elsewhere reads as
+# host), no character written as %XX, no space, nothing a shell reads as more than a word.
+# Anything in doubt is no such address: it is shown as text, and put in no command.
+_USER, _HOST = r"[A-Za-z0-9_][A-Za-z0-9_-]*", r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?"
+_PART, _PORT = r"[A-Za-z0-9._~+][A-Za-z0-9._~+-]*", r"(?::[0-9]{1,5})?"
+ADDRESS = re.compile(
+    rf"(?:(?:https|git)://{_HOST}{_PORT}/|ssh://(?:{_USER}@)?{_HOST}{_PORT}/|{_USER}@{_HOST}:/?)"
+    rf"{_PART}(?:/{_PART})*/?"
+)
 
 MISSING = "missing"  # you have the submodule, not the commit
 LOOSE = "loose"  # the commit is in your submodule, and nothing keeps it there
@@ -253,7 +265,7 @@ class Kept:
     """A submodule commit of the work that you do not keep yet. path: from your repository's
     root; held: your repository of the submodule, where there is one; above: the repository it
     is a submodule of, and inside: its path in that one; url: for one the work adds, where its
-    .gitmodules says it comes from, when that is an address for a command; why: for one
+    .gitmodules says it comes from, as the writer wrote it ("" for no address); why: for one
     vivibox could not check; via: for one that only a submodule's history needs, the path of
     that submodule and the commit of its history that needs it; since: for one whose history
     was not listed, the commit it was to be listed from ("" for a submodule the work adds)."""
@@ -314,7 +326,6 @@ def look(
             elif held is None:
                 named = yours.modules(after) if named is None else named
                 url = named.get(inside, ("", ""))[1]
-                url = url if ADDRESS.fullmatch(url) else ""
                 found.unkept.append(Kept(path, commit, ADDED, None, yours, inside, url, via=via))
             elif state := held.keeps(commit):
                 kind = state if held.tree else NOT_CHECKED_OUT
@@ -451,17 +462,32 @@ def refusal(
             ]
         elif one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
-            where = "" if one.url else " (an address vivibox does not put in a command)"
-            what, whose, kept = "the work adds this submodule", "the work's", "you keep the commit:"
+            # The address is from a .gitmodules the agent may have written: said to be that,
+            # whole, and in the command only when it is one that does nothing but fetch.
+            what, whose, wrote = "the work adds this submodule", "the work's", "the agent wrote it"
+            kept = "you keep the commit"
             if one.via:  # the history's, which the work may not leave there: not said to be the work's
                 what, whose = "that history has a submodule here", "that history's"
-                kept = "you keep the commit; where the work leaves no submodule there, git shows the "
-                kept += "folder as one it does not track:"
+                wrote = "the agent may have written it"
+                kept += "; where the work leaves no submodule there, git shows the folder as one it "
+                kept += "does not track"
+            entry, to = f"{named}: {what}, and your checkout has no copy of it.", display.name(str(mine))
+            if ADDRESS.fullmatch(one.url):
+                lines += [
+                    f"{entry} Clone it to {to}, so that {kept}. The address in the command is the one "
+                    f"{whose} .gitmodules names: {wrote}, and vivibox has not checked it. Look at it "
+                    "before you run the command, and clone from where you know the submodule to be if "
+                    "that is elsewhere:",
+                    f"git clone -- {shlex.quote(one.url)} {quoted(mine)}",
+                ]
+                continue
+            told = f"{whose.capitalize()} .gitmodules names no address for it."
+            if one.url:  # whole, as text: between marks it cannot close, on the line it is said on
+                told = f"As its address {display.quoted(f'{whose} .gitmodules', one.url)}: {wrote}, and "
+                told += "vivibox has not checked it and puts it in no command."
             lines += [
-                f"{named}: {what}, and your checkout has no copy of it. Clone it "
-                f"to {display.name(str(mine))} from the remote {whose} .gitmodules names{where}, so that "
-                f"{kept}",
-                f"git clone -- {one.url or '<its remote>'} {quoted(mine)}",
+                f"{entry} {told} Clone it to {to} from where you know the submodule to be, so that {kept}:",
+                f"git clone -- <its remote> {quoted(mine)}",
             ]
         elif one.kind == LOOSE:
             lines += [

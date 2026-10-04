@@ -218,7 +218,13 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   the commit, and the commands that keep it: a fetch in your submodule from its remote, or
   from the task's clone, which puts the commit under `refs/vivibox/<id>/…` there; a submodule
   you have not checked out is checked out first, and one the work adds is cloned into your
-  checkout from the remote the work names. Then you accept again. The task stays as it was
+  checkout. The address in that clone command is the one the work's `.gitmodules` names: the
+  agent wrote it and vivibox has not checked it, which the refusal says, printing the address
+  whole; look at it before you run the command, and clone from where you know the submodule
+  to be if that is elsewhere. An address that is anything but a plain `https://`, `git://` or
+  `ssh://` URL or `user@host:path` (an option, a transport that runs a program, a folder of
+  your machine, a password or a second host in it) is shown as text between `«` and `»` and
+  put in no command. Then you accept again. The task stays as it was
   meanwhile. The view says it briefly; `vivibox accept <id>` in a terminal says it whole, with
   the commands. The review shows the pointer, not what the commit holds: look at it once you
   have it (`git -C <submodule> show <commit>`). The commit is then yours alone: push it to the

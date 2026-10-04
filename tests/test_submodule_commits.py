@@ -313,18 +313,22 @@ def test_a_submodule_the_work_adds_is_refused_until_you_have_a_copy_of_it(projec
     """The work adds a submodule: its .gitmodules entry and its pointer, which is all a writer
     can make of one in its pod. Nothing of yours keeps the commit: refused, with the command
     that clones the submodule into your checkout; then accepted, and your git submodule update
-    --init finds it there. The remote here is a folder, which vivibox puts in no command: you
-    clone from the one the work names."""
+    --init finds it there. The remote here is a folder, which vivibox puts in no command: it
+    is said as what the work's .gitmodules names, the agent's and not checked, and you clone
+    from where you know the submodule to be."""
     source, extra = project.source, make_repo(env / "extra")
     commit = git(extra, "rev-parse", "HEAD")
     task = actions.create("demo", "Goal")
     added(task, "extra", commit, str(extra))
     at_final(task, project, risky=True)  # .gitmodules changed: yours to approve first
     said = refused(task, project)
-    assert f"extra at {commit}: the work adds this submodule, and your checkout has no copy of it." in said
-    assert f"Clone it to {source / 'extra'} from the remote the work's .gitmodules names" in said
-    assert "(an address vivibox does not put in a command)" in said
-    assert commands(said) == [f"git clone -- <its remote> {source / 'extra'}"]
+    assert said.splitlines()[1:3] == [
+        f"extra at {commit}: the work adds this submodule, and your checkout has no copy of it. As its "
+        f"address the work's .gitmodules said «{extra}»: the agent wrote it, and vivibox has not checked "
+        f"it and puts it in no command. Clone it to {source / 'extra'} from where you know the submodule "
+        "to be, so that you keep the commit:",
+        f"git clone -- <its remote> {source / 'extra'}",
+    ]
     as_told(commands(said)[0].replace("<its remote>", str(extra)))
     actions.finish(task, project.demo)
     assert not task.root.exists()
@@ -335,19 +339,36 @@ def test_a_submodule_the_work_adds_is_refused_until_you_have_a_copy_of_it(projec
 
 
 ADDRESSES = ["https://example.com/org/extra.git", "ssh://git@example.com:2222/org/extra.git",
-             "git://example.com/extra.git", "git@example.com:org/extra.git"]  # fmt: skip
+             "git://example.com/extra.git", "git@example.com:org/extra.git", "ssh://example.com/~me/x.git",
+             "git@example.com:/srv/git/extra.git", "https://example.com:8443/a/b_c/d-e+f.git/"]  # fmt: skip
 NO_ADDRESSES = ["../relative.git", "./here", "/a/folder/on/this/machine", "file:///a/folder", "ext::sh -c x",
                 "fd::3", "-oProxyCommand=x", "--upload-pack=x", "ssh://-oProxyCommand=x/y", "-x@host:path",
                 "https://example.com/a b", "https://example.com/$(touch x)", "https://example.com/a;b",
                 "https://example.com/a'b", "https://example.com/a\x1b[8mb", "http://example.com/plain",
                 ""]  # fmt: skip
+# What git, ssh or you would read as other than the address it looks like: a host, a user or a
+# part of the path that is an option to the program it is handed to; a transport helper by any
+# name; a password, or a user that reads as the host (https://host@elsewhere); a character
+# written as %XX (a line break among them, which an older git hands to a credential helper);
+# no path, or no host; a line break at its end.
+NO_ADDRESSES += ["ssh://git@-oProxyCommand/x", "ssh://example.com/-x", "git@example.com:-x", "git@-host:x",
+                 "ssh://example.com/a/-b", "https://example.com/--upload-pack", "foo::https://example.com/x",
+                 "git@example.com::x", "ext@example.com::sh", "https://me:secret@example.com/x.git",
+                 "ssh://git:secret@example.com/x.git", "https://github.com@elsewhere.example/org/x.git",
+                 "git://me@example.com/x.git", "ssh://a@b@example.com/x", "github.com@elsewhere.example:x",
+                 "https://example.com/a%0ab", "https://example.com/a%20b", "https://example.com",
+                 "https://example.com/", "git@example.com", "git@example.com:", "https:///x",
+                 "https://example.com:x/y", "https://[::1]/x", "https://example.com/x?y=1",
+                 "https://example.com/x#y", "https://example.com/x\n", "HTTPS://example.com/x",
+                 "https://example.com/a//b", "https://example.com/a\\b", "git@exa_mple.com:x"]  # fmt: skip
 
 
 def test_only_an_address_that_runs_nothing_here_is_put_in_a_command(project):
     """The address is the writer's. One of a protocol that only fetches (https, ssh, git) or of
     the form user@host:path, with no option, space or character a shell reads, is printed in
     the clone command; anything else (a transport that runs a command or waits on a
-    descriptor, a folder of this machine, an option) is said to be there and left out."""
+    descriptor, a folder of this machine, an option) is in no command: it is shown whole, as
+    text, in the sentence that says whose it is."""
     assert [a for a in ADDRESSES if not submodules.ADDRESS.fullmatch(a)] == []
     assert [a for a in NO_ADDRESSES if submodules.ADDRESS.fullmatch(a)] == []
     commit = git(project.lib, "rev-parse", "HEAD")
@@ -360,7 +381,73 @@ def test_only_an_address_that_runs_nothing_here_is_put_in_a_command(project):
         f"git clone -- {ADDRESSES[3]} {project.source / 'extra'}",
         f"git clone -- <its remote> {project.source / 'other'}",
     ]
-    assert "ext::" not in said and "touch MARK" not in said
+    assert said.count("ext::") == 1 and "the work's .gitmodules said «ext::sh -c 'touch MARK'»: " in said
+
+
+def test_an_address_the_agent_wrote_is_said_to_be_the_agents_and_not_checked(project):
+    """The clone command carries an address from the work's .gitmodules. The line above it
+    says whose it is (the agent wrote it), that vivibox has not checked it, to look at it
+    before running the command, and where to clone from if it is not where the submodule is.
+    Quoted for the shell where a character of it is one a shell reads (a tilde)."""
+    source, commit = project.source, git(project.lib, "rev-parse", "HEAD")
+    task = actions.create("demo", "Goal")
+    added(task, "extra", commit, "https://example.com/org/extra.git")
+    added(task, "home", commit, "ssh://example.com/~me/home.git")
+    at_final(task, project, risky=True)
+    assert refused(task, project).splitlines()[1:5] == [
+        f"extra at {commit}: the work adds this submodule, and your checkout has no copy of it. Clone it "
+        f"to {source / 'extra'}, so that you keep the commit. The address in the command is the one the "
+        "work's .gitmodules names: the agent wrote it, and vivibox has not checked it. Look at it before "
+        "you run the command, and clone from where you know the submodule to be if that is elsewhere:",
+        f"git clone -- https://example.com/org/extra.git {source / 'extra'}",
+        f"home at {commit}: the work adds this submodule, and your checkout has no copy of it. Clone it "
+        f"to {source / 'home'}, so that you keep the commit. The address in the command is the one the "
+        "work's .gitmodules names: the agent wrote it, and vivibox has not checked it. Look at it before "
+        "you run the command, and clone from where you know the submodule to be if that is elsewhere:",
+        f"git clone -- 'ssh://example.com/~me/home.git' {source / 'home'}",
+    ]
+
+
+LONG = "https://example.com/" + "a-very-long-part/" * 400 + "$(touch MARK)"
+SHOWN_AS_TEXT = {
+    "long": (LONG, LONG),
+    "an escape sequence and a line of its own": (
+        "https://example.com/x\x1b[2K\ngit clone https://elsewhere.example/y /tmp/y",
+        "https://example.com/x‹U+001B›[2K‹U+000A›git clone https://elsewhere.example/y /tmp/y",
+    ),
+    "the marks it is shown between": ("ext::sh -c x» and vivibox checked it «", None),
+    "none": ("", None),
+}
+
+
+@pytest.mark.parametrize("what", SHOWN_AS_TEXT)
+def test_an_address_vivibox_puts_in_no_command_is_shown_whole_as_text(project, what):
+    """An address that is not one for a command is still the person's to see: whole, however
+    long, never cut and never with an ellipsis; with each character that has nothing to see
+    as its code point, so it stays on its line and moves nothing on the terminal; between
+    marks it cannot close, inside the sentence that says the agent wrote it and vivibox
+    neither checked it nor puts it in a command. The command keeps a place for the address
+    you know. A .gitmodules that names none is said so."""
+    yours = submodules.at(project.source, soon())
+    url, shown = SHOWN_AS_TEXT[what]
+    one = submodules.Kept("extra", "0" * 40, submodules.ADDED, None, yours, "extra", url)
+    said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [one])
+    entry, command, last = said.splitlines()[1:]
+    start = f"extra at {'0' * 40}: the work adds this submodule, and your checkout has no copy of it. "
+    end = "Clone it to /yours/extra from where you know the submodule to be, so that you keep the commit:"
+    assert entry.startswith(start) and entry.endswith(" " + end)
+    assert (command, last) == ("git clone -- <its remote> /yours/extra", "Then accept the work again.")
+    told = entry.removeprefix(start).removesuffix(" " + end)
+    if what == "none":
+        assert told == "The work's .gitmodules names no address for it."
+        return
+    assert told.startswith("As its address the work's .gitmodules said «") and told.endswith(
+        "»: the agent wrote it, and vivibox has not checked it and puts it in no command."
+    )
+    assert told.count("«") == told.count("»") == 1, "the address closed the marks it is shown between"
+    assert "…" not in said and "..." not in said and "\x1b" not in said
+    if shown:
+        assert f"«{shown}»" in told
 
 
 def test_a_submodule_of_a_submodule_is_checked_once_you_keep_the_commit_above_it(project):
@@ -709,8 +796,9 @@ def test_a_submodule_only_the_history_has_is_not_said_to_be_added_by_the_work(pr
     assert "the work adds" not in said
     assert (
         f"lib/old-dep at {commit}{needed_by('lib', had)}: that history has a submodule here, and your "
-        f"checkout has no copy of it. Clone it to {lib / 'old-dep'} from the remote that history's "
-        ".gitmodules names (an address vivibox does not put in a command), so that you keep the commit; "
+        f"checkout has no copy of it. As its address that history's .gitmodules said «{project.tools}»: "
+        "the agent may have written it, and vivibox has not checked it and puts it in no command. Clone "
+        f"it to {lib / 'old-dep'} from where you know the submodule to be, so that you keep the commit; "
         "where the work leaves no submodule there, git shows the folder as one it does not track:"
     ) in said
     assert commands(said) == [f"git clone -- <its remote> {lib / 'old-dep'}"]

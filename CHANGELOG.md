@@ -47,6 +47,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The clone command a refused accept prints for a submodule the work adds says whose its
+  address is: the one the work's `.gitmodules` names, written by the agent and not checked by
+  vivibox, to look at before running the command, with where to clone from if the submodule
+  is elsewhere. The address is printed whole. Fewer addresses are put in a command: a plain
+  `https://`, `git://` or `ssh://` URL or `user@host:path` still is; one with a password, with
+  a user in an `https://` or `git://` URL (`https://host@elsewhere`), with a host, user or
+  part of its path that starts with a hyphen, with `::` in it, with a character written as
+  `%XX`, or with no path is not. An address left out of the command was only said to be
+  there; it is now shown whole as text, between `«` and `»`, with its invisible characters as
+  code points, and the command keeps a place for the address you know. The same for a
+  submodule that only a submodule's history has, whose `.gitmodules` the agent may have
+  written.
 - Accepting work reads no more than 64 MiB of what one git prints while it checks the work's
   submodules (the listing of a submodule's history, of a commit's files, a `.gitmodules`), on
   stdout and stderr together, counted as it comes. A listing is as long as the writer made it:

@@ -224,20 +224,26 @@ class Choose(Dialog):
 
 class Confirm(Dialog):
     """A yes or no. Red is for a yes that destroys or interrupts something; agreeing to go on is not
-    a warning."""
+    a warning. about: what the question is asked of (a command, how a task was run), above it.
+    Each of the two scrolls in a share of the screen when it is taller, so the question and the
+    buttons are on the screen whatever the texts hold: nothing is answered out of sight."""
 
     hint_keys = (("enter", "choose"), look.ESC_CANCELS)
+    AUTO_FOCUS = "Button"  # the first button, as ever: a text that scrolls takes focus too
 
-    def __init__(self, question: str, yes: str = "Yes", destructive: bool = False, title: str = ""):
+    def __init__(
+        self, question: str, yes: str = "Yes", destructive: bool = False, title: str = "", about: str = ""
+    ):
         super().__init__()
-        self.question, self.yes, self.destructive = question, yes, destructive
+        self.question, self.yes, self.destructive, self.about = question, yes, destructive, about
         self.frame_title = title
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog narrow"):
-            yield Label(
-                display.terminal(self.question), classes="wrap", markup=False
-            )  # a command the agent wrote
+            for text, kind in ((self.about, "asked about"), (self.question, "asked")):
+                if text:  # a command the agent wrote, how it ran the app
+                    with VerticalScroll(classes=kind):
+                        yield Label(display.terminal(text), classes="wrap", markup=False)
             with Horizontal(classes="buttons"):
                 yield Button(escape(self.yes), variant="error" if self.destructive else "primary", id="yes")
                 yield Button("Cancel", id="no")

@@ -48,6 +48,10 @@ ModalScreen { align: center middle; background: $background 60%; }
 .dialog.usage { width: 110; }
 /* Text in a dialog: a question in the foreground, help and notes muted. */
 .wrap { width: 100%; }
+/* What a yes-or-no asks, and what it asks it of: each as tall as its text, a share of the
+   screen at most, and scrolling past that, so the buttons under them are never off the screen. */
+.dialog > .asked { height: auto; max-height: 28vh; }
+.dialog > .asked.about { margin-bottom: 1; }
 .note, .files { color: $text-muted; }
 .files, .spaced { margin: 1 0 0 0; }
 .problem { color: $error; margin-top: 1; }

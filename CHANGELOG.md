@@ -326,6 +326,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A yes-or-no keeps its question and its buttons on the screen whatever it quotes. With a tall
+  text in it (how the last accepted task was run, which an agent wrote) a terminal of 80 by 24
+  showed neither the end of the text, nor "Still right?", nor the buttons, and Enter still
+  answered "Use it". The quoted text and the question each scroll in a share of the screen.
 - The rule beside what an agent wrote is drawn in the colour of muted text. In the colour of a
   frame it was the faintest thing in the panel, fainter than the lines of a table.
 - A row of a code block that goes on from the row above stands a column in, and its mark `↳` is

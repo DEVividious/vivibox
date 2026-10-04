@@ -171,6 +171,9 @@ approval, stopping just the pod keeps the decision in Waiting for you, its label
   (`widgets.follow_highlight`). A flow's help is `look.flow`, the same under `n` and `k`.
   On a terminal too short for all the fields and the help's two lines, the help is not shown,
   for that terminal, whatever has focus.
+- A yes-or-no (`widgets.Confirm`) is never answered out of sight: what it asks about and the
+  question each scroll in a share of the screen (`vh`) when they are taller, and the buttons
+  stay under them, at 80×24 too.
 - A dialog fits 80×24 with every field on the screen. When the terminal is short, the multi-line
   text gives way first, down to three lines, before anything scrolls.
 - A list in a dialog (settings rows, a catalog, the file tree) grows with the terminal: on a tall

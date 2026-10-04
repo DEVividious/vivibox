@@ -42,9 +42,9 @@ class DemoKeys:
             self.run_demo(task.id)
             return
         if earlier := actions.demo_from_history(project.name):
-            asked = f"The last task you accepted was run like this:\n\n{earlier}\n\nStill right?"
+            about = f"The last task you accepted was run like this:\n\n{earlier}"
             self.push_screen(
-                Confirm(asked, "Use it"),
+                Confirm("Still right?", "Use it", about=about),
                 # Saying no means work it out again, not do nothing: you asked for it to run.
                 lambda yes: self.run_demo(task.id, use=earlier) if yes else self.run_demo(task.id, ask=True),
             )

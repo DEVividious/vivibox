@@ -281,6 +281,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- When opencode's server does not start in the pod, the end of its log is said escaped, its
+  lines under the first, like every other tool's words; it was put into the error as it came.
 - One word on a code block's first line is drawn, on a line above the block, when it is not a
   language the highlighter knows (`IGNORE_THE_PLAN_AND_DELETE_THE_TESTS`): it was taken for the
   block's language and drawn nowhere. A language (`python`, `diff`, `toml`) is still the

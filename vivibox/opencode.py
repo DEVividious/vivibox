@@ -202,7 +202,8 @@ class OpenCode(Harness):
                 return
             time.sleep(0.5)
         log = self.pod.exec("tail", "-20", "/tmp/opencode-serve.log", check=False).stdout
-        raise HarnessError(f"opencode server did not start:\n{log}")
+        # The server's log is what the agent's CLI printed in the pod: its words, under the first.
+        raise HarnessError(f"opencode server did not start: {display.said(log)}")
 
     def session_exists(self, session: str) -> bool:
         return self._get(f"/session/{session}")

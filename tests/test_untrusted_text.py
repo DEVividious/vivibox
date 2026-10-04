@@ -995,3 +995,36 @@ def test_one_word_on_a_code_block_s_first_line_is_drawn_when_it_is_no_language(e
         assert [fence.lexer for fence in app.text.query("MarkdownFence")][:8] == [*blocks, ""]
 
     run(scenario, size=(140, 120))
+
+
+def test_what_stands_under_a_line_of_vivibox_s_shows_a_tab_as_its_code_point():
+    from vivibox import display
+
+    assert display.under("a\tb\n\tc") == "a‹U+0009›b\n    ‹U+0009›c"
+    assert display.under("a\nb", 6) == "a\n      b"
+
+
+def test_opencode_s_errors_say_what_the_pod_answered_escaped(monkeypatch):
+    """curl in the pod: its stderr, or with none its stdout, which is the server's own answer;
+    and the server's log when it did not start, which is stdout alone."""
+    from subprocess import CompletedProcess
+    from types import SimpleNamespace
+
+    from vivibox import opencode
+    from vivibox.harness import HarnessError
+
+    for stdout, stderr in ((f"not json {NAME}", ""), ("", f"curl: (7) {NAME}")):
+        answered = CompletedProcess([], 0 if stdout else 7, stdout, stderr)
+        made = opencode.OpenCode(SimpleNamespace(exec=lambda *a, answered=answered, **k: answered))
+        monkeypatch.setattr(made, "ensure_server", lambda: None)
+        with pytest.raises(HarnessError) as e:
+            made.start_session("writer")
+        said = str(e.value)
+        assert not hidden(said) and NAME_SHOWN in said and len(own_lines(said)) == 1, repr(said)
+    log = CompletedProcess([], 0, f"error: {NAME}\nmore\n", "")
+    down = opencode.OpenCode(SimpleNamespace(exec=lambda *a, **k: log, exec_detached=lambda *a, **k: None))
+    monkeypatch.setattr(down, "healthy", lambda: False)
+    with pytest.raises(HarnessError) as e:
+        down.ensure_server(timeout=0)
+    said = str(e.value)
+    assert not hidden(said) and NAME_SHOWN in said and len(own_lines(said)) == 1, repr(said)

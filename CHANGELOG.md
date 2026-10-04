@@ -268,6 +268,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- When git in a task's clone runs out of time and vivibox finds no special file where git reads
+  its settings or refs, the message no longer says a named pipe made git wait: it says which
+  git did not finish in how many seconds, where, that vivibox looked for such a file and found
+  none, and to try again. A cause is named only where one was found.
+- A notification of a verification that could not run, cut short to fit, ends with where the
+  rest is (`vivibox status <id>`) instead of in the middle of the sentence.
 - A task whose state records, where the layout's version is, something that is no version (text,
   a fraction, `true`, `null`, zero, a negative number) is no longer said to come from a newer
   vivibox, which nothing in it says. Its status is `state unreadable`; every command that runs

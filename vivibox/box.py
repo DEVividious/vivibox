@@ -157,8 +157,9 @@ def close_box(task: Task, project: Project) -> Path | None:
         commit_in_box(task)
         head = repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
     except repo.GitTimeout as e:
+        why = str(e).removesuffix(repo.RETRY)  # the way to try again is said here
         raise repo.GitTimeout(
-            f"the box could not close: {e}; then try again: vivibox accept {task.id}"
+            f"the box could not close: {why}; then try again: vivibox accept {task.id}"
         ) from None
     if head == st.base_commit:
         raise gate.GateError(f"nothing changed in {task.id}; there is nothing to bring back")

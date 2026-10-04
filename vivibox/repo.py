@@ -239,10 +239,17 @@ def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path, sl
 shown = display.name
 
 
+# How a timeout with no cause found ends: the step is to try again, which a caller that says its
+# own way of trying again takes off (fetch_to, box.close_box).
+RETRY = "; try again"
+
+
 def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") -> str:
-    """What timed out, why it likely did, and what to do, in words. Never a command to paste: the
-    names are the agent's, and a shell would run what a name says ($(…), ;) or delete a file of
-    yours by a path that is the clone's (.git/packed-refs)."""
+    """What timed out, the cause where one was found (a special file, named), and what to do, in
+    words; where none was found, the fact alone, what was looked for, and to try again: never a
+    guess at a cause. Never a command to paste: the names are the agent's, and a shell would
+    run what a name says ($(…), ;) or delete a file of yours by a path that is the clone's
+    (.git/packed-refs)."""
     i = 0
     while i < len(args) - 1 and args[i].startswith("-"):
         i += 2 if args[i] in ("-c", "-C") else 1
@@ -251,14 +258,15 @@ def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") ->
     if not found and slow:
         return (
             f"{command} did not finish in {seconds:g} s in {shown(str(clone))}: {slow} can take this long, "
-            "and nothing where git reads its settings or refs is a named pipe; try again"
+            f"and nothing where git reads its settings or refs is a named pipe{RETRY}"
         )
-    what = f"{command} did not answer in {seconds:g} s"
     if not found:
         return (
-            f"{what} in {shown(str(clone))}; a named pipe (FIFO) where git reads its settings or refs "
-            "(.gitignore, .gitattributes, .git/info/exclude, .git/packed-refs) makes git wait like this"
+            f"{command} did not finish in {seconds:g} s in {shown(str(clone))}; vivibox looked there for a "
+            "special file where git reads its settings or refs (a named pipe, a socket, a device) and "
+            f"found none{RETRY}"
         )
+    what = f"{command} did not answer in {seconds:g} s"
     # The file from the clone's root first, said to be the clone's: a notification cut short keeps it.
     named = ", ".join(f"{shown(path)} is {kind}" for path, kind in found)
     committed = [path for path, _ in found if _committed(clone, path)]
@@ -589,8 +597,8 @@ def fetch_to(source: Path, repo: Path, meta: Path, task_id: str) -> str:
         )
     except GitTimeout as e:
         raise GitTimeout(
-            f"the work could not be brought back from the task's clone: {e}; then try again, or see "
-            f"vivibox status {task_id}"
+            f"the work could not be brought back from the task's clone: {str(e).removesuffix(RETRY)}; "
+            f"then try again, or see vivibox status {task_id}"
         ) from None
     return git("rev-parse", review_ref(task_id), cwd=source).stdout.strip()
 

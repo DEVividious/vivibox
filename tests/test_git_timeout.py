@@ -395,15 +395,49 @@ def test_whether_the_commits_have_a_file_is_asked_of_its_name_alone(task):
     assert "delete it" in said and "restore" not in said
 
 
-def test_the_reason_without_a_special_file_found_names_where_to_look(task, tmp_path, monkeypatch):
+def a_git_that_never_ends(tmp_path, monkeypatch) -> None:
+    """git on PATH that waits with nothing in the clone to wait on: no special file is there."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "git").write_text("#!/bin/sh\nexec sleep 300\n")
     (bin_dir / "git").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_the_reason_without_a_special_file_found_is_the_fact_and_the_next_step(task, tmp_path, monkeypatch):
+    """What vivibox knows: which git did not finish in how long, where, and that it found no
+    special file there. Not a cause: it looked for a named pipe and found none."""
+    a_git_that_never_ends(tmp_path, monkeypatch)
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
-    assert said.startswith(f"git status did not answer in {LIMIT} s in {task.repo}")
-    assert ".gitignore" in said and ".git/info/exclude" in said
+    assert said == (
+        f"git status did not finish in {LIMIT} s in {task.repo}; vivibox looked there for a special "
+        "file where git reads its settings or refs (a named pipe, a socket, a device) and found none; "
+        "try again"
+    )
+    assert "makes git wait" not in said and "forever" not in said, "no cause is guessed"
+
+
+def test_the_work_not_brought_back_for_no_cause_found_says_to_try_again_once(
+    task, source, tmp_path, monkeypatch
+):
+    real = repo.guard
+    repo.guard(task.repo)  # as recorded: checked while git still answers
+    a_git_that_never_ends(tmp_path, monkeypatch)
+    monkeypatch.setattr(repo, "check_protection", lambda clone, meta: None)
+    monkeypatch.setattr(repo, "guard", lambda clone: None)
+    said = str(in_time(lambda: repo.fetch_to(source, task.repo, task.meta, task.id)))
+    assert real is not repo.guard
+    assert said.endswith(f"and found none; then try again, or see vivibox status {task.id}")
+    assert said.count("try again") == 1
+
+
+def test_a_backslash_in_a_name_is_shown_as_it_is(task):
+    """A name with a backslash is that name: nothing doubles it, drops it or reads it as an escape."""
+    name = "a\\b\\n"  # a\b\n: two backslashes, and no line break
+    fifo(task.repo, f"{name}/.gitignore")
+    said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    assert f"in the task's clone, {name}/.gitignore is a named pipe (FIFO)" in said
+    assert repo.shown("C:\\x\\y") == "C:\\x\\y" and repo.shown("a\\nb") == "a\\nb"
 
 
 def by_modules(env, monkeypatch, **settings):
@@ -491,8 +525,20 @@ def test_the_notification_names_the_file_from_the_clones_root_whole(tmp_path, mo
     assert "in the task's clone, src/main/resources/.gitignore is a named pipe (FIFO)" in note
     assert "press g" in note
     said = note.removeprefix("verification could not run: ").split("; fix it, then press g")[0]
-    cut = said.removesuffix("…")
-    assert said == whole or (said.endswith("…") and whole[len(cut)] == " "), "never cut in a word"
+    where = f"… (the rest: vivibox status {t.id})"
+    cut = said.removesuffix(where)
+    assert said == whole or (said.endswith(where) and whole[len(cut)] == " "), "never cut in a word"
+
+
+def test_a_notification_cut_short_says_where_the_rest_is(tmp_path, monkeypatch):
+    """Cut at "the clone…", the notification left out where the clone is and named no place that says."""
+    t, note, whole = notified(tmp_path, monkeypatch, "src/main/resources/.gitignore", "a-long-folder-" * 6)
+    assert len(whole) > 150 and whole not in note
+    assert f"… (the rest: vivibox status {t.id}); fix it, then press g (vivibox verify-again {t.id})" in note
+    from vivibox.cli import main  # noqa: F401 (the command the notification names exists)
+
+    shown = ui.task_detail(t, lambda task: "0/1", 3, 5, ui.Style(False), True)
+    assert whole in " ".join(shown.split()), "and vivibox status has it whole"
 
 
 def test_the_notification_suggests_nothing_to_run_in_your_repository(tmp_path, monkeypatch):

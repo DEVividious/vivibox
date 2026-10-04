@@ -130,7 +130,7 @@ def git(
         p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."), *own)
     if check and p.returncode != 0:
         # The arguments and what git says of them may carry a name the agent chose in the clone.
-        raise RepoError(f"git {display.name(' '.join(args[:3]))}…: {display.name(p.stderr.strip())}")
+        raise RepoError(f"git {display.name(' '.join(args[:3]))}…: {display.said(p.stderr)}")
     return p
 
 

@@ -249,7 +249,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         # The keyword only when there is one: runners that know no time limit (tests) keep working.
         p = self.runner(cmd, timeout=timeout) if timeout else self.runner(cmd)
         if check and p.returncode != 0:
-            said = display.name((p.stderr or p.stdout).strip())
+            said = display.said(p.stderr or p.stdout)
             raise PodError(f"{display.name(' '.join(cmd[:4]))}…: {said}")
         return p
 
@@ -278,7 +278,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         if expired.is_set():  # even had git just finished: the container is gone
             raise repo.timed_out(cmd[cmd.index("git") + 1 :], repo.COPY_TIMEOUT, self.repo, COPYING_IS_SLOW)
         if check and p.returncode != 0:
-            said = display.name((p.stderr or p.stdout).strip())
+            said = display.said(p.stderr or p.stdout)
             raise PodError(f"{display.name(' '.join(cmd[:4]))}…: {said}")
         return p
 
@@ -481,7 +481,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             time.sleep(0.5)
         # The daemon's output is the container's, which Docker keeps (stderr apart, as it wrote it).
         log = self._run("docker", "logs", "--tail", "20", self.sidecar, check=False)
-        raise PodError(f"Docker in {self.sidecar} did not start:\n{log.stdout}{log.stderr}")
+        raise PodError(f"Docker in {self.sidecar} did not start: {display.said(log.stdout + log.stderr)}")
 
     def down(self) -> None:
         """Stops the pod and keeps its data, the planner's conversation in its home included. A

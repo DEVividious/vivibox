@@ -255,6 +255,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An error of git or Docker that takes several lines keeps them, each after the first indented
+  under it, in the panel, a notification, `vivibox status <id>` (under `Why`) and a command's
+  error; it was one line with `‹U+000A›` where the lines ended. A line break in a name the tool
+  quotes still cannot draw a line that reads as vivibox's own.
+- What a tool said is escaped in one place, where the error is made, for every error built
+  from it: also Docker's log when a pod's Docker does not start, what Docker said of a network
+  or of the Hub mirror, what the root helper refused (`vivibox disk grow` among them) and why
+  usage could not be measured, which reached the terminal with their control characters.
 - The details panel shows HTML in text an agent wrote as the text it is: a tag was read and
   not drawn, and a block of tags was left out whole. A link's definition on a line of its own
   (`[name]: address`) stays on the screen too.

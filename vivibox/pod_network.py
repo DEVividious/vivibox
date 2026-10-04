@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import names
+from . import display, names
 from .config import TASK_NETWORK_BITS
 
 # The kernel's interfaces: whether a bridge of that name is there is asked of it, not of Docker.
@@ -171,7 +171,7 @@ class PodNetwork:
             "-o", f"com.docker.network.bridge.name={names.bridge(self.task_id, role)}",
             self.network_name(role), check=False,
         )  # fmt: skip
-        return "" if made.returncode == 0 else (made.stderr or made.stdout).strip()
+        return "" if made.returncode == 0 else display.said(made.stderr or made.stdout)
 
     def ensure_networks(self) -> list[RoleNetwork]:
         """The networks of the roles that have one (the writer's first), made on the ranges

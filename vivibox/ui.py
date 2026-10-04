@@ -598,7 +598,9 @@ def task_detail(
     ):
         lines.append(f"{style('Why', 'bold')}   {why}")
     if shown.problem:
-        lines.append(f"{style('Why', 'bold')}   {style(display.terminal(shown.problem, ''), 'red')}")
+        # Its further lines under the first, never at the left edge, where vivibox's own lines start.
+        why = display.terminal(shown.problem, "\n").replace("\n", "\n      ")
+        lines.append(f"{style('Why', 'bold')}   {style(why, 'red')}")
     lines += [
         *([f"{style('Next', 'bold')}  " + "   ".join(shown.commands)] if shown.commands else []),
         "",

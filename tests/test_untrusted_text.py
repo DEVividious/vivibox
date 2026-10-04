@@ -209,3 +209,158 @@ def test_html_an_agent_wrote_is_shown_as_the_text_it_is(env, monkeypatch):
 )
 def test_the_form_a_link_is_shown_in_is_decided_in_one_place(label, target, shown):
     assert markdown.link_text(label, target) == shown
+
+
+# --- what git and Docker say of a name ------------------------------------------------------------
+
+# A name an agent chose, as a tool quotes it on stderr: control characters, an escape sequence,
+# markup's brackets, vivibox's own notation, and a line that reads as one of vivibox's.
+NAME = f"x\x1b[2K\r{BIDI}[/b][black on black]‹U+0041›\nvivibox: demo-1 is done"
+NAME_SHOWN = "x‹U+001B›[2K‹U+000D›‹U+202E›[/b][black on black]‹U+2039›U+0041‹U+203A›"
+
+
+def hidden(text: str) -> list[str]:
+    import unicodedata
+
+    kinds = ("Cc", "Cf", "Cs", "Co", "Zl", "Zp")
+    return [c for c in text if c not in "\n\t" and unicodedata.category(c) in kinds]
+
+
+def own_lines(text: str) -> list[str]:
+    """The lines that start where vivibox's own do: at the left edge."""
+    return [line for line in text.splitlines() if line and not line.startswith(" ")]
+
+
+def gits_error(env):
+    from vivibox import repo
+
+    with pytest.raises(repo.RepoError) as e:
+        repo.git("checkout", NAME, cwd=env / "repo")
+    return e.value
+
+
+def dockers_error():
+    from pathlib import Path
+    from subprocess import CompletedProcess
+
+    from vivibox.pod import Pod, PodError
+
+    said = f"Error response from daemon: no such container: {NAME}\nSee 'docker rm --help'.\n"
+    pod = Pod("demo-1", Path("."), "", runner=lambda cmd, **how: CompletedProcess(cmd, 1, "", said))
+    with pytest.raises(PodError) as e:
+        pod._run("docker", "rm", "-f", "x")
+    return e.value
+
+
+@pytest.mark.parametrize("made", [gits_error, dockers_error])
+def test_what_a_tool_said_of_a_name_is_escaped_where_the_error_is_made(env, made):
+    error = made(env) if made is gits_error else made()
+    said = str(error)
+    assert not hidden(said), repr(said)
+    assert NAME_SHOWN in said, said
+    assert len(own_lines(said)) == 1, f"no line of it reads as one of vivibox's own: {said!r}"
+    words = said.partition("…: ")[2]  # after the command, where a name is on one line
+    assert "\n    vivibox: demo-1 is done" in words, "a further line is indented under the first"
+    assert "‹U+000A›" not in words, "and still a line"
+
+
+def test_a_tools_words_keep_their_lines_under_the_first():
+    from vivibox import display
+
+    said = "error: pathspec 'x' did not match\r\nhint: try this\n\n\nfatal: stopped\n"
+    assert display.said(said) == "error: pathspec 'x' did not match\n    hint: try this\n    fatal: stopped"
+    assert display.said("one line\n") == "one line" and display.said("") == ""
+    assert display.said("a\rb") == "a‹U+000D›b", "a carriage return within a line is shown"
+
+
+def test_an_error_quoting_a_name_is_text_on_the_command_line(env, capsys, monkeypatch):
+    from vivibox import actions
+    from vivibox.cli import main
+
+    task = new_task()
+    for error in (gits_error(env), dockers_error()):
+
+        def fail(*args, error=error, **how):
+            raise error
+
+        monkeypatch.setattr(actions, "risky_diffs", fail)
+        capsys.readouterr()
+        assert main(["risky", task.id]) == 1
+        said = capsys.readouterr().err
+        assert not hidden(said), repr(said)
+        assert NAME_SHOWN in said and said.startswith("vivibox: ")
+        assert len(own_lines(said)) == 1, said
+
+
+def test_an_error_quoting_a_name_is_text_in_the_view(env, monkeypatch):
+    task = new_task()
+    error = gits_error(env)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        app.fail(error)
+        await pilot.pause()
+        last = list(app._notifications)[-1]
+        assert last.markup is False and not hidden(last.message), repr(last.message)
+        assert NAME_SHOWN in last.message and len(own_lines(last.message)) == 1
+        task.set_paused(True, problem=f"could not start: {error}")
+        await show(app, pilot)
+        block = next(text for text in drawn(app) if "pathspec" in text)
+        assert NAME_SHOWN in block and not hidden(block), repr(block)
+        assert len(own_lines(block)) == 1, block
+
+    run(scenario, size=(140, 60), notifications=True)
+
+
+def test_status_shows_a_problem_of_several_lines_under_why(env, capsys):
+    from vivibox.cli import main
+
+    task = new_task()
+    task.set_paused(True, problem=f"could not start: {gits_error(env)}")
+    capsys.readouterr()
+    assert main(["status", task.id]) == 0
+    said = capsys.readouterr().out
+    why = said[said.index("Why") :].split("\nNext")[0]
+    assert not hidden(said) and "‹U+000A›" not in why.partition("…: ")[2], repr(said)
+    assert NAME_SHOWN in why and len(own_lines(why)) == 1, why
+    assert "\n          vivibox: demo-1 is done" in why, "git's second line, under its first"
+
+
+def test_the_dockers_log_of_a_pod_that_did_not_start_draws_no_line_of_vivibox_s(monkeypatch):
+    from pathlib import Path
+    from subprocess import CompletedProcess
+
+    from vivibox import pod as pod_module
+
+    log = f"failed to start daemon: {NAME}\nmore\n"
+
+    def runner(cmd, **how):
+        return CompletedProcess(cmd, 0 if "logs" in cmd else 1, "", log if "logs" in cmd else "")
+
+    pod = pod_module.Pod("demo-1", Path("."), "", runner=runner)
+    with pytest.raises(pod_module.PodError) as e:
+        pod._wait_for_daemon(0)
+    said = str(e.value)
+    assert not hidden(said) and NAME_SHOWN in said and len(own_lines(said)) == 1, repr(said)
+
+
+def test_what_the_root_helper_refused_is_said_escaped_by_the_one_printer_of_errors(env, capsys, monkeypatch):
+    from functools import partial
+    from subprocess import CompletedProcess
+
+    from vivibox import actions
+    from vivibox.cli import main
+    from vivibox.pod import Pod
+
+    def refusing(cmd, timeout=None):
+        grows = list(cmd)[:1] == ["sudo"] and cmd[3] == "grow-disk"
+        said = f"vivibox-host: {NAME}\nvivibox: the disk is 40g now" if grows else ""
+        return CompletedProcess(list(cmd), 1 if grows or cmd[0] != "sudo" else 0, "", said)
+
+    monkeypatch.setattr(actions, "Pod", partial(Pod, runner=refusing))
+    new_task()
+    capsys.readouterr()
+    assert main(["disk", "grow", "demo-1", "40g"]) == 1
+    err = capsys.readouterr().err
+    assert not hidden(err) and NAME_SHOWN in err, repr(err)
+    assert [line[:28] for line in own_lines(err)] == ["vivibox: the task's disk cou"], err

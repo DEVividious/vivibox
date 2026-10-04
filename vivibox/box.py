@@ -141,7 +141,7 @@ def _git_in_box(pod, *args: str, check: bool = True):
     if p.returncode in KILLED and time.monotonic() - began >= seconds:
         raise repo.timed_out(args, seconds, pod.repo, "a very large set of new files")
     if check and p.returncode != 0:
-        said = display.name((p.stderr or p.stdout).strip())
+        said = display.said(p.stderr or p.stdout)
         raise PodError(f"git {display.name(' '.join(args[:3]))}…: {said}")
     return p
 

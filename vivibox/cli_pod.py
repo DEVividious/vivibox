@@ -9,7 +9,6 @@ import sys
 
 from . import actions, limits, panel_resources
 from .config import load_config
-from .pod import PodError
 from .podspec import DISK_LARGEST, DISK_SMALLEST, LIMIT_KEYS, parse_size, size_option
 
 # The options of `vivibox limits`: one per key of [limits] but the disk's size, which is the
@@ -72,12 +71,9 @@ def cmd_disk(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    pod = actions.task_pod(task.id)
-    try:
-        pod.grow_disk(size_option(size))  # the helper takes 1536m or 40g, never 1.5g or 40GiB
-    except PodError as e:
-        print(f"vivibox: {e}", file=sys.stderr)
-        return 1
+    # The helper takes 1536m or 40g, never 1.5g or 40GiB. What it refuses is said where every
+    # error of a command is (cli.main), escaped.
+    actions.task_pod(task.id).grow_disk(size_option(size))
     print(f"The disk of {task.id} is {args.size.strip()} now; what runs in the pod has the space at once.")
     return 0
 

@@ -10,7 +10,7 @@ import json
 import re
 import socket
 
-from . import names
+from . import display, names
 from .egress import hostd, resolver
 from .pod_network import PodError
 from .podspec import HOST_GATEWAY, Runner, run
@@ -52,7 +52,7 @@ def helper(runner: Runner, *args: str, what: str = "this machine's rules for pod
     """The root helper on an operation; PodError, saying what could not be done, on a refusal."""
     p = runner(["sudo", "-n", HELPER, *args])
     if p.returncode != 0:
-        said = (p.stderr or p.stdout).strip()[-600:]
+        said = display.said((p.stderr or p.stdout).strip()[-600:])
         raise PodError(
             f"{what}: {said}. If the helper or its sudo rule is missing (sudo asks for a password, or "
             "the file is not there, or it is older than this vivibox), run host/setup.sh"
@@ -178,7 +178,7 @@ class PodEgress:
         p = self.runner(["sudo", "-n", HELPER, "apply-policy", self.task_id, gone])
         if p.returncode == 0:
             return ""
-        said = (p.stderr or p.stdout).strip()[-400:]
+        said = display.said((p.stderr or p.stdout).strip()[-400:])
         return (
             f"this machine's rules for {self.task_id}'s network (bridge {nets[0]['bridge']}) were not "
             f"removed: {said}. They hold no network now; host/setup.sh installs the helper if it is missing"

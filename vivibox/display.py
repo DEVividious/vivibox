@@ -50,6 +50,15 @@ def name(text: str) -> str:
     return _escape(text)
 
 
+def said(text: str) -> str:
+    """What a tool said of what it was asked (git's or Docker's words on stderr), for a message
+    of vivibox's: each line as name shows it, whatever name the tool quoted in it, and every line
+    after the first indented under it, so none reads as a line of vivibox's own. The one place
+    such words are escaped: where the error is made."""
+    found = [line.removesuffix("\r") for line in text.strip().split("\n")]
+    return "\n    ".join(name(line) for line in found if line.strip())
+
+
 def lines(text: str) -> list[str]:
     """text's lines, each with its \\n: a line ends there alone. What another tool may take for a
     line break (\\r for bash; FF, VT, NEL or U+2028 for Groovy, which takes them for spaces) stays

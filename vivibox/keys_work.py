@@ -44,7 +44,7 @@ def diff_pager(task: Task, project) -> list[str]:
         out.writelines(shown_diff(raw.decode("utf-8", "surrogateescape") for raw in p.stdout))
         said = p.stderr.read().decode("utf-8", "replace")
     if p.returncode != 0:
-        raise repo.RepoError(f"git diff: {display.name(said.strip())}")
+        raise repo.RepoError(f"git diff: {display.said(said)}")
     return pager_command(path, colours=True)  # escaped, its colours vivibox's own
 
 

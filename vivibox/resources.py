@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import display
 from .pod import CACHES, DISK_IMAGE, DISK_MOUNT
 
 # The containers of a task's pod, by the ending of their names (pod.Pod): the agent's, its
@@ -78,7 +79,7 @@ def default_run(command: list[str]) -> str:
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unavailable(str(e)) from None
     if p.returncode != 0:
-        raise Unavailable(p.stderr.strip()[:300])
+        raise Unavailable(display.said(p.stderr.strip()[:300]))
     return p.stdout
 
 

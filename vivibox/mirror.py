@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
+from . import display
 from .config import DEFAULT_HUB_MIRROR_PORT
 from .pod import CA_BUNDLE, HOST_CA_BUNDLE, PodError, Runner, run
 
@@ -82,14 +83,14 @@ def ensure(
     if not state:
         made = runner(command(listen))
         if made.returncode != 0:
-            raise PodError(f"the Docker Hub mirror did not start: {made.stderr.strip()}")
+            raise PodError(f"the Docker Hub mirror did not start: {display.said(made.stderr)}")
     elif state != "running":
         runner(["docker", "start", NAME])
     deadline = time.monotonic() + timeout
     while not ready(listen):
         if time.monotonic() >= deadline:
-            said = runner(["docker", "logs", "--tail", "5", NAME])
-            raise PodError(f"the Docker Hub mirror did not answer on {listen}: {said.stderr.strip()[-400:]}")
+            said = display.said(runner(["docker", "logs", "--tail", "5", NAME]).stderr.strip()[-400:])
+            raise PodError(f"the Docker Hub mirror did not answer on {listen}: {said}")
         time.sleep(0.3)
     return url(address, port)
 

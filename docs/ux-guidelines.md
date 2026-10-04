@@ -239,7 +239,9 @@ rest counted), why, and the one command that says the whole in a terminal. It fi
 Every error has three parts, in this order:
 
 1. What happened, in the person's terms ("could not start").
-2. Why, in the failing tool's own words, a few lines at most.
+2. Why, in the failing tool's own words, a few lines at most. What git or Docker said keeps its
+   lines, each after the first indented under it (`display.said`), so a name the tool quotes
+   cannot draw a line that reads as vivibox's own; `vivibox status <id>` indents them under `Why`.
 3. What to do: a key or a command.
 
 An error belongs to its task. It is written to the task (`Task.set_paused(True, problem=…)`,

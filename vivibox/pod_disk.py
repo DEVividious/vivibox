@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 
+from . import display
 from .pod_egress import HELPER, helper
 from .podspec import size_option
 
@@ -60,7 +61,7 @@ class PodDisk:
         p = self.runner(["sudo", "-n", HELPER, "detach-disk", self.task_id, self._disk_request()])
         if p.returncode == 0:
             return ""
-        said = (p.stderr or p.stdout).strip()[-400:]
+        said = display.said((p.stderr or p.stdout).strip()[-400:])
         return (
             f"the task's disk at {self.disk} was not detached: {said}. Its image {self.disk_image} is "
             "kept; host/setup.sh installs the helper if it is missing"

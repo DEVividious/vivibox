@@ -127,3 +127,28 @@ def test_a_task_deleted_while_the_list_is_refreshed_is_gone_at_the_next_refresh(
         assert rows(app) == ["demo"], "listed as it is now"
 
     run(scenario)
+
+
+def test_a_step_that_finishes_while_the_unfinished_are_counted_does_not_raise():
+    """The executor's threads take themselves off its set of steps at work as they finish, while
+    the view counts the unfinished ones on its own thread: counting over the set itself raised
+    "Set changed size during iteration" (seen under load). Planted here: a step that finishes,
+    and takes another with it, at the moment it is asked whether it is done."""
+    from vivibox.app_support import LeavingExecutor
+
+    executor = LeavingExecutor()
+
+    class Step:
+        def __init__(self, finishes=()):
+            self.finishes = finishes
+
+        def done(self):
+            for step in self.finishes:
+                executor.at_work.discard(step)
+            return False
+
+    others = [Step() for _ in range(8)]
+    executor.at_work.update(others)
+    executor.at_work.add(Step(finishes=others))
+    assert executor.unfinished() >= 1
+    executor.shutdown()

@@ -102,7 +102,8 @@ class LeavingExecutor(ThreadPoolExecutor):
         super().shutdown(wait=False, cancel_futures=cancel_futures)
 
     def unfinished(self) -> int:
-        return sum(1 for future in self.at_work if not future.done())
+        # Over a copy: a step that finishes takes itself off the set from its own thread.
+        return sum(1 for future in list(self.at_work) if not future.done())
 
 
 def in_terminal(command: list[str], env: dict[str, str] | None = None) -> None:

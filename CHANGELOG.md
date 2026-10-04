@@ -254,6 +254,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   background and, on a busy machine or a slow repository, back only after Esc. The answer is
   dropped (the list of providers is still kept for the next time), and so is what a step
   still under way reports while the view is closing.
+- Leaving the view while a step finishes no longer risks `RuntimeError: Set changed size during
+  iteration`: the steps still under way are counted over a copy of their set.
 - The view no longer ends with a traceback (`FileNotFoundError: …/.task/state.json`) when a
   task is deleted at the moment the list is refreshed: accepted or deleted in a shell or from
   a notification, or by the view's own removal still under way. The list stays as it was and

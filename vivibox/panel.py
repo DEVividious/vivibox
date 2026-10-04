@@ -354,6 +354,8 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if st.state is State.CHECKPOINT_BLOCKED:
         if ui.asked(task)[0]:  # as the status has it: a question read, or a file refused
             return "`r` answer · `g` verify again, once you have fixed what it names" + watch
+        if ui.review_abandoned(task):
+            return "`r` tell the writer · `g` verify again, once what changes the clone has ended" + watch
         if ui.environment_problem(task):
             return "`g` verify again, once you have fixed it · `r` tell the agent" + watch
         return "`g` verify again, when what failed was outside the code · `r` tell the agent" + watch
@@ -613,6 +615,9 @@ def detail(
         body = (
             question
             if question
+            # The verification ran and passed; what it left in the handoff is an earlier round's.
+            else [f"**The review could not finish:** {broken}"]
+            if ui.review_abandoned(task)
             else [
                 f"**Verification could not run:** {broken}" if broken else "**Verification keeps failing.**",
                 "",

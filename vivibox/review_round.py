@@ -17,6 +17,27 @@ from .prompts import (
 from .states import State
 from .task import TaskState
 
+# A review given up because the clone was no longer what the verification passed.
+ABANDONED = "review_abandoned"
+
+
+def abandoned_in_a_row(events: list[dict]) -> int:
+    """The reviews given up since the writer last had a turn to take (the task entered
+    implement) or you decided (verify again, a start): counted in the task's event log, which
+    the host alone writes and the pod mounts read-only, so nothing the writer leaves in its
+    clone or its handoff starts the count again. A turn it is given does, and those are its
+    rounds, which have a limit of their own."""
+    count = 0
+    for event in reversed(events):
+        data = event["data"]
+        entered = event["type"] == "state" and (
+            data.get("current") == str(State.IMPLEMENT) or data.get("reason") == "verify again"
+        )
+        if entered or event["type"] == "started":
+            break
+        count += event["type"] == ABANDONED
+    return count
+
 
 class ReviewRound:
     def _review(self, st: TaskState) -> None:
@@ -27,7 +48,26 @@ class ReviewRound:
         try:
             self._round(st)
         except repo.Blocked:
-            self._go(State.VERIFY, "the task's clone is blocked by what it added")
+            self._abandon("the task's clone is blocked by what it added")
+
+    def _abandon(self, why: str) -> None:
+        """A review that is not of what was verified is given up: back to the verification, for
+        no round. The second in a row (abandoned_in_a_row) stops the task for you instead: what
+        changes the clone after each verification would have every further review paid for and
+        given up the same way, with nobody told."""
+        self.task.event(ABANDONED, why=why)
+        if abandoned_in_a_row(self.task.events()) < 2:
+            self._go(State.VERIFY, why)
+            return
+        said = (
+            "no review could be finished on what was verified, twice in a row with no turn of the "
+            f"writer's between: {why}. Whatever changes the clone after the writer's turn (something "
+            "it left running in the pod, or work under w) has to end first: reply, and the writer "
+            "ends what it left; or stop the pod and start it again (s); then verify again (g). No "
+            "review is started until then"
+        )
+        self._go(State.CHECKPOINT_BLOCKED, ui.REVIEW_ABANDONED, environment=said)
+        self.ports.notify(self.task.id, f"{ui.REVIEW_ABANDONED}: {said}")
 
     def _round(self, st: TaskState) -> None:
         """A round of the reviewer's after a green gate, kept as handoff/review-N.md: in the review

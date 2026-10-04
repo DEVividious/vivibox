@@ -159,6 +159,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "unverified_head":
             was, now = data.get("verified", "")[:7], data.get("head", "")[:7]
             text = f"commits changed since the verification: {was} → {now}"
+        elif kind == "review_abandoned":
+            text = f"review given up, the work is not what was verified: {data.get('why', '')}"
         elif kind == "view_not_refreshed":
             whose = data.get("whose", "a reader's")
             text = f"{whose} copy of the commits left as it was: the task's clone is blocked"

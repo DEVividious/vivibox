@@ -96,7 +96,8 @@ def test_the_review_state_sits_between_the_gate_and_the_final_checkpoint(tmp_pat
 
     assert State.REVIEW in TRANSITIONS[State.VERIFY]
     after = {State.IMPLEMENT, State.VERIFY, State.APPROVAL_RISKY, State.CHECKPOINT_FINAL}
-    assert TRANSITIONS[State.REVIEW] == after
+    # And to you, where the clone changed under two reviews in a row (test_review_abandoned).
+    assert TRANSITIONS[State.REVIEW] == after | {State.CHECKPOINT_BLOCKED}
     task = create_task(tmp_path, "demo", "goal", "")
     assert task.read_state().reviews == 0
     task.set_reviews(2)

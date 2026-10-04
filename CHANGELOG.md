@@ -280,6 +280,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A review whose work is no longer what the verification passed (its commits moved, or the task
+  added what blocks its clone) goes back to the verification once. The second time in a row,
+  with no turn of the writer's and no decision of yours between, the task stops for you with
+  the status `review could not finish`, the reason and what to do, and no further review is
+  started. Something left running in the pod that changed the clone after every verification
+  had the task verified and reviewed again without end, a paid reviewer's turn each time, with
+  no round spent and nobody told.
 - A task blocked by a repository or a worktree it added (see under Changed) starts again after
   its pod was stopped or your machine restarted, in every flow. With a planner in a container
   of its own (Planner → Executor, Planner → Writer → Reviewer, Supervisor ⇄ Worker) the start

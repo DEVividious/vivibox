@@ -44,8 +44,15 @@ TRANSITIONS: dict[State, set[State]] = {
         State.CHECKPOINT_FINAL,
     },
     # Blocking notes send the writer back; none, or the last round, and the work goes on to you;
-    # to the verification again where the commits changed since it.
-    State.REVIEW: {State.IMPLEMENT, State.VERIFY, State.APPROVAL_RISKY, State.CHECKPOINT_FINAL},
+    # to the verification again where the commits changed since it, and to you where they
+    # changed under two reviews in a row (review_round: no review is paid for after that).
+    State.REVIEW: {
+        State.IMPLEMENT,
+        State.VERIFY,
+        State.APPROVAL_RISKY,
+        State.CHECKPOINT_BLOCKED,
+        State.CHECKPOINT_FINAL,
+    },
     # Approved: continue to the checkpoint the risky change was blocking.
     # Rejected: back to the agent.
     State.APPROVAL_RISKY: CHECKPOINTS | {State.PLAN, State.IMPLEMENT},

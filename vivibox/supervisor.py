@@ -769,5 +769,5 @@ class Supervisor(ReviewRound):
             return False
         reason = f"commits changed since the verification ({st.verified_commit[:7]} → {head[:7]})"
         self.task.event("unverified_head", verified=st.verified_commit, head=head)
-        self._go(State.VERIFY, reason)
+        self._abandon(reason)  # to the verification; to you, the second time in a row
         return True

@@ -332,6 +332,17 @@ def asked(task: Task) -> tuple[str, str]:
         return NOT_READ, f"{QUESTION_NOT_READ}: {e.why}"
 
 
+# Why a task waits at the blocked checkpoint when its clone changed under two reviews in a row
+# (review_round): the reason of the state's event, and what the notification starts with.
+REVIEW_ABANDONED = "the review could not finish"
+
+
+def review_abandoned(task: Task) -> bool:
+    """Whether the task is where it is because its review could not finish."""
+    entered = next((e["data"] for e in reversed(task.events()) if e["type"] == "state"), {})
+    return entered.get("reason") == REVIEW_ABANDONED
+
+
 def why_blocked(task: Task) -> Path | str | None:
     """What says why a blocked task needs you: the file with the agent's question, vivibox's
     reason for a question.md it did not read (never the file, which is not one to open), or the
@@ -461,6 +472,8 @@ def _decision(task: Task, st: TaskState, max_rounds: int) -> TaskView:
     elif st.state is State.CHECKPOINT_BLOCKED:
         if question := asked(task)[0]:
             status = question
+        elif review_abandoned(task):
+            status = "review could not finish"
         elif environment_problem(task):
             status = "verification could not run"
         else:

@@ -91,6 +91,11 @@ def situations(env):
     (refused.meta / "handoff" / "question.md").symlink_to(GUIDELINES)  # a link: never read through
     refused.transition(State.CHECKPOINT_BLOCKED)
     found.append((refused, True))
+    abandoned = implementing("review abandoned twice")
+    abandoned.transition(State.VERIFY)
+    abandoned.transition(State.REVIEW)
+    abandoned.transition(State.CHECKPOINT_BLOCKED, reason=ui.REVIEW_ABANDONED, environment="no review could…")
+    found.append((abandoned, True))
     failing = implementing("failing")
     failing.transition(State.VERIFY)
     failing.transition(State.CHECKPOINT_BLOCKED)

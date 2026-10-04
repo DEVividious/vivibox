@@ -12,7 +12,7 @@ from pathlib import Path
 from . import cli_session, display, prepare
 from .plan import PlanError, parse_plan
 from .states import State
-from .task import CURRENT, EARLIER, Task, TaskState, layout, layout_problem
+from .task import CURRENT, EARLIER, NEWER, Task, TaskState, layout, layout_problem
 
 CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "cyan": "36"}
 
@@ -447,20 +447,23 @@ def _decision(task: Task, st: TaskState, max_rounds: int) -> TaskView:
     return TaskView(status, WAITS, DECISION, commands=commands)
 
 
-# A task this vivibox does not run (task.layout): one from an earlier vivibox waits for you to
-# delete it, and says when its supervisor or pod from that vivibox still runs.
+# A task this vivibox does not run (task.layout): one from an earlier vivibox, or one whose
+# state is no vivibox's, waits for you to delete it, and says when its supervisor or pod still
+# runs; whose they are is said only where the state says it.
 EARLIER_LABEL, NEWER_LABEL = "from an earlier vivibox", "from a newer vivibox"
+UNREADABLE_LABEL = "state unreadable"
 STILL_RUNNING = "still running"
 
 
 def other_layout(st: TaskState, running: bool) -> TaskView:
-    """running: its supervisor, or for a task from an earlier vivibox its pod too, still runs."""
-    if layout(st) != EARLIER:
-        return TaskView(NEWER_LABEL, WAITS, FAILED, layout_problem(st))
-    why = layout_problem(st)
+    """running: its supervisor, or for a task this vivibox deletes its pod too, still runs."""
+    found, why = layout(st), layout_problem(st)
+    if found == NEWER:
+        return TaskView(NEWER_LABEL, WAITS, FAILED, why)
+    label, whose = (EARLIER_LABEL, " from that vivibox") if found == EARLIER else (UNREADABLE_LABEL, "")
     if running:
-        why += f"; its supervisor or pod from that vivibox is {STILL_RUNNING}, and deleting it stops them"
-    label = f"{EARLIER_LABEL}, {STILL_RUNNING}" if running else EARLIER_LABEL
+        why += f"; its supervisor or pod{whose} is {STILL_RUNNING}, and deleting it stops them"
+        label = f"{label}, {STILL_RUNNING}"
     return TaskView(label, WAITS, FAILED, why, (f"vivibox delete {st.id}",))
 
 

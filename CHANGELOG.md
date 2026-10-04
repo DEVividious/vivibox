@@ -259,6 +259,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task whose state records, where the layout's version is, something that is no version (text,
+  a fraction, `true`, `null`, zero, a negative number) is no longer said to come from a newer
+  vivibox, which nothing in it says. Its status is `state unreadable`; every command that runs
+  or moves it refuses, saying its state is unreadable or damaged and to delete it and create it
+  again, and `vivibox delete` and `x` delete it, which they refused. A task with no version at
+  all is still one from an earlier vivibox, and one with a higher version still a newer
+  vivibox's, shown and not deleted.
 - A model's name with brackets in it, from a provider's catalogue, no longer ends the view with
   `MarkupError` when the new-task form opens: in the form's lists a model's name is text, as is
   a file's name offered after `@` (a name with `[black on black]` in it hid its own rest).

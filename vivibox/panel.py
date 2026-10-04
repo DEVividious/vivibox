@@ -58,7 +58,7 @@ from .sections import (  # noqa: F401 (criteria and checklist: the list reads th
     roles_section,
 )
 from .states import State
-from .task import CURRENT, EARLIER, Task, TaskState, layout
+from .task import CURRENT, EARLIER, NEWER, Task, TaskState, layout
 
 REFRESH_SECONDS = 2.0
 # How often the view looks whether vivibox changed on disk: a git pull, not a keystroke.
@@ -407,8 +407,8 @@ def planned_by_you(task: Task) -> bool:
 def keys_for(task: Task, st: TaskState, running: bool, busy: bool, demo_running: bool) -> dict[str, bool]:
     """Which of the task's keys do something now, one table for every state: the footer, the
     hints and the actions all ask here. busy: a start or a stop of this task is under way."""
-    if layout(st) != CURRENT:  # shown, and deleted when it is an earlier vivibox's; nothing else
-        return {action: layout(st) == EARLIER and action in ("remove", "show_log") for action in TASK_ACTIONS}
+    if layout(st) != CURRENT:  # shown, and deleted unless it is a newer vivibox's; nothing else
+        return {action: layout(st) != NEWER and action in ("remove", "show_log") for action in TASK_ACTIONS}
     at_work = running and not st.paused
     if st.box and st.state is State.IMPLEMENT:
         # A box has no agent to reply to, watch or model; its keys are the pod's.
@@ -487,10 +487,11 @@ def detail(
     seen = ui.view(task, st, running, max_iterations)
     if layout(st) != CURRENT:  # of a task this vivibox does not run, nothing is read but its state
         up = (pod if pod is not None else pod_view(st.id)).address
+        whose = " from that vivibox" if layout(st) == EARLIER else ""  # said where the state says it
         return "\n".join([
             f"### {st.id} · {seen.status}", "", f"*{st.project} · created {ui.ago(st.created)}*", "",
             f"**Next:** {next_steps(task, st, seen, running, PodView())}", "",
-            *([f"*Its pod from that vivibox is {ui.STILL_RUNNING}.*", ""] if up else []),
+            *([f"*Its pod{whose} is {ui.STILL_RUNNING}.*", ""] if up else []),
             f"**{seen.status.capitalize()}.**", "", display.fenced(seen.problem),
         ])  # fmt: skip
     watch = " Look at the agent with `w`." if watchable(task, st, running) else ""

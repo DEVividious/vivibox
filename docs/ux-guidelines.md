@@ -72,6 +72,8 @@ Status labels, the only ones allowed:
 | created by an earlier vivibox, which this one does not run (tasks are not migrated): `x` deletes it | `from an earlier vivibox` | Waiting for you |
 | the same, with its supervisor or pod from that vivibox still up; nothing here stops them but `x` | `from an earlier vivibox, still running` | Waiting for you |
 | created by a newer vivibox: only shown, not even deleted, here | `from a newer vivibox` | Waiting for you |
+| its state records, where the layout's version is, what no vivibox writes (not a whole number, zero or below): not run, and never said to be another vivibox's; `x` deletes it | `state unreadable` | Waiting for you |
+| the same, with its supervisor or pod still up; nothing here stops them but `x` | `state unreadable, still running` | Waiting for you |
 
 Raw state names (`checkpoint:blocked`) never reach the screen. Times are on the person's clock
 (`ui.clock`), never cut out of a UTC timestamp.

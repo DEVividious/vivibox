@@ -22,7 +22,8 @@ MAX_PROBLEM = 2000
 # The layout of a task's files and state that this vivibox runs. A change that a task created
 # before it would not meet (what the task's folder holds, what its pod mounts) raises it. A task
 # written under another is never run nor written here, and never migrated: one from an earlier
-# vivibox is shown and can be deleted, one from a newer vivibox is only shown.
+# vivibox is shown and can be deleted, one from a newer vivibox is only shown, and one whose
+# state records what is no version is unreadable: shown and deleted, whoever wrote it.
 # 2: your replies kept where no agent writes; 3: the pod's network on a bridge of vivibox's
 # naming, its range kept with the task, its egress enforced on the host; 4: the pod's volumes
 # are directories of a disk image of the task's own, which bounds them; 5: a network per role,
@@ -30,7 +31,10 @@ MAX_PROBLEM = 2000
 # in a control container of its own, with its own home on the task's disk, its own network,
 # secrets and harness files, where the flow has a planner other than the writer.
 TASK_SCHEMA_VERSION = 6
-CURRENT, EARLIER, NEWER = "current", "earlier", "newer"
+CURRENT, EARLIER, NEWER, UNREADABLE = "current", "earlier", "newer", "unreadable"
+# What TaskState holds for a state.json with something written where the version is that no
+# vivibox writes (recorded). Its 0 is the field absent, never a 0 that was written.
+NO_VERSION = -1
 # What a task is opened for (find_task): an operation that runs, moves or opens it needs the
 # layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.
 RUN, SHOW, DELETE = "run", "show", "delete"
@@ -104,7 +108,8 @@ class TaskState:
     # for the row to say beside the round; "" before the first.
     round_reason: str = ""
     # The layout the task was created under (TASK_SCHEMA_VERSION), the only thing that says
-    # whether this vivibox runs it. 0: a task from before the field (v0.1.x).
+    # whether this vivibox runs it. 0: a task from before the field (v0.1.x); NO_VERSION: what
+    # its state.json has there is no version (recorded).
     task_schema_version: int = 0
     # The vivibox that created it (version.current()): for a bug report, never for compatibility.
     created_by_version: str = ""
@@ -249,7 +254,7 @@ class Task:
     def read_state(self) -> TaskState:
         path = self.meta / "state.json"
         data = json.loads(path.read_text())
-        if classify(data.get("task_schema_version", 0)) != CURRENT:
+        if classify(recorded(data)) != CURRENT:
             return self._read_other(data, path)
         data["state"] = State(data["state"])
         # A flow chosen under a name it has since changed (config.RENAMED_MODES).
@@ -284,8 +289,8 @@ class Task:
             state = State(data.get("state"))
         except ValueError:
             state = str(data.get("state", ""))  # a newer vivibox's own, as it wrote it
-        raw = data.get("task_schema_version", 0)
-        return TaskState(**{**shape, **known, "id": self.id, "state": state, "task_schema_version": raw})
+        version = recorded(data)
+        return TaskState(**{**shape, **known, "id": self.id, "state": state, "task_schema_version": version})
 
     def _write_state(self, st: TaskState) -> None:
         # Behind every operation: a task of another layout is never written over, which would
@@ -350,11 +355,24 @@ def _iso(text: str) -> bool:
         return False
 
 
+def recorded(data: dict) -> int:
+    """The layout a state.json records, as TaskState holds it: 0 where the file has no such
+    field (a task from before it, v0.1.x), the number where it is one a vivibox writes (a whole
+    number from 1), NO_VERSION for anything else written there: text, a fraction, true or
+    false, nothing, zero, a number below it. Told apart here, where the file is read: after
+    this a written 0 and the absent field would be the same 0."""
+    if "task_schema_version" not in data:
+        return 0
+    number = data["task_schema_version"]
+    return number if type(number) is int and number > 0 else NO_VERSION
+
+
 def layout(st: TaskState) -> str:
-    """CURRENT, EARLIER (no version, or an older one, or this one's with no flow recorded) or
-    NEWER (a higher one, or one that is not a whole number, which no vivibox this one knows
-    wrote). A task that records no flow is one from before tasks recorded theirs: which
-    container its planner runs in cannot be told from it, so it is not run."""
+    """CURRENT, EARLIER (no version, or an older one, or this one's with no flow recorded),
+    NEWER (a higher one) or UNREADABLE (what the state records is no version: nothing says
+    which vivibox wrote it, so none is named). A task that records no flow is one from before
+    tasks recorded theirs: which container its planner runs in cannot be told from it, so it
+    is not run."""
     found = classify(st.task_schema_version)
     if found == CURRENT and not st.orchestration and not st.box:
         return EARLIER
@@ -362,8 +380,10 @@ def layout(st: TaskState) -> str:
 
 
 def classify(number) -> str:
-    """layout() of a version as state.json holds it."""
-    if isinstance(number, bool) or not isinstance(number, int) or number > TASK_SCHEMA_VERSION:
+    """layout() of a version as TaskState holds it (recorded)."""
+    if type(number) is not int or number < 0:
+        return UNREADABLE
+    if number > TASK_SCHEMA_VERSION:
         return NEWER
     return CURRENT if number == TASK_SCHEMA_VERSION else EARLIER
 
@@ -380,12 +400,19 @@ def layout_problem(st: TaskState) -> str:
             f"{st.id} was created by a newer vivibox, whose tasks this one can neither run nor "
             "delete; use that vivibox, or update this one"
         )
+    if found == UNREADABLE:
+        return (
+            f"{st.id}'s state is unreadable or damaged: what it records as its layout is not a "
+            "version vivibox writes, so this vivibox does not run it; delete it and create it "
+            f"again: vivibox delete {st.id}"
+        )
     return ""
 
 
 def check_layout(task: Task, use: str) -> None:
-    """Refuses to open a task for what its layout does not allow here (RUN, SHOW, DELETE). Reads
-    the task's state and writes nothing."""
+    """Refuses to open a task for what its layout does not allow here (RUN, SHOW, DELETE): only
+    a task of this layout is run, and only one from a newer vivibox is not deleted. Reads the
+    task's state and writes nothing."""
     st = task.read_state()
     if use != SHOW and (why := layout_problem(st)) and (use == RUN or layout(st) == NEWER):
         raise TaskLayoutError(why)

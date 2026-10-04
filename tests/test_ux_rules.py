@@ -136,10 +136,14 @@ def situations(env):
     closed = actions.open_box("demo")
     closed.set_paused(True)
     found.append((closed, False))
-    for how in ("earlier", "earlier, still running", "newer"):  # tasks this vivibox does not run
-        other = implementing(f"from an {how} vivibox")
+    # Tasks this vivibox does not run: by the version their state records, or by its absence.
+    versions = {"earlier": None, "newer": TASK_SCHEMA_VERSION + 1, "unreadable": 0}
+    for how in ("earlier", "earlier, still running", "newer", "unreadable", "unreadable, still running"):
+        other = implementing(f"of another layout: {how}")
         state = json.loads((other.meta / "state.json").read_text())
-        state["task_schema_version"] = 0 if how.startswith("earlier") else TASK_SCHEMA_VERSION + 1
+        state["task_schema_version"] = versions[how.split(",")[0]]
+        if state["task_schema_version"] is None:
+            del state["task_schema_version"]  # an earlier vivibox wrote none
         (other.meta / "state.json").write_text(json.dumps(state))
         found.append((other, how.endswith("running")))
     return found

@@ -1,7 +1,9 @@
 """Tasks written under another layout of a task's files and state (task.TASK_SCHEMA_VERSION).
 One from an earlier vivibox is shown and can be deleted, and nothing else is done with it; one from
-a newer vivibox is only shown. vivibox migrates neither, and deletes neither by itself. Looking at
-either writes nothing in it."""
+a newer vivibox is only shown; one whose state records no version at all where the version is
+(not a whole number, or one below 1) is unreadable: shown, deleted, never run, and never said to
+be a newer vivibox's. vivibox migrates none of them, and deletes none by itself. Looking at one
+writes nothing in it."""
 
 import json
 import subprocess
@@ -19,10 +21,26 @@ from vivibox.pod import Pod
 from vivibox.task import TaskLayoutError, find_task
 
 EARLIER = ("no version", "an older version")
-# true is 1 to Python, the version of an earlier layout: it must still not read as one.
-NEWER = ("a newer version", "a version that is not a number", "true as a version")
+NEWER = ("a newer version",)
+# What no vivibox writes there. true is 1 to Python, the version of an earlier layout, and 0 is
+# what the absent field reads as: neither is a version, and neither says which vivibox wrote it.
+UNREADABLE = ("a version that is not a number", "true as a version", "zero as a version")
+KIND = {
+    **dict.fromkeys(EARLIER, "earlier"),
+    **dict.fromkeys(NEWER, "newer"),
+    **dict.fromkeys(UNREADABLE, "unreadable"),
+}
 EARLIER_SAYS = "created by an earlier vivibox"
 NEWER_SAYS = "created by a newer vivibox"
+UNREADABLE_SAYS = "state is unreadable or damaged"
+SAYS = {"earlier": EARLIER_SAYS, "newer": NEWER_SAYS, "unreadable": UNREADABLE_SAYS}
+LABEL = {
+    "earlier": "from an earlier vivibox",
+    "newer": "from a newer vivibox",
+    "unreadable": "state unreadable",
+}
+# delete is the way out of a task this vivibox knows the resources of; a newer one's it does not.
+DELETED = ("earlier", "unreadable")
 
 
 def snapshot(task) -> dict:
@@ -46,17 +64,27 @@ def written_under(task, how: str, monkeypatch) -> None:
         data["task_schema_version"] = task_module.TASK_SCHEMA_VERSION + 1
     elif how == "true as a version":
         data["task_schema_version"] = True
+    elif how == "zero as a version":
+        data["task_schema_version"] = 0
     else:
         data["task_schema_version"] = str(task_module.TASK_SCHEMA_VERSION)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
-@pytest.fixture(params=EARLIER + NEWER)
+@pytest.fixture(params=EARLIER + NEWER + UNREADABLE)
 def other(request, env, monkeypatch):
-    """A task at work, under each layout this vivibox does not run, and what it is: earlier or newer."""
+    """A task at work, under each layout this vivibox does not run, and what it is: earlier, newer
+    or unreadable."""
     task = implementing("Add health endpoint")
     written_under(task, request.param, monkeypatch)
-    return task, "earlier" if request.param in EARLIER else "newer"
+    return task, KIND[request.param]
+
+
+@pytest.fixture(params=UNREADABLE)
+def unreadable(request, env, monkeypatch):
+    task = implementing("Add health endpoint")
+    written_under(task, request.param, monkeypatch)
+    return task
 
 
 @pytest.fixture(params=EARLIER)
@@ -144,8 +172,9 @@ def test_every_command_that_needs_the_layout_refuses_and_writes_nothing(other, a
     before = snapshot(task)
     assert main(argv) == 1
     err = capsys.readouterr().err
-    assert (EARLIER_SAYS if which == "earlier" else NEWER_SAYS) in err
-    assert ("vivibox delete demo-1" in err) == (which == "earlier"), "delete is offered where it works"
+    assert SAYS[which] in err
+    assert ("vivibox delete demo-1" in err) == (which in DELETED), "delete is offered where it works"
+    assert ("newer vivibox" in err) == (which == "newer"), "a newer vivibox is named only where one wrote it"
     assert snapshot(task) == before, "a refusal records nothing on the task"
     assert actions.started == [], "nothing started"
 
@@ -171,7 +200,7 @@ def test_every_command_that_needs_the_layout_refuses_and_writes_nothing(other, a
 def test_what_the_view_and_the_supervisor_call_by_id_refuses_too(other, call):
     task, which = other
     before = snapshot(task)
-    with pytest.raises(TaskLayoutError, match=EARLIER_SAYS if which == "earlier" else NEWER_SAYS):
+    with pytest.raises(TaskLayoutError, match=SAYS[which]):
         call()
     assert snapshot(task) == before
 
@@ -194,12 +223,14 @@ def test_the_list_and_the_status_show_it_and_write_nothing(other, capsys):
     assert main(["status"]) == 0
     listed = capsys.readouterr().out
     assert "demo-1" in listed and "Add health endpoint" in listed
-    label = "from an earlier vivibox" if which == "earlier" else "from a newer vivibox"
+    label = LABEL[which]
     assert label in listed
+    assert ("newer vivibox" in listed) == (which == "newer")
     assert main(["status", "demo-1"]) == 0
     shown = capsys.readouterr().out
-    assert label in shown and (EARLIER_SAYS if which == "earlier" else NEWER_SAYS) in shown
-    assert ("vivibox delete demo-1" in shown) == (which == "earlier")
+    assert label in shown and SAYS[which] in shown
+    assert ("vivibox delete demo-1" in shown) == (which in DELETED)
+    assert ("newer vivibox" in shown) == (which == "newer")
     assert "vivibox start" not in shown and "vivibox attach" not in shown, "no next step it refuses"
     assert main(["timeline", "demo-1"]) == 0 and "demo-1" in capsys.readouterr().out
     assert main(["wait", "demo-1", "--timeout", "0", "--json"]) == 0
@@ -257,6 +288,111 @@ def test_a_task_from_before_the_host_held_its_rules_is_deleted_with_its_network(
     assert removed >= {
         f"vivibox-demo-1-{v}" for v in ("docker", "installed", "gate-installed", "gate-build-cache", "config")
     }
+
+
+# What state.json holds where the version is, and what the task is then. The field absent is a task
+# from before the field; a 0 written there is not, though the absent field reads as 0 too.
+ABSENT = object()
+WRITTEN = [
+    (ABSENT, "earlier"),
+    (1, "earlier"),
+    (task_module.TASK_SCHEMA_VERSION - 1, "earlier"),
+    (task_module.TASK_SCHEMA_VERSION, "current"),
+    (task_module.TASK_SCHEMA_VERSION + 1, "newer"),
+    (10**30, "newer"),
+    (0, "unreadable"),
+    (-1, "unreadable"),
+    (True, "unreadable"),
+    (False, "unreadable"),
+    (None, "unreadable"),
+    (str(task_module.TASK_SCHEMA_VERSION), "unreadable"),
+    (float(task_module.TASK_SCHEMA_VERSION), "unreadable"),
+    ([task_module.TASK_SCHEMA_VERSION], "unreadable"),
+    ({}, "unreadable"),
+]
+
+
+@pytest.mark.parametrize(("written", "kind"), WRITTEN, ids=lambda v: "absent" if v is ABSENT else repr(v))
+def test_what_the_version_in_the_state_makes_of_the_task(env, written, kind, monkeypatch, capsys):
+    """One table for the whole decision: what is read, what is run, what is deleted, what is said."""
+    task = implementing("Add health endpoint")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    if written is ABSENT:
+        del data["task_schema_version"]
+    else:
+        data["task_schema_version"] = written
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(Pod, "remove", lambda self: None)
+    monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
+    st = task.read_state()
+    assert task_module.layout(st) == kind
+    problem = task_module.layout_problem(st)
+    assert ("newer vivibox" in problem) == (kind == "newer")
+    assert ("earlier vivibox" in problem) == (kind == "earlier")
+    if kind == "current":
+        assert problem == "" and find_task(load_config().tasks_dir, "demo-1").id == "demo-1"
+        return
+    assert SAYS[kind] in problem
+    before = snapshot(task)
+    assert main(["start", "demo-1"]) == 1 and SAYS[kind] in capsys.readouterr().err, "never run"
+    assert main(["status", "demo-1"]) == 0 and LABEL[kind] in capsys.readouterr().out
+    assert snapshot(task) == before
+    if kind == "newer":
+        assert main(["delete", "demo-1", "--yes"]) == 1 and task.root.exists()
+    else:
+        assert main(["delete", "demo-1", "--yes"]) == 0 and not task.root.exists()
+
+
+def test_a_task_whose_state_is_unreadable_says_so_and_what_to_do(unreadable, capsys):
+    """Nothing in it says which vivibox wrote it, so none is named: the state is unreadable or
+    damaged, and the way out is to delete the task and create it again."""
+    st = unreadable.read_state()
+    assert task_module.layout_problem(st) == (
+        "demo-1's state is unreadable or damaged: what it records as its layout is not a version "
+        "vivibox writes, so this vivibox does not run it; delete it and create it again: "
+        "vivibox delete demo-1"
+    )
+    seen = ui.view(unreadable, st, False, 3)
+    assert seen.status == "state unreadable" and seen.commands == ("vivibox delete demo-1",)
+    keys = panel.keys_for(unreadable, st, False, False, False)
+    assert {action for action, on in keys.items() if on} == {"remove", "show_log"}
+    shown = panel.detail(unreadable, st, 3, False, panel.PodView())
+    assert "### demo-1 · state unreadable" in shown and "`x` delete it" in shown
+    assert UNREADABLE_SAYS in shown and "vivibox" not in shown.replace("vivibox delete demo-1", "").replace(
+        "a version vivibox writes, so this vivibox does not run it", ""
+    ), "no vivibox, earlier or newer, is named as its author"
+    assert main(["wait", "demo-1", "--timeout", "0", "--json"]) == 0
+    waited = json.loads(capsys.readouterr().out)["tasks"][0]
+    assert waited["reason"] == "problem" and waited["status"] == "state unreadable"
+
+
+def test_delete_removes_everything_of_a_task_whose_state_is_unreadable(
+    unreadable, old_supervisor, monkeypatch, capsys
+):
+    from vivibox import secrets
+
+    supervisor = old_supervisor(unreadable)
+    pods, keys = [], []
+    monkeypatch.setattr(Pod, "remove", lambda self: pods.append(self.task_id))
+    monkeypatch.setattr(secrets, "remove", lambda task_id: keys.append(task_id))
+    before = snapshot(unreadable)
+    assert main(["status", "demo-1"]) == 0
+    shown = capsys.readouterr().out
+    assert "state unreadable, still running" in shown and "deleting it stops them" in shown
+    assert "that vivibox" not in shown, "which vivibox left it running is not known"
+    assert snapshot(unreadable) == before
+    assert main(["delete", "demo-1", "--yes"]) == 0
+    assert "Deleted demo-1" in capsys.readouterr().out
+    assert not unreadable.root.exists() and pods == ["demo-1"]
+    assert keys == ["demo-1", "demo-1-review", "demo-1-control"]
+    assert supervisor.wait(timeout=10) is not None, "its supervisor is stopped"
+
+
+def test_a_pod_still_up_of_a_task_whose_state_is_unreadable_is_not_said_to_be_another_vivibox_s(unreadable):
+    st = unreadable.read_state()
+    shown = panel.detail(unreadable, st, 3, False, panel.PodView(address="10.0.0.2"))
+    assert "Its pod is still running" in shown and "that vivibox" not in shown
 
 
 @pytest.mark.parametrize("how", NEWER)
@@ -359,7 +495,7 @@ CHANGES = {
 }
 
 
-@pytest.mark.parametrize("which", ["earlier", "newer"])
+@pytest.mark.parametrize("which", ["earlier", "newer", "unreadable"])
 @pytest.mark.parametrize("change", list(CHANGES))
 def test_a_state_this_vivibox_cannot_read_whole_is_shown_and_not_crashed_on(
     env, which, change, monkeypatch, capsys
@@ -367,17 +503,18 @@ def test_a_state_this_vivibox_cannot_read_whole_is_shown_and_not_crashed_on(
     task = implementing("Add health endpoint")
     path = task.meta / "state.json"
     data = json.loads(path.read_text())
-    data["task_schema_version"] = 0 if which == "earlier" else task_module.TASK_SCHEMA_VERSION + 1
+    versions = {"earlier": 1, "newer": task_module.TASK_SCHEMA_VERSION + 1, "unreadable": 0}
+    data["task_schema_version"] = versions[which]
     CHANGES[change](data)
     path.write_text(json.dumps(data))
     monkeypatch.setattr(Pod, "remove", lambda self: None)
     monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
-    label = "from an earlier vivibox" if which == "earlier" else "from a newer vivibox"
+    label = LABEL[which]
     before = snapshot(task)
     assert main(["status"]) == 0 and label in capsys.readouterr().out
     assert main(["status", "demo-1"]) == 0 and label in capsys.readouterr().out
     assert main(["start", "demo-1"]) == 1
-    assert (EARLIER_SAYS if which == "earlier" else NEWER_SAYS) in capsys.readouterr().err
+    assert SAYS[which] in capsys.readouterr().err
     assert snapshot(task) == before, "reading it whole or not, nothing is written back"
     if which == "newer":
         assert main(["delete", "demo-1", "--yes"]) == 1 and NEWER_SAYS in capsys.readouterr().err

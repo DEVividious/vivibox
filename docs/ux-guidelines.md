@@ -286,8 +286,17 @@ looks like an empty cache.
   plan under review is the body itself, not a section below it. A review's or a plan's own
   headings are bold lines, never larger than the section they are in; the accepted plan leaves
   its criteria to their section.
+- What an agent wrote stands behind a rule: a heavy line down its left (`┃`), on every row of
+  it, blank ones too. vivibox's own lines never have one, so a line without the rule is
+  vivibox's and a line with it is not, whatever it says (`**Next:**`, a ticked list, a
+  heading). Such text goes into the panel through one function (`markdown.prose`) and is read
+  as markdown on its own, apart from the lines around it: a block it leaves open (a code
+  block, a list, a quote, a table) ends with it, and a heading in it is a bold line, whatever
+  its level and however it was written; the panel's headings are vivibox's sections alone.
+  A quote of the agent's is a quote inside the rule, and nothing in the text ends the rule.
+  A plan is drawn so.
 - The panel is markdown, and much of it is not vivibox's (a plan, a question, a review's
-  notes). That text keeps its headings, lists and emphasis and makes no link: a link in it is
+  notes). That text keeps its lists and emphasis and makes no link: a link in it is
   its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the
   address alone when the label is the address, a title after the address in quotes
   (`markdown.link_text`); HTML is the text it is. What markdown itself would leave out is

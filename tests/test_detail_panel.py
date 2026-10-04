@@ -1,5 +1,6 @@
 """The details panel (d): a header, Next, then the same sections in the same order in every state."""
 
+from test_agent_prose import apart, bold_lines, headings, parsed
 from test_tui import implementing, with_mode, with_reviewer
 
 from vivibox import gate, reviewing
@@ -119,7 +120,9 @@ def test_the_accepted_plan_leaves_its_criteria_to_their_section(env):
     task = implementing()
     shown = detail(task, task.read_state(), 3, running=True)
     plan = shown[shown.index("#### The plan") :]
-    assert "**Goal**" in plan and "\n# " not in plan and "\n## " not in plan, "headings under the section's"
+    own, agents = apart(parsed(plan))
+    assert headings(own) == [("h4", "The plan")] and not headings(agents), "headings under the section's"
+    assert bold_lines(agents)[:2] == ["Goal", "Context"], "as bold lines"
     assert "it works" not in plan, "the criteria are one section, with their ticks"
     assert shown.count("it works") == 1
 
@@ -130,8 +133,9 @@ def test_the_plan_under_review_keeps_its_criteria_under_smaller_headings(env):
     task = new_task()
     at_plan_checkpoint(task)
     shown = detail(task, task.read_state(), 3, running=True)
-    assert "**Acceptance criteria**" in shown and "- [ ] it works" in shown
-    assert "\n# " not in shown and "\n## " not in shown
+    own, agents = apart(parsed(shown))
+    assert "Acceptance criteria" in bold_lines(agents) and "- [ ] it works" in shown
+    assert not headings(agents) and [tag for tag, _ in headings(own)] == ["h3", "h4", "h4"]
 
 
 def test_a_reviewer_without_a_role_of_its_own_runs_on_the_writers_model(env):

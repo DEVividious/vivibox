@@ -47,6 +47,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- What an agent wrote in the details panel is drawn behind a rule. A plan has a heavy line (`┃`)
+  down its left, on every row of it, and vivibox's own lines never have one: a line without the
+  rule is vivibox's, a line with it is not, whatever it says. The plan is read as markdown on
+  its own, apart from the lines around it: a code block, a list, a quote or a table it leaves
+  open ends with it and no longer takes in the sections after it, and a heading in it is a bold
+  line however it was written (a space before the `#`, a line of `=` under the words, inside a
+  list or a quote), so the panel's headings are vivibox's sections alone. A horizontal rule is
+  drawn where it was written, not above the list or the quote it stands in.
 - vivibox asks for Textual 8 (`textual>=8.2.8,<9`) and names `markdown-it-py` (4.x) and
   `pygments` (2.x), which the details panel uses directly: what the panel does with a link and a table's cell is tested
   on that Textual, and the next major is taken up with its tests run.

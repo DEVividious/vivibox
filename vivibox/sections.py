@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from . import display, gate, handoff, orchestration, reviewing, ui
 from .config import ConfigError, load_config
+from .markdown import prose
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .roles import role_of
@@ -237,12 +238,12 @@ def demoted(text: str) -> str:
 
 
 def plan_text(text: str, criteria: bool = True) -> str:
-    """A plan as the panel shows it: the part that concerns you, its headings under the panel's,
-    and, once the criteria have a section of their own, without them."""
+    """A plan as the panel shows it: the part that concerns you, as the agent's words it is
+    (prose), and, once the criteria have a section of their own, without them."""
     shown = plan_body(text)
     if not criteria:
         shown = re.sub(r"(?ms)^#+\s*Acceptance criteria\s*$.*?(?=^#|\Z)", "", shown).strip()
-    return demoted(shown)
+    return prose(shown)
 
 
 def plan_section(task: Task) -> list[str]:

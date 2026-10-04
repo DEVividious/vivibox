@@ -9,11 +9,19 @@ own_link signs a link with a key made when vivibox starts and kept nowhere, and 
 rule (as_text) turns every other link into text, whatever syntax made it. Text that did not pass
 through own_link has no way to the key, so no way to a link.
 
+What an agent wrote is also read apart from vivibox's own lines. prose puts a piece of it
+between two marks made of the same key, and the parser reads what stands between them on its
+own, as a document of its own, and puts the result in a frame (a rule down its left, Quote):
+no block the piece opens goes on into the lines after it, no heading in it is a heading (a bold
+line instead, whatever its level and however it was written), and no line outside a frame is an
+agent's.
+
 What is shown only: the text's source, what is stored and what is hashed stay as they were.
 """
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from markdown_it import MarkdownIt
@@ -25,12 +33,38 @@ from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 from textual.app import ComposeResult
 from textual.widgets import Markdown
-from textual.widgets._markdown import MarkdownBlock, MarkdownTable, MarkdownTableContent
+from textual.widgets._markdown import (
+    MarkdownBlock,
+    MarkdownBlockQuote,
+    MarkdownHorizontalRule,
+    MarkdownTable,
+    MarkdownTableContent,
+)
 
 from . import display
 
 # In the memory of this process alone: no file, no log and no screen holds it.
 _KEY = secrets.token_hex(16)
+
+
+# The marks around what an agent wrote, and what stands between two of them; a mark with no end
+# (text cut by whatever carried it) leaves the rest the agent's, never the other way round.
+_OPEN = f"<agent {_KEY}>"
+_CLOSE = f"</agent {_KEY}>"
+_PIECE = re.compile(f"{re.escape(_OPEN)}\n(.*?)(?:\n{re.escape(_CLOSE)}|\\Z)", re.DOTALL)
+# What says of a token that it is the frame vivibox put around a piece: no text sets it.
+PROSE = "prose"
+# A horizontal rule's token, by a name the widget leaves to Panel.unhandled_token.
+RULE = "rule"
+
+
+def prose(text: str) -> str:
+    """What an agent wrote (a plan, a question, a review's notes, its list of steps), for the
+    panel's text: the one way such words go into it. They are read as markdown on their own,
+    apart from the lines before and after, with their headings as bold lines, and drawn behind
+    a rule that vivibox's own lines never have. Nothing for no text."""
+    text = text.replace(_OPEN, "").replace(_CLOSE, "")  # a piece within a piece is one piece
+    return f"{_OPEN}\n{text}\n{_CLOSE}" if text.strip() else ""
 
 
 def own_link(label: str, url: str) -> str:
@@ -54,17 +88,18 @@ def _text(content: str) -> Token:
     return token
 
 
-def _plain(children: list[Token]) -> list[Token]:
+def _plain(children: list[Token], agents: bool = False) -> list[Token]:
     """A line's tokens with every link that is not vivibox's as text: the label keeps its own
     emphasis and code, the address and the title follow it. An image is a link to a picture, and
     reads the same. What an entity spelled (&#x202e;) is escaped here: the source was escaped
-    before it was parsed, and the parser made the character after."""
+    before it was parsed, and the parser made the character after. agents: the line is of a
+    piece an agent wrote, where no link is vivibox's, whatever its title."""
     out: list[Token] = []
     # The link that is open: where its label starts, where it leads, its title. A picture in its
     # label has an address and a title of its own, and never touches these.
     start, target, title = None, "", ""
     for child in children:
-        if child.type == "link_open" and child.attrs.get("title") != _KEY:
+        if child.type == "link_open" and (agents or child.attrs.get("title") != _KEY):
             start, target = len(out), str(child.attrs.get("href", ""))
             title = str(child.attrs.get("title") or "")
         elif child.type == "link_close" and start is not None:
@@ -73,7 +108,7 @@ def _plain(children: list[Token]) -> list[Token]:
                 out.append(_text(after))
             start = None
         elif child.type == "image":  # its words may hold a link of their own: that address too
-            words = "".join(token.content for token in _plain(child.children or []))
+            words = "".join(token.content for token in _plain(child.children or [], agents))
             picture, named = str(child.attrs.get("src", "")), str(child.attrs.get("title") or "")
             out.append(_text(link_text(words, picture, named)))
         else:
@@ -156,24 +191,82 @@ def _fence_words(tokens: list[Token]) -> list[Token]:
 
 
 def as_text(state: StateCore) -> None:
-    """The parser's last rule: after it, the only links left are those own_link wrote, and what
+    """The last rule of _rules: after it, the only links left are those own_link wrote, and what
     markdown or the widget would leave out (a link's title, the words after a block's language,
     a row's cells past the table's columns) is in what is drawn."""
     state.tokens = _fence_words(_whole_tables(state.tokens))
     for token in state.tokens:
         if token.type == "inline" and token.children:
-            token.children = _plain(token.children)
+            token.children = _plain(token.children, bool(state.env.get(PROSE)))
+        elif token.type == "hr":  # the widget draws an hr above whatever it stands in: Panel
+            token.type = RULE
 
 
-def parser() -> MarkdownIt:
-    """Markdown as the panel reads it. A bare address is the text it is, never made a link
-    (linkify). HTML is text too: the widget draws no tag, so one would be read out of sight, and
-    what it wraps would lose its tags without a word (html). A link's definition on a line of its
-    own stays on the screen, where the parser would take it out of the text (reference); a link
-    that names one is then the text it was written as."""
+def _rules() -> MarkdownIt:
+    """Markdown as the panel reads it, vivibox's own lines and an agent's piece alike. A bare
+    address is the text it is, never made a link (linkify). HTML is text too: the widget draws no
+    tag, so one would be read out of sight, and what it wraps would lose its tags without a word
+    (html). A link's definition on a line of its own stays on the screen, where the parser would
+    take it out of the text (reference); a link that names one is then the text it was written
+    as."""
     found = MarkdownIt("gfm-like", {"linkify": False, "html": False}).disable("reference")
     found.block.ruler.at("table", _table, {"alt": ["paragraph", "reference"]})
     found.core.ruler.push("as_text", as_text)
+    return found
+
+
+def _frame(nesting: int) -> Token:
+    """One end of the frame around a piece: a quote's token, which the widget knows how to nest,
+    marked as vivibox's (PROSE), which a quote written as text never is."""
+    token = Token("blockquote_open" if nesting > 0 else "blockquote_close", "blockquote", nesting)
+    token.block, token.meta = True, {PROSE: True}
+    return token
+
+
+def _demoted(tokens: list[Token]) -> list[Token]:
+    """A piece's tokens with every heading as a bold line: a paragraph, whatever the heading's
+    level, whether it was written with # or with a line under it, and wherever it stands (in a
+    list, in a quote). Decided on what the parser found, never on how a line begins: the panel's
+    headings are vivibox's sections, and its own alone."""
+    for at, token in enumerate(tokens):
+        if token.type in ("heading_open", "heading_close"):
+            token.type, token.tag, token.markup = token.type.replace("heading", "paragraph"), "p", ""
+            if token.nesting > 0 and (line := tokens[at + 1]).type == "inline":
+                line.children = [Token("strong_open", "strong", 1), *(line.children or [])]
+                line.children.append(Token("strong_close", "strong", -1))
+    return tokens
+
+
+def _apart(state: StateCore) -> None:
+    """In the place of the parser's rule for blocks: vivibox's own lines are read as blocks, run by
+    run, and each piece an agent wrote (prose) is left out of that reading whole, kept for
+    _spliced. Whatever a piece opens (a fence, a list, a quote, a table) has nothing after it to
+    go on into, and the lines around it are read as if nothing stood between them and it."""
+    for at, part in enumerate(_PIECE.split(state.src)):
+        if at % 2:
+            state.tokens.append(_block(PROSE, part))
+        else:
+            state.md.block.parse(part, state.md, state.env, state.tokens)
+
+
+def _spliced(state: StateCore) -> None:
+    """The parser's last rule: each piece an agent wrote is parsed as a document of its own, by
+    the same rules, and its tokens put where it stood, in a frame, its headings bold lines."""
+    out: list[Token] = []
+    for token in state.tokens:
+        if token.type == PROSE:
+            out += [_frame(1), *_demoted(_rules().parse(token.content, {PROSE: True})), _frame(-1)]
+        else:
+            out.append(token)
+    state.tokens = out
+
+
+def parser() -> MarkdownIt:
+    """The panel's text as it is read: by _rules, vivibox's own lines apart from every piece an
+    agent wrote (_apart, _spliced)."""
+    found = _rules()
+    found.core.ruler.at("block", _apart)
+    found.core.ruler.push("spliced", _spliced)
     return found
 
 
@@ -206,11 +299,48 @@ class Table(MarkdownTable):
             yield Cells(made.headers, made.rows)
 
 
+class Quote(MarkdownBlockQuote):
+    """A quote of the panel. One an agent wrote is drawn as Textual draws a quote. The frame
+    around a piece an agent wrote (PROSE) is a rule down its left and nothing else (its look is
+    in vivibox.tcss): every row of the piece has it, blank ones too, nothing in the piece ends
+    it, and a line of vivibox's own never has one. A quote in the piece is a quote inside the
+    rule."""
+
+    DEFAULT_CSS = """
+    Quote.prose {
+        background: transparent;
+        border-left: heavy $foreground 30%;
+        margin: 0 0 1 0;
+        padding: 0 0 0 1;
+    }
+    Quote.prose > MarkdownParagraph {
+        margin: 0 0 1 0;
+    }
+    Quote.prose > MarkdownBlock:last-child {
+        margin-bottom: 0;
+    }
+    """
+
+    def __init__(self, markdown: Markdown, token: Token, *args, **kwargs) -> None:
+        super().__init__(markdown, token, *args, **kwargs)
+        self.set_class(bool((token.meta or {}).get(PROSE)), PROSE)
+
+
 class Panel(Markdown):
     """The details panel's text. A click opens an address in your browser, and the only
     addresses a click finds are vivibox's own (own_link)."""
 
-    BLOCKS: dict[str, type[MarkdownBlock]] = {**Markdown.BLOCKS, "table_open": Table}
+    BLOCKS: dict[str, type[MarkdownBlock]] = {
+        **Markdown.BLOCKS,
+        "table_open": Table,
+        "blockquote_open": Quote,
+    }
+
+    def unhandled_token(self, token: Token) -> MarkdownBlock | None:
+        """A horizontal rule, where it was written: Textual draws one at the top level, above
+        the list, the quote or the frame it stands in, where an agent's would be a line of
+        vivibox's own."""
+        return MarkdownHorizontalRule(self, token) if token.type == RULE else None
 
     def __init__(self, **kwargs) -> None:
         super().__init__("", parser_factory=parser, **kwargs)

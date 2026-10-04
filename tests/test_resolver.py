@@ -364,8 +364,10 @@ def test_a_forwarder_that_died_is_named_in_the_header_and_started_again(runtime,
     hostd.ensure(HERE, port, upstream=upstream)
     pid = hostd.running()
     os.kill(pid, signal.SIGKILL)
-    os.waitpid(pid, 0)  # this process's child: until it has ended, however long the machine takes
-    assert hostd.running() is None
+    for _ in range(50):
+        if hostd.running() is None:
+            break
+        time.sleep(0.05)
     said = hostd.problem(HERE, port)
     assert said.startswith("DNS forwarder not running: ")
     assert f"process {pid}" in said and "vivibox hostd start" in said

@@ -193,14 +193,22 @@ def networks_up(pod) -> None:
         (pod_network.SYS_NET / net.bridge / "bridge").mkdir(parents=True, exist_ok=True)
 
 
+# Seconds the suite's own git may take in a clone a test made: one whose refs are a named pipe
+# (tests/test_git_timeout.py) would keep it, and the git it started, waiting long after the
+# suite is over.
+OWN_GIT_SECONDS = 20
+
+
 def as_verified(task) -> str:
     """The task as a green verification leaves it: the commit its clone stands on, recorded as
-    the verified one. A review is made of that commit, and of nothing when there is none."""
+    the verified one. A review is made of that commit, and of nothing when there is none. The
+    question is asked within OWN_GIT_SECONDS: git that does not answer is ended, not left."""
     import subprocess
 
     done = subprocess.run(
-        ["git", "-C", str(task.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-    )
+        ["git", "-C", str(task.repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL, timeout=OWN_GIT_SECONDS,
+    )  # fmt: skip
     task.set_verified_commit(done.stdout.strip())
     return done.stdout.strip()
 

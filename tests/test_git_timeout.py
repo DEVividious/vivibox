@@ -541,6 +541,20 @@ def test_git_in_the_gate_container_that_does_not_answer_ends_the_verification(
     assert not [c for c in docker.calls if "make test" in " ".join(c)], "nothing built"
 
 
+def test_the_suites_own_git_in_a_clone_that_does_not_answer_is_ended(task, monkeypatch):
+    """A round asked for twice (a regression in what stops it) had the suite's own question of
+    the clone, rev-parse HEAD, wait on the pipe the first round left, in a thread nobody
+    joined: git outlived the suite by hours. Asked within a time limit, it is ended."""
+    import conftest
+
+    monkeypatch.setattr(conftest, "OWN_GIT_SECONDS", LIMIT)
+    fifo(task.repo, ".git/packed-refs")
+    ended = in_time(lambda: as_verified(task))
+    assert isinstance(ended, subprocess.TimeoutExpired), f"not ended: {ended!r}"
+    waiting = subprocess.run(["pgrep", "-f", f"git -C {task.repo} rev-parse HEAD"], capture_output=True)
+    assert not waiting.stdout.split(), "the suite's git is still waiting on the clone"
+
+
 def test_the_reviewers_view_of_a_clone_that_does_not_answer_stops_the_round_for_you(
     task, tmp_path, monkeypatch
 ):
@@ -556,10 +570,13 @@ def test_the_reviewers_view_of_a_clone_that_does_not_answer_stops_the_round_for_
     docker = BlockingDocker(task.repo, "clone")
     pod = a_pod(task, docker, tmp_path)
 
+    asked = []
+
     def review_up():
         pod.review_fresh()
-        as_verified(task)  # what the verification passed, as the supervisor records it
-        fifo(task.repo, ".git/packed-refs")
+        if not asked:  # once: a round asked for again finds the pipe, and the suite's git would wait
+            asked.append(as_verified(task))  # what the verification passed, as the supervisor records it
+            fifo(task.repo, ".git/packed-refs")
         reviewing.view(task, pod)
         pod.review_start([], {})
         return tmp_path / "review-out"

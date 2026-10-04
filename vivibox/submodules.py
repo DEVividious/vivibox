@@ -13,7 +13,9 @@ submodule's own commit adds or changes, as far down as you keep the commits. Kep
 reachable from HEAD or a ref of the submodule as you have it checked out, or as your repository
 kept it (.git/modules/<name>): a commit that is there as an object alone goes with git's next
 clean-up. Asked of your repositories alone, never of the task's clone, by git that reads
-objects, fetches nothing and follows no include of a .gitmodules, within a time limit.
+objects, fetches nothing and follows no include of a .gitmodules, within a time limit, and
+read no further than LIMIT bytes of what one git prints: past either, git is ended and the
+accepting refused, with nothing taken from an answer cut short.
 
 A submodule commit you keep brings its history with it: the commits between the one the task
 started from and the one the work keeps stay in your submodule, and one of them may point a
@@ -37,7 +39,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import display, gate, repo
+from . import counted, display, gate, repo
 
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 GITLINK = "160000"
@@ -47,6 +49,9 @@ DEEPEST = 8
 SECONDS = repo.CLONE_TIMEOUT
 # Submodules a refusal says in full; the rest are counted.
 LISTED = 10
+# Bytes the check reads of what one git prints, on both streams: a listing is as long as the
+# writer made it (a few objects make git log --raw print gigabytes). Past it, refused.
+LIMIT = 64 * 2**20
 # The listing of a history: each commit's id, then what it changed, a line for a path with
 # its modes. A merge: what differs from every parent (-c). Each setting of yours that changes
 # what git log prints is said here, so that none hides a pointer or adds a line.
@@ -83,6 +88,11 @@ class Late(Exception):
     """The check ran out of its time. Its text: what it was reading then, where that is known."""
 
 
+class Over(Exception):
+    """git printed more than the check reads (LIMIT) and was ended. Its text: what was being
+    read then, where that is known."""
+
+
 @dataclass(frozen=True)
 class Repository:
     """A repository of yours: your checkout, or a submodule of it. tree: its work tree, None for
@@ -111,7 +121,10 @@ class Repository:
         """The submodules commit points at, as path: commit; None when git cannot list them. A
         path that is no text is kept under a name that stands for it, with something that is
         no commit id: seen as changed when it changed, and never followed."""
-        code, listed = self.git("ls-tree", "-r", "-z", "--full-tree", commit)
+        try:
+            code, listed = self.git("ls-tree", "-r", "-z", "--full-tree", commit)
+        except Over:
+            raise Over(f"listing the files of commit {commit}") from None
         if code != 0:
             return None
         found = {}
@@ -131,7 +144,8 @@ class Repository:
         where no parent of it points), commit itself left out: those since before, or, with
         no before, those no branch of a remote here reaches. None when git cannot list them,
         or prints what is no such listing. One git, whatever the history holds, and what it
-        printed read once through, for as long as the check has left (Late past it)."""
+        printed read once through, for as long as the check has left (Late past it) and no
+        more of it than LIMIT (Over past it: nothing is read from a listing cut short)."""
         code, listed = self.git(*listing(before, commit))
         if code != 0:
             return None
@@ -189,14 +203,18 @@ class Repository:
 
 
 def _git(args: list[str], until: float) -> tuple[int, bytes]:
-    """git on the host (repo.run_git), fetching nothing, for as long as the check has left."""
+    """git on the host (repo.run_git), fetching nothing, for as long as the check has left, and
+    what it prints read up to LIMIT, as it comes: past either, git is ended with what it
+    started, and what it printed by then is no answer (Late, Over)."""
     left = until - time.monotonic()
     if left <= 0:
         raise Late
     try:
-        done = repo.run_git(args, capture_output=True, stdin=subprocess.DEVNULL, timeout=left, env=NOT_LAZY)
+        done = repo.run_git(args, limit=LIMIT, stdin=subprocess.DEVNULL, timeout=left, env=NOT_LAZY)
     except subprocess.TimeoutExpired:
         raise Late from None
+    except counted.TooMuch:
+        raise Over from None
     return done.returncode, done.stdout
 
 
@@ -312,11 +330,12 @@ def look(
 
 def _history(held: Repository, before: str, commit: str, path: str, depth: int) -> list[str] | None:
     """held.history, for the submodule at path that look found at depth; none is listed for
-    one too deep to be followed, which look refuses. Out of time, it says what was read."""
+    one too deep to be followed, which look refuses. Out of time, or past what is read of a
+    listing, it says what was read."""
     try:
         return held.history(before, commit) if depth < DEEPEST else []
-    except Late:
-        raise Late(f"reading the history of {display.name(path)}") from None
+    except (Late, Over) as stopped:
+        raise type(stopped)(f"reading the history of {display.name(path)}") from None
 
 
 def check(task_id: str, source: Path, clone: Path, base: str, commit: str, history: bool = False) -> None:
@@ -326,7 +345,7 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
     history: the accepting keeps every commit of the work (a branch), not its last tree alone,
     so each of them is looked at. Nothing is changed, here or in the task. clone: the task's,
     named in what to do, never read."""
-    found, late = Found(), ""
+    found, late, over = Found(), "", ""
     try:
         yours = at(source, time.monotonic() + SECONDS)
         if yours is None:
@@ -340,10 +359,12 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
     except Late as reading:
         late = f"vivibox did not finish checking the work's submodules in {SECONDS:g} s"
         late += f" ({reading})" if str(reading) else ""
-    if found.unkept or late:
-        raise Unkept(
-            briefly(task_id, found.unkept, late), refusal(task_id, source, clone, found.unkept, late)
-        )
+    except Over as reading:
+        over = "vivibox stopped checking the work's submodules at a safety limit: git printed more than "
+        over += f"{LIMIT // 2**20} MiB" + (f" ({reading})" if str(reading) else "")
+    if found.unkept or late or over:
+        said = refusal(task_id, source, clone, found.unkept, late, over)
+        raise Unkept(briefly(task_id, found.unkept, late or over), said)
 
 
 def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
@@ -361,10 +382,14 @@ def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
     )
 
 
-def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "") -> str:
+def refusal(
+    task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "", over: str = ""
+) -> str:
     """What was refused, why, and what to do, for each commit: commands whole, to paste, with
     the folders they are run in and read from named in full. The first LISTED in full. The
-    first line says a commit is not kept only where vivibox found one that is not."""
+    first line says a commit is not kept only where vivibox found one that is not. late, over:
+    what stopped the check before its end (its time, what it reads of one git), as check says
+    it."""
     known = "its work keeps a submodule commit that no repository of yours keeps. The task's clone may "
     known += "hold the only copy, and accepting deletes the task."
     unknown = "vivibox could not check that you keep every submodule commit its work keeps. The task's "
@@ -465,6 +490,11 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
         lines.append(f"And {len(found) - LISTED} more submodule commits, said once these are kept.")
     if late:
         lines.append(f"{late}: there may be more.")
+    if over:  # no command of yours makes the listing shorter: the work goes back
+        lines.append(
+            f"{over}. Nothing of an answer cut short is used, so there may be more. Send the work back "
+            f'with a reply (vivibox reply {task_id} "…") for work that leaves git less to list there.'
+        )
     if any(one.kind != UNCHECKED for one in found):
         lines.append("Then accept the work again.")
     return "\n".join(lines)

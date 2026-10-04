@@ -233,7 +233,10 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   is taken on trust, not checked, and its address is the one the work names: look at it before
   you clone. Where your submodule lacks the commit the task started from (you pulled, and did
   not update the submodule), that history cannot be listed: the refusal says so, with the
-  fetch that brings the commit. A commit the history needs that neither the submodule's remote
+  fetch that brings the commit. The check reads no more than 64 MiB of what one git prints
+  for it (a history's listing, the files of a commit), since a listing is as long as the
+  writer made it: past that it ends git, uses nothing of the answer cut short and refuses,
+  with the reply that sends the work back. A commit the history needs that neither the submodule's remote
   nor the task's clone has cannot be kept: the work goes back with a reply, for work that does
   not keep that part of the history.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.

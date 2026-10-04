@@ -19,7 +19,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import display, protection
+from . import counted, display, protection
 from .podspec import Mount
 
 # Settings a fresh clone needs; everything else in the source repo's local config is dropped.
@@ -135,9 +135,13 @@ def run_git(args: list[str] | tuple[str, ...], **how) -> subprocess.CompletedPro
     """subprocess.run of git on the host, in git_environment; how: what run takes, env being
     what vivibox sets for the call and to_remotes what git_environment takes. For a caller that
     reads git's answer in its own way (as bytes, within its own time); the rest call git or
-    in_clone."""
+    in_clone. limit: the most bytes git may print, counted as they come (counted.run, which
+    takes timeout too, and stdin and cwd): for a listing as long as an agent made it."""
     env = git_environment(how.pop("env", None), to_remotes=how.pop("to_remotes", False))
-    return subprocess.run(["git", *args], env=env, **how)
+    command, limit = ["git", *args], how.pop("limit", None)
+    if limit is None:
+        return subprocess.run(command, env=env, **how)
+    return counted.run(command, env, limit, **how)
 
 
 def git(

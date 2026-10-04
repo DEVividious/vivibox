@@ -7,6 +7,8 @@ one, and you, running the commands the refusal names, in your own shell.
 
 import ast
 import os
+import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -16,7 +18,7 @@ import pytest
 from conftest import IDENTITY, LOCAL_SUBMODULES, global_git_config, make_repo
 from test_git_environment import snapshot
 
-from vivibox import actions, box, gate, repo, submodules
+from vivibox import actions, box, counted, gate, repo, submodules
 from vivibox.cli import main
 from vivibox.config import load_project
 from vivibox.states import State
@@ -1148,8 +1150,8 @@ def test_a_gitmodules_the_writer_wrote_is_read_as_data(project, env, monkeypatch
 
 def test_the_check_fetches_nothing_and_every_git_of_it_has_a_time_limit(project, monkeypatch):
     """Each git the check runs is told to fetch nothing lazily (a submodule of yours that is a
-    partial clone would go to its remote for a commit it lacks), has a time limit, and reads a
-    .gitmodules without its includes."""
+    partial clone would go to its remote for a commit it lacks), has a time limit and a limit
+    on what is read of it, and reads a .gitmodules without its includes."""
     task = actions.create("demo", "Goal")
     written_in(task.repo / "lib")
     at_final(task, project)
@@ -1161,6 +1163,7 @@ def test_the_check_fetches_nothing_and_every_git_of_it_has_a_time_limit(project,
     assert len(ran) >= 6
     for args, how in ran:
         assert how["env"] == {"GIT_NO_LAZY_FETCH": "1"} and 0 < how["timeout"] <= submodules.SECONDS, args
+        assert how["limit"] == submodules.LIMIT and "capture_output" not in how, args
         assert "config" not in args or "--no-includes" in args, args
         assert str(task.repo) not in " ".join(args), "asked of the task's clone"
 
@@ -1180,6 +1183,149 @@ def test_a_submodule_of_yours_that_is_a_partial_clone_is_not_sent_to_its_remote(
         ["git", "-C", str(partial), "cat-file", "-e", commit], env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}
     )
     assert missing.returncode != 0, "the check fetched the commit from the submodule's remote"
+
+
+BLOCK = 65536  # bytes the stand-in for git writes at a time: what a pipe holds
+BLOCKS = 256  # and how many of them it has to write, were it let
+
+
+def stand_in(folder: Path, word: str, then: str) -> SimpleNamespace:
+    """A git to put first on PATH that is git for everything but `word` (log, ls-tree). Asked
+    for that, it starts a process of its own, which holds the pipes it prints to, writes its
+    process id and that one's to a file (pids), and goes on as `then` says (sh)."""
+    folder.mkdir()
+    there = SimpleNamespace(path=folder, pids=folder / "pids", written=folder / "written")
+    there.block = folder / "block"  # a listing as git log --raw prints one, a pipe's worth of it
+    listing = (COMMIT + "\n" + ROW) * (BLOCK // len(COMMIT + "\n" + ROW))
+    there.block.write_text(listing + "\n" * (BLOCK - len(listing)))
+    there.written.write_text("")
+    (folder / "git").write_text(
+        "#!/bin/sh\n"
+        f'case " $* " in *" {word} "*) ;; *) exec {shutil.which("git")} "$@" ;; esac\n'
+        "sleep 600 &\n"
+        f'echo "$$ $!" > {there.pids}\n'
+        f"{then.format(**vars(there))}\n"
+    )
+    (folder / "git").chmod(0o755)
+    return there
+
+
+def ended(pids: Path) -> bool:
+    """Whether the processes the stand-in named are gone, or dead and not yet collected. Looked
+    at again for a few seconds, since a process that was killed takes a moment to go; any that
+    is still there after that is ended here, by its id, so that the test leaves none."""
+    found = [int(pid) for pid in pids.read_text().split()]
+
+    def there(pid: int) -> bool:
+        try:  # the state follows the name, which is in brackets and may hold any character
+            return Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0] not in "ZX"
+        except (OSError, IndexError):
+            return False
+
+    for _ in range(100):
+        if not any(there(pid) for pid in found):
+            return True
+        time.sleep(0.1)
+    for pid in filter(there, found):
+        os.kill(pid, signal.SIGKILL)
+    return False
+
+
+# What the stand-in does to print without end, as far as a test lets it: a block at a time,
+# each one written counted, to stdout or where the second %s says, and then it waits.
+PRINTS_ON = "n=0; while [ $n -lt %d ]; do cat {block} %s && echo >> {written}; n=$((n + 1)); done\n"
+PRINTS_ON += "exec sleep 600"
+
+
+@pytest.mark.parametrize(
+    "word, stream",
+    [("log", ""), ("log", ">&2"), ("ls-tree", ""), ("config", ""), ("rev-list", "")],
+    ids=["a history", "git's words on a history", "a commit's files", "a .gitmodules", "the work's commits"],
+)
+def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
+    project, monkeypatch, word, stream
+):
+    """A listing is as long as the writer made it: a few objects make git print gigabytes.
+    The check reads 64 MiB of what one git prints, on either stream, and no more (here the
+    limit is 1 MiB, and the stand-in for git has 16 MiB to print and then waits). Past it,
+    git is ended with every process it started, nothing of the answer cut short is used (it
+    is a listing with a pointer in it), and the work is refused as what vivibox could not
+    check, saying the limit, what was being read where that is known, and what to do; the
+    task and your repositories are as they were. Every git of the check is read that way."""
+    assert submodules.LIMIT == 64 * 2**20
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    at_final(task, project)
+    kept_from(task.repo / "lib", lib, commit)  # you keep it: what is left is to read its history
+    base, work = task.read_state().base_commit, git(task.repo, "rev-parse", "HEAD")
+    before = everything(task, project)
+    monkeypatch.setattr(submodules, "LIMIT", 16 * BLOCK)
+    monkeypatch.setattr(submodules, "SECONDS", 20)  # were it read to its end: a failure, not a hang
+    git_ = stand_in(project.source.parent / "stand-in", word, PRINTS_ON % (BLOCKS, stream))
+    with monkeypatch.context() as patched:
+        patched.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
+        with pytest.raises(submodules.Unkept) as said:
+            submodules.check(task.id, project.source, task.repo, base, work, history=True)
+    assert ended(git_.pids), "a process of the git that printed too much is still there"
+    written = len(git_.written.read_text()) * BLOCK
+    assert written <= submodules.LIMIT + 4 * BLOCK, "read past the limit: what git wrote was taken"
+    where = {"log": " (reading the history of lib)", "ls-tree": f" (listing the files of commit {base})"}
+    assert said.value.whole.splitlines() == [
+        f"{task.id} was not accepted: {NOT_KNOWN}",
+        "vivibox stopped checking the work's submodules at a safety limit: git printed more than 1 MiB"
+        f"{where.get(word, '')}. Nothing of an answer cut short is used, so there may be more. Send the "
+        f'work back with a reply (vivibox reply {task.id} "…") for work that leaves git less to list there.',
+    ]
+    assert str(said.value) == (
+        f"{task.id} was not accepted: vivibox stopped checking the work's submodules at a safety limit: git "
+        f"printed more than 1 MiB{where.get(word, '')}, and accepting deletes the task. In a terminal, "
+        f"vivibox accept {task.id} says more."
+    )
+    assert everything(task, project) == before and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_a_process_that_holds_gits_output_after_git_ended_goes_when_the_time_is_out(project, monkeypatch):
+    """git ends at once, and a process it started holds the pipes it printed to: the check
+    waits on them no longer than its time, says so as it says any git that was late, and ends
+    that process with the rest of git's session."""
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    at_final(task, project)
+    kept_from(task.repo / "lib", project.source / "lib", commit)
+    base, work = task.read_state().base_commit, git(task.repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(submodules, "SECONDS", 4)
+    git_ = stand_in(project.source.parent / "stand-in", "log", "exit 0")
+    with monkeypatch.context() as patched:
+        patched.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
+        with pytest.raises(submodules.Unkept) as said:
+            submodules.check(task.id, project.source, task.repo, base, work)
+    late = "vivibox did not finish checking the work's submodules in 4 s (reading the history of lib)"
+    assert f"{late}: there may be more." in said.value.whole
+    assert ended(git_.pids), "the process git left behind is still there"
+
+
+def test_git_read_within_a_limit_answers_as_git_does(tmp_path, monkeypatch):
+    """repo.run_git with a limit: what git printed on each stream and its exit code, as bytes,
+    where it stayed within the limit and the time; past the limit, how much was read by then,
+    which is the limit and at most one read more."""
+    there = make_repo(tmp_path / "there")
+    head = subprocess.run(["git", "-C", str(there), "rev-parse", "HEAD"], capture_output=True).stdout
+    asked = dict(limit=4096, timeout=60, stdin=subprocess.DEVNULL)
+    done = repo.run_git(["-C", str(there), "rev-parse", "HEAD"], **asked)
+    assert (done.returncode, done.stdout, done.stderr) == (0, head, b"")
+    done = repo.run_git(["-C", str(there), "rev-parse", "--verify", "no-such-ref"], **asked)
+    assert done.returncode == 128 and done.stdout == b"" and done.stderr.startswith(b"fatal: ")
+    git_ = stand_in(tmp_path / "stand-in", "log", PRINTS_ON % (BLOCKS, ""))
+    monkeypatch.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
+    with pytest.raises(counted.TooMuch) as stopped:
+        repo.run_git(["log"], **asked)
+    assert 4096 < stopped.value.read <= 4096 + counted.CHUNK and ended(git_.pids)
+    waits = stand_in(tmp_path / "waits", "log", "exec sleep 600")
+    monkeypatch.setenv("PATH", f"{waits.path}:{os.environ['PATH']}")
+    with pytest.raises(subprocess.TimeoutExpired):
+        repo.run_git(["log"], limit=4096, timeout=0.5, stdin=subprocess.DEVNULL)
+    assert ended(waits.pids), "past its time, git's session is ended as it is past the limit"
 
 
 def test_the_fetch_from_the_tasks_clone_works_whatever_protocol_your_settings_name(project, env, monkeypatch):

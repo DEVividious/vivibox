@@ -47,6 +47,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- Accepting work reads no more than 64 MiB of what one git prints while it checks the work's
+  submodules (the listing of a submodule's history, of a commit's files, a `.gitmodules`), on
+  stdout and stderr together, counted as it comes. A listing is as long as the writer made it:
+  a repository of 18 objects made `git log --raw` print 90 MB, which vivibox held whole in
+  memory, three times over while it read it. Past the limit git is ended with every process
+  it started, nothing of the answer cut short is used, and the accepting is refused as what
+  vivibox could not check: the limit, what was being read (`reading the history of lib`), and
+  the reply that sends the work back. The time limit holds as before, whichever comes first,
+  and now ends the processes git started too: one that held git's output after git ended was
+  left running. The task and your repositories are as they were.
 - The verification fails when the work lists a folder in the index as a submodule that is
   none: a folder with no repository in it (its `.git` deleted, say, after `git add` had listed
   it), that the task's base did not list and `.gitmodules` does not name. git commits the

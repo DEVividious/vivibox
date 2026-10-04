@@ -235,9 +235,10 @@ commit of its history that points there; after its commands comes the reply that
 work back, for where neither the submodule's remote nor the task's clone has the commit. A
 submodule that only that history has is said to be the history's, never the work's. Where
 vivibox could not check (a history it could not list, submodules too deep to follow, its
-time out), the first line says that, and not that a commit is not kept; a history it could
-not list comes with what you run: the fetch that brings the commit your submodule lacks, or
-the git that says why. The view's notification wraps a long line and is gone in seconds, so
+time out, a listing past the 64 MiB it reads of one git), the first line says that, and not
+that a commit is not kept; a history it could not list comes with what you run: the fetch
+that brings the commit your submodule lacks, or the git that says why; a listing past the
+limit says the limit, what was being read, and the reply that sends the work back. The view's notification wraps a long line and is gone in seconds, so
 there the refusal is its short form: what was refused, which submodules by path (three, the
 rest counted), why, and the one command that says the whole in a terminal. It fits 80 by 24.
 

@@ -281,6 +281,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A link whose label is a picture (a badge) keeps its own title in the details panel: the
+  picture's title, or its lack of one, took the link's place, so the link's was drawn nowhere.
 - Texts of a verification that could not run. A line of the build cut short in a notification
   has its frame closed before vivibox's own words (`…» (the rest: vivibox status <id>)`).
   `vivibox status <id>` shows that line under `Why` as text, an escape sequence in it as its

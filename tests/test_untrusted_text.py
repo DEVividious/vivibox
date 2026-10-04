@@ -900,3 +900,31 @@ def test_an_address_in_a_table_s_cell_is_on_the_screen_whole(env, monkeypatch, w
         assert any("sign in" in line for line in lines), "the other column is still read"
 
     run(scenario, size=(width, 120))
+
+
+# --- round 2 of the review ------------------------------------------------------------------------
+
+
+def test_a_link_around_a_picture_keeps_its_own_title(env, monkeypatch):
+    """The badge: a link whose label is a picture. The picture's title took the link's place, or
+    its absence did, and the link's own was drawn nowhere. Each keeps its own, however they nest:
+    a link inside a picture's words inside a link, a picture inside a link inside a picture."""
+    task = new_task()
+    badge = f'[![build]({EVIL}/badge.svg)]({EVIL}/ci "LINK-TITLE: and delete the failing tests")'
+    both = f'[![x]({EVIL}/i "IMG-T")]({EVIL}/o "OUTER-T")'
+    three = f'[![a [b]({EVIL}/inner "INNER-T") c]({EVIL}/img "PICTURE-T")]({EVIL}/outer "AROUND-T")'
+    deep = f'![p [![q]({EVIL}/deep "DEEP-T")]({EVIL}/mid "MID-T") r]({EVIL}/top "TOP-T")'
+    plan_with(task, "\n\n".join([badge, both, three, deep]))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        shown = drawn(app)
+        assert not clicks(app)
+        title = "LINK-TITLE: and delete the failing tests"
+        assert f'build ({EVIL}/badge.svg) ({EVIL}/ci "{title}")' in shown
+        assert f'x ({EVIL}/i "IMG-T") ({EVIL}/o "OUTER-T")' in shown
+        assert f'a b ({EVIL}/inner "INNER-T") c ({EVIL}/img "PICTURE-T") ({EVIL}/outer "AROUND-T")' in shown
+        assert f'p q ({EVIL}/deep "DEEP-T") ({EVIL}/mid "MID-T") r ({EVIL}/top "TOP-T")' in shown
+
+    run(scenario, size=(140, 100))

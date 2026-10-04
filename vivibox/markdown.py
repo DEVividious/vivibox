@@ -58,6 +58,8 @@ def _plain(children: list[Token]) -> list[Token]:
     reads the same. What an entity spelled (&#x202e;) is escaped here: the source was escaped
     before it was parsed, and the parser made the character after."""
     out: list[Token] = []
+    # The link that is open: where its label starts, where it leads, its title. A picture in its
+    # label has an address and a title of its own, and never touches these.
     start, target, title = None, "", ""
     for child in children:
         if child.type == "link_open" and child.attrs.get("title") != _KEY:
@@ -69,9 +71,9 @@ def _plain(children: list[Token]) -> list[Token]:
                 out.append(_text(after))
             start = None
         elif child.type == "image":  # its words may hold a link of their own: that address too
-            label = "".join(token.content for token in _plain(child.children or []))
-            where, title = str(child.attrs.get("src", "")), str(child.attrs.get("title") or "")
-            out.append(_text(link_text(label, where, title)))
+            words = "".join(token.content for token in _plain(child.children or []))
+            picture, named = str(child.attrs.get("src", "")), str(child.attrs.get("title") or "")
+            out.append(_text(link_text(words, picture, named)))
         else:
             if child.type in ("text", "code_inline"):
                 child.content = display.terminal(child.content)

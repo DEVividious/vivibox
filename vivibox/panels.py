@@ -59,7 +59,7 @@ def project_detail(name: str, tasks: int, problem: str) -> str:
         "",
         f"`{path}`",
         "",
-        f"```toml\n{read(path)}\n```",
+        display.fenced(read(path), "toml"),
     ]
     return "\n".join(lines)
 

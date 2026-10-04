@@ -255,6 +255,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A project's panel shows its settings as one code block whatever they hold: a line of three
+  backticks in them (in a command kept from a task, say) closed the block, and the rest was
+  read as markdown.
 - An error of git or Docker that takes several lines keeps them, each after the first indented
   under it, in the panel, a notification, `vivibox status <id>` (under `Why`) and a command's
   error; it was one line with `‹U+000A›` where the lines ended. A line break in a name the tool

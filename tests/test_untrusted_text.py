@@ -364,3 +364,40 @@ def test_what_the_root_helper_refused_is_said_escaped_by_the_one_printer_of_erro
     err = capsys.readouterr().err
     assert not hidden(err) and NAME_SHOWN in err, repr(err)
     assert [line[:28] for line in own_lines(err)] == ["vivibox: the task's disk cou"], err
+
+
+# --- code blocks ----------------------------------------------------------------------------------
+
+
+def fences(text: str) -> list[str]:
+    from markdown_it import MarkdownIt
+
+    return [t.content for t in MarkdownIt("gfm-like").parse(text) if t.type == "fence"]
+
+
+def test_a_projects_settings_with_a_fence_in_them_stay_in_their_block(env):
+    """The settings hold what a task brought (the command a writer proposed, kept): a line of
+    three backticks in them closed the block, and the rest was read as markdown."""
+    from vivibox import panels
+
+    path = env / "config" / "projects" / "demo.toml"
+    path.write_text(path.read_text() + f'note = """\n```\n[click]({EVIL})\n# a heading\n"""\n')
+    shown = panels.project_detail("demo", 0, "")
+    assert fences(shown) == [path.read_text().strip() + "\n"], shown
+
+
+def test_no_code_block_of_the_panel_is_fenced_by_hand():
+    """A block around text vivibox did not write has a fence the text cannot close, which
+    display.fenced picks: a fence written out in a module that builds the panel is three
+    backticks whatever the text holds."""
+    import ast
+    from pathlib import Path
+
+    package = Path(markdown.__file__).parent
+    found = {}
+    for name in ("panel.py", "panels.py", "sections.py", "panel_resources.py", "markdown.py"):
+        nodes = ast.walk(ast.parse((package / name).read_text()))
+        texts = [n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        if fenced := [text for text in texts if "```" in text]:
+            found[name] = fenced
+    assert found == {"panel.py": ["```"]}, "only the question whether the feedback quotes the log itself"

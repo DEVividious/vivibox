@@ -162,6 +162,9 @@ NOTHING_TO_SEE = {
     "zero-width spaces": "\u200b\u200b\n".encode(),
     "NUL bytes": b"\0" * 64,
     "a line separator": "\u2028".encode(),
+    # Letters to Unicode, and drawn as nothing: a question of them alone is none (R43).
+    "Hangul fillers": "\u3164\u115f\u1160\uffa0\n".encode(),
+    "variation selectors and a grapheme joiner": "\ufe0f\u034f".encode(),
 }
 SOMETHING = {
     "bytes that are no UTF-8": (b"\xff\xfe why?\n", "\\xff\\xfe why?"),

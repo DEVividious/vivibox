@@ -159,3 +159,35 @@ def test_the_count_is_the_hosts_record_which_the_pod_only_reads(task, tmp_path):
     assert len(reviewer.prompts) == 2 and task.read_state().state is State.CHECKPOINT_BLOCKED
     abandoned = [e for e in task.events() if e["type"] == "review_abandoned"]
     assert len(abandoned) == 2
+
+
+def test_your_start_of_the_task_starts_the_count_again(task, tmp_path):  # noqa: F811
+    """A start is your decision, and brings the pod up anew (the review's R16): the review given
+    up after it is the first again."""
+    sup, notes, reviewer = loop(task, tmp_path, "the commits move")
+    for _ in range(4):  # implement, verify, review (given up), verify
+        sup.step()
+    task.event("started", model="m")  # as actions.start records one
+    sup.step()  # review: given up, the first since the start
+    assert task.read_state().state is State.VERIFY and len(reviewer.prompts) == 2
+    assert not [n for n in notes if "could not finish" in n]
+    for _ in range(4):
+        sup.step()
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED and len(reviewer.prompts) == 3
+
+
+def test_the_timeline_says_each_review_that_was_given_up(task, tmp_path):  # noqa: F811
+    from vivibox import timeline
+
+    sup, _, _ = loop(task, tmp_path, "the commits move")
+    for _ in range(16):
+        sup.step()
+    given_up = [line.split("  ", 1)[1] for line in timeline.lines(task) if "review given up" in line]
+    assert (
+        given_up
+        == [
+            "review given up, the work is not what was verified: commits changed since the verification "
+            "(ccccccc → ddddddd)"
+        ]
+        * 2
+    )

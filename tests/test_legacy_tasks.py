@@ -713,6 +713,9 @@ DAMAGED = {
     "this layout, no id": of_this_layout_without("id"),
     "this layout, a state it has not": with_a_field_as("state", "some-new-state"),
     "this layout, sessions no table": with_a_field_as("sessions", "ses_1"),
+    # A time the view counts from has its zone: one without cannot be told from now's (R31).
+    "this layout, a time with no zone": with_a_field_as("created", "2026-10-04T10:00:00"),
+    "this layout, a time that is none": with_a_field_as("updated", "yesterday"),
 }
 
 
@@ -810,3 +813,15 @@ def test_a_running_supervisor_gives_no_turn_to_a_task_it_no_longer_runs(env, cha
     assert sup.step() is False, "nothing to do until you act: delete it, or use the vivibox that runs it"
     assert harness.prompts == [] and notes == []
     assert snapshot(task) == before, "and nothing written"
+
+
+def test_a_state_file_gone_under_a_task_that_is_being_read_is_unreadable_not_an_error(env):
+    """Between the list finding the task and reading it (a delete elsewhere), or under a
+    supervisor that runs: nothing to read and nothing to ask the file's time of (the review's
+    R35). The task object still answers, as one this vivibox does not run."""
+    task = implementing("Add health endpoint")
+    (task.meta / "state.json").unlink()
+    st = task.read_state()
+    assert task_module.layout(st) == "unreadable" and (st.id, st.project) == ("demo-1", "demo")
+    assert task_module._iso(st.created) and st.created == st.updated, "a time to sort it by, with its zone"
+    assert ui.view(task, st, False, 3).status == "state unreadable"

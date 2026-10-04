@@ -769,3 +769,20 @@ def test_a_git_file_swapped_while_it_is_classified_is_not_taken_for_a_worktrees(
     with pytest.raises(r.RepoError) as refused:
         r.check_protection(task.repo, task.meta)
     assert reads and not isinstance(refused.value, r.Blocked)
+
+
+def test_a_reply_in_a_box_sends_nobody_to_a_feedback_file(task):
+    """A box has no writer and no verification's feedback (the review's R07): a reply there, its
+    clone blocked or not, is the reply alone, and writes neither file."""
+    from vivibox import prompts
+
+    task.set_box()
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
+        task.transition(s)
+    task.transition(State.APPROVAL_RISKY, reason="box closed", then=str(State.CHECKPOINT_FINAL))
+    nested(task.repo)
+    assert r.blocked(task.repo) is not None
+    assert actions.reply(task, "undo the build file") is State.IMPLEMENT
+    assert supervisor.next_prompt(task, "") == prompts.COMMENT_PROMPT
+    assert not (task.meta / "handoff" / "verify-feedback.md").exists()
+    assert not (task.meta / "handoff" / "verify.log").exists()

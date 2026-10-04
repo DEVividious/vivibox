@@ -1,9 +1,9 @@
 """What the agent chose (a file's name, a line of a file, what git said about them), as text you
 read: a character with nothing to see of its own is shown as its code point between ‹ and ›
 (ESC as ‹U+001B›), never sent to the terminal as itself, where it would move the cursor, erase a
-line or turn the text around. ‹ and › are shown the same way, and so is a bracket drawn like
-them around a code point (˂U+001B˃), so what a file says can never read like a character it does
-not have, and a backslash, a regex or a Windows path stays as it is.
+line or turn the text around. ‹ and › are shown the same way, and so is any character outside
+ASCII that touches a code point (˂U+001B˃), so what a file says can never read like a character
+it does not have, and a backslash, a regex or a Windows path stays as it is.
 
 What is shown only: digests, approvals and comparisons are of the original bytes, never of this.
 """
@@ -42,11 +42,16 @@ HIDDEN = re.compile(
     "[\u034f\u115f\u1160\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u3164\ufeff\uffa0"
     "\U000e0000-\U000e007f]"
 )
-# Brackets many fonts draw like ‹ and ›: around a code point (˂U+001B˃) they would read as an
-# escape that is not there, so there they are shown as the characters they are (name, content).
-LIKE_OPEN = "\u02c2\u1438\u2329\u276e\u27e8\u3008\ufe64\uff1c"
-LIKE_CLOSE = "\u02c3\u1433\u232a\u276f\u27e9\u3009\ufe65\uff1e"
-_CODE, _CODE_BEFORE = re.compile(r"U\+[0-9A-F]{4,6}"), re.compile(r"U\+[0-9A-F]{4,6}\Z")
+# A code point as the notation spells it between ‹ and ›, and how one may be spelled to read
+# the same: U, a plus sign (any character outside ASCII in its place: a fullwidth plus, a small
+# one), four to six digits. A character outside ASCII that touches one, before it or after it,
+# would read as the bracket of an escape that is not there (˂U+001B˃, ❬U+001B❭, ≺U+001B≻), so it
+# is shown as the character it is (name, content). The rule is the neighbour, not a list of
+# brackets: what is drawn like ‹ and › is more than any list holds, letters of other scripts
+# among it. What no rule here closes is a letter drawn like U or like a digit (an Armenian Ս, a
+# Cyrillic В) in the spelling itself.
+_CODE = re.compile(r"U(?:\+|[^\x00-\x7f])[0-9A-F]{4,6}")
+_CODE_BEFORE = re.compile(r"U(?:\+|[^\x00-\x7f])[0-9A-F]{4,6}\Z")
 # The selectors of a character's text and emoji form, and what ends a keycap (1, U+FE0F, U+20E3).
 EMOJI_SELECTORS, KEYCAP = "\ufe0e\ufe0f", "\u20e3"
 NO_NEWLINE = "\\ No newline at end of file"
@@ -68,12 +73,11 @@ def _selects(text: str, at: int) -> bool:
     return bool(before) and ord(before) > 0x7F and unicodedata.category(before) in ("So", "Sm")
 
 
-def _spells(c: str, m: re.Match) -> bool:
-    """Whether c is a bracket like ‹ or › that stands where the notation's own would: before a
-    code point, or after one."""
-    if c in LIKE_OPEN:
-        return bool(_CODE.match(m.string, m.end()))
-    return c in LIKE_CLOSE and bool(_CODE_BEFORE.search(m.string, max(0, m.start() - 8), m.start()))
+def _spells(m: re.Match) -> bool:
+    """Whether the character outside ASCII that m found stands where a bracket of the notation
+    would: right before a code point's spelling, or right after one."""
+    after = _CODE_BEFORE.search(m.string, max(0, m.start() - 8), m.start())
+    return bool(after or _CODE.match(m.string, m.end()))
 
 
 def _escape(text: str, keep: str = "", prose: bool = False) -> str:
@@ -89,7 +93,7 @@ def _escape(text: str, keep: str = "", prose: bool = False) -> str:
             return c if prose else code_point(c)
         if prose and c in EMOJI_SELECTORS and _selects(m.string, m.start()):
             return c
-        if not prose and _spells(c, m):
+        if not prose and _spells(m):
             return code_point(c)
         return code_point(c) if unicodedata.category(c) in INVISIBLE or UNSEEN.match(c) else c
 

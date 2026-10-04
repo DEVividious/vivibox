@@ -270,6 +270,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Any character outside ASCII that touches a code point's spelling in a name or a line of a
+  file is shown as its own code point, not only the brackets of a list: `❬U+001B❭`,
+  `⧼U+001B⧽`, `≺U+001B≻` read as an escape that is not there, as did a spelling with a
+  fullwidth plus (`U＋001B`).
 - Two more errors made of a tool's words are escaped where they are made, their lines under
   the first: why your repository at a task's start could not be read (git's first line), and
   what the pod answered when opencode made no session.

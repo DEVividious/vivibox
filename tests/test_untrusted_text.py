@@ -570,13 +570,16 @@ def test_the_panel_draws_no_character_with_nothing_to_see_from_a_plan(env, monke
 
 # --- vivibox's own notation -----------------------------------------------------------------------
 
-# Brackets many fonts draw like ‹ and ›, in pairs: modifier arrowheads, the angle brackets of
-# mathematics and of CJK, the small and the fullwidth signs, the ornaments, Canadian syllabics.
+# Characters many fonts draw like ‹ and ›, in pairs: modifier arrowheads, the angle brackets of
+# mathematics and of CJK, the small and the fullwidth signs, the ornaments, the tortoise shells,
+# precedes and succeeds, and letters (Canadian syllabics, runes). No list of them is whole: what
+# is held is the rule, any character outside ASCII that touches a code point.
 LOOKALIKES = [
     chr(left) + chr(right)
     for left, right in [
         (0x02C2, 0x02C3), (0x2329, 0x232A), (0x3008, 0x3009), (0x27E8, 0x27E9), (0xFE64, 0xFE65),
-        (0xFF1C, 0xFF1E), (0x276E, 0x276F), (0x1438, 0x1433),
+        (0xFF1C, 0xFF1E), (0x276E, 0x276F), (0x1438, 0x1433), (0x276C, 0x276D), (0x29FC, 0x29FD),
+        (0x2770, 0x2771), (0x227A, 0x227B), (0x16B2, 0x16B3), (0x00AB, 0x00BB), (0x2192, 0x2190),
     ]
 ]  # fmt: skip
 
@@ -609,6 +612,18 @@ def test_those_brackets_around_anything_else_read_as_they_are():
     assert display.name("U+001B〉") == "U+001B‹U+3009›", "after a code point it closes one"
     assert display.name("〈U+001B") == "‹U+3008›U+001B", "before one it opens one"
     assert display.terminal("˂U+001B˃ ‹U+001B›") == "˂U+001B˃ ‹U+001B›", "prose, where ‹ and › stay too"
+
+
+def test_a_plus_sign_of_another_width_spells_a_code_point_too():
+    """U, any character outside ASCII in the place of the plus, the digits: the fullwidth plus,
+    the small one, a superscript."""
+    from vivibox import display
+
+    for plus in (chr(0xFF0B), chr(0xFE62), chr(0x207A), chr(0x2795)):
+        spelled = f"a˂U{plus}001B˃.gradle"
+        assert display.name(spelled) == f"a‹U+02C2›U{plus}001B‹U+02C3›.gradle", spelled
+    assert display.name("é+001B") == "é+001B" and display.name("naïveU+12") == "naïveU+12"
+    assert display.name("caféU+00E9") == "caf‹U+00E9›U+00E9", "the rule's cost: any neighbour of one"
 
 
 # --- markup ---------------------------------------------------------------------------------------

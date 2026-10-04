@@ -248,6 +248,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Git variables exported in the shell vivibox is started from no longer redirect the git it
+  runs on your machine. Every `GIT_*` variable but `GIT_TERMINAL_PROMPT` is taken out of that
+  git's environment: a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` (set inside a git
+  hook, or by a tool) no longer aims it at another repository, index or object store of yours,
+  and `GIT_CONFIG_COUNT`, `GIT_CONFIG_GLOBAL`, `GIT_TEMPLATE_DIR` or `GIT_EXTERNAL_DIFF` no
+  longer hand it configuration or a program to run. Your git configuration files are read as
+  before. `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS` and `GIT_SSL_CAINFO` are taken out too:
+  where the submodules of a task's clone need one, name it in your git configuration
+  (`core.sshCommand`, `core.askPass`, `http.sslCAInfo`). So are `GIT_AUTHOR_*` and
+  `GIT_COMMITTER_*`: the accepted work is committed as your git configuration names you, as
+  the task's own commits are.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

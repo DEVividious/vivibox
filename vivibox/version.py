@@ -10,6 +10,8 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed
 from pathlib import Path
 
+from .repo import run_git
+
 # The repository this module is in, when it is in one.
 SOURCE = Path(__file__).resolve().parent.parent
 TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-(\d+)-g([0-9a-f]+)$")
@@ -23,7 +25,7 @@ def from_checkout(repo: Path) -> str:
         return ""
 
     def git(*args: str) -> str:
-        p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=10)
+        p = run_git(["-C", str(repo), *args], capture_output=True, text=True, timeout=10)
         return p.stdout.strip() if p.returncode == 0 else ""
 
     try:

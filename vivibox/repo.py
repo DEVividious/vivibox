@@ -59,19 +59,46 @@ CLONE_TIMEOUT = 60.0
 COPY_TIMEOUT = 600.0
 
 
+# git's own variables that pass from your shell to git on the host; every other GIT_* is taken
+# out (git_environment), whatever git names next.
+PASSED_ON = (
+    # Only ever stops git asking for a password on the terminal, which the view is drawn on; it
+    # names no path and no program.
+    "GIT_TERMINAL_PROMPT",
+)
+
+
+def git_environment(own: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment of every git vivibox runs on the host: this process's own without git's
+    variables (every GIT_* but PASSED_ON), then what vivibox sets for the call (own). git takes
+    them before its working directory and -C, so one your shell carries (inside a git hook,
+    under a tool that exports them) would aim vivibox's git at another repository, index or
+    object store of yours (GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY), hand it
+    configuration that runs a program (GIT_CONFIG_COUNT, GIT_CONFIG_GLOBAL), or name one
+    outright (GIT_EXTERNAL_DIFF, GIT_EXEC_PATH). Your configuration files are read as before."""
+    kept = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in PASSED_ON}
+    return {**kept, **(own or {})}
+
+
+def run_git(args: list[str] | tuple[str, ...], **how) -> subprocess.CompletedProcess:
+    """subprocess.run of git on the host, in git_environment; how: what run takes, env being
+    what vivibox sets for the call. For a caller that reads git's answer in its own way (as
+    bytes, within its own time); the rest call git or in_clone."""
+    return subprocess.run(["git", *args], env=git_environment(how.pop("env", None)), **how)
+
+
 def git(
     *args: str, cwd: Path | None = None, check: bool = True, timeout: float | None = None,
     clone: Path | None = None, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:  # fmt: skip
     """timeout: seconds git may take, or no limit; past it, GitTimeout says what git was waiting on
-    in clone (cwd when not given). env: variables over this process's own, for a git that must
+    in clone (cwd when not given). env: variables over git_environment, for a git that must
     not read your configuration (control.refresh)."""
     if cwd is not None and not Path(cwd).is_dir():
         # A folder that was moved or deleted since it was configured; say so instead of a stack trace.
         raise RepoError(f"{cwd} does not exist")
     if timeout is None:
-        whole = {**os.environ, **env} if env else None
-        p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=whole)
+        p = run_git(args, cwd=cwd, capture_output=True, text=True, env=env)
     else:
         own = (env,) if env else ()  # a stand-in for _bounded may know no environment
         p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."), *own)
@@ -107,7 +134,7 @@ def _bounded(
     for (a split one), which protection could not read."""
     p = subprocess.Popen(
         command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, start_new_session=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", **(env or {})},
+        text=True, start_new_session=True, env=git_environment({"GIT_OPTIONAL_LOCKS": "0", **(env or {})}),
     )  # fmt: skip
     try:
         out, err = p.communicate(timeout=timeout)
@@ -214,11 +241,8 @@ def _committed(clone: Path, path: str) -> bool:
     except RepoError:
         return False
     try:
-        listed = subprocess.run(
-            ["git", "--literal-pathspecs", "ls-files", "-z", "--", path],
-            cwd=clone,
-            capture_output=True,
-            timeout=5,
+        listed = run_git(
+            ["--literal-pathspecs", "ls-files", "-z", "--", path], cwd=clone, capture_output=True, timeout=5
         )
     except (OSError, subprocess.TimeoutExpired):
         return False

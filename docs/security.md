@@ -215,6 +215,11 @@ Git follows more of a `.git` than those two to other configs, hooks and object s
 in the index). vivibox records them when it makes the clone, and before every git command it runs
 on your machine in the clone, and before the verification's and the review's copies of it, checks
 that each is as recorded; when one is not, it runs no git there. Alternates are read-only in the pod.
+Every git command vivibox runs on your machine, in the clone, in your repository and in the
+copies alike, runs without the git variables of your shell (every `GIT_*` but
+`GIT_TERMINAL_PROMPT`), so a `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` or
+`GIT_CONFIG_COUNT` exported there neither aims it at another repository of yours nor hands it
+configuration; your git configuration files are read as before.
 
 ## Limits of the boundary
 

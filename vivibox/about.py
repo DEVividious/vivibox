@@ -5,10 +5,9 @@ each role runs on, and the vivibox version."""
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
-from . import cli_session, manual, skill, version
+from . import cli_session, manual, repo, skill, version
 from .config import ORCHESTRATION_MODES, Role, load_config, load_project
 from .orchestration import problem
 from .projects import project_at
@@ -18,9 +17,7 @@ JSON_VERSION = 1
 
 
 def repository_root(path: Path) -> Path | None:
-    found = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True
-    )
+    found = repo.run_git(["-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     return Path(found.stdout.strip()).resolve() if found.returncode == 0 else None
 
 

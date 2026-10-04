@@ -36,7 +36,9 @@ def diff_pager(task: Task, project) -> list[str]:
     path.parent.mkdir(parents=True, exist_ok=True)
     command = [*git_diff(task, project), "--no-color"]
     with (
-        subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p,
+        subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=repo.git_environment()
+        ) as p,
         open(path, "w") as out,
     ):
         out.writelines(shown_diff(raw.decode("utf-8", "surrogateescape") for raw in p.stdout))

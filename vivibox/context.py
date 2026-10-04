@@ -15,9 +15,10 @@ from __future__ import annotations
 import fnmatch
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .repo import run_git
 
 MOUNT = "/task/context"
 LIMIT_BYTES = 20 * 1024 * 1024
@@ -78,9 +79,7 @@ def _locate(mention: str, cwd: Path, repo: Path | None) -> Path | None:
 
 def _git_status(repo: Path, path: str) -> str:
     """ " " unchanged, "??" untracked, else modified; "" when git cannot say."""
-    p = subprocess.run(
-        ["git", "status", "--porcelain", "--", path], cwd=repo, capture_output=True, text=True, check=False
-    )
+    p = run_git(["status", "--porcelain", "--", path], cwd=repo, capture_output=True, text=True)
     return p.stdout[:2] if p.returncode == 0 and p.stdout else ("" if p.returncode else "  ")
 
 
@@ -164,8 +163,8 @@ def project_paths(repo: Path) -> list[str]:
     to its root; folders end with '/'. What git ignores (build output, caches) is not part of the
     project. Nothing for a folder that is no repository."""
     try:
-        p = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        p = run_git(
+            ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             cwd=repo, capture_output=True, text=True,
         )  # fmt: skip
     except OSError:

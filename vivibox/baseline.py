@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import repo
 
 # A commit id as git writes it, SHA-1 or SHA-256: nothing else reaches git's command line.
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -91,9 +92,7 @@ def _git(source: Path, *args: str, input: bytes = b"") -> tuple[bytes | None, st
     """git's output in your checkout, or None and the first line git said of why; an argument
     list, never a shell."""
     try:
-        done = subprocess.run(
-            ["git", "-C", str(source), *args], input=input, capture_output=True, check=False
-        )
+        done = repo.run_git(["-C", str(source), *args], input=input, capture_output=True, check=False)
     except OSError as e:
         return None, f"git could not run: {e.strerror}"
     if done.returncode == 0:

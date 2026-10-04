@@ -1,6 +1,7 @@
 """The shape of the code, as AGENTS.md states it: a module past 800 lines is split before a feature
 is added to it. Checked here so the debt is seen when it is made, not after."""
 
+import ast
 import re
 import subprocess
 from pathlib import Path
@@ -36,6 +37,39 @@ BUILDERS = {
     "keys_plan.py": 2,  # the view's own review_command: the `review the command` decision, no pod in it
     "tui.py": 1,  # the same, called
 }
+
+
+# Where an argument list of git's own is written (a list or a tuple that begins with "git"),
+# how many, and why. git on the host runs only through repo.run_git and repo._bounded, which
+# give it repo.git_environment: your shell's GIT_DIR, GIT_INDEX_FILE or GIT_CONFIG_COUNT
+# reaches none of them. git in a container (pod.exec, pod.gate_exec) is no such list: its
+# environment is the container's.
+GIT_ARGV = {
+    "repo.py": 2,  # run_git, and git handing its command to _bounded: both in git_environment
+    # the diff under f, run by keys_work.diff_pager in git_environment
+    # (tests/test_git_environment.py runs it with every variable exported)
+    "panel.py": 1,
+    "pod.py": 1,  # compared with a docker exec's command to bound it; runs nothing
+}
+
+
+def git_argv_sites() -> dict[str, int]:
+    package = ROOT / "vivibox"
+    found = {}
+    for path in sorted(package.rglob("*.py")):
+        lists = (n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n, ast.List | ast.Tuple))
+        firsts = (n.elts[0] for n in lists if n.elts)
+        if count := sum(1 for first in firsts if isinstance(first, ast.Constant) and first.value == "git"):
+            found[str(path.relative_to(package))] = count
+    return found
+
+
+def test_git_on_the_host_runs_only_through_the_helper_that_cleans_its_environment():
+    """A module that writes git's argument list itself would run it in your shell's environment,
+    with whatever GIT_* variables it carries. The sites that write one are listed here, each
+    with its reason, so a new one is a failure until it goes through repo.run_git, repo.git or
+    repo.in_clone, or is accounted for."""
+    assert git_argv_sites() == GIT_ARGV, "git on the host runs through repo.run_git, repo.git or in_clone"
 
 
 def sites(pattern: re.Pattern) -> dict[str, int]:

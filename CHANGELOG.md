@@ -270,6 +270,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Two more errors made of a tool's words are escaped where they are made, their lines under
+  the first: why your repository at a task's start could not be read (git's first line), and
+  what the pod answered when opencode made no session.
 - Words of a plan, a question or a review that the details panel left out are drawn: a link's
   or a picture's title, after its address in quotes (`the docs (https://example.org/x "its
   title")`), and an address inside a picture's own words; the words after the language on a
@@ -592,6 +595,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- A test holds that a tool's stderr becomes a message only through `display.said`
+  (`tests/test_structure.py`): every other read of it is listed there with why.
 - The command line's commands for your decisions on a task (`accept`, `plan`, `reply`,
   `risky`, `approve-risky`, `verify-again`) are in `vivibox/cli_decisions.py`, moved out of
   `cli.py` as they were, which is 641 lines now.

@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import repo
+from . import display, repo
 
 # A commit id as git writes it, SHA-1 or SHA-256: nothing else reaches git's command line.
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -97,7 +97,7 @@ def _git(source: Path, *args: str, input: bytes = b"") -> tuple[bytes | None, st
         return None, f"git could not run: {e.strerror}"
     if done.returncode == 0:
         return done.stdout, ""
-    said = [line for line in done.stderr.decode(errors="replace").splitlines() if line.strip()]
+    said = display.said(done.stderr.decode(errors="replace")).split("\n    ")  # its lines, escaped
     # Why it failed, not what it warned of before (a global attributes file it could not read).
     failed = [line for line in said if line.startswith(("fatal:", "error:"))]
-    return None, next(iter(failed or said), f"git exited with {done.returncode}")
+    return None, next(iter(failed or said)) or f"git exited with {done.returncode}"

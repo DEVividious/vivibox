@@ -108,6 +108,60 @@ def test_nothing_is_run_through_a_shell():
     assert keyword_sites("shell", unless=constant(False)) == {}
 
 
+# Where a tool's stderr is read outside display.said, how many times, and why: an error built
+# from it is escaped and keeps its lines under the first only through that one function.
+RAW_STDERR = {
+    # the agent CLI's own words, kept as they came for the task's record and the next turn;
+    # escaped where they are shown (the panel's block, display.under in status and wait)
+    "claudecode.py": 1,
+    "opencode.py": 1,
+    # the log of the verification and a command's result in it: what the agent reads
+    "gate.py": 2,
+    "image.py": 1,  # what a check of the image printed, compared with what it expects
+    "repo.py": 1,  # the pipe of a git past its time, closed and never read
+    "supervisor.py": 1,  # handed to supervisor.notify, which escapes whatever it is given
+}
+
+
+def raw_stderr_sites() -> dict[str, int]:
+    """Every read of an attribute stderr (a finished process's, an open pipe's; never sys.stderr)
+    that is not within the arguments of display.said, by module."""
+    package = ROOT / "vivibox"
+    found = {}
+    for path in sorted(package.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        escaped = {
+            id(inner)
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "said"
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "display"
+            for inner in ast.walk(call)
+        }
+        reads = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and node.attr == "stderr"
+            and isinstance(node.ctx, ast.Load)
+            and not (isinstance(node.value, ast.Name) and node.value.id == "sys")
+        ]
+        if count := sum(1 for node in reads if id(node) not in escaped):
+            found[str(path.relative_to(package))] = count
+    return found
+
+
+def test_what_a_tool_said_on_stderr_becomes_an_error_through_display_said():
+    """git's and Docker's words quote names an agent chose: read anywhere else than in a call of
+    display.said, they reach a message with their control characters, and their second line at
+    the left edge. The reads that stay raw are listed above, each with why, so one more is a
+    failure until it goes through display.said or is accounted for. What this cannot see: text
+    taken from stdout alone, from an exception's own words, or from a log file."""
+    assert raw_stderr_sites() == RAW_STDERR, "a tool's stderr goes into a message through display.said"
+
+
 def sites(pattern: re.Pattern) -> dict[str, int]:
     package = ROOT / "vivibox"
     return {

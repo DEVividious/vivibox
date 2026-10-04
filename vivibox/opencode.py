@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from . import brief, progress, providers, repo
+from . import brief, display, progress, providers, repo
 from .harness import Harness, HarnessError, OnStep, Turn
 from .pod import Pod
 from .secrets import MOUNT
@@ -223,7 +223,7 @@ class OpenCode(Harness):
         except (json.JSONDecodeError, AttributeError):
             session = ""
         if p.returncode != 0 or not session:
-            raise HarnessError(f"opencode made no session: {(p.stderr or p.stdout).strip()[-500:]}")
+            raise HarnessError(f"opencode made no session: {display.said((p.stderr or p.stdout)[-500:])}")
         return session
 
     def restart_server(self) -> None:

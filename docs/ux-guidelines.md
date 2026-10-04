@@ -226,10 +226,13 @@ refusal names each submodule and the whole commit id, then the commands that kee
 each on a line of its own, whole, with the folders in full; ten submodules at most, the rest
 counted. A commit that the work no longer points at, and that the history of a submodule it
 keeps still does, is refused the same, and named with what needs it: the submodule and the
-commit of its history that points there. The view's notification wraps a long line and is
-gone in seconds, so there the refusal is its short form: what was refused, which submodules
-by path (three, the rest counted), why, and the one command that says the whole in a
-terminal. It fits 80 by 24.
+commit of its history that points there. Where vivibox could not check (a history it could
+not list, submodules too deep to follow, its time out), the first line says that, and not
+that a commit is not kept; a history it could not list comes with what you run: the fetch
+that brings the commit your submodule lacks, or the git that says why. The view's
+notification wraps a long line and is gone in seconds, so there the refusal is its short
+form: what was refused, which submodules by path (three, the rest counted), why, and the one
+command that says the whole in a terminal. It fits 80 by 24.
 
 Every error has three parts, in this order:
 

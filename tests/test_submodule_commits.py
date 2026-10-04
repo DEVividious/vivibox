@@ -431,6 +431,7 @@ def test_submodules_more_than_eight_deep_are_refused_not_accepted(env, project):
     said = refused(task, project)
     deepest = "top" + "/s" * submodules.DEEPEST
     assert f"{deepest} at " in said and "submodules more than 8 deep are not followed" in said
+    assert said.startswith(f"{task.id} was not accepted: {NOT_KNOWN}\n")
     assert "send the work back with a reply" in said and commands(said) == []
 
 
@@ -634,6 +635,67 @@ def test_a_submodule_the_history_points_into_that_you_have_not_checked_out_is_re
     assert not task.root.exists()
 
 
+NOT_KNOWN = (
+    "vivibox could not check that you keep every submodule commit its work keeps. The task's clone may "
+    "hold the only copy of one, and accepting deletes the task."
+)
+
+
+@pytest.mark.parametrize("where, checked_out", [("lib", True), ("lib/deep", True), ("lib", False)])
+def test_a_submodule_of_yours_without_the_commit_the_task_started_from_gets_the_fetch(
+    project, where, checked_out
+):
+    """You pulled a commit that moves a submodule to a newer commit of its remote, and did not
+    update the submodule: yours lacks that commit. The work moves the submodule back to the
+    one you stand on. Which commits are new between the two cannot be listed without the
+    first, so it is refused: as what vivibox could not check, with the fetch that brings the
+    commit, never as work to send back. After the fetch, accepted. The same one level down,
+    and for a submodule your repository only kept, which is checked out first."""
+    source, lib = project.source, project.source / "lib"
+    mine = source / where
+    stood, newer = (
+        git(mine, "rev-parse", "HEAD"),
+        newer_at(project.deep if where == "lib/deep" else project.lib),
+    )
+    if where == "lib/deep":  # lib's remote moves lib/deep on; your lib follows it, your lib/deep does not
+        git(project.lib / "deep", "pull", "-q", "origin", "main")
+        git(project.lib, "commit", "-qam", "A newer library below")
+        git(lib, "pull", "-q", "--no-recurse-submodules", "origin", "main")
+        git(source, "add", "lib")
+    else:
+        git(source, "update-index", "--cacheinfo", f"160000,{newer},lib")
+    git(source, "commit", "-qm", "Pulled; the submodule not updated")
+    task = actions.create("demo", "Goal")
+    if not checked_out:
+        git(source, "submodule", "deinit", "-f", "lib")
+    git(task.repo / where, "checkout", "-q", stood)
+    if where == "lib/deep":
+        git(task.repo / "lib", "add", "deep")
+        kept_from(task.repo / "lib", lib, written_in(task.repo / "lib"))
+    at_final(task, project)
+    said = refused(task, project)
+    owner = "lib" if where == "lib/deep" else "your project"
+    assert said.startswith(f"{task.id} was not accepted: {NOT_KNOWN}\n")
+    assert (
+        f"{where} at {stood}: your submodule does not have {newer}, the commit {owner} had it at when the "
+        "task started, so vivibox cannot tell which commits of its history are new. "
+        f"{'Fetch' if checked_out else 'Check the submodule out, then fetch'} it from the submodule's remote:"
+    ) in said
+    init = [] if checked_out else [f"git -C {source} submodule update --init -- lib"]
+    assert commands(said) == [*init, f"git -C {mine} fetch --no-recurse-submodules"]
+    assert "send the work back" not in said and said.endswith("\nThen accept the work again.")
+    with pytest.raises(submodules.Unkept) as short:
+        actions.finish(task, project.demo)
+    assert str(short.value) == (
+        f"{task.id} was not accepted: vivibox could not check its work's submodules ({where}), and "
+        f"accepting deletes the task. In a terminal, vivibox accept {task.id} says more."
+    )
+    for command in commands(said):
+        as_told(command)
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
 LISTINGS = ["takes longer than the check has", "is still being read when the check's time is out", "fails"]
 
 
@@ -665,15 +727,22 @@ def test_a_history_vivibox_cannot_list_is_refused_and_said(project, monkeypatch,
     monkeypatch.setattr(submodules, "time", SimpleNamespace(monotonic=lambda: clock() + later[0]))
     said = refused(task, project)
     later[0] = 0.0
+    monkeypatch.setattr(repo, "run_git", real)
+    assert said.startswith(f"{task.id} was not accepted: {NOT_KNOWN}\n"), "what vivibox knows, and no more"
     if listing == "fails":
-        start = git(project.source / "lib", "rev-parse", "HEAD")
-        why = f"vivibox could not list the commits of its history in your repository since {start}"
-        assert f"lib at {made.last}: {why}, so the work is not accepted with it" in said
+        lib, start = project.source / "lib", git(project.source / "lib", "rev-parse", "HEAD")
+        why = "vivibox could not list the commits of its history in your repository"
+        assert f"lib at {made.last}: {why}, so the work is not accepted with it. The git that" in said
+        assert commands(said) == [
+            f"git -C {lib} log --format=%H --raw -r -c --root --no-renames --ignore-submodules=none "
+            f"--no-show-signature --no-color {start}..{made.last} --"
+        ]
+        as_told(commands(said)[0])  # yours to run: here it lists, since git itself was not in the way
+        assert "send the work back" not in said and said.endswith("\nThen accept the work again.")
     else:
         late = f"vivibox did not finish checking the work's submodules in {submodules.SECONDS:g} s"
         assert f"{late} (reading the history of lib): there may be more." in said
-    assert commands(said) == [] and "Then accept the work again" not in said
-    monkeypatch.setattr(repo, "run_git", real)
+        assert commands(said) == [] and "Then accept the work again" not in said
     actions.finish(task, project.demo)
     assert not task.root.exists()
 
@@ -958,6 +1027,7 @@ def test_a_check_that_runs_out_of_time_is_a_refusal_that_says_so(project, monkey
     monkeypatch.setattr(submodules, "SECONDS", 0)
     said = refused(task, project)
     assert "vivibox did not finish checking the work's submodules in 0 s: there may be more." in said
+    assert said.startswith(f"{task.id} was not accepted: {NOT_KNOWN}\n")
     assert "Then accept the work again" not in said
 
 

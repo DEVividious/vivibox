@@ -229,7 +229,9 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   submodule of its own at a commit, and a later one moved it back, that commit is checked as
   well, and the refusal names the commit of the history that needs it. The history checked is
   the submodule's since the commit the task started from; for a submodule the work adds, the
-  part of it that no branch of a remote in your copy reaches.
+  part of it that no branch of a remote in your copy reaches. Where your submodule lacks the
+  commit the task started from (you pulled, and did not update the submodule), that history
+  cannot be listed: the refusal says so, with the fetch that brings the commit.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.
 
 An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it

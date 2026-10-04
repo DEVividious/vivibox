@@ -60,6 +60,10 @@ LOOSE = "loose"  # the commit is in your submodule, and nothing keeps it there
 NOT_CHECKED_OUT = "not checked out"  # the submodule is your project's, with no copy of it here
 ADDED = "added"  # the work adds the submodule
 UNCHECKED = "unchecked"  # vivibox could not look: said, and refused
+NO_START = "no start"  # your submodule lacks the commit it was at when the task started
+UNLISTED = "unlisted"  # git in your submodule did not list its history
+# The kinds that say a commit is not kept; the rest say vivibox does not know.
+NOT_KEPT = (MISSING, LOOSE, NOT_CHECKED_OUT, ADDED)
 
 
 class Unkept(gate.GateError):
@@ -84,11 +88,14 @@ class Repository:
     git_dir: Path
     until: float
 
+    def where(self) -> tuple[str, str]:
+        """What tells git to answer for this repository."""
+        return ("-C", str(self.tree)) if self.tree else ("--git-dir", str(self.git_dir))
+
     def git(self, *args: str) -> tuple[int, bytes]:
         """git's exit code and what it printed, as bytes: the names in a commit are the
         writer's, and need not be text."""
-        where = ("-C", str(self.tree)) if self.tree else ("--git-dir", str(self.git_dir))
-        return _git([*where, *args], self.until)
+        return _git([*self.where(), *args], self.until)
 
     def keeps(self, commit: str) -> str:
         """ "" when commit is reachable from HEAD or a ref here; LOOSE when it is here and
@@ -121,8 +128,7 @@ class Repository:
         no before, those no branch of a remote here reaches. None when git cannot list them,
         or prints what is no such listing. One git, whatever the history holds, and what it
         printed read once through, for as long as the check has left (Late past it)."""
-        since = [f"{before}..{commit}"] if before else [commit, "--not", "--remotes"]
-        code, listed = self.git(*HISTORY, *since, "--")
+        code, listed = self.git(*listing(before, commit))
         if code != 0:
             return None
         found, last, counted = [], "", True  # counted: last is in found, or is not to be
@@ -190,6 +196,11 @@ def _git(args: list[str], until: float) -> tuple[int, bytes]:
     return done.returncode, done.stdout
 
 
+def listing(before: str, commit: str) -> list[str]:
+    """What git is asked for the history of commit since before: Repository.history."""
+    return [*HISTORY, *([f"{before}..{commit}"] if before else [commit, "--not", "--remotes"]), "--"]
+
+
 def _text(printed: bytes) -> str:
     """What git printed, when it is text; "" when it is not."""
     try:
@@ -222,7 +233,8 @@ class Kept:
     is a submodule of, and inside: its path in that one; url: for one the work adds, where its
     .gitmodules says it comes from, when that is an address for a command; why: for one
     vivibox could not check; via: for one that only a submodule's history needs, the path of
-    that submodule and the commit of its history that needs it."""
+    that submodule and the commit of its history that needs it; since: for one whose history
+    was not listed, the commit it was to be listed from ("" for a submodule the work adds)."""
 
     path: str
     commit: str
@@ -233,6 +245,7 @@ class Kept:
     url: str = ""
     why: str = ""
     via: tuple[str, str] | None = None
+    since: str = ""
 
 
 @dataclass
@@ -268,8 +281,8 @@ def look(
             found.unkept.append(Kept(prefix.rstrip("/") or ".", after, UNCHECKED, None, yours, "", why=deep))
             continue
         for inside, commit in sorted(now.items()):
-            path = prefix + inside
-            if was.get(inside) == commit or (path, commit) in found.seen:
+            path, old = prefix + inside, was.get(inside, "")
+            if old == commit or (path, commit) in found.seen:
                 continue
             found.seen.add((path, commit))
             if not plain(inside) or not COMMIT.fullmatch(commit):
@@ -284,12 +297,13 @@ def look(
             elif state := held.keeps(commit):
                 kind = state if held.tree else NOT_CHECKED_OUT
                 found.unkept.append(Kept(path, commit, kind, held, yours, inside, via=via))
-            elif (more := _history(held, was.get(inside, ""), commit, path, depth)) is None:
-                since = f" since {was[inside]}" if inside in was else ""
-                why = f"vivibox could not list the commits of its history in your repository{since}"
-                found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside, why=why, via=via))
+            elif (more := _history(held, old, commit, path, depth)) is None:
+                # Why, at the cost of one more git: the commit to list from is not there, or git failed.
+                lacks = old and held.git("cat-file", "-e", f"{old}^{{commit}}")[0] != 0
+                kind = NO_START if lacks else UNLISTED
+                found.unkept.append(Kept(path, commit, kind, held, yours, inside, via=via, since=old))
             else:
-                look(held, was.get(inside, ""), [commit], found, path + "/", depth + 1, tuple(more), via)
+                look(held, old, [commit], found, path + "/", depth + 1, tuple(more), via)
 
 
 def _history(held: Repository, before: str, commit: str, path: str, depth: int) -> list[str] | None:
@@ -334,19 +348,25 @@ def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
     paths = list(dict.fromkeys(display.name(one.path) for one in found))
     more = f" and {len(paths) - 3} more" if len(paths) > 3 else ""
     which = f" ({', '.join(paths[:3])}{more})" if paths else ""
-    what = "its work keeps submodule commits you do not keep" if paths else late
+    known = any(one.kind in NOT_KEPT for one in found)
+    what = "vivibox could not check its work's submodules" if paths else late
+    what = "its work keeps submodule commits you do not keep" if known else what
     return (
         f"{task_id} was not accepted: {what}{which}, and accepting deletes the task. "
-        f"In a terminal, vivibox accept {task_id} says how to keep them."
+        f"In a terminal, vivibox accept {task_id} says {'how to keep them' if known else 'more'}."
     )
 
 
 def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "") -> str:
     """What was refused, why, and what to do, for each commit: commands whole, to paste, with
-    the folders they are run in and read from named in full. The first LISTED in full."""
+    the folders they are run in and read from named in full. The first LISTED in full. The
+    first line says a commit is not kept only where vivibox found one that is not."""
+    known = "its work keeps a submodule commit that no repository of yours keeps. The task's clone may "
+    known += "hold the only copy, and accepting deletes the task."
+    unknown = "vivibox could not check that you keep every submodule commit its work keeps. The task's "
+    unknown += "clone may hold the only copy of one, and accepting deletes the task."
     lines = [
-        f"{task_id} was not accepted: its work keeps a submodule commit that no repository of yours "
-        "keeps. The task's clone may hold the only copy, and accepting deletes the task."
+        f"{task_id} was not accepted: {known if any(one.kind in NOT_KEPT for one in found) else unknown}"
     ]
     quoted = lambda path: shlex.quote(str(path))  # noqa: E731
     for one in found[:LISTED]:
@@ -373,7 +393,29 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
         keeps = f"{ref} keeps it there, and may be deleted once "
         keeps += "" if one.via else "the submodule is on that commit or "
         keeps += "its remote has it"
-        if one.kind == ADDED:
+        if one.above.tree:
+            init = f"git -C {quoted(one.above.tree)} submodule update --init -- {quoted(one.inside)}"
+        else:  # the submodule above it is not checked out either: from the top, all the way down
+            top = one.path.split("/")[0]
+            init = f"git -C {quoted(source)} submodule update --init --recursive -- {quoted(top)}"
+        if one.kind == NO_START:
+            # The submodule's own path in the repository above it, which had it at that commit.
+            owner = display.name(one.path.removesuffix(one.inside).rstrip("/")) or "your project"
+            first = "" if one.held and one.held.tree else "Check the submodule out, then fetch"
+            lines += [
+                f"{named}: your submodule does not have {one.since}, the commit {owner} had it at when "
+                "the task started, so vivibox cannot tell which commits of its history are new. "
+                f"{first or 'Fetch'} it from the submodule's remote:",
+                *([init] if first else []),
+                fetch,
+            ]
+        elif one.kind == UNLISTED:
+            lines += [
+                f"{named}: vivibox could not list the commits of its history in your repository, so the "
+                "work is not accepted with it. The git that lists them says why:",
+                "git " + shlex.join([*one.held.where(), *listing(one.since, one.commit)]),  # to paste
+            ]
+        elif one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
             where = "" if one.url else " (an address vivibox does not put in a command)"
             lines += [
@@ -389,11 +431,6 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: st
                 f"git -C {quoted(mine)} update-ref {ref} {one.commit}",
             ]
         elif one.kind == NOT_CHECKED_OUT:
-            if one.above.tree:
-                init = f"git -C {quoted(one.above.tree)} submodule update --init -- {quoted(one.inside)}"
-            else:  # the submodule above it is not checked out either: from the top, all the way down
-                top = one.path.split("/")[0]
-                init = f"git -C {quoted(source)} submodule update --init --recursive -- {quoted(top)}"
             lines += [
                 f"{named}: your checkout has no copy of this submodule. Check it out, then fetch the "
                 f"commit from the submodule's remote, or from the task's clone ({keeps}):",

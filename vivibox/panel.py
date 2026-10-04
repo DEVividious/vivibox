@@ -30,6 +30,7 @@ from . import (
 from . import pod as pod_module
 from .handoff import for_you, refused
 from .handoff import read_text as read_handoff
+from .markdown import own_link
 from .panels import deleted_detail as deleted_detail
 from .panels import edit_in_editor as edit_in_editor
 from .panels import finished_detail as finished_detail
@@ -100,8 +101,9 @@ class PodView:
         """What the pod is doing, in the states that can be told apart from outside it."""
         if not self.address:
             return []
-        where = [f"[{self.address}:{p.port}](http://{self.address}:{p.port})" for p in self.reachable]
-        shown = ", ".join(where)
+        shown = ", ".join(
+            own_link(f"{self.address}:{p.port}", f"http://{self.address}:{p.port}") for p in self.reachable
+        )
         closed = ", ".join(f"`{p.port}`" for p in self.listening if not p.reachable)
         state = {
             "live": f"running · open at {shown}",

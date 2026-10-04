@@ -260,5 +260,12 @@ shown as its code point, `‹U+001B›`, and `‹` and `›` themselves the same
 hidden from you and no text is drawn that the file does not hold. What you approve is still the
 file's bytes, not what is shown.
 
+What an agent writes for you to read (a plan, a question, a review's notes) keeps its headings,
+lists and emphasis in the details panel, and makes no link there. A link in it, however it is
+written, is shown as text: its label, then the address it leads to, whole, in parentheses
+(`the docs (https://example.org/x)`), so a click opens nothing and no address hides behind other
+words; HTML in it is shown as the text it is. The only links a click opens in the panel are the
+addresses of what the task is running, which vivibox writes itself.
+
 ---
 Back to the [README](../README.md).

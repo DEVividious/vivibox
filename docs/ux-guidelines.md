@@ -1,7 +1,7 @@
 # UX guidelines
 
 Read this before changing anything a person sees: the view (`vivibox/tui.py`, `vivibox/table.py`,
-`vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
+`vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/markdown.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
 `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
 `vivibox/branches.py`, `vivibox/usage_view.py`), their look (`vivibox/look.py`, `vivibox/vivibox.tcss`),
 `vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
@@ -277,6 +277,11 @@ looks like an empty cache.
   plan under review is the body itself, not a section below it. A review's or a plan's own
   headings are bold lines, never larger than the section they are in; the accepted plan leaves
   its criteria to their section.
+- The panel is markdown, and much of it is not vivibox's (a plan, a question, a review's
+  notes). That text keeps its headings, lists and emphasis and makes no link: a link in it is
+  its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the
+  address alone when the label is the address (`markdown.link_text`); HTML is the text it is.
+  The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

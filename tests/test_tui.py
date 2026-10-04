@@ -21,6 +21,7 @@ from vivibox import (
     dialogs,
     gate,
     look,
+    markdown,
     newtask,
     panel,
     providers_ui,
@@ -1148,7 +1149,8 @@ def test_the_panel_tells_the_three_states_apart(env):
     st = task.read_state()
 
     up = panel.PodView("198.51.100.2", [Listener(5173, True)], demo=True)
-    assert "[198.51.100.2:5173](http://198.51.100.2:5173)" in detail(task, st, 3, pod=up), "clickable"
+    link = markdown.own_link("198.51.100.2:5173", "http://198.51.100.2:5173")
+    assert link in detail(task, st, 3, pod=up), "clickable: a link of vivibox's own"
 
     hidden = panel.PodView("198.51.100.2", [Listener(8000, False)], demo=True)
     assert "nothing outside can reach it" in detail(task, st, 3, pod=hidden)

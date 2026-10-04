@@ -59,7 +59,8 @@ def risky_section(task) -> str:
 
 
 def links(markdown: str) -> list[str]:
-    """Every address the details panel would open on a click."""
+    """Every link a stock parser finds: text read as markdown where it was to be read as it is.
+    (The panel's own parser makes a link of none but vivibox's: tests/test_untrusted_text.py.)"""
     tokens = MarkdownIt("gfm-like").parse(markdown)
     children = [c for t in tokens for c in (t.children or [])]
     return [c.attrs.get("href", "") for c in children if c.type == "link_open"]

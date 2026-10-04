@@ -47,6 +47,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A link in text an agent wrote (a plan, a question, a review's notes, a criterion) is no
+  longer a link in the details panel: it is shown as its label, then the address it leads to,
+  whole, in parentheses (`the docs (https://example.org/x)`), the address alone when the label
+  is the address, whatever syntax made it (inline, by reference, in angle brackets, an image);
+  a bare address is plain text. A click on it opens nothing. The addresses of what the task is
+  running, which vivibox writes itself, open in your browser as before, now once per click
+  instead of twice.
 - A task whose flow has a planner other than the writer (Planner → Executor, Planner → Writer →
   Reviewer, Supervisor ⇄ Worker) runs the planner in a container of its own,
   `vivibox-<id>-control`, made at the task's start after the agent's and kept for the whole
@@ -248,6 +255,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The details panel shows HTML in text an agent wrote as the text it is: a tag was read and
+  not drawn, and a block of tags was left out whole. A link's definition on a line of its own
+  (`[name]: address`) stays on the screen too.
+- A bidi override or a zero-width character spelled as an entity (`&#x202e;`) in a plan, a
+  question or a review is shown as its code point in the details panel, as the character itself
+  already was.
 - The view no longer ends with a traceback when an answer comes for a dialog you have already
   closed: the branch of your checkout for the new-task dialog, the branches for the branch
   picker, the providers opencode knows for the add-provider dialog, each read in the

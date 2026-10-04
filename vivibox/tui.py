@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, code, display, gate, handoff, ide, look, probe, skill, ui
+from . import actions, code, display, gate, handoff, ide, look, markdown, probe, skill, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -176,7 +176,7 @@ class Vivibox(
         )  # the cursor keeps a row's own colours: a status reads the same under it
         yield Static("", id="empty")  # in the table's place while there is nothing to list
         with VerticalScroll(id="detail", classes="hidden"):
-            yield Markdown("", id="detail-text")
+            yield markdown.Panel(id="detail-text")
         yield LiveFooter(compact=True)
 
     def on_mount(self) -> None:
@@ -652,12 +652,6 @@ class Vivibox(
             self.reload()
 
         self.push_screen(Confirm(f"Approve the risky files of {task.id} as shown?", "Approve"), approve)
-
-    @on(Markdown.LinkClicked)
-    def open_link(self, event: Markdown.LinkClicked) -> None:
-        """An address in the details panel: what the agent is running, opened in your browser."""
-        event.prevent_default()
-        self.open_url(event.href)
 
     def busy_with(self, task_id: str, doing: str) -> None:
         """What a slow step (the demo, starting or stopping the task) is doing, in the task's

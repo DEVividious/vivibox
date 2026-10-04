@@ -1,13 +1,14 @@
-"""Accepting work that moved a submodule is refused while the commit it points at is in no
+"""Accepting work that moved a submodule is refused while the commit it keeps is kept by no
 repository of yours: accepting deletes the task, and the task's clone may hold the only copy.
 
-Real git throughout, no pod: a project with a submodule checked out, a task whose writer moves
-it, and you, running the commands the refusal names, in your own shell.
+Real git throughout, no pod: a project with submodules checked out, a task whose writer moves
+one, and you, running the commands the refusal names, in your own shell.
 """
 
 import ast
 import os
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,12 +16,17 @@ import pytest
 from conftest import IDENTITY, LOCAL_SUBMODULES, global_git_config, make_repo
 from test_git_environment import snapshot
 
-from vivibox import actions, box, gate, submodules
+from vivibox import actions, box, gate, repo, submodules
 from vivibox.cli import main
 from vivibox.config import load_project
 from vivibox.states import State
 
 WRITER = ("-c", "user.name=Writer", "-c", "user.email=writer@example.com")
+
+
+def soon() -> float:
+    """When a question asked of a repository here must be answered: time enough."""
+    return time.monotonic() + 60
 
 
 def git(path: Path, *args: str, input: bytes = b"") -> str:
@@ -32,17 +38,18 @@ def git(path: Path, *args: str, input: bytes = b"") -> str:
 
 @pytest.fixture
 def project(env, monkeypatch) -> SimpleNamespace:
-    """The project demo with a submodule, lib, checked out in your repository; lib has a
-    submodule of its own, deep, checked out too."""
+    """The project demo with two submodules, lib and tools, checked out in your repository; lib
+    has a submodule of its own, deep, checked out too."""
     global_git_config(monkeypatch, env / "home", IDENTITY + LOCAL_SUBMODULES)
     source = load_project("demo").repo
-    deep, lib = make_repo(env / "deep"), make_repo(env / "lib")
+    deep, lib, tools = make_repo(env / "deep"), make_repo(env / "lib"), make_repo(env / "tools")
     git(lib, "submodule", "add", "-q", str(deep), "deep")
     git(lib, "commit", "-qm", "A library of the library's")
     git(source, "submodule", "add", "-q", str(lib), "lib")
+    git(source, "submodule", "add", "-q", str(tools), "tools")
     git(source, "submodule", "update", "-q", "--init", "--recursive")
-    git(source, "commit", "-qm", "A library")
-    return SimpleNamespace(source=source, lib=lib, deep=deep, demo=load_project("demo"))
+    git(source, "commit", "-qm", "A library and tools")
+    return SimpleNamespace(source=source, lib=lib, deep=deep, tools=tools, demo=load_project("demo"))
 
 
 def written_in(folder: Path, text: str = "the writer's\n") -> str:
@@ -52,11 +59,31 @@ def written_in(folder: Path, text: str = "the writer's\n") -> str:
     return git(folder, "rev-parse", "HEAD")
 
 
+def newer_at(remote: Path) -> str:
+    """A commit the submodule's remote has, made after you last fetched."""
+    (remote / "README.md").write_text("newer\n")
+    git(remote, "commit", "-qam", "Newer, at the remote")
+    return git(remote, "rev-parse", "HEAD")
+
+
+def moved_to_remotes(task, name: str) -> str:
+    """The writer moves the submodule to the newest commit of its remote."""
+    git(task.repo / name, "fetch", "-q", "origin", "main")
+    git(task.repo / name, "checkout", "-q", "FETCH_HEAD")
+    return git(task.repo / name, "rev-parse", "HEAD")
+
+
+def committed(task, said: str = "Move the library") -> str:
+    git(task.repo, "add", "-A")
+    git(task.repo, *WRITER, "commit", "-qm", said)
+    return git(task.repo, "rev-parse", "HEAD")
+
+
 def at_final(task, project, risky: bool = False) -> None:
     """The task as it waits for you with its work: its pointers committed, verified as far as
     this goes, its risky files approved by you when it changed any, the review copy made."""
-    git(task.repo, "add", "-A")
-    git(task.repo, *WRITER, "commit", "-qm", "Move the library")
+    if git(task.repo, "status", "--porcelain"):
+        committed(task)
     if task.read_state().box:
         return
     task.transition(State.CHECKPOINT_PLAN)
@@ -84,16 +111,29 @@ def everything(task, project) -> dict:
 
 
 def refused(task, project, how=("accept",)) -> str:
-    """What accepting says when it refuses: nothing is accepted, and nothing changed."""
+    """What accepting says, whole, when it refuses: nothing is accepted, and nothing changed."""
     before = everything(task, project)
     with pytest.raises(submodules.Unkept) as said:
         actions.finish(task, project.demo, branch_only="--branch" in how)
     assert everything(task, project) == before, "a refusal changed the task or your repository"
     assert task.read_state().state is State.CHECKPOINT_FINAL
-    return str(said.value)
+    assert str(said.value).startswith(f"{task.id} was not accepted: "), "the short form, for the view"
+    return said.value.whole
 
 
 FROM_TASK = "GIT_NO_LAZY_FETCH=1 git"  # the fetch from the task's clone: nothing fetched lazily there
+
+
+def ref_of(task, commit: str) -> str:
+    return f"refs/vivibox/{task.id}/{commit[:12]}"
+
+
+def from_task(task, mine: Path, theirs: Path, commit: str) -> str:
+    """The command that keeps a commit of the task's clone in your submodule, as it is printed."""
+    return (
+        f"{FROM_TASK} -C {mine} -c protocol.version=2 fetch --no-tags --no-recurse-submodules "
+        f"{theirs} {commit}:{ref_of(task, commit)}"
+    )
 
 
 def commands(said: str) -> list[str]:
@@ -106,11 +146,18 @@ def as_told(command: str) -> None:
     assert done.returncode == 0, f"{command}: {done.stderr}"
 
 
-def test_a_commit_made_inside_a_submodule_is_accepted_once_you_have_it(project, capsys):
+def cleaned_up(folder: Path) -> None:
+    """git's clean-up as it is at its most thorough: what no ref reaches goes at once."""
+    git(folder, "gc", "-q", "--prune=now")
+
+
+def test_a_commit_made_inside_a_submodule_is_accepted_once_you_keep_it(project, capsys):
     """The story from end to end, on the command line: the writer commits inside the submodule
     and moves the pointer; accepting refuses, naming the submodule and the commit; the task is
-    there, unchanged; the command that fetches from the task's clone is run; accepting again
-    succeeds and the task goes; your git submodule update then gives you the writer's change."""
+    there, unchanged; the command that fetches from the task's clone is run, and keeps the
+    commit under a ref; accepting again succeeds and the task goes; git's clean-up in your
+    submodule, before and after, takes nothing; your git submodule update then gives you the
+    writer's change."""
     source, lib = project.source, project.source / "lib"
     task = actions.create("demo", "Goal")
     commit = written_in(task.repo / "lib")
@@ -120,20 +167,22 @@ def test_a_commit_made_inside_a_submodule_is_accepted_once_you_have_it(project, 
     assert main(["accept", task.id]) == 1
     said = capsys.readouterr().err
     what, why, _ = said.partition("The task's clone may hold the only copy, and accepting deletes the task.")
-    assert what.startswith(f"vivibox: {task.id} was not accepted: its work points at a submodule commit")
-    assert why and said.rstrip().endswith(
-        f"Then accept the work again. In a terminal, vivibox accept {task.id} says this whole."
-    )
+    assert what.startswith(f"vivibox: {task.id} was not accepted: its work keeps a submodule commit")
+    assert why and said.rstrip().endswith("Then accept the work again.")
     assert f"lib at {commit} is not in your submodule." in said, "the submodule and the whole commit id"
+    assert f"({ref_of(task, commit)} keeps it there, and may be deleted once" in said
     assert commands(said) == [
         f"git -C {lib} fetch --no-recurse-submodules",
-        f"{FROM_TASK} -C {lib} fetch --no-tags --no-recurse-submodules {task.repo / 'lib'} {commit}",
+        from_task(task, lib, task.repo / "lib", commit),
     ]
     assert everything(task, project) == before and task.root.exists(), "the task, as it was"
 
     as_told(commands(said)[1])
+    assert git(lib, "rev-parse", ref_of(task, commit)) == commit, "kept, under a ref of its own"
+    cleaned_up(lib)
     assert main(["accept", task.id]) == 0
     assert not task.root.exists(), "accepted, and the task gone with its clone"
+    cleaned_up(lib)
     git(source, "commit", "-qm", "The work")
     assert git(source, "status", "--porcelain") == "M lib", "the pointer moved; your submodule not yet"
     git(source, "submodule", "update")  # your own, after the accept: vivibox never runs it for you
@@ -143,15 +192,13 @@ def test_a_commit_made_inside_a_submodule_is_accepted_once_you_have_it(project, 
 
 def test_a_commit_the_submodules_remote_has_is_accepted_once_you_fetched_it(project):
     task = actions.create("demo", "Goal")
-    (project.lib / "README.md").write_text("newer\n")
-    git(project.lib, "commit", "-qam", "Newer, at the remote")
-    git(task.repo / "lib", "fetch", "-q", "origin", "main")
-    git(task.repo / "lib", "checkout", "-q", "FETCH_HEAD")
-    commit = git(task.repo / "lib", "rev-parse", "HEAD")
+    newer_at(project.lib)
+    commit = moved_to_remotes(task, "lib")
     at_final(task, project)
     said = refused(task, project)
     assert f"lib at {commit} is not in your submodule." in said
-    as_told(commands(said)[0])  # from the submodule's remote
+    as_told(commands(said)[0])  # from the submodule's remote: its branch there keeps the commit
+    cleaned_up(project.source / "lib")
     done = actions.finish(task, project.demo)
     assert not done.conflicts and not task.root.exists()
     git(project.source, "submodule", "update")
@@ -159,15 +206,13 @@ def test_a_commit_the_submodules_remote_has_is_accepted_once_you_fetched_it(proj
 
 
 @pytest.mark.parametrize("how", [("accept",), ("accept", "--branch")], ids=" ".join)
-def test_a_commit_you_have_is_accepted_at_once(project, how):
+def test_a_commit_you_keep_is_accepted_at_once(project, how):
     """As before: a task with a verification command whose work moves a submodule to a commit
-    your submodule holds, and one that touches no submodule at all, are accepted."""
+    your submodule keeps, and one that touches no submodule at all, are accepted."""
     task = actions.create("demo", "Goal")
-    (project.lib / "README.md").write_text("newer\n")
-    git(project.lib, "commit", "-qam", "Newer, at the remote")
+    newer_at(project.lib)
     git(project.source / "lib", "fetch", "-q")  # you have it; your work tree is where it was
-    git(task.repo / "lib", "fetch", "-q", "origin", "main")
-    git(task.repo / "lib", "checkout", "-q", "FETCH_HEAD")
+    moved_to_remotes(task, "lib")
     at_final(task, project)
     actions.finish(task, project.demo, branch_only="--branch" in how)
     assert not task.root.exists()
@@ -178,6 +223,40 @@ def test_a_commit_you_have_is_accepted_at_once(project, how):
     at_final(plain, project)
     actions.finish(plain, project.demo, branch_only="--branch" in how)
     assert not plain.root.exists()
+
+
+def test_a_commit_that_is_in_your_submodule_and_kept_by_nothing_is_refused(project):
+    """Fetched by its id alone, a commit is an object no ref reaches (FETCH_HEAD keeps nothing):
+    git's next clean-up removes it. Having it is not keeping it: refused, with the command that
+    gives it a ref; then accepted, and the clean-up leaves it."""
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    at_final(task, project)
+    git(lib, "fetch", "-q", "--no-tags", str(task.repo / "lib"), commit)
+    assert git(lib, "cat-file", "-t", commit) == "commit" and not git(
+        lib, "for-each-ref", "--contains", commit
+    )
+    said = refused(task, project)
+    assert f"lib at {commit} is in your submodule, and nothing keeps it there" in said
+    assert commands(said) == [f"git -C {lib} update-ref {ref_of(task, commit)} {commit}"]
+    as_told(commands(said)[0])
+    actions.finish(task, project.demo)
+    cleaned_up(lib)
+    assert git(lib, "cat-file", "-t", commit) == "commit"
+
+
+def test_a_commit_your_submodule_stands_on_is_kept(project):
+    """Checked out by its id, on no branch: HEAD keeps it. Accepted."""
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    at_final(task, project)
+    git(lib, "fetch", "-q", "--no-tags", str(task.repo / "lib"), commit)
+    git(lib, "checkout", "-q", commit)
+    assert not git(lib, "for-each-ref", "--contains", commit), "no ref: the detached HEAD alone"
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
 
 
 @pytest.mark.parametrize("kept", [False, True], ids=["nothing of it kept", "its repository kept"])
@@ -197,8 +276,7 @@ def test_a_submodule_you_have_not_checked_out_is_refused_until_you_do(project, k
     assert commands(said) == [
         f"git -C {source} submodule update --init -- lib",
         f"git -C {source / 'lib'} fetch --no-recurse-submodules",
-        f"{FROM_TASK} -C {source / 'lib'} fetch --no-tags --no-recurse-submodules "
-        f"{task.repo / 'lib'} {commit}",
+        from_task(task, source / "lib", task.repo / "lib", commit),
     ]
     as_told(commands(said)[0])
     as_told(commands(said)[2])
@@ -206,36 +284,44 @@ def test_a_submodule_you_have_not_checked_out_is_refused_until_you_do(project, k
     assert not task.root.exists()
 
 
-def test_what_your_repository_kept_of_a_submodule_counts_as_having_the_commit(project):
-    """Deinitialised, its repository still under .git/modules, the commit in it: accepted."""
+def test_what_your_repository_kept_of_a_submodule_counts_when_it_keeps_the_commit(project):
+    """Deinitialised, its repository still under .git/modules, the commit under a ref in it:
+    accepted."""
     source = project.source
     task = actions.create("demo", "Goal")
     commit = written_in(task.repo / "lib")
-    git(source / "lib", "fetch", "-q", "--no-tags", str(task.repo / "lib"), commit)
+    git(source / "lib", "fetch", "-q", "--no-tags", str(task.repo / "lib"), f"{commit}:refs/heads/kept")
     git(source, "submodule", "deinit", "-f", "lib")
     at_final(task, project)
     actions.finish(task, project.demo)
     assert not task.root.exists()
 
 
+def added(task, name: str, commit: str, url: str, more: str = "") -> None:
+    """A submodule as a writer can add one in its pod: the .gitmodules entry and the pointer."""
+    with (task.repo / ".gitmodules").open("a") as f:
+        f.write(f'{more}[submodule "{name}"]\n\tpath = {name}\n\turl = "{url}"\n')
+    (task.repo / name).mkdir()  # as git leaves the folder of a submodule that is not checked out
+    git(task.repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},{name}")
+
+
 def test_a_submodule_the_work_adds_is_refused_until_you_have_a_copy_of_it(project, env):
     """The work adds a submodule: its .gitmodules entry and its pointer, which is all a writer
-    can make of one in its pod. Nothing of yours holds the commit: refused, with the command
-    that clones the submodule into your checkout from the remote the work names; then accepted,
-    and your git submodule update --init finds it there."""
+    can make of one in its pod. Nothing of yours keeps the commit: refused, with the command
+    that clones the submodule into your checkout; then accepted, and your git submodule update
+    --init finds it there. The remote here is a folder, which vivibox puts in no command: you
+    clone from the one the work names."""
     source, extra = project.source, make_repo(env / "extra")
     commit = git(extra, "rev-parse", "HEAD")
     task = actions.create("demo", "Goal")
-    with (task.repo / ".gitmodules").open("a") as f:
-        f.write(f'[submodule "extra"]\n\tpath = extra\n\turl = {extra}\n')
-    (task.repo / "extra").mkdir()  # as git leaves the folder of a submodule that is not checked out
-    git(task.repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},extra")
+    added(task, "extra", commit, str(extra))
     at_final(task, project, risky=True)  # .gitmodules changed: yours to approve first
     said = refused(task, project)
     assert f"extra at {commit}: the work adds this submodule, and your checkout has no copy of it." in said
     assert f"Clone it to {source / 'extra'} from the remote the work's .gitmodules names" in said
-    assert commands(said) == [f"git clone -- {extra} {source / 'extra'}"]
-    as_told(commands(said)[0])
+    assert "(an address vivibox does not put in a command)" in said
+    assert commands(said) == [f"git clone -- <its remote> {source / 'extra'}"]
+    as_told(commands(said)[0].replace("<its remote>", str(extra)))
     actions.finish(task, project.demo)
     assert not task.root.exists()
     git(source, "commit", "-qm", "The work")
@@ -244,27 +330,40 @@ def test_a_submodule_the_work_adds_is_refused_until_you_have_a_copy_of_it(projec
     assert git(source, "status", "--porcelain") == ""
 
 
-@pytest.mark.parametrize("url", ["../relative.git", "-oProxyCommand=x", "ssh://host/a\x1b[8mb"])
-def test_a_remote_that_is_no_plain_address_is_never_part_of_a_command(project, url):
-    """The address is the writer's: one relative to your project's remote, one git would read as
-    an option, and one with an escape sequence in it are left out of the command."""
-    task = actions.create("demo", "Goal")
+ADDRESSES = ["https://example.com/org/extra.git", "ssh://git@example.com:2222/org/extra.git",
+             "git://example.com/extra.git", "git@example.com:org/extra.git"]  # fmt: skip
+NO_ADDRESSES = ["../relative.git", "./here", "/a/folder/on/this/machine", "file:///a/folder", "ext::sh -c x",
+                "fd::3", "-oProxyCommand=x", "--upload-pack=x", "ssh://-oProxyCommand=x/y", "-x@host:path",
+                "https://example.com/a b", "https://example.com/$(touch x)", "https://example.com/a;b",
+                "https://example.com/a'b", "https://example.com/a\x1b[8mb", "http://example.com/plain",
+                ""]  # fmt: skip
+
+
+def test_only_an_address_that_runs_nothing_here_is_put_in_a_command(project):
+    """The address is the writer's. One of a protocol that only fetches (https, ssh, git) or of
+    the form user@host:path, with no option, space or character a shell reads, is printed in
+    the clone command; anything else (a transport that runs a command or waits on a
+    descriptor, a folder of this machine, an option) is said to be there and left out."""
+    assert [a for a in ADDRESSES if not submodules.ADDRESS.fullmatch(a)] == []
+    assert [a for a in NO_ADDRESSES if submodules.ADDRESS.fullmatch(a)] == []
     commit = git(project.lib, "rev-parse", "HEAD")
-    with (task.repo / ".gitmodules").open("a") as f:
-        f.write(f'[submodule "extra"]\n\tpath = extra\n\turl = "{url}"\n')
-    (task.repo / "extra").mkdir()  # as git leaves the folder of a submodule that is not checked out
-    git(task.repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},extra")
+    task = actions.create("demo", "Goal")
+    added(task, "extra", commit, ADDRESSES[3])
+    added(task, "other", commit, "ext::sh -c 'touch MARK'")
     at_final(task, project, risky=True)
     said = refused(task, project)
-    assert commands(said) == [f"git clone -- <its remote> {project.source / 'extra'}"]
-    assert "relative" not in said and "ProxyCommand" not in said and "\x1b" not in said
+    assert commands(said) == [
+        f"git clone -- {ADDRESSES[3]} {project.source / 'extra'}",
+        f"git clone -- <its remote> {project.source / 'other'}",
+    ]
+    assert "ext::" not in said and "touch MARK" not in said
 
 
-def test_a_submodule_of_a_submodule_is_checked_once_you_have_the_commit_above_it(project):
+def test_a_submodule_of_a_submodule_is_checked_once_you_keep_the_commit_above_it(project):
     """The writer commits in lib/deep, then in lib, then moves lib. Your lib lacks its commit:
-    refused for lib. Once you have that one, its own pointer is read in your lib: refused for
-    lib/deep, by its path. Once you have both, accepted; git submodule update --recursive then
-    stands on the writer's commits all the way down."""
+    refused for lib. Once you keep that one, its own pointer is read in your lib: refused for
+    lib/deep, by its path. Once you keep both, accepted; git submodule update --recursive then
+    stands on the writer's commits all the way down, after git's clean-up too."""
     source = project.source
     task = actions.create("demo", "Goal")
     below = written_in(task.repo / "lib" / "deep", "the writer's, below\n")
@@ -276,18 +375,61 @@ def test_a_submodule_of_a_submodule_is_checked_once_you_have_the_commit_above_it
     as_told(commands(said)[1])
     said = refused(task, project)
     assert f"lib/deep at {below} is not in your submodule." in said and f"lib at {above}" not in said
-    nested = f"{task.repo / 'lib' / 'deep'} {below}"
-    assert commands(said)[1] == (
-        f"{FROM_TASK} -C {source / 'lib' / 'deep'} fetch --no-tags --no-recurse-submodules {nested}"
-    )
+    assert commands(said)[1] == from_task(task, source / "lib" / "deep", task.repo / "lib" / "deep", below)
     as_told(commands(said)[1])
     actions.finish(task, project.demo)
     assert not task.root.exists()
+    cleaned_up(source / "lib")
+    cleaned_up(source / "lib" / "deep")
     git(source, "commit", "-qm", "The work")
     git(source, "submodule", "update", "--recursive")
     assert git(source / "lib", "rev-parse", "HEAD") == above
     assert git(source / "lib" / "deep", "rev-parse", "HEAD") == below
     assert (source / "lib" / "deep" / "README.md").read_text() == "the writer's, below\n"
+
+
+def test_every_submodule_the_work_moved_is_checked_not_the_first_alone(project):
+    """Two submodules moved: lib to a commit you keep, tools to one of the writer's. Refused,
+    for tools, and lib is not named."""
+    task = actions.create("demo", "Goal")
+    newer_at(project.lib)
+    git(project.source / "lib", "fetch", "-q")
+    moved_to_remotes(task, "lib")
+    commit = written_in(task.repo / "tools")
+    at_final(task, project)
+    said = refused(task, project)
+    assert f"tools at {commit} is not in your submodule." in said and "lib at" not in said
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+def test_submodules_more_than_eight_deep_are_refused_not_accepted(env, project):
+    """Ten repositories, each a submodule of the one above, all moved to commits you keep: the
+    check follows eight levels under your project's submodule and refuses the rest, saying why."""
+    chain = [make_repo(env / f"level-{n}") for n in range(10)]
+    for above, below in zip(reversed(chain[:-1]), reversed(chain[1:]), strict=True):
+        git(above, "submodule", "add", "-q", str(below), "s")
+        git(above, "commit", "-qm", "One below")
+    source = project.source
+    git(source, "submodule", "add", "-q", str(chain[0]), "top")
+    git(source, "submodule", "update", "-q", "--init", "--recursive")
+    git(source, "commit", "-qm", "Ten deep")
+    newer_at(chain[-1])
+    for above in reversed(chain[:-1]):  # each remote moves its pointer to the commit below
+        git(above, "submodule", "update", "-q", "--remote", "s")
+        git(above, "commit", "-qam", "Newer below")
+    yours = source / "top"
+    for _ in chain:  # you fetched every level, and stand where you stood
+        git(yours, "fetch", "-q")
+        yours = yours / "s"
+    task = actions.create("demo", "Goal")
+    moved_to_remotes(task, "top")
+    at_final(task, project)
+    said = refused(task, project)
+    deepest = "top" + "/s" * submodules.DEEPEST
+    assert f"{deepest} at " in said and "submodules more than 8 deep are not followed" in said
+    assert "send the work back with a reply" in said and commands(said) == []
 
 
 @pytest.fixture
@@ -321,12 +463,158 @@ def test_every_way_of_accepting_work_refuses_the_same(project, a_box, flow):
     assert not task.root.exists()
 
 
-def test_the_views_accept_key_says_the_refusal_and_keeps_the_task(project):
+@pytest.mark.parametrize("kept", ["squashed", "as a branch", "squashed on a branch of yours that moved"])
+def test_a_commit_an_earlier_commit_of_the_work_pointed_at_is_checked_where_it_is_kept(project, kept):
+    """The writer moves lib to a commit of its own and, in a later commit, back. Squashed into
+    your checkout where the task started, only the last tree is kept, and it points nowhere
+    new: accepted. Kept as a branch, every commit of the work stays, the first with its
+    pointer: refused. And where your branch has moved since the task started, the work may
+    conflict, and work that conflicts is kept as a branch too: refused the same."""
+    task = actions.create("demo", "Goal")
+    start = git(task.repo / "lib", "rev-parse", "HEAD")
+    commit = written_in(task.repo / "lib")
+    committed(task, "Move the library")
+    git(task.repo / "lib", "checkout", "-q", start)
+    (task.repo / "notes.txt").write_text("the rest of the work\n")
+    committed(task, "And back")
+    at_final(task, project)
+    if kept == "squashed":
+        actions.finish(task, project.demo)
+        assert not task.root.exists() and (project.source / "notes.txt").exists()
+        return
+    if kept != "as a branch":
+        (project.source / "yours.txt").write_text("since the task started\n")
+        git(project.source, "add", "yours.txt")
+        git(project.source, "commit", "-qm", "Yours, meanwhile")
+    said = refused(task, project, ("accept", "--branch") if kept == "as a branch" else ("accept",))
+    assert f"lib at {commit} is not in your submodule." in said
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo, branch_only=kept == "as a branch")
+    assert not task.root.exists()
+
+
+def test_a_refusal_says_ten_submodules_in_full_and_counts_the_rest(project):
+    commit = git(project.lib, "rev-parse", "HEAD")
+    task = actions.create("demo", "Goal")
+    for n in range(13):
+        added(task, f"extra-{n:02}", commit, f"https://example.com/extra-{n}.git")
+    at_final(task, project, risky=True)
+    with pytest.raises(submodules.Unkept) as refusal:
+        actions.finish(task, project.demo)
+    said = refusal.value.whole
+    assert (
+        len(commands(said)) == submodules.LISTED == 10 and "extra-09 at" in said and "extra-10 at" not in said
+    )
+    assert "And 3 more submodule commits, said once these are kept." in said
+    assert str(refusal.value) == (
+        f"{task.id} was not accepted: its work keeps submodule commits you do not keep (extra-00, "
+        f"extra-01, extra-02 and 10 more), and accepting deletes the task. In a terminal, vivibox accept "
+        f"{task.id} says how to keep them."
+    )
+
+
+def test_a_check_that_runs_out_of_time_is_a_refusal_that_says_so(project, monkeypatch):
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    at_final(task, project)
+    monkeypatch.setattr(submodules, "SECONDS", 0)
+    said = refused(task, project)
+    assert "vivibox did not finish checking the work's submodules in 0 s: there may be more." in said
+    assert "Then accept the work again" not in said
+
+
+@pytest.mark.parametrize("where", ["in the work's .gitmodules", "in a commit the writer made in a submodule"])
+def test_a_gitmodules_the_writer_wrote_is_read_as_data(project, env, monkeypatch, where):
+    """A .gitmodules may name another file to include, any file of this machine: one of yours,
+    or a named pipe, which git would wait on for good. The writer's .gitmodules is read without
+    its includes: the check answers at once, the pipe is not opened, and nothing a file it
+    names says is taken for what the work says."""
+    monkeypatch.setattr(submodules, "SECONDS", 20)  # were the pipe opened: a failure, not a hang
+    pipe, yours = env / "pipe", env / "yours.gitconfig"
+    os.mkfifo(pipe)
+    yours.write_text('[submodule "extra"]\n\turl = git@yours.example:private/elsewhere.git\n')
+    include = f"[include]\n\tpath = {pipe}\n\tpath = {yours}\n"
+    commit = git(project.deep, "rev-parse", "HEAD")
+    task = actions.create("demo", "Goal")
+    if where == "in the work's .gitmodules":
+        added(task, "extra", commit, "https://example.com/extra.git", more=include)
+        at_final(task, project, risky=True)
+        path, mine = "extra", project.source / "extra"
+    else:
+        inside = SimpleNamespace(repo=task.repo / "lib")
+        added(inside, "extra", commit, "https://example.com/extra.git", more=include)
+        git(inside.repo, "add", ".gitmodules")
+        above = written_in(inside.repo)
+        at_final(task, project, risky=True)  # a .gitmodules in the submodule's work tree is one too
+        git(project.source / "lib", "fetch", "-q", "--no-tags", str(inside.repo), f"{above}:refs/heads/kept")
+        path, mine = "lib/extra", project.source / "lib" / "extra"
+    began = time.monotonic()
+    said = refused(task, project)
+    assert time.monotonic() - began < 10, "the check waited on a file the writer's .gitmodules names"
+    assert f"{path} at {commit}: the work adds this submodule" in said
+    assert commands(said) == [f"git clone -- https://example.com/extra.git {mine}"]
+    assert "yours.example" not in said
+
+
+def test_the_check_fetches_nothing_and_every_git_of_it_has_a_time_limit(project, monkeypatch):
+    """Each git the check runs is told to fetch nothing lazily (a submodule of yours that is a
+    partial clone would go to its remote for a commit it lacks), has a time limit, and reads a
+    .gitmodules without its includes."""
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    at_final(task, project)
+    ran, real = [], repo.run_git
+    monkeypatch.setattr(repo, "run_git", lambda args, **how: ran.append((args, how)) or real(args, **how))
+    with pytest.raises(submodules.Unkept):
+        work = git(task.repo, "rev-parse", "HEAD")
+        submodules.check(task.id, project.source, task.repo, task.read_state().base_commit, work)
+    assert len(ran) >= 6
+    for args, how in ran:
+        assert how["env"] == {"GIT_NO_LAZY_FETCH": "1"} and 0 < how["timeout"] <= submodules.SECONDS, args
+        assert "config" not in args or "--no-includes" in args, args
+        assert str(task.repo) not in " ".join(args), "asked of the task's clone"
+
+
+def test_a_submodule_of_yours_that_is_a_partial_clone_is_not_sent_to_its_remote(env, project):
+    """git in a partial clone fetches what it lacks from the remote it came from, a commit asked
+    after among it. The check asks without that: the commit is not there, and stays not there."""
+    remote = make_repo(env / "served")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    git(remote, "config", "uploadpack.allowAnySHA1InWant", "true")
+    partial = env / "partial"
+    git(env, "clone", "-q", "--filter=blob:none", f"file://{remote}", str(partial))
+    commit = newer_at(remote)
+    yours = submodules.at(partial, soon())
+    assert yours.keeps(commit) == submodules.MISSING
+    missing = subprocess.run(
+        ["git", "-C", str(partial), "cat-file", "-e", commit], env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+    )
+    assert missing.returncode != 0, "the check fetched the commit from the submodule's remote"
+
+
+def test_the_fetch_from_the_tasks_clone_works_whatever_protocol_your_settings_name(project, env, monkeypatch):
+    """protocol.version = 0 in your settings, and the commit no longer where the clone's
+    submodule stands: a git speaking the old protocol is refused a commit by its id. The
+    printed command names the protocol itself."""
+    global_git_config(monkeypatch, env / "home", IDENTITY + LOCAL_SUBMODULES + "[protocol]\n\tversion = 0\n")
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    at_final(task, project)
+    written_in(task.repo / "lib", "the writer went on\n")  # the clone's submodule stands elsewhere now
+    said = refused(task, project)
+    as_told(commands(said)[1])
+    assert git(lib, "rev-parse", ref_of(task, commit)) == commit
+
+
+def test_the_views_accept_key_says_the_refusal_briefly_and_keeps_the_task(project):
+    """On the smallest terminal the view promises, 80 by 24: the notification says what was
+    refused, which submodule, and the one command that says the rest; no fetch command in it."""
     from test_tui import run
     from ux import screen_text
 
     task = actions.create("demo", "Goal")
-    commit = written_in(task.repo / "lib")
+    written_in(task.repo / "lib")
     at_final(task, project)
     before = everything(task, project)
 
@@ -336,19 +624,20 @@ def test_the_views_accept_key_says_the_refusal_and_keeps_the_task(project):
         await pilot.press("enter")  # Accept, in the dialog that asks
         await app.workers.wait_for_complete()
         await pilot.pause()
-        said = screen_text(app)
-        assert f"{task.id} was not accepted" in said and commit in said
-        # The notification wraps its commands: it says where they are printed whole.
-        assert f"vivibox accept {task.id} says" in " ".join(said.replace("▌", " ").split())
+        said = " ".join(screen_text(app).replace("▌", " ").split())
+        assert f"{task.id} was not accepted: its work keeps submodule commits you do not keep (lib)" in said
+        assert "and accepting deletes the task" in said
+        assert f"In a terminal, vivibox accept {task.id} says how to keep them." in said
+        assert "fetch" not in said
 
-    run(scenario, size=(200, 50), notifications=True)
+    run(scenario, size=(80, 24), notifications=True)
     assert everything(task, project) == before and task.root.exists()
 
 
 def test_a_name_that_is_not_plain_is_never_part_of_a_command(project):
     """The names are the writer's. One a shell would read as more than a name is quoted whole;
     one that is shown as other than itself (a line break, an escape) gets no command at all."""
-    yours = submodules.at(project.source)
+    yours = submodules.at(project.source, soon())
     spaced = submodules.Kept(
         "a dir/$(touch x)", "0" * 40, submodules.MISSING, yours, yours, "a dir/$(touch x)"
     )
@@ -361,6 +650,7 @@ def test_a_name_that_is_not_plain_is_never_part_of_a_command(project):
     said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [hidden])
     assert "git " not in said and "send the work back with a reply" in said and "\x1b" not in said
     assert "Then accept the work again" not in said
+    assert "\x1b" not in submodules.briefly("demo-1", [hidden])
 
 
 def test_only_a_repository_of_that_very_folder_counts_as_your_copy(project, env):
@@ -368,22 +658,27 @@ def test_only_a_repository_of_that_very_folder_counts_as_your_copy(project, env)
     link out of your checkout: neither is taken for your copy of a submodule, so the commit is
     looked for in nothing but the submodule itself."""
     source = project.source
-    yours = submodules.at(source)
+    yours = submodules.at(source, soon())
     head = git(source, "rev-parse", "HEAD")
-    assert yours.submodule("lib", head).tree == source / "lib" and yours.has(head)
+    assert yours.submodule("lib", "lib").tree == source / "lib" and yours.keeps(head) == ""
+    assert yours.modules(head) == {"lib": ("lib", str(project.lib)), "tools": ("tools", str(project.tools))}
     (source / "hollow" / ".git").mkdir(parents=True)
-    assert submodules.at(source / "hollow") is None and yours.submodule("hollow", "") is None
+    assert submodules.at(source / "hollow", soon()) is None and yours.submodule("hollow", "") is None
     elsewhere = make_repo(env / "elsewhere")
     (source / "link").symlink_to(elsewhere)
-    assert submodules.at(source / "link") is not None, "a repository, but not in your checkout"
+    assert submodules.at(source / "link", soon()) is not None, "a repository, but not in your checkout"
     assert yours.submodule("link", "") is None
+    assert yours.keeps("0" * 40) == submodules.MISSING
     assert yours.gitlinks("0" * 40) is None, "a commit git cannot list is said, not taken for none"
+    found = submodules.Found()
+    submodules.look(yours, head, ["0" * 40], found)
+    assert [one.kind for one in found.unkept] == [submodules.UNCHECKED]
     # A name that is no text (the writer's own bytes): listed, and never taken for a commit to follow.
     odd = git(source, "mktree", "--missing", input=b"160000 commit " + head.encode() + b"\tli\xffb\n")
     assert yours.gitlinks(odd) == {"li\\xffb": f"not text: {head}"}
-    assert [one.kind for one in submodules.unkept(yours, "", odd)] == [submodules.UNCHECKED]
-    unread = submodules.unkept(yours, head, "0" * 40)
-    assert [one.kind for one in unread] == [submodules.UNCHECKED]
+    found = submodules.Found()
+    submodules.look(yours, "", [odd], found)
+    assert [one.kind for one in found.unkept] == [submodules.UNCHECKED]
 
 
 def calls(node: ast.AST) -> list[tuple[int, str]]:
@@ -400,7 +695,7 @@ def test_no_way_of_accepting_work_skips_the_check():
     """Work is accepted in one function, review.finish: the command line, the view's key, a
     box's work and accepting as a branch all end there. In it the check comes before the first
     thing accepting does, and what applies the work, makes its branch or ends the task is
-    called from nowhere else."""
+    called from nowhere else. A tripwire for a refactoring; the tests above are the proof."""
     package = Path(submodules.__file__).parent
     accepting = {"apply_work", "repo.create_branch", "actions.remove", "remember", "task.transition"}
     elsewhere = {}

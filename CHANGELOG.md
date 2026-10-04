@@ -273,14 +273,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the writer made in the submodule. vivibox no longer fetches the submodule's new commits into
   your checkout on the way, and never runs `git submodule update` for you: after accepting, you
   do.
-- Accepting work refuses while a submodule commit it points at is in no repository of yours:
+- Accepting work refuses while a submodule commit it keeps is kept by no repository of yours:
   accepting deletes the task, and a commit the writer made inside a submodule exists only in
   the task's clone. Every submodule the work adds or moves is checked, and under it the
-  submodules its own commit adds or moves, in your repositories and without the network; the
-  refusal names each submodule and commit and the commands that keep it (a fetch in your
-  submodule from its remote, or from the task's clone), and changes nothing of the task or of
-  your repository. Then you accept again. It holds for every way of accepting: `vivibox
-  accept`, `--branch`, the view's `a`, and a box's work.
+  submodules its own commit adds or moves, in your repositories, with nothing fetched and
+  within a time limit; with `--branch`, or where your branch has moved since the task started,
+  every commit of the work is checked, since a branch keeps them all. A commit counts when
+  your submodule's `HEAD` or one of its refs reaches it, not when it is only an object there.
+  The refusal names each submodule and commit and the commands that keep it (a fetch in your
+  submodule from its remote, or from the task's clone under `refs/vivibox/<id>/…`), ten in
+  full and the rest counted, and leaves the task as it was. Then you accept again. It holds
+  for every way of accepting: `vivibox accept`, `--branch`, the view's `a` (which says it
+  briefly and names the command that says it whole), and a box's work.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

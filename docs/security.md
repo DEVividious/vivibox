@@ -229,8 +229,10 @@ to your remotes, the fetch of a new clone's submodules from the URLs named by th
 branch you are on or reachable from a ref of yours other than `refs/vivibox/`, where a task's
 work waits until you accept it. No later git on what the agent wrote is handed them. Bringing
 a task's commits to your repository fetches from the task's clone alone, without going into
-your submodules, and accepting work is refused while a submodule commit it points at is in no
-repository of yours, since accepting deletes the task's clone.
+your submodules, and accepting work is refused while a submodule commit it keeps is kept by
+no repository of yours, since accepting deletes the task's clone. That check reads the
+`.gitmodules` of the work, which the agent may have written, as data: without its includes,
+with nothing fetched, within a time limit.
 
 ## Limits of the boundary
 

@@ -268,8 +268,10 @@ def finish(
     commit = fetch_work(task, project)
     st = task.read_state()
     # Before anything of the accepting is done: the task goes with it, and its clone may hold the
-    # only copy of a submodule commit the work points at.
-    submodules.check(task.id, project.repo, task.repo, st.base_commit, commit)
+    # only copy of a submodule commit the work keeps. A branch keeps every commit of the work,
+    # and one is made of work that conflicts, which it can only where your branch has moved.
+    moved = repo.git("rev-parse", "HEAD", cwd=project.repo).stdout.strip() != st.base_commit
+    submodules.check(task.id, project.repo, task.repo, st.base_commit, commit, history=branch_only or moved)
     cli_usage.count(task, "conversation")
     spent = ui.cost(task)
     criteria = accepted_criteria(task)

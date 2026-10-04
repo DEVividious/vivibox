@@ -211,12 +211,20 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
 - **Submodules**: vivibox never runs `git submodule update` for you. Work that moved a
   submodule brings the new pointer to the review copy and to your checkout, not the
   submodule's commits; after accepting, you run `git submodule update`. Accepting refuses
-  while a commit the work points at is in no repository of yours for that submodule: a commit
+  while a commit the work keeps is kept by no repository of yours for that submodule: a commit
   the writer made inside the submodule exists only in the task's clone, and accepting deletes
-  the task. The refusal names the submodule and the commit, and the commands that keep it: a
-  fetch in your submodule from its remote, or from the task's clone; a submodule you have not
-  checked out is checked out first, and one the work adds is cloned into your checkout from
-  the remote the work names. Then you accept again. Nothing of the task changes meanwhile.
+  the task. Kept means reachable from the submodule's `HEAD` or one of its refs; a commit that
+  is only an object there goes with git's next clean-up. The refusal names the submodule and
+  the commit, and the commands that keep it: a fetch in your submodule from its remote, or
+  from the task's clone, which puts the commit under `refs/vivibox/<id>/…` there; a submodule
+  you have not checked out is checked out first, and one the work adds is cloned into your
+  checkout from the remote the work names. Then you accept again. The task stays as it was
+  meanwhile. The view says it briefly; `vivibox accept <id>` in a terminal says it whole, with
+  the commands. The review shows the pointer, not what the commit holds: look at it once you
+  have it (`git -C <submodule> show <commit>`). The commit is then yours alone: push it to the
+  submodule's remote for others to have it, and delete the ref when it is there. Accepting
+  with `--branch`, or where your branch has moved since the task started, keeps every commit
+  of the work, so each commit's submodules are checked, not the last one's alone.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.
 
 An accepted task leaves a line in `~/.local/share/vivibox/history.jsonl`: what it was, what it

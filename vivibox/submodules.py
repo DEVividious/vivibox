@@ -1,24 +1,28 @@
-"""Before work is accepted: every submodule commit the work points at is one you have.
+"""Before work is accepted: every submodule commit the work keeps is one you keep.
 
 Accepting deletes the task, its clone with it. Work that moved a submodule to another commit
 brings only the pointer to your repository (repo.fetch_to goes into no submodule), so a commit
 the writer made inside a submodule, or one your submodule never fetched, may exist nowhere but
-in the clone that is about to go. check refuses the accepting until each such commit is in a
-repository of yours for that submodule, and says how to put it there.
+in the clone that is about to go. check refuses the accepting until each such commit is kept by
+a repository of yours for that submodule, and says how to keep it there.
 
-What is compared: the submodule pointers (gitlinks) of the commit that will be accepted against
-those of the commit the task started from; each one added or changed, and under it the pointers
-that submodule's own commit adds or changes, as far down as you have the commits. Where a
-commit must be: in the submodule as you have it checked out, or in what your repository kept
-of it (.git/modules/<name>). Asked of your repositories alone, by git that reads its objects
-and reaches no remote; never of the task's clone.
+What is compared: the submodule pointers (gitlinks) of what will be kept (the work's last
+commit; every commit of the work, when the accepting keeps them as a branch) against those of
+the commit the task started from; each one added or changed, and under it the pointers that
+submodule's own commit adds or changes, as far down as you keep the commits. Kept means
+reachable from HEAD or a ref of the submodule as you have it checked out, or as your repository
+kept it (.git/modules/<name>): a commit that is there as an object alone goes with git's next
+clean-up. Asked of your repositories alone, never of the task's clone, by git that reads
+objects, fetches nothing and follows no include of a .gitmodules, within a time limit.
 """
 
 from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+import subprocess
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import display, gate, repo
@@ -27,34 +31,57 @@ COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 GITLINK = "160000"
 # Submodules in submodules, followed this far down: deeper is refused, not waited on.
 DEEPEST = 8
+# Seconds the whole check may take, as git on what the agent wrote elsewhere; past it, refused.
+SECONDS = repo.CLONE_TIMEOUT
+# Submodules a refusal says in full; the rest are counted.
+LISTED = 10
+# git here fetches nothing: a submodule of yours that is a partial clone would otherwise go to
+# its remote for a commit it lacks.
+NOT_LAZY = {"GIT_NO_LAZY_FETCH": "1"}
+# An address vivibox puts in a command for you to run: a URL of a protocol that runs nothing
+# here, or user@host:path; no option, no space, nothing a shell reads as more than a word.
+ADDRESS = re.compile(r"(?:(?:https|ssh|git)://|[A-Za-z0-9_][A-Za-z0-9._-]*@)[A-Za-z0-9][A-Za-z0-9._~:/@%+-]*")
 
 MISSING = "missing"  # you have the submodule, not the commit
+LOOSE = "loose"  # the commit is in your submodule, and nothing keeps it there
 NOT_CHECKED_OUT = "not checked out"  # the submodule is your project's, with no copy of it here
 ADDED = "added"  # the work adds the submodule
 UNCHECKED = "unchecked"  # vivibox could not look: said, and refused
 
 
 class Unkept(gate.GateError):
-    """Work that would be accepted while a submodule commit it points at is not yours yet."""
+    """Work that would be accepted while a submodule commit it keeps is not kept by you. Its
+    text is the short form, for a notification; whole: with every submodule and command."""
+
+    def __init__(self, short: str, whole: str) -> None:
+        super().__init__(short)
+        self.whole = whole
+
+
+class Late(Exception):
+    """The check ran out of its time."""
 
 
 @dataclass(frozen=True)
 class Repository:
     """A repository of yours: your checkout, or a submodule of it. tree: its work tree, None for
-    one your repository only kept (.git/modules/<name>)."""
+    one your repository only kept (.git/modules/<name>). until: when the check must be over."""
 
     tree: Path | None
     git_dir: Path
+    until: float
 
     def git(self, *args: str) -> tuple[int, bytes]:
         """git's exit code and what it printed, as bytes: the names in a commit are the
         writer's, and need not be text."""
         where = ("-C", str(self.tree)) if self.tree else ("--git-dir", str(self.git_dir))
-        done = repo.run_git([*where, *args], capture_output=True)
-        return done.returncode, done.stdout
+        return _git([*where, *args], self.until)
 
-    def has(self, commit: str) -> bool:
-        return self.git("cat-file", "-e", f"{commit}^{{commit}}")[0] == 0
+    def keeps(self, commit: str) -> str:
+        """ "" when commit is reachable from HEAD or a ref here; LOOSE when it is here and
+        nothing reaches it; MISSING when it is not here."""
+        code, loose = self.git("rev-list", "--max-count=1", f"{commit}^{{commit}}", "--not", "--all")
+        return MISSING if code else LOOSE if loose.strip() else ""
 
     def gitlinks(self, commit: str) -> dict[str, str] | None:
         """The submodules commit points at, as path: commit; None when git cannot list them. A
@@ -75,42 +102,47 @@ class Repository:
                 found[path.decode("utf-8", "backslashreplace")] = f"not text: {oid}"
         return found
 
-    def submodule(self, path: str, before: str) -> Repository | None:
+    def modules(self, commit: str) -> dict[str, tuple[str, str]]:
+        """What commit's .gitmodules says of each submodule, as path: (name, url). Read as
+        data: no include of it is followed (the file is the writer's where the commit is,
+        and an include names any file on this machine, a pipe to wait on among them)."""
+        code, listed = self.git("config", "--no-includes", "--blob", f"{commit}:.gitmodules", "-z", "--list")
+        said: dict[str, dict[str, str]] = {}
+        for entry in filter(None, _text(listed).split("\0") if code == 0 else []):
+            key, _, value = entry.partition("\n")
+            section, _, variable = key.rpartition(".")
+            if section.startswith("submodule."):
+                said.setdefault(section.removeprefix("submodule."), {})[variable] = value
+        return {of["path"]: (name, of.get("url", "")) for name, of in said.items() if "path" in of}
+
+    def submodule(self, path: str, name: str) -> Repository | None:
         """Your repository of the submodule at path: the one checked out there, else the one
-        kept under the name the commit you had (before) gave that path; None for neither."""
+        kept under name, which the commit you had gave that path; None for neither."""
         if self.tree:
             there = self.tree / path
             if there.resolve().is_relative_to(self.tree.resolve()) and (there / ".git").exists():
-                return at(there)
-        name = self._name(path, before) if before else ""
+                return at(there, self.until)
         kept = self.git_dir / "modules" / name
         if (
             name
+            and plain(name)
             and kept.is_dir()
-            and repo.git("--git-dir", str(kept), "rev-parse", check=False).returncode == 0
+            and _git(["--git-dir", str(kept), "rev-parse"], self.until)[0] == 0
         ):
-            return Repository(None, kept)
+            return Repository(None, kept, self.until)
         return None
 
-    def url(self, path: str, commit: str) -> str:
-        """Where commit's .gitmodules says the submodule at path comes from, when that is
-        something to hand git clone as it stands: "" for none, for one that is relative to
-        your project's own remote, and for one that would be read as an option."""
-        name = self._name(path, commit)
-        code, found = self.git("config", "--blob", f"{commit}:.gitmodules", "--get", f"submodule.{name}.url")
-        url = _text(found).strip() if name and code == 0 else ""
-        return url if url and display.name(url) == url and not url.startswith(("-", "./", "../")) else ""
 
-    def _name(self, path: str, commit: str) -> str:
-        """The name commit's .gitmodules gives the submodule at path, "" for none or for one
-        that is no folder's name under .git/modules."""
-        code, listed = self.git("config", "--blob", f"{commit}:.gitmodules", "-z", "--get-regexp", r"\.path$")
-        for entry in filter(None, _text(listed).split("\0") if code == 0 else []):
-            key, _, value = entry.partition("\n")
-            name = key.removeprefix("submodule.").removesuffix(".path")
-            if value == path and plain(name):
-                return name
-        return ""
+def _git(args: list[str], until: float) -> tuple[int, bytes]:
+    """git on the host (repo.run_git), fetching nothing, for as long as the check has left."""
+    left = until - time.monotonic()
+    if left <= 0:
+        raise Late
+    try:
+        done = repo.run_git(args, capture_output=True, stdin=subprocess.DEVNULL, timeout=left, env=NOT_LAZY)
+    except subprocess.TimeoutExpired:
+        raise Late from None
+    return done.returncode, done.stdout
 
 
 def _text(printed: bytes) -> str:
@@ -121,14 +153,14 @@ def _text(printed: bytes) -> str:
         return ""
 
 
-def at(tree: Path) -> Repository | None:
+def at(tree: Path, until: float) -> Repository | None:
     """The repository whose work tree is tree, and no other: a folder with a .git that is no
     repository would have git answer for the one above it."""
-    top = repo.git("rev-parse", "--show-toplevel", cwd=tree, check=False)
-    git_dir = repo.git("rev-parse", "--absolute-git-dir", cwd=tree, check=False)
-    if top.returncode or git_dir.returncode or Path(top.stdout.strip()).resolve() != tree.resolve():
+    top, toplevel = _git(["-C", str(tree), "rev-parse", "--show-toplevel"], until)
+    kept, git_dir = _git(["-C", str(tree), "rev-parse", "--absolute-git-dir"], until)
+    if top or kept or Path(_text(toplevel).strip()).resolve() != tree.resolve():
         return None
-    return Repository(tree, Path(git_dir.stdout.strip()))
+    return Repository(tree, Path(_text(git_dir).strip()), until)
 
 
 def plain(path: str) -> bool:
@@ -140,10 +172,11 @@ def plain(path: str) -> bool:
 
 @dataclass(frozen=True)
 class Kept:
-    """A submodule commit of the work that is not yours yet. path: from your repository's root;
-    held: your repository of the submodule, where there is one; above: the repository it is a
-    submodule of, and inside: its path in that one; url: for one the work adds, where its
-    .gitmodules says it comes from."""
+    """A submodule commit of the work that you do not keep yet. path: from your repository's
+    root; held: your repository of the submodule, where there is one; above: the repository it
+    is a submodule of, and inside: its path in that one; url: for one the work adds, where its
+    .gitmodules says it comes from, when that is an address for a command; why: for one
+    vivibox could not check."""
 
     path: str
     commit: str
@@ -152,76 +185,132 @@ class Kept:
     above: Repository
     inside: str
     url: str = ""
+    why: str = ""
 
 
-def unkept(yours: Repository, before: str, after: str, prefix: str = "", depth: int = 0) -> list[Kept]:
-    """The submodule commits `after` adds or moves, compared with `before` ("" for nothing to
-    compare with), that no repository of yours holds; with those their own commits add or move."""
-    now = yours.gitlinks(after)
-    if now is None or depth > DEEPEST:
-        return [Kept(prefix.rstrip("/") or ".", after, UNCHECKED, None, yours, "")]
+@dataclass
+class Found:
+    """What a check found, as far as it got: a check that ran out of time says what it has."""
+
+    unkept: list[Kept] = field(default_factory=list)
+    seen: set[tuple[str, str]] = field(default_factory=set)
+
+
+def look(
+    yours: Repository, before: str, afters: list[str], found: Found, prefix: str = "", depth: int = 0
+) -> None:
+    """Adds to found the submodule commits the commits `afters` add or move, compared with
+    `before` ("" for nothing to compare with), that no repository of yours keeps; and, where
+    you keep one, those its own commit adds or moves."""
     was = (yours.gitlinks(before) if before else None) or {}
-    found = []
-    for inside, commit in sorted(now.items()):
-        if was.get(inside) == commit:
+    names = yours.modules(before) if before and was else {}
+    for after in afters:
+        now, named = yours.gitlinks(after), None  # named: what after's .gitmodules says, read once
+        if now is None or depth > DEEPEST:
+            deep = f"submodules more than {DEEPEST} deep are not followed" if now is not None else ""
+            found.unkept.append(Kept(prefix.rstrip("/") or ".", after, UNCHECKED, None, yours, "", why=deep))
             continue
-        path = prefix + inside
-        if not plain(inside) or not COMMIT.fullmatch(commit):
-            found.append(Kept(path, commit, UNCHECKED, None, yours, inside))
-        elif (held := yours.submodule(inside, before)) is None and inside in was:
-            found.append(Kept(path, commit, NOT_CHECKED_OUT, None, yours, inside))
-        elif held is None:
-            found.append(Kept(path, commit, ADDED, None, yours, inside, yours.url(inside, after)))
-        elif not held.has(commit):
-            kind = MISSING if held.tree else NOT_CHECKED_OUT
-            found.append(Kept(path, commit, kind, held, yours, inside))
-        else:
-            found += unkept(held, was.get(inside, ""), commit, path + "/", depth + 1)
-    return found
+        for inside, commit in sorted(now.items()):
+            path = prefix + inside
+            if was.get(inside) == commit or (path, commit) in found.seen:
+                continue
+            found.seen.add((path, commit))
+            if not plain(inside) or not COMMIT.fullmatch(commit):
+                found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside))
+            elif (held := yours.submodule(inside, names.get(inside, ("", ""))[0])) is None and inside in was:
+                found.unkept.append(Kept(path, commit, NOT_CHECKED_OUT, None, yours, inside))
+            elif held is None:
+                named = yours.modules(after) if named is None else named
+                url = named.get(inside, ("", ""))[1]
+                url = url if ADDRESS.fullmatch(url) else ""
+                found.unkept.append(Kept(path, commit, ADDED, None, yours, inside, url))
+            elif state := held.keeps(commit):
+                kind = state if held.tree else NOT_CHECKED_OUT
+                found.unkept.append(Kept(path, commit, kind, held, yours, inside))
+            else:
+                look(held, was.get(inside, ""), [commit], found, path + "/", depth + 1)
 
 
-def check(task_id: str, source: Path, clone: Path, base: str, commit: str) -> None:
+def check(task_id: str, source: Path, clone: Path, base: str, commit: str, history: bool = False) -> None:
     """Refuses (Unkept) to accept commit, the task's work brought to your repository at source,
-    while a submodule commit it adds or moves since base is in no repository of yours. Nothing
-    is changed, here or in the task. clone: the task's, named in what to do, never read."""
-    yours = at(source)
-    if yours is None:
-        raise Unkept(f"{task_id} was not accepted: {source} is not a git repository vivibox can read")
-    if found := unkept(yours, base, commit):
-        raise Unkept(refusal(task_id, source, clone, found))
+    while a submodule commit it adds or moves since base is kept by no repository of yours.
+    history: the accepting keeps every commit of the work (a branch), not its last tree alone,
+    so each of them is looked at. Nothing is changed, here or in the task. clone: the task's,
+    named in what to do, never read."""
+    found, late = Found(), ""
+    try:
+        yours = at(source, time.monotonic() + SECONDS)
+        if yours is None:
+            said = f"{task_id} was not accepted: {source} is not a git repository vivibox can read"
+            raise Unkept(said, said)
+        kept = [commit]
+        if history:
+            code, listed = yours.git("rev-list", f"{base}..{commit}")
+            kept = _text(listed).split() if code == 0 else []
+        look(yours, base, kept or [commit], found)
+    except Late:
+        late = f"vivibox did not finish checking the work's submodules in {SECONDS:g} s"
+    if found.unkept or late:
+        raise Unkept(
+            briefly(task_id, found.unkept, late), refusal(task_id, source, clone, found.unkept, late)
+        )
 
 
-def refusal(task_id: str, source: Path, clone: Path, found: list[Kept]) -> str:
+def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
+    """The refusal for a notification, which wraps and is gone in seconds: what was refused and
+    why, which submodules, and where the whole of it is said."""
+    paths = list(dict.fromkeys(display.name(one.path) for one in found))
+    more = f" and {len(paths) - 3} more" if len(paths) > 3 else ""
+    which = f" ({', '.join(paths[:3])}{more})" if paths else ""
+    what = "its work keeps submodule commits you do not keep" if paths else late
+    return (
+        f"{task_id} was not accepted: {what}{which}, and accepting deletes the task. "
+        f"In a terminal, vivibox accept {task_id} says how to keep them."
+    )
+
+
+def refusal(task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "") -> str:
     """What was refused, why, and what to do, for each commit: commands whole, to paste, with
-    the folders they are run in and read from named in full."""
+    the folders they are run in and read from named in full. The first LISTED in full."""
     lines = [
-        f"{task_id} was not accepted: its work points at a submodule commit your repository does not "
-        "have. The task's clone may hold the only copy, and accepting deletes the task."
+        f"{task_id} was not accepted: its work keeps a submodule commit that no repository of yours "
+        "keeps. The task's clone may hold the only copy, and accepting deletes the task."
     ]
     quoted = lambda path: shlex.quote(str(path))  # noqa: E731
-    for one in found:
+    for one in found[:LISTED]:
         named = f"{display.name(one.path)} at {one.commit}"
         if one.kind == UNCHECKED:
+            why = one.why or "vivibox could not check this submodule"
             lines.append(
-                f"{named}: vivibox could not check this submodule, so the work is not accepted with it; "
-                "send the work back with a reply."
+                f"{named}: {why}, so the work is not accepted with it; send the work back with a reply."
             )
             continue
         mine, theirs = source / one.path, clone / one.path
+        ref = f"refs/vivibox/{task_id}/{one.commit[:12]}"
         fetch = f"git -C {quoted(mine)} fetch --no-recurse-submodules"
-        # From the task's clone: the one commit, no tags, no submodules, and a git serving it
-        # there that fetches nothing lazily, whatever its own default is (reading.HOST_GIT).
+        # From the task's clone: the one commit, under a ref that keeps it; no tags, no
+        # submodules; asked for by its id, which a git serving protocol 2 gives whatever your
+        # settings; and a git serving it there that fetches nothing lazily (reading.HOST_GIT).
         from_task = (
-            f"GIT_NO_LAZY_FETCH=1 git -C {quoted(mine)} fetch --no-tags --no-recurse-submodules "
-            f"{quoted(theirs)} {one.commit}"
+            f"GIT_NO_LAZY_FETCH=1 git -C {quoted(mine)} -c protocol.version=2 fetch --no-tags "
+            f"--no-recurse-submodules {quoted(theirs)} {one.commit}:{ref}"
         )
+        keeps = f"{ref} keeps it there, and may be deleted once the submodule is on that commit or "
+        keeps += "its remote has it"
         if one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
+            where = "" if one.url else " (an address vivibox does not put in a command)"
             lines += [
                 f"{named}: the work adds this submodule, and your checkout has no copy of it. Clone it "
-                f"to {display.name(str(mine))} from the remote the work's .gitmodules names, so that you "
-                "have the commit:",
-                f"git clone -- {quoted(one.url) if one.url else '<its remote>'} {quoted(mine)}",
+                f"to {display.name(str(mine))} from the remote the work's .gitmodules names{where}, so that "
+                "you keep the commit:",
+                f"git clone -- {one.url or '<its remote>'} {quoted(mine)}",
+            ]
+        elif one.kind == LOOSE:
+            lines += [
+                f"{named} is in your submodule, and nothing keeps it there: git removes it when it next "
+                f"cleans up. Give it a ref ({keeps}):",
+                f"git -C {quoted(mine)} update-ref {ref} {one.commit}",
             ]
         elif one.kind == NOT_CHECKED_OUT:
             if one.above.tree:
@@ -231,7 +320,7 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept]) -> str:
                 init = f"git -C {quoted(source)} submodule update --init --recursive -- {quoted(top)}"
             lines += [
                 f"{named}: your checkout has no copy of this submodule. Check it out, then fetch the "
-                "commit from the submodule's remote, or from the task's clone:",
+                f"commit from the submodule's remote, or from the task's clone ({keeps}):",
                 init,
                 fetch,
                 from_task,
@@ -239,11 +328,14 @@ def refusal(task_id: str, source: Path, clone: Path, found: list[Kept]) -> str:
         else:
             lines += [
                 f"{named} is not in your submodule. Fetch it from the submodule's remote, or from the "
-                "task's clone:",
+                f"task's clone ({keeps}):",
                 fetch,
                 from_task,
             ]
+    if len(found) > LISTED:
+        lines.append(f"And {len(found) - LISTED} more submodule commits, said once these are kept.")
+    if late:
+        lines.append(f"{late}: there may be more.")
     if any(one.kind != UNCHECKED for one in found):
-        # The view's notification wraps a long line and is gone in seconds: where to read it whole.
-        lines.append(f"Then accept the work again. In a terminal, vivibox accept {task_id} says this whole.")
+        lines.append("Then accept the work again.")
     return "\n".join(lines)

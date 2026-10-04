@@ -26,6 +26,7 @@ from . import (
     providers,
     repo,
     risky,
+    submodules,
     timeline,
     ui,
     version,
@@ -280,7 +281,10 @@ def cmd_accept(args: argparse.Namespace) -> int:
         print(f"{project.name} is verified with `{kept}` from now on; {task.id} is verifying.")
         carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
-        done = actions.finish(task, project, branch_only=args.branch)
+        try:
+            done = actions.finish(task, project, branch_only=args.branch)
+        except submodules.Unkept as e:  # here, the whole of it: the view's short form says so
+            raise gate.GateError(e.whole) from None
         report_finished(done)
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; nothing to accept (use 'vivibox reply')")

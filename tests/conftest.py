@@ -290,3 +290,75 @@ def no_real_notifications(request, monkeypatch):
     # supervise.channel_for from a configuration with a topic gets this.
     monkeypatch.setattr(ntfy, "post", lambda url, headers, body: quiet.ntfy.append((url, headers, body)))
     return quiet
+
+
+# --- the view, as the tests drive it (Textual's run_test and its Pilot) -------------------------------
+
+# Seconds a view may take to come to rest, or its threads to end, before the test fails saying
+# so, never hanging the run; what Pilot's own wait for the screen's messages is bounded by.
+REST_WITHIN = 30.0
+
+
+def threads_of_no_worker(app) -> int:
+    """How many threads of the view's executor (app_support.LeavingExecutor) are at work that
+    are not a running worker's: Textual's own (it parses a Markdown text in one, so the panel's
+    words arrive after the key that asked for them) and those of a worker the view cancelled,
+    which run on and may still report back. All the view's workers are thread workers."""
+    executor = getattr(app, "executor", None)
+    if executor is None:
+        return 0
+    return executor.unfinished() - sum(1 for worker in app.workers if worker.is_running)
+
+
+async def at_rest(min_sleep: float = 0.0, max_sleep: float = 1.0) -> None:
+    """Until the view has nothing left to do with what it was given: no task of its loop can run,
+    no timer is due, no thread that is not a running worker's is at work (threads_of_no_worker),
+    and no screen has a layout, a repaint or a call after one outstanding (which is done here,
+    at once, as Pilot.pause does for the screen on top).
+
+    In place of Textual's wait_for_idle, which Pilot calls after every key and in every pause.
+    That one sleeps 20 ms and takes the app for idle when the process used under a millisecond
+    of CPU meanwhile: true of an app that is done, and as true of one the machine gave no CPU
+    to. On a busy machine a test went on while its key was still on the way to the widget, or a
+    dialog was half built, and asserted on what it found. It also gave up after a second.
+
+    What a running worker's thread is still doing is not waited for: a test that needs its
+    result says so (workers.wait_for_complete), and some hold one on purpose to look at the
+    view meanwhile."""
+    import asyncio
+
+    from textual._context import active_app
+
+    loop = asyncio.get_running_loop()
+    if min_sleep:
+        await asyncio.sleep(min_sleep)
+    app = active_app.get(None)
+    give_up = loop.time() + REST_WITHIN
+    while loop.time() < give_up:
+        await asyncio.sleep(0)  # behind every task that can run now
+        if loop._ready or any(not t.cancelled() and t.when() <= loop.time() for t in loop._scheduled):
+            continue
+        if app is not None and threads_of_no_worker(app) > 0:
+            await asyncio.sleep(0.001)  # nothing to run until the thread is back
+            continue
+        try:
+            screens = list(app.screen_stack) if app is not None else []
+        except Exception:  # no screens: the app is closing
+            screens = []
+        unfinished = [screen for screen in screens if screen._update_timer._active.is_set()]
+        if not unfinished:
+            return
+        for screen in unfinished:
+            screen._on_timer_update()
+    raise AssertionError(f"the view did not come to rest in {REST_WITHIN:g} s: it always has work")
+
+
+@pytest.fixture(autouse=True)
+def the_view_is_waited_for_until_it_is_at_rest(monkeypatch):
+    """Pilot's keys and pauses wait on what the view has left to do (at_rest), not on how much
+    CPU the process got in 20 ms."""
+    import textual.app
+    import textual.pilot
+
+    monkeypatch.setattr(textual.pilot, "wait_for_idle", at_rest)
+    monkeypatch.setattr(textual.app, "wait_for_idle", at_rest)

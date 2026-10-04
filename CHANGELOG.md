@@ -253,12 +253,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   git's environment: a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` (set inside a git
   hook, or by a tool) no longer aims it at another repository, index or object store of yours,
   and `GIT_CONFIG_COUNT`, `GIT_CONFIG_GLOBAL`, `GIT_TEMPLATE_DIR` or `GIT_EXTERNAL_DIFF` no
-  longer hand it configuration or a program to run. Your git configuration files are read as
-  before. `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS` and `GIT_SSL_CAINFO` are taken out too:
-  where the submodules of a task's clone need one, name it in your git configuration
-  (`core.sshCommand`, `core.askPass`, `http.sslCAInfo`). So are `GIT_AUTHOR_*` and
-  `GIT_COMMITTER_*`: the accepted work is committed as your git configuration names you, as
-  the task's own commits are.
+  longer hand it configuration or a program to run. Your git configuration is read from the
+  files where git keeps it (`~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, the system's, the
+  repository's own); a file your shell names in `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` is
+  not, and when your identity is only there, vivibox says so and names the commands that set
+  it where it is read. The one git that reaches your remotes, the fetch of a new task's
+  submodules, is still handed how you reach them, and it alone: `GIT_SSH`, `GIT_SSH_COMMAND`,
+  `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_CERT`,
+  `GIT_SSL_KEY` and `GIT_PROXY_COMMAND`; never `GIT_ALLOW_PROTOCOL` or `GIT_SSL_NO_VERIFY`.
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*` are taken out everywhere: the accepted work is
+  committed as your git configuration names you, as the task's own commits and its branch
+  always were, so every commit vivibox makes as you has one source for who you are. For an
+  identity of its own in one folder, use `includeIf "gitdir:…"` in your git configuration.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

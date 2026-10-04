@@ -219,7 +219,13 @@ Every git command vivibox runs on your machine, in the clone, in your repository
 copies alike, runs without the git variables of your shell (every `GIT_*` but
 `GIT_TERMINAL_PROMPT`), so a `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` or
 `GIT_CONFIG_COUNT` exported there neither aims it at another repository of yours nor hands it
-configuration; your git configuration files are read as before.
+configuration; your git configuration is read from the files where git keeps it, never from
+one `GIT_CONFIG_GLOBAL` names, and it alone says who a commit is by. The one git that reaches
+your remotes, the fetch of a new clone's submodules from the URLs your own `.gitmodules` names
+at the commit the task starts from, is also handed how you reach them (`GIT_SSH`,
+`GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+`GIT_SSL_CERT`, `GIT_SSL_KEY`, `GIT_PROXY_COMMAND`), and never `GIT_ALLOW_PROTOCOL` or
+`GIT_SSL_NO_VERIFY`.
 
 ## Limits of the boundary
 

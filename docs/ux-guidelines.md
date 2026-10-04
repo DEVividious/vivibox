@@ -215,6 +215,9 @@ such as a value refused and why; it never carries a description, which is gone b
 Before opening the new task form, `n` checks the project's Git identity. Missing `user.name`
 or `user.email` keeps the list open and shows a bottom-right error toast with the two
 `git config --global` commands, and the option to run them without `--global` in the project.
+Where the shell sets `GIT_CONFIG_GLOBAL` to a file vivibox's git does not read, `--global`
+would write that file again: the toast says the variable is not followed, and its commands
+write `~/.gitconfig` (`git config --file ~/.gitconfig`).
 The chosen project's identity is checked again before creating the task.
 
 Every error has three parts, in this order:

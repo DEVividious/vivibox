@@ -66,39 +66,62 @@ PASSED_ON = (
     # names no path and no program.
     "GIT_TERMINAL_PROMPT",
 )
+# And, to the one git on the host that reaches your remotes, how you reach them: the fetch of a
+# new clone's submodules (prepare), from the URLs your own .gitmodules names at the commit the
+# task starts from. None of these says which repository, index, object store or configuration
+# git works on, and each has a twin in your configuration files that this git reads anyway
+# (core.sshCommand, core.askPass, http.sslCAInfo). Never GIT_ALLOW_PROTOCOL, which widens what a
+# URL there may do, nor GIT_SSL_NO_VERIFY, nor a trace.
+TO_YOUR_REMOTES = (
+    "GIT_SSH",  # the ssh program you reach them with,
+    "GIT_SSH_COMMAND",  # or its whole command line,
+    "GIT_SSH_VARIANT",  # and which ssh that is
+    "GIT_ASKPASS",  # the program that hands git your password (an IDE's terminal exports one)
+    "GIT_SSL_CAINFO",  # the certificate authorities you trust (a proxy's, say),
+    "GIT_SSL_CAPATH",  # or the folder of them
+    "GIT_SSL_CERT",  # your client certificate
+    "GIT_SSL_KEY",  # and its key
+    "GIT_PROXY_COMMAND",  # the program that connects through your proxy
+)
 
 
-def git_environment(own: dict[str, str] | None = None) -> dict[str, str]:
+def git_environment(own: dict[str, str] | None = None, to_remotes: bool = False) -> dict[str, str]:
     """The environment of every git vivibox runs on the host: this process's own without git's
-    variables (every GIT_* but PASSED_ON), then what vivibox sets for the call (own). git takes
-    them before its working directory and -C, so one your shell carries (inside a git hook,
-    under a tool that exports them) would aim vivibox's git at another repository, index or
-    object store of yours (GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY), hand it
-    configuration that runs a program (GIT_CONFIG_COUNT, GIT_CONFIG_GLOBAL), or name one
-    outright (GIT_EXTERNAL_DIFF, GIT_EXEC_PATH). Your configuration files are read as before."""
-    kept = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in PASSED_ON}
+    variables (every GIT_* but PASSED_ON), then what vivibox sets for the call (own), which
+    wins. git takes them before its working directory and -C, so one your shell carries
+    (inside a git hook, under a tool that exports them) would aim vivibox's git at another
+    repository, index or object store of yours (GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY),
+    hand it configuration that runs a program (GIT_CONFIG_COUNT, GIT_CONFIG_GLOBAL), or name
+    one outright (GIT_EXTERNAL_DIFF, GIT_EXEC_PATH). Your configuration files are read where
+    git keeps them. to_remotes: for the one git that reaches your remotes, TO_YOUR_REMOTES pass
+    too."""
+    passed = PASSED_ON + (TO_YOUR_REMOTES if to_remotes else ())
+    kept = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in passed}
     return {**kept, **(own or {})}
 
 
 def run_git(args: list[str] | tuple[str, ...], **how) -> subprocess.CompletedProcess:
     """subprocess.run of git on the host, in git_environment; how: what run takes, env being
-    what vivibox sets for the call. For a caller that reads git's answer in its own way (as
-    bytes, within its own time); the rest call git or in_clone."""
-    return subprocess.run(["git", *args], env=git_environment(how.pop("env", None)), **how)
+    what vivibox sets for the call and to_remotes what git_environment takes. For a caller that
+    reads git's answer in its own way (as bytes, within its own time); the rest call git or
+    in_clone."""
+    env = git_environment(how.pop("env", None), how.pop("to_remotes", False))
+    return subprocess.run(["git", *args], env=env, **how)
 
 
 def git(
     *args: str, cwd: Path | None = None, check: bool = True, timeout: float | None = None,
-    clone: Path | None = None, env: dict[str, str] | None = None,
+    clone: Path | None = None, env: dict[str, str] | None = None, to_remotes: bool = False,
 ) -> subprocess.CompletedProcess:  # fmt: skip
     """timeout: seconds git may take, or no limit; past it, GitTimeout says what git was waiting on
     in clone (cwd when not given). env: variables over git_environment, for a git that must
-    not read your configuration (control.refresh)."""
+    not read your configuration (control.refresh). to_remotes: this git reaches your remotes
+    (git_environment); never one with a timeout, which reads the task's clone."""
     if cwd is not None and not Path(cwd).is_dir():
         # A folder that was moved or deleted since it was configured; say so instead of a stack trace.
         raise RepoError(f"{cwd} does not exist")
     if timeout is None:
-        p = run_git(args, cwd=cwd, capture_output=True, text=True, env=env)
+        p = run_git(args, cwd=cwd, capture_output=True, text=True, env=env, to_remotes=to_remotes)
     else:
         own = (env,) if env else ()  # a stand-in for _bounded may know no environment
         p = _bounded(["git", *args], cwd, timeout, Path(clone or cwd or "."), *own)
@@ -264,13 +287,31 @@ def identity(source: Path) -> Identity:
     name = git("config", "user.name", cwd=source, check=False).stdout.strip()
     email = git("config", "user.email", cwd=source, check=False).stdout.strip()
     if not name or not email:
-        raise RepoError(
-            "Git identity is missing. Set your name and email:\n"
-            'git config --global user.name "Your Name"\n'
-            'git config --global user.email "you@example.com"\n'
-            f"Or run these without --global in {source}."
-        )
+        raise RepoError(_no_identity(source))
     return Identity(name, email)
+
+
+def _no_identity(source: Path) -> str:
+    """What to say of a missing identity, with commands that set it where git on the host reads
+    it. `git config --global` writes the file GIT_CONFIG_GLOBAL names when your shell sets it,
+    and git on the host is not given that variable (git_environment): unless it names one of
+    the files git reads anyway, the commands name ~/.gitconfig themselves."""
+    home = Path.home()
+    usual = (home / ".gitconfig", Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "git/config")
+    named = os.environ.get("GIT_CONFIG_GLOBAL")
+    if named is None or Path(named).resolve() in [path.resolve() for path in usual]:
+        what, where = "Git identity is missing. Set your name and email:", "--global"
+    else:
+        what = (
+            "Git identity is missing where vivibox's git reads it: your shell sets GIT_CONFIG_GLOBAL, "
+            "and vivibox runs git without it. Set your name and email in ~/.gitconfig:"
+        )
+        where = "--file ~/.gitconfig"
+    return (
+        f'{what}\ngit config {where} user.name "Your Name"\n'
+        f'git config {where} user.email "you@example.com"\n'
+        f"Or run these without {where} in {source}."
+    )
 
 
 def git_dirs(repo: Path) -> list[Path]:
@@ -341,7 +382,8 @@ def prepare(source: Path, repo: Path, task_id: str, meta: Path, base_ref: str = 
     # --no-hardlinks: the agent must not be able to modify objects shared with your repository.
     git("clone", "--quiet", "--no-hardlinks", "--no-checkout", str(source), str(repo))
     git("switch", "--quiet", "-c", branch_name(task_id), base, cwd=repo)
-    git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo)
+    # The one git on the host that reaches your remotes: as you reach them (TO_YOUR_REMOTES).
+    git("submodule", "update", "--init", "--recursive", "--quiet", cwd=repo, to_remotes=True)
     if origin:
         git("remote", "set-url", "origin", origin, cwd=repo)
     else:

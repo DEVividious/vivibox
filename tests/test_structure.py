@@ -72,6 +72,37 @@ def test_git_on_the_host_runs_only_through_the_helper_that_cleans_its_environmen
     assert git_argv_sites() == GIT_ARGV, "git on the host runs through repo.run_git, repo.git or in_clone"
 
 
+def keyword_sites(name: str, unless) -> dict[str, int]:
+    """Where a call in the package has the keyword name, by module, but for a value unless
+    accepts."""
+    package = ROOT / "vivibox"
+    found = {}
+    for path in sorted(package.rglob("*.py")):
+        calls = (n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n, ast.Call))
+        if count := sum(1 for c in calls for k in c.keywords if k.arg == name and not unless(k.value)):
+            found[str(path.relative_to(package))] = count
+    return found
+
+
+def constant(value):
+    """Whether a node is that constant."""
+    return lambda node: isinstance(node, ast.Constant) and node.value is value
+
+
+def test_one_git_on_the_host_is_handed_how_you_reach_your_remotes():
+    """repo.TO_YOUR_REMOTES (your ssh command, your askpass, your certificates) pass to a git
+    that is asked for with to_remotes: the fetch of a new clone's submodules in repo.prepare,
+    and no other. The rest of repo.py only hands the choice down (git to run_git)."""
+    assert keyword_sites("to_remotes", unless=lambda node: not constant(True)(node)) == {"repo.py": 1}
+    assert keyword_sites("to_remotes", unless=constant(True)) == {"repo.py": 1}, "handed down, once"
+
+
+def test_nothing_is_run_through_a_shell():
+    """shell=True hands a string to sh: a git in it is no argument list for the guard above, and
+    would run in your shell's environment."""
+    assert keyword_sites("shell", unless=constant(False)) == {}
+
+
 def sites(pattern: re.Pattern) -> dict[str, int]:
     package = ROOT / "vivibox"
     return {

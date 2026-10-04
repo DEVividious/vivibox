@@ -18,12 +18,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import GIT_CONFIG, HOME, make_repo, suites_own
+from conftest import GIT_CONFIG, HOME, IDENTITY, global_git_config, make_repo, suites_own
 
 from vivibox import about, baseline, context, keys_work, reading, repo, version
 
 REAL_GIT = shutil.which("git")
 BRANCH = repo.branch_name("demo-1")
+# The one git on the host that reaches your remotes, by its arguments, and what of your shell it
+# alone is handed (repo.TO_YOUR_REMOTES): how you reach them.
+SUBMODULES = "submodule update --init --recursive --quiet"
+HOW_YOU_REACH_THEM = ("GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT", "GIT_ASKPASS", "GIT_SSL_CAINFO",
+                      "GIT_SSL_CAPATH", "GIT_SSL_CERT", "GIT_SSL_KEY", "GIT_PROXY_COMMAND")  # fmt: skip
 # Run by git for the commands vivibox gives it, were a hooksPath of yours to reach it.
 HOOKS = ("pre-commit", "post-commit", "post-checkout", "post-merge", "reference-transaction",
          "post-index-change", "pre-auto-gc", "post-rewrite")  # fmt: skip
@@ -56,11 +61,16 @@ class Site:
     spy: Path  # the folder first on PATH, whose git writes down its GIT_* variables
     log: Path
 
-    def logged(self) -> list[list[str]]:
-        """The GIT_* variables of every git vivibox started, one list per git."""
+    def ran(self) -> list[tuple[str, list[str]]]:
+        """Every git vivibox started, as (its arguments, the GIT_* variables it was handed)."""
         if not self.log.exists():
             return []
-        return [run.splitlines()[1:] for run in self.log.read_text().split("== git")[1:]]
+        runs = (run.splitlines() for run in self.log.read_text().split("== git ")[1:])
+        return [(lines[0], lines[1:]) for lines in runs]
+
+    def logged(self) -> list[list[str]]:
+        """The GIT_* variables of every git vivibox started, one list per git."""
+        return [variables for _, variables in self.ran()]
 
 
 def script(path: Path, body: str) -> Path:
@@ -165,13 +175,20 @@ CASES = {
     "GIT_PAGER": lambda s: {"GIT_PAGER": str(s.program)},
     "GIT_EDITOR": lambda s: {"GIT_EDITOR": str(s.program)},
     "GIT_SEQUENCE_EDITOR": lambda s: {"GIT_SEQUENCE_EDITOR": str(s.program)},
+    # how you reach your remotes: handed to the fetch of a new clone's submodules alone
     "GIT_SSH": lambda s: {"GIT_SSH": str(s.program)},
     "GIT_SSH_COMMAND": lambda s: {"GIT_SSH_COMMAND": str(s.program)},
+    "GIT_SSH_VARIANT": lambda s: {"GIT_SSH_VARIANT": "plink"},
     "GIT_ASKPASS": lambda s: {"GIT_ASKPASS": str(s.program)},
     "GIT_PROXY_COMMAND": lambda s: {"GIT_PROXY_COMMAND": str(s.program)},
+    "GIT_SSL_CAINFO": lambda s: {"GIT_SSL_CAINFO": str(s.config)},
+    "GIT_SSL_CAPATH": lambda s: {"GIT_SSL_CAPATH": str(s.hooks)},
+    "GIT_SSL_CERT": lambda s: {"GIT_SSL_CERT": str(s.config)},
+    "GIT_SSL_KEY": lambda s: {"GIT_SSL_KEY": str(s.config)},
+    # what widens or shows what a remote may do: handed to none
     "GIT_ALLOW_PROTOCOL": lambda s: {"GIT_ALLOW_PROTOCOL": "ext:file"},
     "GIT_SSL_NO_VERIFY": lambda s: {"GIT_SSL_NO_VERIFY": "true"},
-    "GIT_SSL_CAINFO": lambda s: {"GIT_SSL_CAINFO": str(s.config)},
+    "GIT_CURL_VERBOSE": lambda s: {"GIT_CURL_VERBOSE": "1"},
     "GIT_TRACE": lambda s: {"GIT_TRACE": f"{s.left}/trace"},
     "GIT_TRACE2": lambda s: {"GIT_TRACE2": f"{s.left}/trace2"},
     "GIT_TRACE2_EVENT": lambda s: {"GIT_TRACE2_EVENT": f"{s.left}/trace2-event"},
@@ -227,10 +244,15 @@ def carried(site: Site, monkeypatch, case: str):
             changed = sorted(name for name in names if before.get(name) != after.get(name))
             assert not changed, f"your other repository changed: {changed}"
             assert not sorted(p.name for p in site.left.iterdir()), "a hook, a program or a trace of yours"
-    ran = site.logged()
+    ran = site.ran()
     assert ran, "no git of vivibox's ran: the calls were not what is tested"
-    given = {line for variables in ran for line in variables}
-    reached = sorted(f"{name}={value}" for name, value in exported.items() if f"{name}={value}" in given)
+    reached = sorted(
+        f"{name}={value} (git {command})"
+        for command, variables in ran
+        for name, value in exported.items()
+        # how you reach your remotes goes to the git that reaches them, and to no other
+        if f"{name}={value}" in variables and not (name in HOW_YOU_REACH_THEM and command == SUBMODULES)
+    )
     assert not reached, f"git on the host was handed your shell's {reached}"
 
 
@@ -418,6 +440,134 @@ def test_git_on_the_host_gets_what_vivibox_sets_for_it_and_nothing_else_of_gits(
     assert reading.HOST_GIT == {
         "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_LAZY_FETCH": "1",
     }  # fmt: skip
+
+
+@pytest.mark.parametrize("name", HOW_YOU_REACH_THEM)
+def test_only_the_fetch_of_a_new_clones_submodules_is_handed_how_you_reach_your_remotes(
+    site, tmp_path, monkeypatch, name
+):
+    """The submodules of a task's clone are fetched from your remotes, by the URLs your own
+    .gitmodules names: that git gets your ssh command, your askpass, your certificates. No other
+    git of the host's does, in your repository, in the clone or for a reader."""
+    task, view = a_task(site, tmp_path / "task"), tmp_path / "view"
+    view.mkdir()
+    meta = tmp_path / "new" / ".task"
+    meta.mkdir(parents=True)
+    monkeypatch.setenv(name, str(site.program))
+    monkeypatch.setenv("PATH", f"{site.spy}{os.pathsep}{os.environ['PATH']}")
+    repo.prepare(site.mine, tmp_path / "new" / "repo", "demo-2", meta)
+    repo.fetch_to(site.mine, task.clone, task.meta, "demo-1")
+    reading.view(task.clone, BRANCH, view, task.work, "the reviewer's")
+    baseline.read(site.mine, task.base)
+    handed = [command for command, variables in site.ran() if f"{name}={site.program}" in variables]
+    assert handed == [SUBMODULES], "the git that reaches your remotes, and it alone"
+    assert not list(site.left.iterdir()), "no program of yours ran: nothing here is behind ssh"
+
+
+def test_a_submodule_you_reach_through_your_ssh_command_is_fetched(site, tmp_path, monkeypatch):
+    """A project whose submodule is behind ssh, reached by the command your shell names
+    (GIT_SSH_COMMAND, as a jump host or a key of its own needs): the task's clone has it."""
+    lib = make_repo(tmp_path / "lib")
+    git(site.mine, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "lib")
+    git(site.mine, "config", "--file", ".gitmodules", "submodule.lib.url", f"ssh://git.example.invalid{lib}")
+    git(site.mine, "commit", "-qam", "A library, behind ssh")
+    asked = tmp_path / "asked-of-ssh"
+    # ssh as git runs it: the host, then the command for the far side, which is run here.
+    ssh = script(
+        tmp_path / "yours" / "ssh", f'echo "$*" >> "{asked}"\nfor far; do :; done\nexec sh -c "$far"'
+    )
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
+    monkeypatch.setenv("PATH", f"{site.spy}{os.pathsep}{os.environ['PATH']}")
+    meta = tmp_path / "task" / ".task"
+    meta.mkdir(parents=True)
+    clone = tmp_path / "task" / "repo"
+    repo.prepare(site.mine, clone, "demo-1", meta)
+    assert (clone / "lib" / "README.md").read_text() == "demo\n", "the submodule, in the task's clone"
+    assert f"git.example.invalid git-upload-pack '{lib}'" in asked.read_text()
+    handed = [command for command, variables in site.ran() if f"GIT_SSH_COMMAND={ssh}" in variables]
+    assert handed == [SUBMODULES]
+
+
+def test_how_you_reach_your_remotes_is_a_list_of_names_and_passes_only_when_asked(monkeypatch):
+    """Nine names, each with its reason in repo.py; what widens or shows what a remote may do
+    (GIT_ALLOW_PROTOCOL, GIT_SSL_NO_VERIFY, a trace) and what aims git elsewhere pass to none."""
+    assert repo.TO_YOUR_REMOTES == HOW_YOU_REACH_THEM
+    never = ("GIT_ALLOW_PROTOCOL", "GIT_SSL_NO_VERIFY", "GIT_TRACE", "GIT_CURL_VERBOSE", "GIT_DIR",
+             "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT", "GIT_AUTHOR_NAME", "GIT_EXEC_PATH")  # fmt: skip
+    for name in (*HOW_YOU_REACH_THEM, *never):
+        monkeypatch.setenv(name, "yours")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    gits = lambda found: {name for name in found if name.startswith("GIT_")}  # noqa: E731
+    assert gits(repo.git_environment()) == set()
+    assert gits(repo.git_environment(to_remotes=True)) == set(HOW_YOU_REACH_THEM)
+
+
+def test_what_vivibox_sets_for_a_git_wins_over_what_passes_from_your_shell(monkeypatch):
+    for name in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND", "LESS"):
+        monkeypatch.setenv(name, "yours")
+    own = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes", "LESS": "R"}
+    found = repo.git_environment(own, to_remotes=True)
+    assert {name: found[name] for name in own} == own
+
+
+@pytest.fixture
+def unnamed(tmp_path, monkeypatch) -> Path:
+    """A repository with no identity of its own, on a machine whose ~/.gitconfig has none."""
+    source = make_repo(tmp_path / "source")
+    for key in ("user.name", "user.email"):
+        git(source, "config", "--unset", key)
+    global_git_config(monkeypatch, tmp_path / "home", "")
+    return source
+
+
+def as_told(said: str, where: Path) -> None:
+    """The commands an error names, run as you would run them: in your shell, as it is."""
+    for line in said.splitlines():
+        if line.startswith("git config "):
+            subprocess.run(["sh", "-c", line], cwd=where, env=dict(os.environ), check=True)
+
+
+def test_the_identity_hint_sets_it_where_vivibox_reads_it_when_your_shell_names_its_own_file(
+    unnamed, tmp_path, monkeypatch
+):
+    """Your shell keeps git's global settings in a file GIT_CONFIG_GLOBAL names, your identity
+    in it. vivibox's git is not given that variable, so it finds no identity; `git config
+    --global` would write that same file again. The error says so, and its commands lead on."""
+    elsewhere = tmp_path / "elsewhere" / "gitconfig"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(IDENTITY)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(elsewhere))
+    with pytest.raises(repo.RepoError) as refused:
+        repo.identity(unnamed)
+    said = str(refused.value)
+    what, first, second, other = said.splitlines()
+    assert what.startswith("Git identity is missing where vivibox's git reads it: ")
+    assert "your shell sets GIT_CONFIG_GLOBAL, and vivibox runs git without it" in what
+    assert first == 'git config --file ~/.gitconfig user.name "Your Name"' and "--global" not in said
+    assert second == 'git config --file ~/.gitconfig user.email "you@example.com"'
+    assert other == f"Or run these without --file ~/.gitconfig in {unnamed}."
+    as_told(said, tmp_path)
+    assert repo.identity(unnamed) == repo.Identity("Your Name", "you@example.com")
+    assert elsewhere.read_text() == IDENTITY, "your own file is as it was"
+
+
+@pytest.mark.parametrize("named", ["nothing", "~/.gitconfig"])
+def test_the_identity_hint_is_git_config_global_where_that_writes_what_vivibox_reads(
+    unnamed, tmp_path, monkeypatch, named
+):
+    if named == "nothing":
+        monkeypatch.delenv("GIT_CONFIG_GLOBAL")
+    with pytest.raises(repo.RepoError) as refused:
+        repo.identity(unnamed)
+    said = str(refused.value)
+    assert said.splitlines() == [
+        "Git identity is missing. Set your name and email:",
+        'git config --global user.name "Your Name"',
+        'git config --global user.email "you@example.com"',
+        f"Or run these without --global in {unnamed}.",
+    ]
+    as_told(said, tmp_path)
+    assert repo.identity(unnamed) == repo.Identity("Your Name", "you@example.com")
 
 
 def test_the_suites_home_hides_the_settings_your_shell_points_git_and_vivibox_at(tmp_path, monkeypatch):

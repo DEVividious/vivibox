@@ -4959,6 +4959,33 @@ def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeyp
     run(scenario, notifications=True)
 
 
+def test_n_says_when_your_identity_is_in_a_file_only_your_shell_names(env, monkeypatch):
+    """GIT_CONFIG_GLOBAL in your shell names the file your identity is in; vivibox's git is not
+    given it. The toast says so, and its commands write the file vivibox's git reads."""
+    from ux import screen_text
+
+    global_git_config(monkeypatch, env / "home", "")
+    named = env / "elsewhere.gitconfig"
+    named.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(named))
+    for key in ("name", "email"):
+        subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
+
+    async def scenario(app, pilot):
+        await pilot.press("n")
+        await pilot.pause()
+        assert not isinstance(app.screen, newtask.NewTask)
+        said = screen_text(app)
+        assert "Git identity is missing where vivibox's git reads it" in said
+        assert "GIT_CONFIG_GLOBAL" in said and "--global" not in said
+        assert "git config --file ~/.gitconfig user.name" in said
+        assert "git config --file ~/.gitconfig user.email" in said
+        assert "without --file ~/.gitconfig" in said
+        assert not load_config().tasks_dir.exists()
+
+    run(scenario, notifications=True)
+
+
 @pytest.mark.parametrize("local", [False, True])
 def test_n_accepts_a_complete_local_or_global_git_identity(env, monkeypatch, local):
     if local:

@@ -211,9 +211,10 @@ def test_the_writer_reads_how_to_take_a_repository_out(task):
 
 
 def test_the_writer_is_told_what_half_of_it_leaves(task):
-    """The middle step alone (the `.git` deleted, the index left listing a submodule) passes
-    every check there is and commits none of the folder's files: the feedback says so, as
-    nothing else does."""
+    """The middle step alone (the `.git` deleted, the index left listing a submodule) passes the
+    protection check, and to git nothing is left to commit, while none of the folder's files is
+    committed: the feedback says so beforehand, and the verification afterwards
+    (test_gitlinks_left)."""
     nested(task.repo)
     git(task.repo, "commit", "-q", "-m", "Add web")
     __import__("shutil").rmtree(task.repo / "web" / ".git")
@@ -223,6 +224,7 @@ def test_the_writer_is_told_what_half_of_it_leaves(task):
     said = feedback.TAKE_OUT["a repository of its own"]
     assert "out of the index first" in said
     assert said.endswith("still in the index, none of its files is in your commits.")
+    assert gate.uncommitted(task.repo) == [r.NO_SUBMODULE.format("web")]
 
 
 def test_the_writer_reads_how_to_remove_a_worktree(task, tmp_path):

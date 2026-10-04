@@ -325,6 +325,13 @@ def _gitlinks(root: Path, git_dir: str) -> list[str] | str:
             os.close(f)
 
 
+def index_gitlinks(root: Path) -> list[str]:
+    """The folders the clone's own index lists as submodules, as paths from root, read from the
+    file (no git); none for an index vivibox cannot read, which the check before it refused."""
+    listed = _gitlinks(root, ".git")
+    return listed if isinstance(listed, list) else []
+
+
 def _listed(f: int, size: int, hash_length: int, index: str) -> list[str] | str:
     """The submodules the index open at f lists; why not. Its first megabyte is read, and the rest
     only when the entries go on past it, never past INDEX_LIMIT; its extensions are walked by

@@ -481,7 +481,7 @@ class GateResult:
 
 def uncommitted(repo_dir: Path) -> list[str]:
     status = repo.in_clone(repo_dir, "status", "--porcelain", "--untracked-files=all").stdout
-    return [line[3:] for line in status.splitlines()]
+    return [line[3:] for line in status.splitlines()] + repo.gitlinks_left(repo_dir)
 
 
 def masked(text: str, values: list[str]) -> str:

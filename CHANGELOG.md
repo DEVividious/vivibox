@@ -47,6 +47,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The verification fails when the work lists a folder in the index as a submodule that is
+  none: a folder with no repository in it (its `.git` deleted, say, after `git add` had listed
+  it), that the task's base did not list and `.gitmodules` does not name. git commits the
+  pointer and none of the folder's files, and its status is clean, so the verification was
+  green, a review was paid for, and only accepting refused, with a clone to make from a
+  `.gitmodules` that was not there. The writer is told among what is not committed: the
+  folder, that none of its files is, and to take it out of the index and add them. A
+  submodule of the base (checked out or not, moved or not) and one the work adds with its
+  entry in `.gitmodules` are left alone; what accepting checks is unchanged.
 - What an agent wrote in the details panel is drawn behind a rule: a heavy line (`┃`) down its
   left, on every row of it, which vivibox's own lines never have. A line without the rule is
   vivibox's, a line with it is not, whatever it says. Drawn so: a plan (under review, accepted,

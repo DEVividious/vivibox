@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -525,6 +526,56 @@ def blocked(clone: Path) -> Blocked | None:
     except RepoError:
         return None
     return None
+
+
+# What the verification says of a folder the work lists as a submodule that is none, among what
+# is not committed (gate.uncommitted): the folder by its name, as text, and the command without it.
+NO_SUBMODULE = (
+    "{}: none of this folder's files, because the index lists the folder as a submodule and it holds "
+    "no repository. Take it out of the index (`git rm -f --cached` with its path), add its files as "
+    "ordinary files and commit"
+)
+COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def gitlinks_left(clone: Path) -> list[str]:
+    """Folders the work lists in its index as submodules that are none, each as NO_SUBMODULE says
+    it: a folder with no repository in it (its .git deleted, half of taking a repository of its
+    own out), that the task's base did not list and the commit's .gitmodules does not name.
+    git commits the pointer and none of the folder's files, and its status is clean. Left alone:
+    a submodule of the base, checked out or not, moved or not; one the work adds with its entry
+    in .gitmodules; a pointer whose folder is gone, which git's status has as deleted.
+
+    Only on a clone the protection check passes (guard): the index and the folders are looked
+    at as files, and git is asked, through in_clone, what the base listed and what .gitmodules
+    names, and only when there is such a folder."""
+    guard(clone)
+    left = [
+        path
+        for path in protection.index_gitlinks(clone)
+        if protection.look(clone, path, read=False) == protection.FOLDER
+        and protection.look(clone, f"{path}/.git", read=False) == protection.ABSENT
+    ]
+    if not left:
+        return []
+    from .task import Task  # here, not at the top: task reads its version through this module
+
+    try:
+        base = Task(clone.parent).read_state().base_commit
+    except (OSError, ValueError, KeyError, TypeError):
+        base = ""
+    listed = ""
+    if COMMIT_ID.fullmatch(base):  # the paths as names, never as patterns
+        listed = in_clone(
+            clone, "--literal-pathspecs", "ls-tree", "-z", base, "--", *left, check=False
+        ).stdout
+    in_base = {entry.partition("\t")[2] for entry in listed.split("\0") if entry.startswith("160000 ")}
+    names = in_clone(
+        clone, "config", "--no-includes", "--blob", "HEAD:.gitmodules", "-z", "--get-regexp",
+        r"^submodule\..*\.path$", check=False,
+    )  # fmt: skip
+    named = {entry.partition("\n")[2] for entry in names.stdout.split("\0") if entry}
+    return [NO_SUBMODULE.format(display.name(path)) for path in left if path not in in_base | named]
 
 
 def named_changes(changed: list[str]) -> str:

@@ -32,7 +32,11 @@ here in the same commit.
   plays in one conversation (`roles/writer-reviewer.md`, `roles/planner-writer-reviewer.md`,
   `roles/planner-reviewer.md`, chosen by the orchestration mode).
 - **Feedback** (`verify-feedback.md`, `comments.md`): what was wrong, quoted, and what would
-  make it right.
+  make it right. Where your reply sends the writer back to a clone its own addition blocks (a
+  repository of its own that it tracks, a worktree), the turn is the failed verification's and
+  then the reply's, both as they are (`BLOCKED_REPLY_PROMPT`), and the feedback it names is
+  written at that reply to say how each addition is taken out (`feedback.write_blocked`): a
+  reply that says no more than "go on" still sends the writer to the instructions.
 
 A rule is stated once, in the brief. A turn prompt may name it ("tick each item the moment you
 have verified it"); it does not explain it again. Feedback repeats a rule only when it was

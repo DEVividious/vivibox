@@ -111,6 +111,17 @@ def feedback(result: GateResult) -> str:
     return "\n".join(parts) + "\n"
 
 
+def write_blocked(task: Task, blocked: repo.Blocked) -> None:
+    """The feedback and the log in handoff/ for a clone blocked now, written as your reply sends
+    the writer back (decisions.reply): its turn names the feedback, which then says how each
+    addition is taken out, whatever verification wrote the two last (none, when the clone was
+    blocked after the work was verified). HandoffError where vivibox does not write through
+    what is there."""
+    folder = task.meta / "handoff"
+    handoff.write_text(folder / "verify-feedback.md", feedback(GateResult(folder, environment=blocked.why)))
+    handoff.write_text(folder / "verify.log", f"# the verification does not run: {blocked.logged}\n")
+
+
 def write_feedback(task: Task, result: GateResult) -> None:
     """A file there vivibox does not write through is a problem outside the code: the agent could
     not read its feedback, so the task stops for you and no round is spent."""

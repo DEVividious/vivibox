@@ -30,19 +30,20 @@ def ends_verification(make: Callable[..., Any]) -> Callable[[Callable], Callable
             except repo.GitTimeout as e:
                 return could_not_verify(task, make, str(e))
             except repo.Blocked as e:  # with what blocks it, for the writer's feedback
-                return could_not_verify(task, make, e.why)
+                return could_not_verify(task, make, e.why, e.logged)
 
         return bounded
 
     return wrap
 
 
-def could_not_verify(task: Task, make: Callable[..., Any], why: str) -> Any:
-    """The result, its log and the gate's event, as the gate records a verification."""
+def could_not_verify(task: Task, make: Callable[..., Any], why: str, logged: str = "") -> Any:
+    """The result, its log and the gate's event, as the gate records a verification. logged:
+    what the log says, when why holds a step that is yours and the writer reads the log too."""
     st = task.read_state()
     log = task.meta / "log" / f"verify-{st.iteration}-{time.strftime('%H%M%S')}.log"
     with Path(log).open("a") as out:
-        out.write(f"# the verification could not run: {why}\n")
+        out.write(f"# the verification could not run: {logged or why}\n")
     result = make(log, environment=why)
     task.event("gate", iteration=st.iteration, **result.summary())
     return result

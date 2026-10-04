@@ -58,6 +58,12 @@ class Blocked(RepoError):
         why.found = self.found
         return why
 
+    @property
+    def logged(self) -> str:
+        """For the verification's log, which you read under l and the writer in its handoff:
+        what blocks the clone, as a fact, and neither reader's step."""
+        return f"the task's clone is blocked by what was added to it: {named_changes(self.found)}"
+
 
 class BlockedBy(str):
     """Why a verification could not run, as you read it, and the additions that block the clone
@@ -489,6 +495,18 @@ def check_protection(repo: Path, meta: Path) -> None:
             "clone now, so its work can be neither verified nor brought back: see what the agent did "
             "in its log, and delete the task"
         )
+
+
+def blocked(clone: Path) -> Blocked | None:
+    """What of the task's own adding blocks its clone now, or None: read as guard reads it,
+    with no git. A clone refused for anything else is none here; the next git says that."""
+    try:
+        guard(clone)
+    except Blocked as e:
+        return e
+    except RepoError:
+        return None
+    return None
 
 
 def named_changes(changed: list[str]) -> str:

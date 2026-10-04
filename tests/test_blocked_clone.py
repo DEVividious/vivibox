@@ -350,3 +350,83 @@ def test_the_reviews_view_keeps_what_blocks_the_clone_apart_from_other_refusals(
     pod = SimpleNamespace(review_work=tmp_path / "work", review_src=str(tmp_path / "src"))
     with pytest.raises(r.Blocked, match="the task added a repository of its own to its clone"):
         reviewing.view(task, pod)
+
+
+# --- after your reply: the writer is sent to what says how --------------------------------------------
+
+
+def test_after_the_reply_the_writers_turn_names_the_file_that_says_how(task):
+    """Your reply may say no more than "go on": the turn it starts sends the writer to the
+    verification's feedback, in the words a failed verification's turn has, and then to your
+    reply; and the file it names holds how the repository is taken out."""
+    from vivibox import prompts
+
+    nested(task.repo)
+    sup, _, _ = at_the_gate(task)
+    actions.reply(task, "please go on")
+    sup.step()  # the writer's turn
+    asked = sup.harness.prompts[-1]
+    assert "/task/handoff/verify-feedback.md" in asked and "/task/handoff/comments.md" in asked
+    assert asked == prompts.FEEDBACK_PROMPT + "\n\n" + prompts.COMMENT_PROMPT, "no word of either changed"
+    assert asked == prompts.BLOCKED_REPLY_PROMPT
+    fed = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert "web/.git was added" in fed and "`git rm -f --cached`" in fed
+
+
+def test_a_reply_to_work_blocked_since_it_was_verified_writes_how_to_take_it_out(task, tmp_path):
+    """Blocked after the verification passed (the work waits for you, and accepting refuses): the
+    feedback there is an earlier round's, or none. The reply writes what the turn's prompt names."""
+    from vivibox import prompts
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
+        task.transition(s)
+    stale = task.meta / "handoff" / "verify-feedback.md"
+    stale.write_text("# Verification failed\n\n- Criterion not ticked: an earlier round's\n")
+    worktree(task.repo, tmp_path / "elsewhere")
+    assert actions.reply(task, "take it out") is State.IMPLEMENT
+    fed = stale.read_text()
+    assert "an earlier round's" not in fed
+    assert ".git/worktrees was added" in fed and "`git worktree remove`" in fed
+    assert supervisor.next_prompt(task, "") == prompts.BLOCKED_REPLY_PROMPT
+    log = (task.meta / "handoff" / "verify.log").read_text()
+    assert ".git/worktrees was added" in log and "reply" not in log
+
+
+def test_a_reply_to_a_task_whose_clone_is_as_recorded_is_the_reply_alone(task):
+    from vivibox import prompts
+
+    for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_BLOCKED):
+        task.transition(s)
+    fed = task.meta / "handoff" / "verify-feedback.md"
+    fed.write_text("# Verification failed\n\n- Verification could not run: Docker is down.\n")
+    actions.reply(task, "it is up again")
+    assert supervisor.next_prompt(task, "") == prompts.COMMENT_PROMPT
+    assert "Docker is down" in fed.read_text(), "the verification's own feedback is left as it is"
+
+
+def test_a_reply_that_cannot_write_how_is_refused_whole(task):
+    """A link where the feedback goes: vivibox does not write through it, and a turn sent to a
+    file that does not say how would be paid for nothing. Nothing of the reply is kept."""
+    nested(task.repo)
+    at_the_gate(task)
+    fed = task.meta / "handoff" / "verify-feedback.md"
+    outside = task.root / "outside.txt"
+    outside.write_text("the host's\n")
+    fed.unlink()
+    fed.symlink_to(outside)
+    before = (task.meta / "comments.md").read_text()
+    with pytest.raises(gate.GateError, match="verify-feedback.md"):
+        actions.reply(task, "please go on")
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    assert (task.meta / "comments.md").read_text() == before and outside.read_text() == "the host's\n"
+
+
+def test_neither_file_the_writer_reads_tells_it_what_you_are_told(task):
+    """handoff/verify.log is the verification's log, copied for the writer: what blocks the
+    clone is in it as a fact, and the step that is yours is not."""
+    nested(task.repo)
+    at_the_gate(task)
+    for name in ("verify-feedback.md", "verify.log"):
+        said = (task.meta / "handoff" / name).read_text()
+        assert "web/.git was added" in said, name
+        assert "reply" not in said and "the writer" not in said, name

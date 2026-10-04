@@ -59,7 +59,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   writer back, which reads in `verify-feedback.md` how to take the repository or the worktree
   out, in words that hold no command made of a name it chose, and `g` verifies again. Found at
   a review instead (added after the verification passed), it sends the task back to the
-  verification, which waits for you the same way. In a box the message names whoever works in
+  verification, which waits for you the same way. The turn your reply starts sends the writer
+  to `verify-feedback.md` first (the turn a failed verification starts, then your reply's, both
+  in their own words), and that file is written at your reply to say how, also where the clone
+  was blocked after its last verification; a reply that cannot write it is refused whole. The
+  verification's log, which the writer reads as `verify.log`, says what blocks the clone and
+  not what you are told to do. In a box the message names whoever works in
   it, not a writer. Any other change to the clone's git files is refused in the words it was.
 - The verification refuses, in a line the work adds, the Hangul fillers (U+115F, U+1160,
   U+3164, U+FFA0: letters drawn as nothing, so a name of their own nobody sees) and the

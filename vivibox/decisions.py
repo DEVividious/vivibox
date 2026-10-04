@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import actions, comments, gate, handoff, manual, prompts, supervisor
+from . import actions, comments, feedback, gate, handoff, manual, prompts, repo, supervisor
 from .config import Project, config_dir
 from .risky import Approvals
 from .states import State
@@ -113,13 +113,19 @@ def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:
         target = targets[st.state]
     else:
         raise gate.GateError(f"{task.id} is in {st.state}; replies are for checkpoints")
+    # A clone blocked by what the writer added: its turn is sent to the verification's feedback,
+    # which is written here to say how that is taken out, before anything of the reply is kept.
+    blocked = repo.blocked(task.repo) if target is State.IMPLEMENT and not st.box else None
     try:  # open, or refused, before any criterion is added, not after
+        if blocked:
+            feedback.write_blocked(task, blocked)
         with handoff.appending(task.meta / comments.FILE) as file:
             file.write(comments.entry(comment, gate.add_criteria(task, criteria) if criteria else []))
     except handoff.HandoffError as e:
         raise gate.GateError(str(e)) from e
     supervisor.put_question_away(task)
     prompt = prompts.PLAN_COMMENT_PROMPT if target is State.PLAN else prompts.COMMENT_PROMPT
+    prompt = prompts.BLOCKED_REPLY_PROMPT if blocked else prompt
     supervisor.set_next_prompt(task, prompt)
     task.reset_rounds()
     task.transition(target, reason="your reply")

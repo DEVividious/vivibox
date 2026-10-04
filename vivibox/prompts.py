@@ -99,6 +99,11 @@ COMMENT_PROMPT = """The user replied. Read the newest entry in /task/handoff/com
 what it asks. End the turn when that is done and committed, or when you have written a new
 question to /task/handoff/question.md."""
 
+# After your reply to a task whose clone is blocked by what the writer added to it (repo.Blocked):
+# the turn a failed verification starts, whose file says how each addition is taken out
+# (feedback.blocked), and then your reply. Both as they are: no wording of its own.
+BLOCKED_REPLY_PROMPT = FEEDBACK_PROMPT + "\n\n" + COMMENT_PROMPT
+
 PLAN_COMMENT_PROMPT = """The user commented on your plan. Read the newest entry in
 /task/handoff/comments.md and update /task/handoff/plan-draft.md. End the turn when the draft is
 updated."""

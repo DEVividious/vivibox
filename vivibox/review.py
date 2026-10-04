@@ -23,6 +23,7 @@ from . import (
     handoff,
     ide,
     repo,
+    submodules,
     timeline,
     ui,
     version,
@@ -266,6 +267,9 @@ def finish(
         )
     commit = fetch_work(task, project)
     st = task.read_state()
+    # Before anything of the accepting is done: the task goes with it, and its clone may hold the
+    # only copy of a submodule commit the work points at.
+    submodules.check(task.id, project.repo, task.repo, st.base_commit, commit)
     cli_usage.count(task, "conversation")
     spent = ui.cost(task)
     criteria = accepted_criteria(task)

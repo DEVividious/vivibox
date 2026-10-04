@@ -271,7 +271,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the submodule's remote: bringing a task's commits to your repository reads the task's clone
   and nothing else, so it no longer fails where that remote does not answer, or lacks a commit
   the writer made in the submodule. vivibox no longer fetches the submodule's new commits into
-  your checkout on the way: after accepting such work, `git submodule update` does.
+  your checkout on the way, and never runs `git submodule update` for you: after accepting, you
+  do.
+- Accepting work refuses while a submodule commit it points at is in no repository of yours:
+  accepting deletes the task, and a commit the writer made inside a submodule exists only in
+  the task's clone. Every submodule the work adds or moves is checked, and under it the
+  submodules its own commit adds or moves, in your repositories and without the network; the
+  refusal names each submodule and commit and the commands that keep it (a fetch in your
+  submodule from its remote, or from the task's clone), and changes nothing of the task or of
+  your repository. Then you accept again. It holds for every way of accepting: `vivibox
+  accept`, `--branch`, the view's `a`, and a box's work.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

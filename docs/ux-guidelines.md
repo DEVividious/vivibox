@@ -220,6 +220,12 @@ would write that file again: the toast says the variable is not followed, and it
 write `~/.gitconfig` (`git config --file ~/.gitconfig`).
 The chosen project's identity is checked again before creating the task.
 
+Accepting work is refused while a submodule commit it points at is in no repository of yours
+(accepting deletes the task, whose clone may hold the only copy): the refusal names each
+submodule and the whole commit id, then the commands that keep the commit, each on a line of
+its own, whole, with the folders in full. The view's notification wraps a long line and is gone
+in seconds, so the refusal ends with the command that says it again in a terminal.
+
 Every error has three parts, in this order:
 
 1. What happened, in the person's terms ("could not start").

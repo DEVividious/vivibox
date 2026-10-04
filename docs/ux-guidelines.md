@@ -294,7 +294,13 @@ looks like an empty cache.
   block, a list, a quote, a table) ends with it, and a heading in it is a bold line, whatever
   its level and however it was written; the panel's headings are vivibox's sections alone.
   A quote of the agent's is a quote inside the rule, and nothing in the text ends the rule.
-  A plan is drawn so.
+  Drawn so: a plan (under review, accepted, a finished task's), the agent's question, a
+  review's notes, the acceptance criteria and the writer's steps (a list each, an item one
+  line whatever line breaks it held: `markdown.listed`), what the browser prompt tells a chat
+  about the repository, a finished or deleted task's summary. Why vivibox did not read such a
+  file is vivibox's own line, outside the rule. A name or a command an agent chose stands in
+  vivibox's own lines as inline code, and what a tool printed as a code block.
+  `tests/test_structure.py` fails on a file read into the panel's text any other way.
 - The panel is markdown, and much of it is not vivibox's (a plan, a question, a review's
   notes). That text keeps its lists and emphasis and makes no link: a link in it is
   its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the

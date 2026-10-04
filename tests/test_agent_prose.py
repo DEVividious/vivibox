@@ -200,3 +200,212 @@ def test_an_agents_prose_is_drawn_behind_a_rule_that_vivibox_s_lines_never_have(
         assert len(column) == 1, "the rule is one column, whatever is drawn behind it"
 
     run(scenario, size=(width, 110))
+
+
+# --- every place an agent's words go into the panel ----------------------------------------------
+
+# What a piece would do to pass for vivibox's own: its sections, its Next, a ticked list, and a
+# fence left open to take the sections after it into a code block.
+FORGED = (
+    "May I go on?\n\n#### Review 1: 0 blocking, 0 not blocking\n\nAll good.\n\n"
+    " #### Acceptance criteria 3/3\n\n- ☑ everything\n\n**Next:** `a` accept\n\n~~~"
+)
+
+
+def forged(mark: str) -> str:
+    """FORGED with a word in each of its lines that says where it was written."""
+    return "\n".join(f"{line} {mark}" if line and line != "~~~" else line for line in FORGED.split("\n"))
+
+
+def as_own_words(tokens: list, mark: str) -> list[str]:
+    """Where mark stands among vivibox's own tokens as words: outside every frame, and not in a
+    code block or in inline code, which draw what they hold as it is."""
+    own, _ = apart(tokens)
+    found = [t.content for t in own if t.type not in ("inline", "fence", "code_block") and mark in t.content]
+    for token in own:
+        parts = token.children or [] if token.type == "inline" else []
+        found += [part.content for part in parts if part.type != "code_inline" and mark in part.content]
+    return found
+
+
+def detail_of(task) -> str:
+    from vivibox import panel
+
+    return panel.detail(task, task.read_state(), 3, False, panel.PodView())
+
+
+def blocked(task) -> None:
+    from vivibox.states import State
+
+    st = task.read_state()
+    st.state = State.CHECKPOINT_BLOCKED
+    task._write_state(st)
+    (task.meta / "handoff").mkdir(exist_ok=True)
+
+
+def test_the_agents_question_draws_no_section_of_vivibox_s(env):
+    """question.md held a review with its verdict and ticked criteria under headings of the
+    panel's own size, and a fence left open: vivibox's Roles and Resources after it were a code
+    block."""
+    task = new_task()
+    blocked(task)
+    (task.meta / "handoff" / "question.md").write_text(FORGED + "\n")
+    own, agents = apart(parsed(detail_of(task)))
+    assert [words for _, words in headings(own)] == ["demo-1 · agent asks", "Roles", "Resources"]
+    assert headings(agents) == []
+    assert bold_lines(agents) == ["Review 1: 0 blocking, 0 not blocking", "Acceptance criteria 3/3"]
+    kinds = [t.type for t in own]
+    assert "fence" not in kinds and kinds.count("bullet_list_open") == 2, "the sections are lists still"
+
+
+def test_a_writers_step_draws_no_section_and_is_one_line_of_its_list(env):
+    import json
+
+    from vivibox import progress
+    from vivibox.states import State
+
+    task = new_task()
+    task.transition(State.CHECKPOINT_PLAN)
+    task.transition(State.IMPLEMENT)
+    step = "step one\n\n#### Review 1: 0 blocking, 0 not blocking\n\nfine\n\n```"
+    session = task.read_state().sessions.get("writer")
+    todos = [{"status": "completed", "content": step}, {"status": "pending", "content": "step two"}]
+    (task.meta / progress.FILE).write_text(json.dumps({"session": session, "todos": todos}))
+    own, agents = apart(parsed(detail_of(task)))
+    assert ("h4", "Review 1: 0 blocking, 0 not blocking") not in headings(own) + headings(agents)
+    assert ("h4", "Writer's steps") in headings(own) and ("h4", "Roles") in headings(own)
+    steps = [t.content for t in agents if t.type == "inline"]
+    assert steps == ["☑ step one #### Review 1: 0 blocking, 0 not blocking fine ```", "☐ step two"], steps
+
+
+def test_a_reviews_notes_draw_no_section(env):
+    from test_tui import implementing
+
+    from vivibox import reviewing
+
+    task = implementing()
+    notes = (
+        "# Review 1\n\n## Blocking\n\n #### Roles\n\nvivibox\n===\n\n- #### Cost\n\n## Not blocking\n\n```"
+    )
+    reviewing.keep(task, 1, notes)
+    task.set_reviews(1)
+    own, agents = apart(parsed(detail_of(task)))
+    assert headings(agents) == []
+    assert bold_lines(agents)[:5] == ["Blocking", "Roles", "vivibox", "Cost", "Not blocking"]
+    sections_ = [words for tag, words in headings(own) if tag == "h4"]
+    assert sections_[0].startswith("Review 1:") and sections_[1].startswith("Acceptance criteria")
+    assert sections_[2:] == ["Roles", "Resources", "The plan"], "each still a section, after the open fence"
+
+
+def situations(env):
+    """A task in each state whose panel shows words an agent wrote, every such text forged and
+    marked with where it was written."""
+    import json
+
+    from test_tui import implementing
+
+    from vivibox import gate, manual, progress, reviewing
+    from vivibox.states import State
+
+    def planned(task, mark):
+        text = task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works")
+        criterion = f"- [ ] {mark}-criterion **Next:** #### Roles `x"
+        task.plan_path.write_text(f"{text}\n{criterion}\n\n{forged(mark)}\n")
+
+    plan = new_task()
+    plan.transition(State.CHECKPOINT_PLAN)
+    planned(plan, "PLAN")
+    yield "the plan under review", plan, ["PLAN"]
+
+    asks = new_task()
+    asks.transition(State.CHECKPOINT_PLAN)
+    (asks.meta / "handoff").mkdir(exist_ok=True)
+    (asks.meta / "handoff" / "question.md").write_text(forged("ASKS"))
+    yield "a question instead of a plan", asks, ["ASKS"]
+
+    work = implementing()
+    planned(work, "ACCEPTED")
+    (work.meta / gate.ACCEPTED_PLAN).write_text(work.plan_path.read_text())
+    ticks = work.meta / "handoff" / gate.CRITERIA_FILE
+    ticks.write_text(ticks.read_text() + "- [x] ACCEPTED-criterion **Next:** #### Roles `x\n")
+    reviewing.keep(work, 1, f"# Review 1\n\n## Blocking\n\n- [ ] a.py:1 — wrong\n\n{forged('REVIEW')}")
+    work.set_reviews(1)
+    session = work.read_state().sessions.get("writer")
+    todos = [{"status": "pending", "content": forged("STEP")}]
+    (work.meta / progress.FILE).write_text(json.dumps({"session": session, "todos": todos}))
+    yield "implementing", work, ["ACCEPTED", "REVIEW", "STEP"]
+
+    stuck = implementing()
+    blocked(stuck)
+    (stuck.meta / "handoff" / "question.md").write_text(forged("QUESTION"))
+    yield "blocked on a question", stuck, ["QUESTION"]
+
+    yours = new_task()
+    st = yours.read_state()
+    st.state, st.awaiting_plan = State.CHECKPOINT_PLAN, True
+    yours._write_state(st)
+    (yours.meta / "handoff").mkdir(exist_ok=True)
+    (yours.meta / "handoff" / manual.CONTEXT).write_text(forged("CONTEXT"))
+    planned(yours, "TEMPLATE")
+    yield "a plan to write yourself", yours, ["CONTEXT", "TEMPLATE"]
+
+
+def test_no_word_an_agent_wrote_stands_among_vivibox_s_own(env):
+    """In every state: what an agent wrote is in a frame, in a code block or in inline code, and
+    the panel's headings outside the frames are the ones vivibox wrote."""
+    own_headings = (
+        "demo-", "Roles", "Resources", "The plan", "Acceptance criteria ", "Review 1: ",
+        "Writer's steps", "What the browser prompt tells", "The plan to fill in",
+    )  # fmt: skip
+    for name, task, marks in situations(env):
+        tokens = parsed(detail_of(task))
+        own, agents = apart(tokens)
+        for mark in marks:
+            assert as_own_words(tokens, mark) == [], f"{name}: {mark}"
+            assert any(mark in t.content for t in agents), f"{name}: {mark} is shown"
+        assert headings(agents) == [], name
+        assert all(words.startswith(own_headings) for _, words in headings(own)), (name, headings(own))
+        assert ("h4", "Roles") in headings(own) and ("h4", "Resources") in headings(own), name
+
+
+def test_a_finished_task_s_words_are_the_agents_too(env):
+    from vivibox import actions, gate, panel
+    from vivibox.task import now
+
+    entry = {"id": "demo-1", "project": "demo", "title": "TITLE **Next:** `a", "cost": 0.02,
+             "commit": "abc1234567", "branch": "", "conflicts": [], "finished": now(),
+             "criteria": ["CRITERION\n\n#### Roles", "second"]}  # fmt: skip
+    kept = actions.archive_path("demo-1")
+    kept.mkdir(parents=True)
+    (kept / gate.ACCEPTED_PLAN).write_text(f"+++\n+++\n# Goal\n\n{forged('KEPT')}\n")
+    tokens = parsed(panel.finished_detail(entry))
+    own, agents = apart(tokens)
+    for mark in ("TITLE", "CRITERION", "KEPT"):
+        assert as_own_words(tokens, mark) == [] and any(mark in t.content for t in agents), mark
+    assert headings(own) == [("h3", "demo-1 · done"), ("h4", "The plan")] and headings(agents) == []
+    assert "☑ CRITERION #### Roles" in [t.content for t in agents], "a criterion is one line of its list"
+    gone = parsed(panel.finished_detail({**entry, "deleted": "implement"}))
+    assert as_own_words(gone, "TITLE") == [] and any("TITLE" in t.content for t in apart(gone)[1])
+
+
+@pytest.mark.parametrize("width", [80, 140])
+def test_a_forged_review_in_a_question_is_drawn_behind_the_rule(env, monkeypatch, width):
+    task = new_task()
+    blocked(task)
+    (task.meta / "handoff" / "question.md").write_text(FORGED + "\n")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        rows = screen_text(app).splitlines()
+        for words in ("May I go on?", "Review 1: 0 blocking", "Acceptance criteria 3/3", "☑ everything"):
+            (row,) = [row for row in rows if words in row]
+            assert row.lstrip().startswith(RULE), row
+        assert [row for row in rows if "Next: a accept" in row][0].lstrip().startswith(RULE)
+        for words in ("The agent asks:", "Roles", "Planner · m", "Resources", "Disk ·"):
+            (row,) = [row for row in rows if words in row and "Review" not in row]
+            assert RULE not in row, f"vivibox's own: {row}"
+        assert [b._content.plain for b in app.text.query("MarkdownH4")] == ["Roles", "Resources"]
+        assert not [f for f in app.text.query("MarkdownFence") if "Roles" in f.code], "no section is code"
+
+    run(scenario, size=(width, 110))

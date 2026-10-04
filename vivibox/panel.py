@@ -30,7 +30,7 @@ from . import (
 from . import pod as pod_module
 from .handoff import for_you, refused
 from .handoff import read_text as read_handoff
-from .markdown import own_link
+from .markdown import listed, own_link, prose
 from .panels import deleted_detail as deleted_detail
 from .panels import edit_in_editor as edit_in_editor
 from .panels import finished_detail as finished_detail
@@ -379,7 +379,14 @@ def agents_question(task: Task, heading: str) -> list[str]:
     text, why = supervisor.read_question(task)
     if why:
         return [f"**{supervisor.QUESTION_NOT_READ}:** {why}.", "", "Answering moves the file out of the way."]
-    return [heading, "", text] if text else []
+    return [heading, "", prose(text)] if text else []
+
+
+def told(path: Path) -> str:
+    """A file an agent wrote for you to read, as the agent's words (prose); why vivibox did not
+    read it, in vivibox's own; "" for none."""
+    text, why = for_you(path)
+    return why or prose(text)
 
 
 def handed(path: Path) -> str:
@@ -571,7 +578,7 @@ def detail(
             # before it goes to another provider. The CLI prompt carries none of it.
             "#### What the browser prompt tells the chat about the repository",
             "",
-            for_you(handoff / manual.CONTEXT) or "Nothing: this is a new project.",
+            told(handoff / manual.CONTEXT) or "Nothing: this is a new project.",
             "",
             "#### The plan to fill in",
             "",
@@ -662,7 +669,7 @@ def detail(
             "",
             "Its working list; acceptance criteria are listed separately.",
             "",
-            *(f"- {marks[t['status']]} {t['content']}" for t in todos),
+            listed(f"{marks[t['status']]} {t['content']}" for t in todos),
         ]
     # The same sections in the same order in every state: the plan under review is the body.
     if not st.box and st.state not in (State.PLAN, State.CHECKPOINT_PLAN):

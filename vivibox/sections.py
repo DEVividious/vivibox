@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from . import display, gate, handoff, orchestration, reviewing, ui
 from .config import ConfigError, load_config
-from .markdown import prose
+from .markdown import listed, prose
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .roles import role_of
@@ -39,7 +39,7 @@ def checklist(task: Task) -> list[str]:
         missing = set(gate.missing_criteria(task))
     except (OSError, PlanError, gate.GateError):
         return []
-    return [f"- {'☐' if text in missing else '☑'} {text}" for text in wanted]
+    return [f"{'☐' if text in missing else '☑'} {text}" for text in wanted]
 
 
 def read(path) -> str:
@@ -92,13 +92,13 @@ def reviewers_notes(task: Task) -> list[str]:
         line for line in text.rstrip().splitlines() if not re.fullmatch(r"#+\s*Review\s+\d+\s*", line)
     )
     if problem := reviewing.unreadable(task, int(n)):  # no counts: they would read as a clean review
-        rest = [] if kept.strip() == problem else ["", demoted(kept.strip())]
+        rest = [] if kept.strip() == problem else ["", prose(kept.strip())]
         return ["", f"#### Review {n}: unreadable", "", problem, *rest]
     return [
         "",
         f"#### Review {n}: {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",
         "",
-        demoted(kept.strip()),
+        prose(kept.strip()),
     ]
 
 
@@ -114,7 +114,7 @@ def criteria_section(task: Task) -> list[str]:
         "",
         "As the agent reports them.",
         "",
-        *items,
+        listed(items),
     ]
 
 
@@ -230,13 +230,6 @@ def cost_section(task: Task, st: TaskState) -> list[str]:
     ]
 
 
-def demoted(text: str) -> str:
-    """Markdown whose headings would stand larger than the panel's own: bold lines instead."""
-    return "\n".join(
-        f"**{line.lstrip('#').strip()}**" if line.startswith("#") else line for line in text.splitlines()
-    )
-
-
 def plan_text(text: str, criteria: bool = True) -> str:
     """A plan as the panel shows it: the part that concerns you, as the agent's words it is
     (prose), and, once the criteria have a section of their own, without them."""
@@ -248,5 +241,5 @@ def plan_text(text: str, criteria: bool = True) -> str:
 
 def plan_section(task: Task) -> list[str]:
     """The accepted plan, last: what the task is held to, once it is no longer the decision."""
-    text = read(task.meta / gate.ACCEPTED_PLAN)
-    return ["", "#### The plan", "", plan_text(text, criteria=False)] if text else []
+    shown = plan_text(read(task.meta / gate.ACCEPTED_PLAN), criteria=False)
+    return ["", "#### The plan", "", shown] if shown else []

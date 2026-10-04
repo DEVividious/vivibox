@@ -210,15 +210,16 @@ def read_or_nothing(path: Path) -> str:
         return ""
 
 
-def for_you(path: Path) -> str:
-    """The file's text for you to read, stripped; why vivibox did not read it, when it is a link or
-    a special file; "" when there is none."""
+def for_you(path: Path) -> tuple[str, str]:
+    """The file's text for you to read, stripped, and ""; or "" and why vivibox did not read it,
+    when it is a link or a special file: the agent's words and vivibox's own are never one
+    string. "" twice when there is none."""
     try:
-        return read_text(path).strip()
+        return read_text(path).strip(), ""
     except HandoffError as e:
-        return str(e)
+        return "", str(e)
     except OSError:
-        return ""
+        return "", ""
 
 
 def refused(folder: Path, *names: str) -> str:

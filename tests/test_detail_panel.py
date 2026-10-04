@@ -110,9 +110,10 @@ def test_the_reviews_own_headings_stay_under_its_section(env):
     reviewing.keep(task, 1, "# Review 1\n\n## Blocking\n\n- [ ] a.py:1 — wrong\n\n## Not blocking\n")
     task.set_reviews(1)
     shown = detail(task, task.read_state(), 3, running=True)
-    section = shown[shown.index("#### Review 1") :]
-    assert "**Blocking**" in section and "**Not blocking**" in section
-    assert "\n## " not in section.split("#### Acceptance criteria")[0]
+    section = shown[shown.index("#### Review 1") :].split("#### Acceptance criteria")[0]
+    own, agents = apart(parsed(section))
+    assert bold_lines(agents) == ["Blocking", "Not blocking"] and not headings(agents)
+    assert headings(own) == [("h4", "Review 1: 1 blocking, 0 not blocking")]
     assert "# Review 1" not in section.replace("#### Review 1", ""), "the heading says it already"
 
 

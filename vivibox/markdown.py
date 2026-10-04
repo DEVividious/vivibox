@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from collections.abc import Iterable
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
@@ -65,6 +66,13 @@ def prose(text: str) -> str:
     a rule that vivibox's own lines never have. Nothing for no text."""
     text = text.replace(_OPEN, "").replace(_CLOSE, "")  # a piece within a piece is one piece
     return f"{_OPEN}\n{text}\n{_CLOSE}" if text.strip() else ""
+
+
+def listed(items: Iterable[str]) -> str:
+    """A list whose items are an agent's words (criteria, the steps of its working list), as one
+    piece: each item on a line of its own, whatever line breaks it held, so an item is one item
+    of the list and never a block after it."""
+    return prose("\n".join(f"- {' '.join(item.split())}" for item in items))
 
 
 def own_link(label: str, url: str) -> str:

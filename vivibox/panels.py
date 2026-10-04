@@ -14,6 +14,7 @@ from pathlib import Path
 from . import actions, display, gate, ui
 from .app_support import in_terminal
 from .config import ConfigError, config_dir, load_project
+from .markdown import listed, prose
 from .plan import body as plan_body
 
 
@@ -101,7 +102,7 @@ def deleted_detail(entry: dict) -> str:
             "",
             f"*{entry['project']} · {ui.ago(entry['finished'])} · {ui.finished_cost(entry)}*",
             "",
-            entry["title"],
+            prose(entry["title"]),
             "",
             f"Deleted{f' {when}' if when else ''}; its files and its work went with it.",
             "",
@@ -124,14 +125,14 @@ def finished_detail(entry: dict) -> str:
     # Tasks accepted before criteria were kept have none; say so rather than show an empty list.
     met = entry.get("criteria")
     delivered = (
-        ["**It was accepted as meeting:**", "", *(f"- ☑ {text}" for text in met), ""]
+        ["**It was accepted as meeting:**", "", listed(f"☑ {text}" for text in met), ""]
         if met
         else ["*Its criteria were not recorded; it finished before vivibox kept them.*", ""]
     )
     kept = actions.archive_path(entry["id"])
-    plan = read(kept / gate.ACCEPTED_PLAN) or read(kept / "plan.md")
+    plan = prose(plan_body(read(kept / gate.ACCEPTED_PLAN) or read(kept / "plan.md")))
     archived = (
-        [f"Its plan, its events and its logs are kept in `{kept}`.", "", "#### The plan", "", plan_body(plan)]
+        [f"Its plan, its events and its logs are kept in `{kept}`.", "", "#### The plan", "", plan]
         if plan
         else []
     )
@@ -141,7 +142,7 @@ def finished_detail(entry: dict) -> str:
             "",
             f"*{entry['project']} · {ui.ago(entry['finished'])} · {ui.finished_cost(entry)}*",
             "",
-            entry["title"],
+            prose(entry["title"]),
             "",
             f"Its work is {where}, from commit `{entry['commit']}`.",
             "",

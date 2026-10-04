@@ -162,6 +162,75 @@ def test_what_a_tool_said_on_stderr_becomes_an_error_through_display_said():
     assert raw_stderr_sites() == RAW_STDERR, "a tool's stderr goes into a message through display.said"
 
 
+# The modules that put the details panel's text together.
+PANEL_MODULES = ("panel.py", "panels.py", "sections.py", "panel_resources.py")
+# What reads a file an agent may have written, by the name it is called by there.
+READERS = {"read", "handed", "read_handoff", "read_text", "read_question", "for_you"}
+# Where what was read cannot pass for vivibox's own words: the one function for an agent's prose
+# and those that end in it, a code block, inline code, and a parser that takes values out of it.
+KEPT_APART = {"prose", "listed", "plan_text", "told", "fenced", "code", "parse_plan", "parse_review"}
+# The reads that stand outside such a call, and where each one's text goes.
+READS_ACCOUNTED_FOR = {
+    "panel.py": [
+        "for_you(path)",  # told: its text to prose, vivibox's reason beside it and never in it
+        "handed(handoff / 'verify-feedback.md')",  # asked only whether it quotes the log itself
+        "handed(handoff / 'verify-feedback.md')",  # into display.fenced, two lines below
+        "handed(log)",  # build_said: gate.log_excerpt of it, into display.fenced
+        "progress.read(task)",  # the writer's steps, into markdown.listed
+        "read(log)",  # the verification's log: its commands into display.code, its tail fenced
+        "read_handoff(path)",  # handed's own body
+        "supervisor.read_question(task)",  # agents_question: its text to prose, the reason apart
+    ],
+    "panels.py": [
+        "path.read_text()",  # read's own body
+        "view_state_path().read_text()",  # view.json, which vivibox writes: never drawn
+    ],
+    "sections.py": [
+        "handoff.read_text(path)",  # the review: counted by parse_review, its notes to prose
+        "path.read_text()",  # read's own body
+    ],
+}
+
+
+def reads_outside() -> dict[str, list[str]]:
+    """Every call of a reader in the panel's modules that is not within the arguments of a call
+    that keeps its text apart, by module, as the call is written."""
+
+    def called(call: ast.Call) -> str:
+        func = call.func
+        return func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+
+    found = {}
+    for module in PANEL_MODULES:
+        calls = [
+            n for n in ast.walk(ast.parse((ROOT / "vivibox" / module).read_text())) if isinstance(n, ast.Call)
+        ]
+        apart = {
+            id(inner)
+            for call in calls
+            if called(call) in KEPT_APART
+            for argument in [*call.args, *call.keywords]
+            for inner in ast.walk(argument)
+        }
+        if reads := sorted(ast.unparse(c) for c in calls if called(c) in READERS and id(c) not in apart):
+            found[module] = reads
+    return found
+
+
+def test_what_an_agent_wrote_goes_into_the_panel_through_one_function():
+    """A file an agent may have written is read, in the modules that build the panel's text,
+    within a call that keeps its words apart from vivibox's own: markdown.prose (or listed,
+    plan_text, told, which end in it), a code block, inline code. Text joined into the panel's
+    lines any other way is read with vivibox's own, where a heading in it is a section and an
+    open fence takes the sections after it. The reads outside such a call are listed above, each
+    with where its text goes, so one more is a failure until it goes through prose or is
+    accounted for. What this cannot see: a read in another module that these call by another
+    name, and text that comes from the task's state or its events; for those,
+    tests/test_agent_prose.py marks every text an agent writes and looks for the marks among
+    vivibox's own words."""
+    assert reads_outside() == READS_ACCOUNTED_FOR, "an agent's words go into the panel through markdown.prose"
+
+
 def sites(pattern: re.Pattern) -> dict[str, int]:
     package = ROOT / "vivibox"
     return {

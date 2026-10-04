@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import clone_read, handoff, init, repo, toolchain, unanswered
+from . import clone_read, display, handoff, init, repo, toolchain, unanswered
 from .plan import CRITERIA_HEADING, HEADING, Plan, checkboxes, parse_plan
 from .pod import Pod
 from .risky import Approvals, Change
@@ -47,7 +47,7 @@ ACCEPTED_PLAN = "plan.accepted.md"
 CRITERIA_FILE = "criteria.md"
 PLACEHOLDER = "Replace with an observable outcome you can check"
 MAX_SUBJECT = 72
-HIDDEN = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
+HIDDEN = display.HIDDEN  # refused in a line the work adds; the list is beside what is shown escaped
 AI_MARKERS = re.compile(r"co-authored-by|generated (with|by)|\bai[- ]generated\b|🤖", re.IGNORECASE)
 # A commit about the task's own files, not the code: "Record test red evidence", "Tick criteria".
 # These files never reach the project's history, so a message about them says nothing there.

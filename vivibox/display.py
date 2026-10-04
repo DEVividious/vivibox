@@ -23,6 +23,26 @@ OPEN, CLOSE = "‹", "›"
 # embeddings, overrides and isolates, zero-width characters, the BOM, tags), surrogates, private use,
 # unassigned code points, the line and paragraph separators, and every space but the ASCII one.
 INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"})
+# With nothing to see though their category says letter, mark or symbol: what Unicode calls
+# default ignorable outside the categories above (the grapheme joiner, the Hangul fillers, the
+# Khmer inherent vowels, the Mongolian and the general variation selectors) and the blank
+# braille pattern.
+UNSEEN = re.compile(
+    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180d\u180f\u2800\u3164\ufe00-\ufe0f\uffa0\U000e0100-\U000e01ef]"
+)
+# What the verification refuses in a line the work adds (gate.hidden_characters), kept beside
+# what is shown escaped, so that the two are decided together and every character refused is
+# one shown: the zero-width and bidi format characters and the tags, and of UNSEEN those that
+# make a name read as another while no ordinary text has them: the Hangul fillers (letters, so
+# a name of their own: the invisible variable) and the grapheme joiner. Not the variation
+# selectors nor the blank braille pattern: an emoji in a project's own text carries U+FE0F and
+# a spinner's frames U+2800, and work is not refused for those; they are shown, never refused.
+HIDDEN = re.compile(
+    "[\u034f\u115f\u1160\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u3164\ufeff\uffa0"
+    "\U000e0000-\U000e007f]"
+)
+# The selectors of a character's text and emoji form, and what ends a keycap (1, U+FE0F, U+20E3).
+EMOJI_SELECTORS, KEYCAP = "\ufe0e\ufe0f", "\u20e3"
 NO_NEWLINE = "\\ No newline at end of file"
 # Printable ASCII never needs a look; anything else (‹ and › among it) is looked up.
 _LOOK = re.compile(r"[^\x20-\x7e]")
@@ -32,14 +52,30 @@ def code_point(c: str) -> str:
     return f"{OPEN}U+{ord(c):04X}{CLOSE}"
 
 
-def _escape(text: str, keep: str = "", markers: bool = True) -> str:
+def _selects(text: str, at: int) -> bool:
+    """Whether the selector at text[at] has something to see: after a symbol outside ASCII it
+    picks that character's text or emoji form, and between a digit, # or * and U+20E3 it makes
+    a keycap. After anything else, a second one in a row among it, it is drawn as nothing."""
+    before = text[at - 1 : at]
+    if before and before in "0123456789#*":
+        return text[at + 1 : at + 2] == KEYCAP
+    return bool(before) and ord(before) > 0x7F and unicodedata.category(before) in ("So", "Sm")
+
+
+def _escape(text: str, keep: str = "", prose: bool = False) -> str:
+    """prose: text put on the screen whole, where ‹ and › stay (what name or content escaped is
+    not escaped twice) and so does the selector of an emoji; in a name or a line of a file
+    every one of them is shown, as the name with it is another name."""
+
     def one(m: re.Match) -> str:
         c = m.group()
         if c in keep:
             return c
         if c in (OPEN, CLOSE):
-            return code_point(c) if markers else c
-        return code_point(c) if unicodedata.category(c) in INVISIBLE else c
+            return c if prose else code_point(c)
+        if prose and c in EMOJI_SELECTORS and _selects(m.string, m.start()):
+            return c
+        return code_point(c) if unicodedata.category(c) in INVISIBLE or UNSEEN.match(c) else c
 
     return _LOOK.sub(one, text)
 
@@ -89,8 +125,9 @@ def terminal(text: str, keep: str = "\n\t") -> str:
     """Text vivibox puts on the screen whole (the details panel's markdown, what the agent wrote
     in the list or a notification): every invisible character but those kept (a line break and a
     tab; none in a row of a list) as its code point, so none reaches the terminal as itself.
-    ‹ and › stay: what was escaped already (name, content) is not escaped twice."""
-    return _escape(text, keep, markers=False)
+    ‹ and › stay: what was escaped already (name, content) is not escaped twice. So does the
+    selector of an emoji (U+FE0F after a symbol, or in a keycap), which has something to see."""
+    return _escape(text, keep, prose=True)
 
 
 def own_folder() -> Path:

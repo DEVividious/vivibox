@@ -401,3 +401,77 @@ def test_no_code_block_of_the_panel_is_fenced_by_hand():
         if fenced := [text for text in texts if "```" in text]:
             found[name] = fenced
     assert found == {"panel.py": ["```"]}, "only the question whether the feedback quotes the log itself"
+
+
+# --- characters with nothing to see ---------------------------------------------------------------
+
+# Nothing to see, though their category says letter, mark or symbol: the Hangul fillers, the
+# grapheme joiner, the variation selectors, the blank braille pattern, and the rest of what
+# Unicode calls default ignorable outside the control and format categories.
+FILLERS = "\u115f\u1160\u3164\uffa0"
+JOINER = "\u034f"
+SELECTORS = "".join(
+    map(chr, [*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0), 0x180B, 0x180C, 0x180D, 0x180F])
+)
+UNSEEN = FILLERS + JOINER + SELECTORS + "\u2800\u17b4\u17b5"
+
+
+def test_a_name_and_a_line_show_every_character_with_nothing_to_see_as_its_code_point():
+    from vivibox import display
+
+    for c in UNSEEN:
+        assert display.name(f"a{c}b") == f"a{display.code_point(c)}b", f"U+{ord(c):04X}"
+        assert display.content(f"a{c}b\n") == f"a{display.code_point(c)}b\n", f"U+{ord(c):04X}"
+        assert display.said(f"a{c}b") == f"a{display.code_point(c)}b"
+    # An emoji in a name is the two characters it is: the name with the selector is another name.
+    assert display.name("⚠\ufe0f.gradle") == "⚠‹U+FE0F›.gradle"
+    assert (
+        display.content("def \u3164 = 1; if (admin\u3164) {\n") == "def ‹U+3164› = 1; if (admin‹U+3164›) {\n"
+    )
+
+
+def test_prose_shows_them_too_but_for_the_selector_of_an_emoji():
+    """In what is put on the screen whole (a plan, a goal, a notification) U+FE0E and U+FE0F stay
+    where they have something to see: after a symbol, whose text or emoji form they pick, and in
+    a keycap. Anywhere else they are as hidden as the rest."""
+    from vivibox import display
+
+    for c in UNSEEN:
+        assert display.terminal(f"a{c}b") == f"a{display.code_point(c)}b", f"U+{ord(c):04X}"
+    emoji = "⚠\ufe0f careful ✔\ufe0f done ↔\ufe0e 1\ufe0f\u20e3 #\ufe0f\u20e3 \U0001f3f3\ufe0f"
+    assert display.terminal(emoji) == emoji, "an ordinary plan reads as it did"
+    assert display.terminal("./gradlew\ufe0f build") == "./gradlew‹U+FE0F› build", "after a letter: hidden"
+    assert display.terminal("run1\ufe0f") == "run1‹U+FE0F›", "a digit with no keycap after it"
+    assert display.terminal("\ufe0fx") == "‹U+FE0F›x" and display.terminal("a \ufe0f") == "a ‹U+FE0F›"
+    assert display.terminal("⚠\ufe0f\ufe0f") == "⚠\ufe0f‹U+FE0F›", "one selector, not a run"
+    assert display.terminal("⚠\ufe00") == "⚠‹U+FE00›", "the selectors of emoji alone"
+    # Escaped once already as a name, nothing changes: the selector follows › there.
+    assert display.terminal(display.name("⚠\ufe0f")) == "⚠‹U+FE0F›"
+
+
+def test_the_verification_refuses_what_makes_a_name_read_the_same_and_not_an_emoji():
+    """The invisible variable (a Hangul filler is a letter, so a name of its own) and the grapheme
+    joiner within a name are refused in a line the work adds; a variation selector and the blank
+    braille pattern are not: an emoji in a project's own text carries U+FE0F, and a spinner's
+    frames U+2800."""
+    from vivibox import display, gate
+
+    for c in FILLERS + JOINER:
+        assert gate._hidden_in("Main.java", 2, f"if (admin{c}) {{") == [f"Main.java:2 U+{ord(c):04X}"]
+    for c in SELECTORS + "\u2800\u17b4\u17b5":
+        assert gate._hidden_in("README.md", 1, f"⚠{c} see the notes") == [], f"U+{ord(c):04X}"
+    assert gate.HIDDEN is display.HIDDEN, "one list, beside what is shown escaped"
+    every = [chr(c) for c in range(0x110000) if gate.HIDDEN.fullmatch(chr(c))]
+    assert all(display.name(c) == display.code_point(c) for c in every), "refused, so shown"
+
+
+def test_the_panel_draws_no_character_with_nothing_to_see_from_a_plan(env, monkeypatch):
+    task = new_task()
+    plan_with(task, "a\u3164b ⚠\ufe0f c\ufe0fd e\u034ff \u2800g")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        assert "a‹U+3164›b ⚠\ufe0f c‹U+FE0F›d e‹U+034F›f ‹U+2800›g" in drawn(app)
+
+    run(scenario, size=(140, 60))

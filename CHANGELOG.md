@@ -47,6 +47,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The verification refuses, in a line the work adds, the Hangul fillers (U+115F, U+1160,
+  U+3164, U+FFA0: letters drawn as nothing, so a name of their own nobody sees) and the
+  combining grapheme joiner (U+034F), as it does zero-width and bidi characters. A variation
+  selector (the U+FE0F of an emoji) and the blank braille pattern (U+2800) are not refused.
 - A link in text an agent wrote (a plan, a question, a review's notes, a criterion) is no
   longer a link in the details panel: it is shown as its label, then the address it leads to,
   whole, in parentheses (`the docs (https://example.org/x)`), the address alone when the label
@@ -255,6 +259,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- More characters with nothing to see are shown as their code points wherever a name, a line
+  of a file or a tool's words are shown: the Hangul fillers, the variation selectors (U+FE00
+  to U+FE0F, U+E0100 to U+E01EF, the Mongolian ones), the combining grapheme joiner, the Khmer
+  inherent vowels and the blank braille pattern (U+2800). In text shown whole (a plan, a goal,
+  a notification) the same, but for the selector of an emoji (`⚠` with U+FE0F, a keycap), which
+  stays where it follows a symbol.
 - A project's panel shows its settings as one code block whatever they hold: a line of three
   backticks in them (in a command kept from a task, say) closed the block, and the rest was
   read as markdown.

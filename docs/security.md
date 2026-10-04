@@ -255,10 +255,15 @@ approve risky files and run the review copy in your IDE, that code runs with you
 
 The agent chooses file names and what the files say. Wherever vivibox shows them to you (the
 risky files' diffs, `vivibox risky`, the details panel, the messages that name a file), a
-control or invisible character (ESC, a carriage return, a bidi override, a zero-width space) is
+control or invisible character (ESC, a carriage return, a bidi override, a zero-width space, a
+Hangul filler, a variation selector, the blank braille pattern) is
 shown as its code point, `‹U+001B›`, and `‹` and `›` themselves the same way, so no line is
 hidden from you and no text is drawn that the file does not hold. What you approve is still the
-file's bytes, not what is shown.
+file's bytes, not what is shown. In prose shown whole (a plan, a goal) the selector of an emoji
+stays where it follows a symbol; in a name or a line of a file it is shown like the rest. Of
+these characters the verification refuses, in a line the work adds, those that make a name read
+as another and that no ordinary text has: the zero-width and bidi characters, the tags, the
+Hangul fillers and the combining grapheme joiner; not an emoji's selector.
 
 What an agent writes for you to read (a plan, a question, a review's notes) keeps its headings,
 lists and emphasis in the details panel, and makes no link there. A link in it, however it is

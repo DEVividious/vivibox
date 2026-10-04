@@ -599,3 +599,49 @@ def test_a_dialog_s_title_and_its_button_are_text(env):
         assert f"Model for {odd}" in screen_text(app)
 
     run(scenario, size=(160, 50))
+
+
+# --- vivibox risky --------------------------------------------------------------------------------
+
+
+def test_vivibox_risky_names_every_kind_of_change_escaped(env, capsys):
+    """An added, a removed, an empty and a binary file, a link out of the repository and a folder,
+    each with a name or a target of control characters, markup and backticks: one line each on
+    the command line, and a block each in the panel that the name does not close."""
+    import os
+
+    from test_display import at_approval, risky_section
+
+    from vivibox import actions
+    from vivibox.cli import main
+    from vivibox.risky import Approvals
+
+    name = f"x\x1b[2K\ry{BIDI}[bold]`z```"
+    shown = "x‹U+001B›[2K‹U+000D›y‹U+202E›[bold]`z```"
+    task = new_task()
+    (task.repo / name).mkdir()
+    (task.repo / name / "build.gradle").write_text("x\x1b\n")
+    (task.repo / "pom.xml").write_text("old\n")
+    Approvals(task.meta, task.repo).approve()
+    (task.repo / "pom.xml").unlink()
+    (task.repo / name / "build.gradle").unlink()
+    (task.repo / f"{name}.gradle").write_text("")
+    (task.repo / "bin.gradle").write_bytes(b"\x00\x01\xff\x1b[2K")
+    os.symlink(f"/etc/{name}", task.repo / "build.gradle")
+    capsys.readouterr()
+    assert main(["risky", task.id]) == 0
+    said = capsys.readouterr().out
+    assert not hidden(said), repr(said)
+    for line in (
+        f"{shown}/build.gradle: removed",
+        f"{shown}.gradle: added (empty)",
+        "pom.xml: removed",
+        "bin.gradle: added: not shown: it is not text",
+        f"a link that leads out of the repository (/etc/{shown})",
+    ):
+        assert line in said, line
+    at_approval(task)
+    panel_text = risky_section(task)
+    blocks = fences(panel_text)
+    assert len(blocks) == len(actions.risky_diffs(task, actions.load(task.id)[1])) == 5, panel_text
+    assert not hidden(panel_text) and sum(shown in block for block in blocks) == 3

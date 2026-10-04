@@ -81,9 +81,10 @@ def committed(task, said: str = "Move the library") -> str:
     return git(task.repo, "rev-parse", "HEAD")
 
 
-def at_final(task, project, risky: bool = False) -> None:
+def at_final(task, project, risky: bool = False, reviewed: bool = True) -> None:
     """The task as it waits for you with its work: its pointers committed, verified as far as
-    this goes, its risky files approved by you when it changed any, the review copy made."""
+    this goes, its risky files approved by you when it changed any, the review copy made
+    (reviewed), which brings its work to your repository under refs/vivibox/<id>."""
     if git(task.repo, "status", "--porcelain"):
         committed(task)
     if task.read_state().box:
@@ -95,7 +96,8 @@ def at_final(task, project, risky: bool = False) -> None:
         task.transition(state)
     if risky:
         actions.approve_risky(task, project.demo)
-    actions.prepare_review(task, project.demo)
+    if reviewed:
+        actions.prepare_review(task, project.demo)
 
 
 def everything(task, project) -> dict:
@@ -451,6 +453,38 @@ def test_an_address_vivibox_puts_in_no_command_is_shown_whole_as_text(project, w
     assert "…" not in said and "..." not in said and "\x1b" not in said
     if shown:
         assert f"«{shown}»" in told
+
+
+def test_a_refused_accept_takes_back_the_ref_it_brought_and_no_other(project):
+    """Accepting brings the work to your repository, under refs/vivibox/<id>, before it checks
+    it. Where no review copy had brought it (the ref was not there), a refusal takes the ref
+    back: your refs are as they were, however often you try. The ref of another task stays,
+    and so does one that was there before the attempt. The refs you made in your submodules
+    with the refusal's commands (refs/vivibox/<id>/<commit>) are yours: never deleted."""
+    source = project.source
+    other = actions.create("demo", "Another task")
+    written_in(other.repo / "tools")
+    at_final(other, project)
+    task = actions.create("demo", "Goal")
+    commit, _ = written_in(task.repo / "lib"), written_in(task.repo / "tools")
+    at_final(task, project, reviewed=False)
+    before = git(source, "for-each-ref")
+    assert f"refs/vivibox/{other.id}" in before and f"refs/vivibox/{task.id}" not in before
+    with pytest.raises(submodules.Unkept) as said:
+        actions.finish(task, project.demo)
+    assert git(source, "for-each-ref") == before, "the refusal left a ref it brought"
+    as_told(commands(said.value.whole)[1])  # lib's commit, kept under a ref of yours; tools is left
+    kept = git(source / "lib", "for-each-ref", f"refs/vivibox/{task.id}")
+    assert commit in kept
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert git(source, "for-each-ref") == before and git(source / "lib", "for-each-ref").count(kept) == 1
+    actions.prepare_review(task, project.demo)
+    reviewed = git(source, "for-each-ref")
+    assert f"refs/vivibox/{task.id}" in reviewed
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert git(source, "for-each-ref") == reviewed, "a ref that was there before the attempt stays"
 
 
 def test_a_submodule_of_a_submodule_is_checked_once_you_keep_the_commit_above_it(project):

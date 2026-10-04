@@ -265,13 +265,24 @@ def finish(
             f"{copy} has changes you made ({', '.join(changed[:3])}); ask the agent with a reply "
             "or discard them"
         )
+    ref = ("rev-parse", "--verify", "--quiet", repo.review_ref(task.id))
+    there = repo.git(*ref, cwd=project.repo, check=False).returncode == 0  # before this attempt
     commit = fetch_work(task, project)
     st = task.read_state()
     # Before anything of the accepting is done: the task goes with it, and its clone may hold the
     # only copy of a submodule commit the work keeps. A branch keeps every commit of the work,
     # and one is made of work that conflicts, which it can only where your branch has moved.
     moved = repo.git("rev-parse", "HEAD", cwd=project.repo).stdout.strip() != st.base_commit
-    submodules.check(task.id, project.repo, task.repo, st.base_commit, commit, history=branch_only or moved)
+    try:
+        submodules.check(
+            task.id, project.repo, task.repo, st.base_commit, commit, history=branch_only or moved
+        )
+    except submodules.Unkept:
+        # Refused: your refs are as they were. The ref this attempt brought the work under goes;
+        # one that was there before it (the review copy's) stays, as it stays for the task.
+        if not there:
+            repo.drop_review_ref(project.repo, task.id)
+        raise
     cli_usage.count(task, "conversation")
     spent = ui.cost(task)
     criteria = accepted_criteria(task)

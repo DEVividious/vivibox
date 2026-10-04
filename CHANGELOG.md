@@ -577,6 +577,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   is refused as what vivibox could not check: with the fetch that brings the commit the task
   started from, where your submodule lacks it, or the git that says why; so is one not read
   within the check's time.
+- A refused accept leaves your repository's refs as they were: accepting brings the work
+  under `refs/vivibox/<id>` before it checks its submodules, and where no review copy had
+  brought it there already, a refusal left that ref behind. It now takes back the ref it
+  brought, and never one that was there before, another task's, or the refs you made in your
+  submodules with the refusal's commands.
 - Accepting work reads a submodule's commits as git keeps them, not as a replace ref of yours
   shows them (`GIT_NO_REPLACE_OBJECTS=1` for the check's git): a commit of a submodule's
   history that moves a pointer was not seen where `git replace` showed another in its place,

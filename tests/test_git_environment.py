@@ -12,6 +12,7 @@ vivibox started was handed the variable (a `git` first on PATH writes down what 
 import os
 import shutil
 import subprocess
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -579,7 +580,9 @@ def test_the_suites_home_hides_the_settings_your_shell_points_git_and_vivibox_at
     from vivibox import config, keys, review, roles
 
     named = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
-    assert all(Path(os.environ[name]).is_relative_to(HOME) for name in named), "as every test starts"
+    assert os.environ["HOME"] == str(HOME) and not [name for name in named if name in os.environ], (
+        "as every test starts: the suite's home, and no folder named apart from it"
+    )
     yours, ran = tmp_path / "yours", tmp_path / "ran"
     for hook in ("reference-transaction", "post-checkout"):
         script(yours / "hooks" / hook, f'echo "$0" >> "{ran}"')
@@ -600,6 +603,26 @@ def test_the_suites_home_hides_the_settings_your_shell_points_git_and_vivibox_at
     assert not ran.exists(), "a hook of your own git settings ran in a test"
     for kept in (config.config_dir(), keys.store(), review.history_path(), roles.models_cache()):
         assert kept.is_relative_to(HOME), f"{kept} is not the suite's"
+
+
+def test_the_suite_takes_no_git_variable_from_the_shell_it_is_started_from(tmp_path):
+    """Inside a git hook the shell carries GIT_DIR and GIT_INDEX_FILE of the repository being
+    committed to, and GIT_AUTHOR_*: the suite's own git, which makes the fixtures' repositories,
+    would write that repository. conftest.py takes every GIT_* out of the process as it is
+    loaded, before any fixture runs, and sets only the suite's own configuration."""
+    shell = {**os.environ, "GIT_DIR": str(tmp_path / ".git"), "GIT_INDEX_FILE": str(tmp_path / "index"),
+             "GIT_AUTHOR_NAME": "Yours", "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig")}  # fmt: skip
+    report = (
+        "import os, shutil, conftest\n"
+        "print(sorted(name for name in os.environ if name.startswith('GIT_')))\n"
+        "print(os.environ['GIT_CONFIG_GLOBAL'] == str(conftest.GIT_CONFIG))\n"
+        "shutil.rmtree(conftest.HOME)\nshutil.rmtree(conftest.TEMPORARY)\n"
+    )
+    loaded = subprocess.run(
+        [sys.executable, "-c", report], cwd=Path(__file__).parent, env=shell, capture_output=True, text=True
+    )
+    assert loaded.stdout.splitlines() == ["['GIT_CONFIG_GLOBAL']", "True"], loaded.stderr
+    assert not [name for name in os.environ if name.startswith("GIT_") and name != "GIT_CONFIG_GLOBAL"]
 
 
 def test_the_environment_of_git_keeps_everything_that_is_not_gits(monkeypatch):

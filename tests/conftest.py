@@ -5,6 +5,13 @@ from pathlib import Path
 
 import pytest
 
+# The suite's own git takes nothing from the git variables of the shell it is started from:
+# inside a git hook GIT_DIR and GIT_INDEX_FILE name the repository being committed to, and the
+# repositories the fixtures make would be that one. Taken out of the process before anything
+# runs; a test that needs one sets it itself (monkeypatch).
+for _name in [name for name in os.environ if name.startswith("GIT_")]:
+    del os.environ[_name]
+
 # Git's global configuration for the tests: an identity of their own, so a repository they make
 # without one commits the same on this machine and on a runner with no ~/.gitconfig, and nothing
 # the tests do reads or writes yours. It is the ~/.gitconfig of a home of the suite's own: the
@@ -84,30 +91,27 @@ def real_machine(request) -> bool:
     return "docker" in request.keywords or "model" in request.keywords
 
 
-# The folders a shell may name apart from HOME, by where each is under a home: git reads its
-# global settings in $XDG_CONFIG_HOME/git/config beside ~/.gitconfig, and vivibox keeps its
-# configuration, its keys and history, and what it remembers of the models there.
-OWN_FOLDERS = {
-    "XDG_CONFIG_HOME": ".config",
-    "XDG_DATA_HOME": ".local/share",
-    "XDG_CACHE_HOME": ".cache",
-    "XDG_STATE_HOME": ".local/state",
-}
+# The folders a shell may name apart from HOME: git reads its global settings in
+# $XDG_CONFIG_HOME/git/config beside ~/.gitconfig, and vivibox keeps its configuration, its keys
+# and history, and what it remembers of the models in them.
+OWN_FOLDERS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
 
 
 def suites_own(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HOME and every folder a shell can name apart from it (OWN_FOLDERS) are the suite's."""
+    """HOME is the suite's, and no folder is named apart from it (OWN_FOLDERS): git and vivibox
+    look each up under the home, as on a machine whose shell names none, which is most."""
     monkeypatch.setenv("HOME", str(HOME))
-    for name, folder in OWN_FOLDERS.items():
-        monkeypatch.setenv(name, str(HOME / folder))
+    for name in OWN_FOLDERS:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def own_home(request, monkeypatch):
-    """HOME is the suite's, where its git configuration is (GIT_CONFIG), and so is every folder
-    your shell may name apart from it (suites_own): the git vivibox runs reads its settings
-    there and never yours, hooks and all, and vivibox writes its cache there. Not for a test on
-    this machine's Docker, whose client keeps its own settings in your home."""
+    """HOME is the suite's, where its git configuration is (GIT_CONFIG), and the folders your
+    shell may name apart from it are not followed (suites_own): the git vivibox runs reads its
+    settings in the suite's home and never yours, hooks and all, and vivibox writes its cache
+    there. Not for a test on this machine's Docker, whose client keeps its own settings in
+    your home."""
     if not real_machine(request):
         suites_own(monkeypatch)
 

@@ -4,7 +4,8 @@ Read this before changing anything a person sees: the view (`vivibox/tui.py`, `v
 `vivibox/keys_*.py`, `vivibox/panel.py`, `vivibox/markdown.py`, `vivibox/ui.py`), the dialogs (`vivibox/dialogs.py`,
 `vivibox/browse.py`, `vivibox/providers_ui.py`, `vivibox/settings.py`, `vivibox/logs.py`, `vivibox/widgets.py`,
 `vivibox/branches.py`, `vivibox/usage_view.py`), their look (`vivibox/look.py`, `vivibox/vivibox.tcss`),
-`vivibox/cli.py`, notification texts, the README and `docs/`. The rules can be checked, and
+`vivibox/cli.py` and the commands apart from it in `vivibox/cli_*.py`, notification texts, the README
+and `docs/`. The rules can be checked, and
 `tests/test_ux_rules.py` checks the mechanical ones. A change to a user-facing string updates the
 tables here in the same commit.
 

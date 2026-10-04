@@ -417,10 +417,10 @@ CONFLICT = "a[link=https://evil.invalid]x[/link][black on black]y[/][/b]\x1b[2K\
 
 
 def test_a_conflict_the_agent_named_is_shown_as_text_everywhere(env, capsys):
-    from vivibox import cli, ui
+    from vivibox import cli_decisions, ui
 
     done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "vivibox/demo-1", [CONFLICT])
-    cli.report_finished(done)
+    cli_decisions.report_finished(done)
     said = capsys.readouterr().out
     assert not hidden(said) and "a[link=https://evil.invalid]x[/link]" in said and "‹U+001B›[2K" in said
     entry = {"id": "demo-1", "project": "demo", "title": "t", "cost": 0, "commit": "abc", "finished": "",
@@ -657,12 +657,12 @@ def test_a_line_break_in_a_message_draws_no_line_of_the_supervisors_own(monkeypa
 
 
 def test_the_files_left_uncommitted_are_printed_as_text(env, capsys, monkeypatch):
-    from vivibox import cli, ui
+    from vivibox import cli_decisions, ui
 
     monkeypatch.setattr(actions, "current_branch", lambda source: "main")
-    monkeypatch.setattr(cli, "offer_commit", lambda done: None)
+    monkeypatch.setattr(cli_decisions, "offer_commit", lambda done: None)
     done = actions.Finished("demo-1", env / "repo", ui.Spend(), "msg", "", [], "A  a\u202eb\x1b[2K.java\n")
-    cli.report_finished(done)
+    cli_decisions.report_finished(done)
     said = capsys.readouterr().out
     assert "A  a‹U+202E›b‹U+001B›[2K.java" in said and not hidden(said), repr(said)
 

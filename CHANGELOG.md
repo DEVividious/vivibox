@@ -576,6 +576,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The command line's commands for your decisions on a task (`accept`, `plan`, `reply`,
+  `risky`, `approve-risky`, `verify-again`) are in `vivibox/cli_decisions.py`, moved out of
+  `cli.py` as they were, which is 641 lines now.
 - What a task's status needs of its `question.md` (whether it says anything, or was refused) is
   read a piece at a time and no further than the first word (`handoff.has_text`), with bytes
   that are no text tolerated: the list asks for every task at every refresh.

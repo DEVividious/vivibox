@@ -352,7 +352,7 @@ def next_steps(task: Task, st: TaskState, seen: ui.TaskView, running: bool, pod:
     if st.state is State.APPROVAL_RISKY:
         return "`p` approve the files as shown · `r` send the agent back"
     if st.state is State.CHECKPOINT_BLOCKED:
-        if (task.meta / "handoff" / supervisor.QUESTION).exists():
+        if ui.asked(task)[0]:  # as the status has it: a question read, or a file refused
             return "`r` answer · `g` verify again, once you have fixed what it names" + watch
         if ui.environment_problem(task):
             return "`g` verify again, once you have fixed it · `r` tell the agent" + watch

@@ -310,12 +310,27 @@ def environment_problem(task: Task) -> str:
     return ""
 
 
-def why_blocked(task: Task) -> Path | None:
-    """The file that says why a blocked task needs you: the agent's question, or what the last
-    verification found."""
+# What the host took of the agent's question.md: a question it read, or a file it refused (a
+# link, a special file). Each is a status; a file that is there and says nothing is neither.
+ASKS, NOT_READ = "agent asks", "question not read"
+
+
+def asked(task: Task) -> tuple[str, str]:
+    """ASKS, NOT_READ or "", and for NOT_READ why, in vivibox's words. What a task is called
+    follows this, never the file's presence in a folder the agent writes."""
+    from .supervisor import QUESTION_NOT_READ, read_question  # here: the supervisor reads the view's words
+
+    text, why = read_question(task)
+    return (ASKS, "") if text else (NOT_READ, f"{QUESTION_NOT_READ}: {why}") if why else ("", "")
+
+
+def why_blocked(task: Task) -> Path | str | None:
+    """What says why a blocked task needs you: the file with the agent's question, vivibox's
+    reason for a question.md it did not read (never the file, which is not one to open), or the
+    file with what the last verification found."""
     handoff = task.meta / "handoff"
-    if (question := handoff / "question.md").exists():
-        return question
+    if (status := asked(task))[0]:
+        return handoff / "question.md" if status[0] == ASKS else status[1]
     # Not a link or a special file the agent put there: environment_problem says why then.
     feedback = handoff / "verify-feedback.md"
     return feedback if feedback.is_file() and not feedback.is_symlink() else None
@@ -349,7 +364,7 @@ def planner_asks(task: Task, st: TaskState) -> bool:
 
     if st.state is not State.CHECKPOINT_PLAN or st.awaiting_plan:
         return False
-    if not (task.meta / "handoff" / "question.md").exists():
+    if not asked(task)[0]:  # a question it read, or a file it refused: an empty one is neither
         return False
     try:
         gate.check_plan(parse_plan(task.plan_path.read_text()))
@@ -434,10 +449,10 @@ def _decision(task: Task, st: TaskState, max_rounds: int) -> TaskView:
         # Nobody in a box to reply to; its work is yours to accept or to delete.
         commands = tuple(c for c in commands if "reply" not in c)
     elif planner_asks(task, st):
-        status, commands = "agent asks", tuple(c for c in commands if "reply" in c)
+        status, commands = asked(task)[0], tuple(c for c in commands if "reply" in c)
     elif st.state is State.CHECKPOINT_BLOCKED:
-        if (task.meta / "handoff" / "question.md").exists():
-            status = "agent asks"
+        if question := asked(task)[0]:
+            status = question
         elif environment_problem(task):
             status = "verification could not run"
         else:
@@ -595,7 +610,7 @@ def task_detail(
             else []
         ),
     ]
-    asks = (task.meta / "handoff" / "question.md").exists()  # first, as in the status it has
+    asks = asked(task)[0]  # first, as in the status it has
     if st.state is State.CHECKPOINT_BLOCKED and (
         why := why_blocked(task) if asks else environment_problem(task) or why_blocked(task)
     ):

@@ -268,6 +268,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task stopped on a `question.md` that vivibox did not read (a link, or not a plain file) is
+  no longer called `agent asks` in the list and in `vivibox status`: its status is `question
+  not read`, and `Why` gives vivibox's reason instead of the path of a file not to open. A
+  `question.md` that is there and empty asks nothing: the task has the status of what it is
+  blocked on, as its panel already said.
+- A blocked task whose `question.md` was empty no longer stops on an error (`list index out of
+  range`) when you verify again and the build fails again: it waits for you as it did, and the
+  notification says the file is empty.
 - When git in a task's clone runs out of time and vivibox finds no special file where git reads
   its settings or refs, the message no longer says a named pipe made git wait: it says which
   git did not finish in how many seconds, where, that vivibox looked for such a file and found

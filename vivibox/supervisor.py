@@ -688,7 +688,7 @@ class Supervisor(ReviewRound):
             # still unanswered, so it comes back to you; a feedback turn would have the agent work
             # around what it asked about. No attempt is spent.
             kept.rename(kept.with_name(QUESTION))
-            asked = (question(self.task) or "").splitlines()[0][:150]
+            asked = ((question(self.task) or "").splitlines() or ["(its question.md is empty)"])[0][:150]
             self._go(State.CHECKPOINT_BLOCKED, "verification still failing; the agent's question stands")
             self.ports.notify(
                 self.task.id, f"verification still failing; the agent's question stands: {asked}"

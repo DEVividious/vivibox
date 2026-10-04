@@ -53,6 +53,7 @@ Status labels, the only ones allowed:
 | the reviewer reading the work | `reviewing` | Working |
 | risky files changed | `approve risky files` | Waiting for you |
 | blocked on the agent's question; or the planner asked instead of planning (the goal is met already), with only the template for a plan: its question in the panel, `r` to answer, `e` to write the plan, no `a` | `agent asks` | Waiting for you |
+| the agent's `question.md` is a link or not a plain file, which vivibox does not read: its own reason in the panel and under `Why`, never the file; `r` to answer, which moves the file away. An empty `question.md` asks nothing, and is no status | `question not read` | Waiting for you |
 | blocked with every round used | `verification failed N×` | Waiting for you |
 | blocked by something outside the code (Docker, network, a credential, the time limit); no round spent | `verification could not run` | Waiting for you |
 | work ready | `review the work` | Waiting for you |

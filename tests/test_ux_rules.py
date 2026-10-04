@@ -87,6 +87,10 @@ def situations(env):
     (asks.meta / "handoff" / "question.md").write_text("Which one?\n")
     asks.transition(State.CHECKPOINT_BLOCKED)
     found.append((asks, True))
+    refused = implementing("question refused")
+    (refused.meta / "handoff" / "question.md").symlink_to(GUIDELINES)  # a link: never read through
+    refused.transition(State.CHECKPOINT_BLOCKED)
+    found.append((refused, True))
     failing = implementing("failing")
     failing.transition(State.VERIFY)
     failing.transition(State.CHECKPOINT_BLOCKED)

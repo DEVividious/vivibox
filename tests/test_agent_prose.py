@@ -777,3 +777,43 @@ def test_an_error_after_the_pieces_are_drawn_as_their_source_ends_the_view_as_be
 
     with pytest.raises(KeyError):
         run(with_no_piece, size=(80, 60))
+
+
+def test_the_criteria_of_a_task_at_work_stand_behind_the_rule(env):
+    """The list under Acceptance criteria is the plan's words with the agent's ticks; the count
+    in the section's heading is vivibox's, and stands outside."""
+    from test_tui import implementing
+
+    from vivibox import gate
+
+    task = implementing()
+    ticks = task.meta / "handoff" / gate.CRITERIA_FILE
+    ticks.write_text(ticks.read_text().replace("- [ ] it works", "- [x] it works"))
+    (task.meta / gate.ACCEPTED_PLAN).write_text("+++\n+++\n## Acceptance criteria\n\n- [ ] it works\n")
+    tokens = parsed(detail_of(task))
+    own, agents = apart(tokens)
+    assert as_own_words(tokens, "it works") == [], "no criterion among vivibox's own lines"
+    assert "☑ it works" in [t.content for t in agents if t.type == "inline"]
+    assert ("h4", "Acceptance criteria 1/1") in headings(own)
+
+
+@pytest.mark.parametrize("width", [80, 140])
+def test_the_rule_is_drawn_in_the_colour_of_muted_text(env, monkeypatch, width):
+    """The rule says whose words these are: it was the faintest thing in the panel, fainter
+    than the lines of a table an agent draws two columns from it."""
+    from vivibox import look
+
+    task = new_task()
+    plan_with(task, "| a | b |\n|---|---|\n| c | d |")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        from textual.geometry import Region
+
+        (frame,) = app.text.query("Quote.prose")
+        rows = frame.render_lines(Region(0, 0, frame.outer_size.width, frame.outer_size.height))
+        edges = {(next(iter(row)).text, next(iter(row)).style.color.name) for row in rows}
+        assert edges == {(RULE, look.MUTED)}, "every row of the piece, in the one colour"
+
+    run(scenario, size=(width, 60))

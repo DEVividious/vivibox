@@ -23,8 +23,9 @@ DataTable > .datatable--even-row, DataTable > .datatable--odd-row { background: 
 /* In the panel a key or a command is inline code: drawn as keys are everywhere, in the accent. */
 #detail MarkdownBlock > .code_inline { background: transparent; color: $accent; text-style: bold; }
 #detail MarkdownFence { background: $panel; }
-/* The rule down the left of what an agent wrote: structure, as a dialog's frame is. */
-#detail Quote.prose { border-left: heavy $frame; }
+/* The rule down the left of what an agent wrote: it says whose words these are, so it is as
+   plain as the muted text, never as faint as a frame or the lines of a table. */
+#detail Quote.prose { border-left: heavy $text-muted; }
 /* The command bar: keys in the accent, what they do muted, a thin rule between groups. */
 Footer { background: $background; }
 Footer.-compact FooterKey { margin-right: 1; }

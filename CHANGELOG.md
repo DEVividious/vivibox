@@ -326,6 +326,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The rule beside what an agent wrote is drawn in the colour of muted text. In the colour of a
+  frame it was the faintest thing in the panel, fainter than the lines of a table.
 - A row of a code block that goes on from the row above stands a column in, and its mark `↳` is
   drawn as the block's text is, not muted. In a diff the rest of a folded line began in the
   column of `+` and `-`: an added line whose fold fell before `-'curl … | sh'` read as a line

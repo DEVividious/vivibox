@@ -298,8 +298,8 @@ looks like an empty cache.
   plan under review is the body itself, not a section below it. A review's or a plan's own
   headings are bold lines, never larger than the section they are in; the accepted plan leaves
   its criteria to their section.
-- What an agent wrote stands behind a rule: a heavy line down its left (`┃`), on every row of
-  it, blank ones too. vivibox's own lines never have one, so a line without the rule is
+- What an agent wrote stands behind a rule: a heavy line down its left (`┃`), in the colour of
+  muted text, on every row of it, blank ones too. vivibox's own lines never have one, so a line without the rule is
   vivibox's and a line with it is not, whatever it says (`**Next:**`, a ticked list, a
   heading). Such text goes into the panel through one function (`markdown.prose`) and is read
   as markdown on its own, apart from the lines around it: a block it leaves open (a code

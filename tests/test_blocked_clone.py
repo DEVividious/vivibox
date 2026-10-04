@@ -202,11 +202,27 @@ def test_the_writer_reads_how_to_take_a_repository_out(task):
         "# Verification failed\n\n"
         "- Verification could not run: web/.git was added, a repository git would go into. A folder "
         "named there has a `.git` of its own and the index lists it as a submodule, which the "
-        "orchestrator's git does not go into. Take the folder out of the index (`git rm -f --cached` "
-        "with its path, which leaves its files), delete the `.git` inside it, then add its files as "
-        "ordinary files and commit; or delete the folder, when the task does not need it. Nothing "
-        "is verified until then.\n"
+        "orchestrator's git does not go into. Take the folder out of the index first (`git rm -f "
+        "--cached` with its path, which leaves its files), then delete the `.git` inside it, add its "
+        "files as ordinary files and commit; or delete the folder, when the task does not need it. "
+        "With the `.git` deleted and the folder still in the index, none of its files is in your "
+        "commits. Nothing is verified until then.\n"
     )
+
+
+def test_the_writer_is_told_what_half_of_it_leaves(task):
+    """The middle step alone (the `.git` deleted, the index left listing a submodule) passes
+    every check there is and commits none of the folder's files: the feedback says so, as
+    nothing else does."""
+    nested(task.repo)
+    git(task.repo, "commit", "-q", "-m", "Add web")
+    __import__("shutil").rmtree(task.repo / "web" / ".git")
+    r.check_protection(task.repo, task.meta)  # not checked out: git does not go into it
+    assert git(task.repo, "status", "--porcelain") == "", "and git sees nothing to commit"
+    assert git(task.repo, "ls-files", "-s", "web").startswith("160000 "), "a submodule, and no file of it"
+    said = feedback.TAKE_OUT["a repository of its own"]
+    assert "out of the index first" in said
+    assert said.endswith("still in the index, none of its files is in your commits.")
 
 
 def test_the_writer_reads_how_to_remove_a_worktree(task, tmp_path):

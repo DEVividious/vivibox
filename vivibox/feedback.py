@@ -22,9 +22,11 @@ def _listed(items: list[str], line: str) -> list[str]:
 TAKE_OUT = {
     protection.REPOSITORY: (
         "A folder named there has a `.git` of its own and the index lists it as a submodule, which "
-        "the orchestrator's git does not go into. Take the folder out of the index (`git rm -f "
-        "--cached` with its path, which leaves its files), delete the `.git` inside it, then add its "
-        "files as ordinary files and commit; or delete the folder, when the task does not need it."
+        "the orchestrator's git does not go into. Take the folder out of the index first (`git rm -f "
+        "--cached` with its path, which leaves its files), then delete the `.git` inside it, add its "
+        "files as ordinary files and commit; or delete the folder, when the task does not need it. "
+        "With the `.git` deleted and the folder still in the index, none of its files is in your "
+        "commits."
     ),
     protection.WORKTREE: (
         "That is a worktree of this repository, which the orchestrator's git does not go into. "

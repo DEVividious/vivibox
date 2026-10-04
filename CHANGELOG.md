@@ -64,7 +64,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   in their own words), and that file is written at your reply to say how, also where the clone
   was blocked after its last verification; a reply that cannot write it is refused whole. The
   verification's log, which the writer reads as `verify.log`, says what blocks the clone and
-  not what you are told to do. In a box, which nobody is sent back to, the message says what
+  not what you are told to do. The feedback says in which order a repository goes out, and
+  that its `.git` deleted alone leaves none of its files in the commits. In a box, which nobody is sent back to, the message says what
   closes it: the repository's folder removed, ignored, or its files kept as ordinary ones
   (taken out of the index alone it comes back, as closing a box adds every file git does not
   ignore). Any other change to the clone's git files is refused in the words it was.

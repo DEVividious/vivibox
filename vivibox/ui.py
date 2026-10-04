@@ -317,19 +317,13 @@ ASKS, NOT_READ = "agent asks", "question not read"
 
 def asked(task: Task) -> tuple[str, str]:
     """ASKS, NOT_READ or "", and for NOT_READ why, in vivibox's words. What a task is called
-    follows this, never the file's presence in a folder the agent writes; as the supervisor
-    takes the file (supervisor.read_question), but reading no more of it than tells which: the
+    follows this, never the file's presence in a folder the agent writes: it is the supervisor's
+    own answer (supervisor.read_question), which reads a bounded start of the file, as the
     list asks for every task at every refresh."""
-    from . import handoff
-    from .supervisor import QUESTION, QUESTION_NOT_READ  # here: the supervisor reads the view's words
+    from .supervisor import QUESTION_NOT_READ, read_question  # here: the supervisor reads the view's words
 
-    path = task.meta / "handoff" / QUESTION
-    if not path.exists():
-        return "", ""
-    try:
-        return (ASKS, "") if handoff.has_text(path) else ("", "")
-    except handoff.HandoffError as e:
-        return NOT_READ, f"{QUESTION_NOT_READ}: {e.why}"
+    text, why = read_question(task)
+    return (ASKS, "") if text else (NOT_READ, f"{QUESTION_NOT_READ}: {why}") if why else ("", "")
 
 
 # Why a task waits at the blocked checkpoint when its clone changed under two reviews in a row

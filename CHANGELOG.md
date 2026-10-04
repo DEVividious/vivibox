@@ -280,6 +280,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A `question.md` with bytes that are no UTF-8 no longer ends the view with `UnicodeDecodeError`
+  while its task's panel is open, nor stops the task on that error's text: the bytes are shown
+  as their codes (`\xff`). The list, `vivibox status`, the panel and the supervisor now read
+  the file through one function, so they agree on whether there is a question: a file with
+  nothing to see in it (white space however much, a byte order mark, zero-width spaces, NUL
+  bytes) is none to all of them. Its first 65,536 characters are read, and a longer one says
+  it goes on.
 - A task whose `state.json` cannot be read as a state (not JSON, cut short, empty, not an
   object, not readable, or of this layout with a field missing or of another kind) no longer
   ends `vivibox status` and the view with a traceback for every task, and can be deleted. It
@@ -637,8 +644,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `risky`, `approve-risky`, `verify-again`) are in `vivibox/cli_decisions.py`, moved out of
   `cli.py` as they were, which is 641 lines now.
 - What a task's status needs of its `question.md` (whether it says anything, or was refused) is
-  read a piece at a time and no further than the first word (`handoff.has_text`), with bytes
-  that are no text tolerated: the list asks for every task at every refresh.
+  the bounded start every reader of it takes (`handoff.read_start`,
+  `supervisor.read_question`), with bytes that are no text tolerated: the list asks for every
+  task at every refresh.
 - The test that keeps text vivibox did not write from being read as markup
   (`tests/test_markup_rules.py`) looks at more shapes: an update of a widget, an Option, a
   Selection, a Select's options, an option list filled later, a Button and its label,

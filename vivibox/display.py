@@ -100,6 +100,15 @@ def _escape(text: str, keep: str = "", prose: bool = False) -> str:
     return _LOOK.sub(one, text)
 
 
+def seen(text: str) -> bool:
+    """Whether text has anything to see: a character that is no white space and none of those
+    shown as their code points (a byte order mark, a zero-width space, a NUL). A file of such
+    characters alone says nothing, whatever its size."""
+    return any(
+        not c.isspace() and unicodedata.category(c) not in INVISIBLE and not UNSEEN.match(c) for c in text
+    )
+
+
 def name(text: str) -> str:
     """A file's name or path, or a message that carries one: on one line, every invisible
     character, a tab and a line break among them, as its code point."""

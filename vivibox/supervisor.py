@@ -125,16 +125,22 @@ def _notes(n: int) -> str:
     return ui.count(n, "blocking note")
 
 
+# Characters of question.md that are read: a question is a few lines, and this is asked often.
+QUESTION_LIMIT = 1 << 16
+
+
 def read_question(task: Task) -> tuple[str, str]:
     """The agent's question and "", or "" and why vivibox did not read question.md: a link or a
-    special file in its place, which stops the task for you as a question does."""
+    special file in its place, which stops the task for you as a question does. "" twice for
+    none: no file, or nothing to see in what is read of it. The one answer, for the supervisor,
+    the list, the status and the panel; bytes that are no text are shown as their codes."""
     path = task.meta / "handoff" / QUESTION
-    if not path.exists():
-        return "", ""
     try:
-        return handoff.read_text(path).strip(), ""
+        text, more = handoff.read_start(path, QUESTION_LIMIT) if path.exists() else ("", False)
     except handoff.HandoffError as e:
         return "", e.why
+    cut = f"\n\n(question.md goes on: vivibox reads its first {QUESTION_LIMIT} characters)"
+    return (text.strip() + cut * more, "") if display.seen(text) else ("", "")
 
 
 def question(task: Task) -> str | None:

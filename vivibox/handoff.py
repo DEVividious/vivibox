@@ -191,21 +191,14 @@ def read_text(path: Path, root: Path | None = None, errors: str = "strict") -> s
         return ""
 
 
-def has_text(path: Path, limit: int = 1 << 20) -> bool:
-    """Whether the file says anything: read a piece at a time, as far as the first character
-    that is no white space and never past limit characters (white space that long is not taken
-    for an empty file), with bytes that are no text read as the mark for one. False when there
-    is none. For a status, asked at every refresh: it reads no more than tells it."""
-    try:
-        with _opened(path, os.O_RDONLY, "r", errors="replace") as file:
-            read = 0
-            while read < limit and (piece := file.read(1 << 12)):
-                if piece.strip():
-                    return True
-                read += len(piece)
-            return read >= limit
-    except FileNotFoundError:
-        return False
+def read_start(path: Path, limit: int) -> tuple[str, bool]:
+    """The file's first limit characters, and whether it goes on past them: for text an agent
+    wrote that is asked for often (a status, at every refresh) and shown to you, so never read
+    whole whatever its size, and never an error for what it holds: bytes that are no UTF-8 are
+    read as their codes (\\xff). FileNotFoundError when there is none."""
+    with _opened(path, os.O_RDONLY, "r", errors="backslashreplace") as file:
+        text = file.read(limit)
+        return text, bool(file.read(1))
 
 
 def read_or_nothing(path: Path) -> str:

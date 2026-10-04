@@ -62,13 +62,13 @@ class BranchPicker(Dialog):
         self.app.call_from_thread(self.loaded, choices)
 
     def failed(self, error: str) -> None:
-        if self.is_mounted:
+        if self.still_open():
             self.query_one("#branch-count", Label).update(
                 f"Could not list branches: {error}. Escape returns to the task."
             )
 
     def loaded(self, choices: list[tuple[str, str]]) -> None:
-        if not self.is_mounted:
+        if not self.still_open():
             return
         self.choices = choices
         self.ready = True

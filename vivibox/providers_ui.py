@@ -423,8 +423,9 @@ class AddProvider(Dialog):
         self.app.call_from_thread(self.loaded, found)
 
     def loaded(self, found: list[tuple[str, str]]) -> None:
-        self.catalog = self.app.catalog = found
-        self.show()
+        self.catalog = self.app.catalog = found  # the view's, whether or not this dialog is still open
+        if self.still_open():
+            self.show()
 
     @on(Input.Changed, "#search")
     def show(self) -> None:

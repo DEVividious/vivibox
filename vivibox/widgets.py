@@ -100,6 +100,13 @@ class Dialog(ModalScreen):
     def framed(self) -> None:
         self.reframe()
 
+    def still_open(self) -> bool:
+        """Whether the dialog is there to show what a thread of its own brings back (the
+        branches, the providers): asked before the answer touches a field, since Esc may come
+        first, and a dialog that is closing has lost its fields. Not is_mounted, which stays
+        true once it was."""
+        return self.is_attached and self in self.app.screen_stack
+
     @on(events.DescendantFocus)
     def mark_row(self, event: events.DescendantFocus) -> None:
         """Focus is one signal in a form: the label of the row that has the keys, in the accent

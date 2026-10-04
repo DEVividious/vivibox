@@ -482,7 +482,7 @@ class NewTask(Dialog):
 
     def current_branch_loaded(self, project: str, label: str) -> None:
         if (
-            self.is_mounted
+            self.still_open()
             and self.base_ref == "HEAD"
             and self.query_one("#project", Select).value == project
         ):

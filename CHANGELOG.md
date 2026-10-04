@@ -248,6 +248,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The view no longer ends with a traceback when an answer comes for a dialog you have already
+  closed: the branch of your checkout for the new-task dialog, the branches for the branch
+  picker, the providers opencode knows for the add-provider dialog, each read in the
+  background and, on a busy machine or a slow repository, back only after Esc. The answer is
+  dropped (the list of providers is still kept for the next time), and so is what a step
+  still under way reports while the view is closing.
 - Git variables exported in the shell vivibox is started from no longer redirect the git it
   runs on your machine. Every `GIT_*` variable but `GIT_TERMINAL_PROMPT` is taken out of that
   git's environment: a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` (set inside a git

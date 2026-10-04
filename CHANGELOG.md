@@ -273,6 +273,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task blocked by a repository or a worktree it added (see under Changed) starts again after
+  its pod was stopped or your machine restarted, in every flow. With a planner in a container
+  of its own (Planner → Executor, Planner → Writer → Reviewer, Supervisor ⇄ Worker) the start
+  ended in `could not start`, with a message that told you to reply where no reply is taken.
+  The planner's copy of the commits is not brought up to date from a blocked clone (no git of
+  your machine reads one): it stays as it was, the timeline says so, and the planner gets no
+  turn until the clone is as recorded again.
 - Any character outside ASCII that touches a code point's spelling in a name or a line of a
   file is shown as its own code point, not only the brackets of a list: `❬U+001B❭`,
   `⧼U+001B⧽`, `≺U+001B≻` read as an escape that is not there, as did a spelling with a

@@ -535,7 +535,14 @@ def _start(
     if pod.has_control:
         # The commits, for the planner to read, before anything of the project runs.
         on_step("copying the commits for the planner…")
-        control.refresh(task, pod, control.reviewed_commit(task))
+        try:
+            control.refresh(task, pod, control.reviewed_commit(task))
+        except repo.Blocked as e:
+            # What the task added blocks its clone, and no git of the host's reads it: the
+            # planner's copy stays as it was, and the planner gets no turn on it (its copy is
+            # asked for again before each one). The task starts all the same, so that it waits
+            # where your reply is taken and the writer can take out what it added.
+            task.event("view_not_refreshed", whose=control.PLANNERS_OWN, why=str(e)[:500])
     if project.java or project.tools:
         on_step(
             f"installing {', '.join(([f'Java {project.java}'] if project.java else []) + project.tools)}…"

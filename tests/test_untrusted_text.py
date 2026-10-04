@@ -21,6 +21,11 @@ LINKS = {
     f"<{EVIL}/auto>": f"{EVIL}/auto",
     f"bare {EVIL}/bare here": f"bare {EVIL}/bare here",
     "bare www.evil.invalid/www here": "bare www.evil.invalid/www here",
+    # A host the parser's linkify knows as one: it would draw the address twice, a link's way.
+    "bare www.example.com/www here": "bare www.example.com/www here",
+    "see example.com and mail a@example.com": "see example.com and mail a@example.com",
+    f"![a{BIDI_ENTITY}b]({EVIL}/alt.png)": f"a‹U+202E›b ({EVIL}/alt.png)",
+    f'[t]({EVIL}/t "x{BIDI_ENTITY}y")': f't ({EVIL}/t "x‹U+202E›y")',
     f"![a picture]({EVIL}/image.png)": f"a picture ({EVIL}/image.png)",
     f'[`code` *em* [b]x[/b]]({EVIL}/label "a title")': f'code em [b]x[/b] ({EVIL}/label "a title")',
     f"[https://good.example/]({EVIL}/other)": f"https://good.example/ ({EVIL}/other)",
@@ -96,7 +101,7 @@ def test_a_link_an_agent_wrote_is_text_with_its_address_in_full(env, monkeypatch
         await click_on(app, pilot, "a picture")
         assert opened == [], "a click on it opens nothing"
 
-    run(scenario, size=(140, 60))
+    run(scenario, size=(140, 110))
 
 
 def test_a_link_by_reference_is_the_text_it_was_written_as_with_its_definition(env, monkeypatch):
@@ -137,6 +142,17 @@ def test_the_address_of_what_the_task_runs_still_opens_on_a_click(env, monkeypat
         assert opened == [address], "opened once"
 
     run(scenario, size=(140, 60))
+
+
+def test_the_key_of_vivibox_s_links_is_made_anew_by_every_process():
+    """A key written into the source would be one an agent can read there."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(markdown.__file__).read_text())
+    made = [n.value for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "_KEY"]
+    assert [ast.unparse(value) for value in made] == ["secrets.token_hex(16)"], "128 random bits"
+    assert len(markdown._KEY) == 32 and markdown._KEY not in Path(markdown.__file__).read_text()
 
 
 def test_a_link_is_vivibox_s_by_the_function_that_wrote_it_never_by_its_address():
@@ -489,7 +505,7 @@ def test_no_code_block_of_the_panel_is_fenced_by_hand():
     for name in ("panel.py", "panels.py", "sections.py", "panel_resources.py", "markdown.py"):
         nodes = ast.walk(ast.parse((package / name).read_text()))
         texts = [n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)]
-        if fenced := [text for text in texts if "```" in text]:
+        if fenced := [text for text in texts if "```" in text or "~~~" in text]:
             found[name] = fenced
     assert found == {"panel.py": ["```"]}, "only the question whether the feedback quotes the log itself"
 
@@ -533,6 +549,8 @@ def test_prose_shows_them_too_but_for_the_selector_of_an_emoji():
     assert display.terminal(emoji) == emoji, "an ordinary plan reads as it did"
     assert display.terminal("./gradlew\ufe0f build") == "./gradlew‹U+FE0F› build", "after a letter: hidden"
     assert display.terminal("run1\ufe0f") == "run1‹U+FE0F›", "a digit with no keycap after it"
+    for symbol in "=+<>|~^$`":  # symbols of ASCII, which a command is made of, take no selector
+        assert display.terminal(f"x{symbol}\ufe0f1") == f"x{symbol}‹U+FE0F›1", symbol
     assert display.terminal("\ufe0fx") == "‹U+FE0F›x" and display.terminal("a \ufe0f") == "a ‹U+FE0F›"
     assert display.terminal("⚠\ufe0f\ufe0f") == "⚠\ufe0f‹U+FE0F›", "one selector, not a run"
     assert display.terminal("⚠\ufe00") == "⚠‹U+FE00›", "the selectors of emoji alone"

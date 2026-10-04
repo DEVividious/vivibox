@@ -332,6 +332,17 @@ def test_a_start_on_a_retired_model_says_so_and_what_to_pick(env, monkeypatch):
     )
 
 
+def test_what_vivibox_remembers_of_the_models_is_the_tests_own(env):
+    """The suite's home is one per worker process, and what vivibox remembers of the models was
+    kept there: the list the test below leaves was read by whichever test of that worker asked
+    next, for a day, and a view of an earlier test still listing models in its thread wrote
+    its own over this test's. Each test has its own, like its configuration and its keys."""
+    from conftest import HOME
+
+    for kept in (roles.models_cache(), roles.models_cache().with_name("providers.json")):
+        assert kept.is_relative_to(env) and not kept.is_relative_to(HOME)
+
+
 def test_a_model_list_cached_before_retired_models_were_dropped_is_read_again(env, monkeypatch):
     import json
     import time

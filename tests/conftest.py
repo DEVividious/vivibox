@@ -68,6 +68,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))  # keys and history, never yours
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # opencode's configuration, never yours
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))  # a task's secrets, never yours
+    # What vivibox remembers of the models and the providers, never another test's: the suite's
+    # home is one per worker process, and a list one test left there was the next one's for a day.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
     # A test run from an agent's CLI would record that CLI's session with a task, and look for it.
     for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CODEX_THREAD_ID", "CODEX_HOME"):

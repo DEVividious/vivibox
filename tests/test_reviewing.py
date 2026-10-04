@@ -1,4 +1,4 @@
-from conftest import networks_up
+from conftest import as_verified, networks_up
 
 from vivibox import reviewing
 from vivibox.states import State
@@ -135,6 +135,7 @@ def test_the_reviewers_pod_side_gets_its_own_key_harness_files_and_a_place_to_wr
 
     pod = pods.Pod(task.id, task.repo, "img", runner=Runner(), review_dir=task.root / "review")
     networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
+    as_verified(task)
     out = reviewing.up(task, pod, load_config())
     assert prepared == {f"{task.id}-review": ["other"]}, "the reviewer's key, nobody else's"
     assert out == task.root / "review" / "out" and out.is_dir()
@@ -218,6 +219,7 @@ def test_the_reviewers_container_has_the_secrets_of_the_mcp_servers_its_opencode
     secrets.prepare(reviewing.secrets_id(task.id), ["other", "deepseek"])
     providers.set_serena_mode("off")
     networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
+    as_verified(task)
     reviewing.up(task, pod, load_config())
     d = secrets.runtime_dir(reviewing.secrets_id(task.id))
     assert sorted(p.name for p in d.iterdir()) == ["other", "server-password"]

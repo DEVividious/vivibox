@@ -178,6 +178,18 @@ review container is started: the reviewer is never run in the writer's tree inst
 and its scratch folder are the container's own memory, new every round, and its secrets are
 mounted in that container alone.
 
+Both copies, the planner's and the reviewer's, are made the same way. Their `.git` is made
+without git's templates and holds no hook. A symbolic link the writer committed is checked out
+there as a plain file holding the path it names (`core.symlinks=false` in the copy's own
+configuration), so a link to a file of the reader's container, its secrets among them, is not
+followed when the planner or the reviewer reads it. Git on your host fetches nothing lazily for
+a copy (`GIT_NO_LAZY_FETCH=1`), whatever remote the writer's clone names. And git in both
+containers takes a directory for a repository only when it is pointed at it
+(`safe.bareRepository=explicit`, set in their environment): a folder committed to look like a
+bare repository is not one to a git command there that was not given `--git-dir`. The
+reviewer's round is made of the commit the verification passed and of nothing else: for a task
+that records none, no reviewer is started.
+
 The writer can read, and not write, what vivibox keeps of the planner's work under `/task`: the
 planner's session id in the task's state and the transcripts of its turns in the task's log.
 Knowing them gives no way to the conversation: the store and the server are in the planner's

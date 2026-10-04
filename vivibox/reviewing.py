@@ -220,17 +220,17 @@ def env(task: Task) -> dict[str, str]:
 def view(task: Task, pod: Pod) -> None:
     """The round's working directory for the reviewer's harness and its view of the commits,
     made on the host in the review directory (reading), before its container: on the commit the
-    verification passed, or the task's branch as it is for a task that records none. One that
-    cannot be made stops the review with the reason."""
+    verification passed. One that cannot be made stops the review with the reason, and so does
+    a task that records no verified commit: its branch as it happens to be is not reviewed."""
+    verified = task.read_state().verified_commit
+    if not verified:
+        raise repo.RepoError(
+            f"the review could not start: {task.id} records no commit that passed the verification; "
+            f"verify it again: vivibox verify {task.id}"
+        )
     try:
         reading.workdir(pod.review_work, REVIEWERS_OWN)
-        reading.view(
-            task.repo,
-            repo.branch_name(task.id),
-            Path(pod.review_src),
-            task.read_state().verified_commit,
-            REVIEWERS_OWN,
-        )
+        reading.view(task.repo, repo.branch_name(task.id), Path(pod.review_src), verified, REVIEWERS_OWN)
     except repo.GitTimeout as e:
         again = f"then start the task again: vivibox start {task.id}"
         raise repo.GitTimeout(f"the review could not start: {e}; {again}") from None
@@ -243,7 +243,7 @@ def up(task: Task, pod: Pod, config: Config, verify: list[str] | tuple = ()) -> 
     that the host makes for the round, the reviewer's own key and harness files, the task's
     files to read, and the directory its review goes to, returned. verify: the project's
     verification commands, a fact its brief names. The view stands on the
-    commit the verification passed (the task's branch as it is for a task that records none).
+    commit the verification passed; a task that records none is not reviewed.
     The container starts only once both are made: a view that cannot be made stops the review
     with the reason, and the reviewer is never started in the writer's tree instead."""
     # The reviewer's model where config.toml names one, else the writer's (planner_writer_reviewer

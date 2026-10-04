@@ -101,6 +101,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   is started; nor is one started on a folder vivibox did not make for the round, and that
   refusal names the command that starts the task again. The reviewer's container is otherwise
   as it was: its network, its home and scratch folder in memory, its secrets and its limits.
+- The copies of the commits the planner and the reviewer read hold nothing to follow out of
+  them. Their `.git` is made without git's templates and has no hook, whatever
+  `GIT_TEMPLATE_DIR` or your configuration says. A symbolic link the writer committed is a
+  plain file there, holding the path it names, so reading it in the planner's or the reviewer's
+  container never reads a file of that container's own, such as its key; a copy made before is
+  made over at its next refresh. Git on your machine fetches nothing lazily for a copy,
+  whatever remote the clone names. Git in both containers uses a directory as a repository only
+  when it is pointed at it (`safe.bareRepository=explicit` in their environment), so a folder
+  committed to look like a bare repository is not one there. And the reviewer's round is
+  made only of a commit the verification passed: for a task that records none no reviewer is
+  started, and the reason names `vivibox verify <id>`.
 - The reviewer in its own container is told what that container is, in the words the planner
   and the supervisor read: the project is a read-only view of the task's committed work at its
   path, on the commit the verification passed; it starts in an empty directory and git answers

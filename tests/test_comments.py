@@ -8,7 +8,7 @@ import os
 import subprocess
 
 import pytest
-from conftest import networks_up, review_made
+from conftest import as_verified, networks_up, review_made
 from test_handoff import OUTSIDE, at_review, linked
 from test_pod import FakeDocker
 
@@ -198,6 +198,7 @@ def test_the_reviewer_reads_your_replies_not_the_empty_mount_point(env, monkeypa
     outside = linked(target)
     pod = Pod(task.id, task.repo, "img", runner=runner, review_dir=task.root / "review")
     networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
+    as_verified(task)
     reviewing.up(task, pod, load_config())
     run = next(c for c in calls if c[:3] == ["docker", "run", "-d"])
     binds = [run[i + 1] for i, arg in enumerate(run) if arg == "-v"]

@@ -144,6 +144,18 @@ def networks_up(pod) -> None:
         (pod_network.SYS_NET / net.bridge / "bridge").mkdir(parents=True, exist_ok=True)
 
 
+def as_verified(task) -> str:
+    """The task as a green verification leaves it: the commit its clone stands on, recorded as
+    the verified one. A review is made of that commit, and of nothing when there is none."""
+    import subprocess
+
+    done = subprocess.run(
+        ["git", "-C", str(task.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    )
+    task.set_verified_commit(done.stdout.strip())
+    return done.stdout.strip()
+
+
 def review_made(pod) -> None:
     """The review directory as reviewing.up leaves it before the container starts, for a test
     that starts the review container itself: emptied, with a working directory and a view of

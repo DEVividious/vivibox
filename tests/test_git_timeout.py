@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import make_repo, networks_up
+from conftest import as_verified, make_repo, networks_up
 from test_gate import PLAN, FakePod
 from test_supervisor import FakeHarness
 
@@ -558,6 +558,7 @@ def test_the_reviewers_view_of_a_clone_that_does_not_answer_stops_the_round_for_
 
     def review_up():
         pod.review_fresh()
+        as_verified(task)  # what the verification passed, as the supervisor records it
         fifo(task.repo, ".git/packed-refs")
         reviewing.view(task, pod)
         pod.review_start([], {})

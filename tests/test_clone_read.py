@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import make_repo
+from conftest import as_verified, make_repo
 from test_gate import FakePod, git
 
 from vivibox import clone_read, gate, init, pod_network, repo, reviewing, risky, supervisor
@@ -1081,6 +1081,7 @@ def test_the_copies_for_you_are_in_no_containers_writable_mount(env, monkeypatch
     monkeypatch.setattr(opencode, "provider_of", lambda model: "ollama")
     monkeypatch.setattr(providers, "keyless", lambda provider: True)
     monkeypatch.setattr(the_pod, "review_start", lambda mounts, env_: reviewer.append(mounts))
+    as_verified(t)
     reviewing.up(t, the_pod, load_config())
     argvs = [
         the_pod.agent_command(),

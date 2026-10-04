@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 
 import pytest
+from conftest import as_verified
 from test_pod import FakeDocker, applied_policy, flag, starts
 
 from vivibox import (
@@ -217,6 +218,9 @@ def test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own
         "OPENCODE_DISABLE_LSP_DOWNLOAD=true",
         "OPENCODE_CONFIG=/task/harness/opencode.json",
         "CLAUDE_CONFIG_DIR=/config/claude",
+        "GIT_CONFIG_COUNT=1",  # git there never takes a committed folder for a bare repository
+        "GIT_CONFIG_KEY_0=safe.bareRepository",
+        "GIT_CONFIG_VALUE_0=explicit",
     }, "nothing of the build's"
     assert f"{task.root}/disk/control-src:{task.repo}:ro" in mounted, "what GIT_DIR names is the copy"
     assert cmd[cmd.index("-w") + 1] == "/work" and cmd[-3:] == [pod.image, "sleep", "infinity"]
@@ -234,6 +238,7 @@ def test_no_container_but_the_planners_mounts_anything_of_the_planners(docker, m
     pod.up(timeout=1)
     pod._copying_clone = lambda *cmd, **kw: None  # no clone to copy here
     pod.gate_up()
+    as_verified(task)
     reviewing.up(task, pod, load_config())
     runs = {run[4].rsplit("-", 1)[1]: " ".join(run) for run in docker.find("docker", "run", "-d", "--name")}
     assert set(runs) == {"dind", "agent", "gate", "review"} | ({"control"} if has_one else set())
@@ -281,6 +286,7 @@ def test_every_container_that_mounts_the_handoff_mounts_your_replies_over_it(doc
     pod._copying_clone = lambda *cmd, **kw: None  # no clone to copy here
     from vivibox import reviewing
 
+    as_verified(task)
     reviewing.up(task, pod, load_config())
     replies = f"{task.meta / 'comments.md'}:/task/handoff/comments.md:ro"
     seen = []

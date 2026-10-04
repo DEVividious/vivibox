@@ -1,6 +1,6 @@
 import stat
 
-from conftest import networks_up
+from conftest import as_verified, networks_up
 
 from vivibox import secrets
 
@@ -95,6 +95,7 @@ def review(env, monkeypatch, task_id="demo-1"):
         review_dir=task.root / "review",
     )  # fmt: skip
     networks_up(pod)  # as up would have: the review checks its networks and the host's rules first
+    as_verified(task)
     reviewing.up(task, pod, load_config())
 
 

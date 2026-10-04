@@ -188,3 +188,36 @@ def test_a_pnpm_pattern_that_leaves_the_project_is_ignored(tmp_path, pattern):
     write(repo / "packages" / "a" / "package.json", json.dumps({"scripts": {"test": "jest"}}))
     write(tmp_path / "outside" / "package.json", "{}")
     assert init.modules(repo) == ["packages/a"]
+
+
+# The project itself as a workspace (pnpm's `- '.'`, seen in real projects): no folder under it,
+# and to pathlib a pattern of no part (IndexError). A leading ./ is the same folder as without.
+ITSELF = [".", "./", "./.", ""]
+
+
+@pytest.mark.parametrize("pattern", ITSELF[:3], ids=repr)
+def test_the_project_itself_as_a_workspace_is_no_module_and_no_traceback(tmp_path, pattern):
+    npm = tmp_path / "npm"
+    write(
+        npm / "package.json",
+        json.dumps({"workspaces": [pattern, "./packages/*"], "scripts": {"test": "jest"}}),
+    )
+    write(npm / "packages" / "a" / "package.json", json.dumps({"scripts": {"test": "jest"}}))
+    assert init.modules(npm) == ["packages/a"], "./packages/* is packages/*, and . is the project"
+    assert ("cd packages/a && npm ci && npm test", "packages/a/package.json") in init.candidates(npm)
+    pnpm = tmp_path / "pnpm"
+    write(pnpm / "package.json", json.dumps({"scripts": {"test": "jest"}}))
+    write(pnpm / "pnpm-workspace.yaml", f"packages:\n  - '{pattern}'\n  - 'apps/*'\n")
+    write(pnpm / "apps" / "web" / "package.json", "{}")
+    assert init.modules(pnpm) == ["apps/web"]
+    init.candidates(pnpm)
+
+
+@pytest.mark.parametrize("pattern", ["a**b/*", "packages/**x", "[", "a\x00b"], ids=repr)
+def test_a_pattern_pathlib_does_not_take_is_ignored(tmp_path, pattern):
+    """What the screening lets through and pathlib refuses, or matches nothing with (the
+    review's M58): the other patterns still count."""
+    write(tmp_path / "package.json", json.dumps({"workspaces": [pattern, "packages/*"]}))
+    write(tmp_path / "packages" / "a" / "package.json", json.dumps({"scripts": {"test": "jest"}}))
+    assert init.modules(tmp_path) == ["packages/a"]
+    assert init.candidates(tmp_path) == [("cd packages/a && npm ci && npm test", "packages/a/package.json")]

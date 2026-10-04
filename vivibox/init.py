@@ -185,14 +185,16 @@ def _scripts(repo: Path, folder: Path) -> dict | None:
 
 def _matching(repo: Path, pattern: object) -> list[Path]:
     """The project's folders a workspace pattern names, sorted. A pattern that is no folder of
-    the project's matches nothing: an absolute one, one that leaves through .., none at all, or
-    one that is no text. The file is the project's, and what it names outside is not looked at."""
-    named = pattern.strip().rstrip("/") if isinstance(pattern, str) else ""
-    if not named or named.startswith("/") or ".." in named.split("/"):
+    the project's matches nothing: an absolute one, one that leaves through .., none at all, the
+    project itself (.), or one that is no text. The file is the project's, and what it names
+    outside is not looked at."""
+    named = pattern.strip() if isinstance(pattern, str) else ""
+    parts = [part for part in named.split("/") if part not in ("", ".")]  # ./packages/* is packages/*
+    if not parts or named.startswith("/") or ".." in parts:  # no part left: the project itself
         return []
     try:
-        return sorted(repo.glob(named))
-    except (ValueError, NotImplementedError, OSError):  # a pattern pathlib does not take
+        return sorted(repo.glob("/".join(parts)))
+    except (ValueError, NotImplementedError, IndexError, OSError):  # a pattern pathlib does not take
         return []
 
 

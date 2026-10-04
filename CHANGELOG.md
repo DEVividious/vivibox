@@ -345,7 +345,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - A project whose `package.json` or `pnpm-workspace.yaml` names a workspace outside it (an
   absolute pattern such as `/etc/*`, one that leaves through `..`, or an empty one) no longer
   ends `vivibox init`, the new-project dialog or a verification with a traceback, nor has a
-  folder outside it taken for one of its modules: such a pattern is ignored.
+  folder outside it taken for one of its modules: such a pattern is ignored. So is the project
+  itself as a workspace (pnpm's `- '.'`), which ended them the same way; `./packages/*` is
+  `packages/*`.
 - When Docker does not answer `vivibox status` in time, the line that says so no longer calls
   every task this vivibox does not run one "from an earlier vivibox" (a newer one's is among
   them), and says how to ask again.

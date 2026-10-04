@@ -243,7 +243,13 @@ vivibox could not check (a history it could not list, submodules too deep to fol
 time out, a listing past the 64 MiB it reads of one git), the first line says that, and not
 that a commit is not kept; a history it could not list comes with what you run: the fetch
 that brings the commit your submodule lacks, or the git that says why; a listing past the
-limit says the limit, what was being read, and the reply that sends the work back. The view's notification wraps a long line and is gone in seconds, so
+limit says the limit, what was being read, and the reply that sends the work back. Where
+one refusal has both, a commit that is not kept and a submodule vivibox could not check, the
+first line is the stronger one, of the commit that is not kept; each entry says its own; and
+the short form names each submodule among what it is (`commits you do not keep (tools), and
+vivibox could not check others (lib)`). "Then accept the work again." ends a refusal only
+where a command in it does something: a git that only says why is followed by nothing to
+wait for but its answer. The view's notification wraps a long line and is gone in seconds, so
 there the refusal is its short form: what was refused, which submodules by path (three, the
 rest counted), why, and the one command that says the whole in a terminal. It fits 80 by 24.
 

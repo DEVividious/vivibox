@@ -577,6 +577,23 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   is refused as what vivibox could not check: with the fetch that brings the commit the task
   started from, where your submodule lacks it, or the git that says why; so is one not read
   within the check's time.
+- Accepting work reads a submodule's commits as git keeps them, not as a replace ref of yours
+  shows them (`GIT_NO_REPLACE_OBJECTS=1` for the check's git): a commit of a submodule's
+  history that moves a pointer was not seen where `git replace` showed another in its place,
+  while git's clean-up, a clone and a push keep the commit that was replaced. The `git log`
+  a refusal prints for a history it could not list says `--no-replace-objects` too.
+- Accepting work as a branch, or where your branch has moved, refuses when git does not list
+  the work's commits in your repository: it was accepted on its last commit alone, with the
+  earlier commits, which a branch keeps, not looked at. The refusal names the git that says
+  why.
+- What a refused accept says, where it said something else than what is: a submodule your
+  project points at with no entry in `.gitmodules` and no copy in your checkout was to be
+  checked out, to which git answers "No url found", and is now to be cloned from where you
+  know it to be; "Then accept the work again." no longer follows a `git log` that only says
+  why a history could not be listed (the entry says to accept once it lists them); and the
+  short form of a refusal with both a commit you do not keep and a submodule vivibox could
+  not check names each among what it is (`commits you do not keep (tools), and vivibox could
+  not check others (lib)`), where it counted both as commits you do not keep.
 - The gate no longer deletes `init.d` and `gradle.properties` from the shared Gradle cache before a
   verification: its Gradle home is its own, so nothing the writer put there runs in the gate, and
   nothing of the writer's is removed.

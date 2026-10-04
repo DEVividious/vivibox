@@ -13,9 +13,10 @@ submodule's own commit adds or changes, as far down as you keep the commits. Kep
 reachable from HEAD or a ref of the submodule as you have it checked out, or as your repository
 kept it (.git/modules/<name>): a commit that is there as an object alone goes with git's next
 clean-up. Asked of your repositories alone, never of the task's clone, by git that reads
-objects, fetches nothing and follows no include of a .gitmodules, within a time limit, and
-read no further than LIMIT bytes of what one git prints: past either, git is ended and the
-accepting refused, with nothing taken from an answer cut short.
+objects as they are kept (whatever a replace ref of yours shows in place of one), fetches
+nothing and follows no include of a .gitmodules, within a time limit, and read no further than
+LIMIT bytes of what one git prints: past either, git is ended and the accepting refused, with
+nothing taken from an answer cut short.
 
 A submodule commit you keep brings its history with it: the commits between the one the task
 started from and the one the work keeps stay in your submodule, and one of them may point a
@@ -28,7 +29,8 @@ The address of that remote is the one the work's .gitmodules names, the writer's
 prints it whole and says whose it is and that vivibox has not checked it, in its clone command
 when it is one that only fetches (ADDRESS), as text in no command when it is anything else. A
 remote that serves a history pointing at a commit the task's clone alone holds is not caught.
-A history that cannot be listed is refused.
+A history that cannot be listed is refused, and so is work whose own commits cannot be, where
+the accepting keeps them all.
 """
 
 from __future__ import annotations
@@ -59,8 +61,10 @@ LIMIT = 64 * 2**20
 HISTORY = ("log", "--format=%H", "--raw", "-r", "-c", "--root", "--no-renames")
 HISTORY += ("--ignore-submodules=none", "--no-show-signature", "--no-color")
 # git here fetches nothing: a submodule of yours that is a partial clone would otherwise go to
-# its remote for a commit it lacks.
-NOT_LAZY = {"GIT_NO_LAZY_FETCH": "1"}
+# its remote for a commit it lacks. And it reads each commit as it is kept: a replace ref of
+# yours has git show another commit in place of one, while git's clean-up, a clone and a push
+# keep and send the one that was replaced, with the pointers it has.
+AS_KEPT = {"GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1"}
 # An address vivibox puts in a command for you to run, said there to be the writer's: a URL of
 # a protocol that runs nothing here (https, git, ssh) or user@host:path, with a host, an
 # optional port and a path, each of plain characters. Nothing that git, ssh or you would read
@@ -79,12 +83,13 @@ ADDRESS = re.compile(
 MISSING = "missing"  # you have the submodule, not the commit
 LOOSE = "loose"  # the commit is in your submodule, and nothing keeps it there
 NOT_CHECKED_OUT = "not checked out"  # the submodule is your project's, with no copy of it here
+NO_ADDRESS = "no address"  # the same, and no .gitmodules of yours says where it comes from
 ADDED = "added"  # the work adds the submodule
 UNCHECKED = "unchecked"  # vivibox could not look: said, and refused
 NO_START = "no start"  # your submodule lacks the commit it was at when the task started
 UNLISTED = "unlisted"  # git in your submodule did not list its history
 # The kinds that say a commit is not kept; the rest say vivibox does not know.
-NOT_KEPT = (MISSING, LOOSE, NOT_CHECKED_OUT, ADDED)
+NOT_KEPT = (MISSING, LOOSE, NOT_CHECKED_OUT, NO_ADDRESS, ADDED)
 
 
 class Unkept(gate.GateError):
@@ -222,7 +227,7 @@ def _git(args: list[str], until: float) -> tuple[int, bytes]:
     if left <= 0:
         raise Late
     try:
-        done = repo.run_git(args, limit=LIMIT, stdin=subprocess.DEVNULL, timeout=left, env=NOT_LAZY)
+        done = repo.run_git(args, limit=LIMIT, stdin=subprocess.DEVNULL, timeout=left, env=AS_KEPT)
     except subprocess.TimeoutExpired:
         raise Late from None
     except counted.TooMuch:
@@ -322,7 +327,9 @@ def look(
             if not plain(inside) or not COMMIT.fullmatch(commit):
                 found.unkept.append(Kept(path, commit, UNCHECKED, None, yours, inside, via=via))
             elif (held := yours.submodule(inside, names.get(inside, ("", ""))[0])) is None and inside in was:
-                found.unkept.append(Kept(path, commit, NOT_CHECKED_OUT, None, yours, inside, via=via))
+                # git checks out a submodule from the address .gitmodules gives its path.
+                kind = NOT_CHECKED_OUT if names.get(inside, ("", ""))[1] else NO_ADDRESS
+                found.unkept.append(Kept(path, commit, kind, None, yours, inside, via=via))
             elif held is None:
                 named = yours.modules(after) if named is None else named
                 url = named.get(inside, ("", ""))[1]
@@ -362,11 +369,15 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
         if yours is None:
             said = f"{task_id} was not accepted: {source} is not a git repository vivibox can read"
             raise Unkept(said, said)
-        kept = [commit]
+        kept = []
         if history:
             code, listed = yours.git("rev-list", f"{base}..{commit}")
-            kept = _text(listed).split() if code == 0 else []
-        look(yours, base, kept or [commit], found)
+            kept = _text(listed).split()
+            if code != 0 or not all(COMMIT.fullmatch(one) for one in kept):
+                # Which commits stay is not known, and the last says nothing of the others.
+                found.unkept.append(Kept(".", commit, UNLISTED, yours, yours, "", since=base))
+                kept = []
+        look(yours, base, kept or [commit], found)  # no commit since base: the last is all there is
     except Late as reading:
         late = f"vivibox did not finish checking the work's submodules in {SECONDS:g} s"
         late += f" ({reading})" if str(reading) else ""
@@ -378,17 +389,30 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
         raise Unkept(briefly(task_id, found.unkept, late or over), said)
 
 
+def _whose(one: Kept) -> str:
+    """The submodule a refusal names for one, as text; the work itself for your project's own."""
+    return "the work" if one.path == "." else display.name(one.path)
+
+
 def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
     """The refusal for a notification, which wraps and is gone in seconds: what was refused and
-    why, which submodules, and where the whole of it is said."""
-    paths = list(dict.fromkeys(display.name(one.path) for one in found))
-    more = f" and {len(paths) - 3} more" if len(paths) > 3 else ""
-    which = f" ({', '.join(paths[:3])}{more})" if paths else ""
-    known = any(one.kind in NOT_KEPT for one in found)
-    what = "vivibox could not check its work's submodules" if paths else late
-    what = "its work keeps submodule commits you do not keep" if known else what
+    why, which submodules, and where the whole of it is said. A submodule vivibox could not
+    check is never counted among the commits you do not keep."""
+
+    def named(lacking: bool) -> str:
+        """In brackets, where found has a commit you do not keep (lacking), or where it has
+        what vivibox could not check: three of them, the rest counted."""
+        paths = list(dict.fromkeys(_whose(one) for one in found if (one.kind in NOT_KEPT) == lacking))
+        more = f" and {len(paths) - 3} more" if len(paths) > 3 else ""
+        return f" ({', '.join(paths[:3])}{more})" if paths else ""
+
+    known, unknown = named(True), named(False)
+    what = f"vivibox could not check its work's submodules{unknown}" if unknown else late
+    if known:  # each among what it is: a submodule vivibox could not check is not a commit you lack
+        what = f"its work keeps submodule commits you do not keep{known}"
+        what += f", and vivibox could not check others{unknown}" if unknown else ""
     return (
-        f"{task_id} was not accepted: {what}{which}, and accepting deletes the task. "
+        f"{task_id} was not accepted: {what}, and accepting deletes the task. "
         f"In a terminal, vivibox accept {task_id} says {'how to keep them' if known else 'more'}."
     )
 
@@ -410,7 +434,7 @@ def refusal(
     ]
     quoted = lambda path: shlex.quote(str(path))  # noqa: E731
     for one in found[:LISTED]:
-        named, way_out = f"{display.name(one.path)} at {one.commit}", []
+        named, way_out = f"{_whose(one)} at {one.commit}", []
         if one.via:  # not where the work leaves the submodule: said, with the commit that needs it
             above = display.name(one.via[0])
             named += f" (needed by {above} at {one.via[1]}, in the history of {above} that the work keeps)"
@@ -457,8 +481,11 @@ def refusal(
         elif one.kind == UNLISTED:
             lines += [
                 f"{named}: vivibox could not list the commits of its history in your repository, so the "
-                "work is not accepted with it. The git that lists them says why:",
-                "git " + shlex.join([*one.held.where(), *listing(one.since, one.commit)]),  # to paste
+                "work is not accepted with it. The git that lists them says why; accept the work again "
+                "once it lists them:",
+                # To paste: as the check asked, of the commits as they are kept.
+                "git "
+                + shlex.join(["--no-replace-objects", *one.held.where(), *listing(one.since, one.commit)]),
             ]
         elif one.kind == ADDED:
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
@@ -504,6 +531,17 @@ def refusal(
                 from_task,
                 *way_out,
             ]
+        elif one.kind == NO_ADDRESS:  # git submodule update --init answers "No url found" there
+            lines += [
+                f"{named}: your checkout has no copy of this submodule, and no .gitmodules of yours names "
+                f"its address, so git cannot check it out. Clone it to {display.name(str(mine))} from where "
+                "you know it to be, then fetch the commit from the submodule's remote, or from the task's "
+                f"clone ({keeps}):",
+                f"git clone -- <its remote> {quoted(mine)}",
+                fetch,
+                from_task,
+                *way_out,
+            ]
         else:
             lines += [
                 f"{named} is not in your submodule. Fetch it from the submodule's remote, or from the "
@@ -521,6 +559,6 @@ def refusal(
             f"{over}. Nothing of an answer cut short is used, so there may be more. Send the work back "
             f'with a reply (vivibox reply {task_id} "…") for work that leaves git less to list there.'
         )
-    if any(one.kind != UNCHECKED for one in found):
+    if any(one.kind not in (UNCHECKED, UNLISTED) for one in found):  # a command above does something
         lines.append("Then accept the work again.")
     return "\n".join(lines)

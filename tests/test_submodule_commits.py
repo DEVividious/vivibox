@@ -126,6 +126,9 @@ def refused(task, project, how=("accept",)) -> str:
 
 
 FROM_TASK = "GIT_NO_LAZY_FETCH=1 git"  # the fetch from the task's clone: nothing fetched lazily there
+# What the check's git is told: fetch nothing lazily, and read each commit as it is kept,
+# whatever a replace ref of yours shows in its place.
+AS_KEPT = {"GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1"}
 
 
 def ref_of(task, commit: str) -> str:
@@ -681,7 +684,7 @@ def test_a_history_that_moves_no_pointer_costs_one_listing_and_no_submodule_none
     assert not [args for args in ran if first in " ".join(args)], "a commit that moves no pointer was read"
     assert not [args for args in ran if str(task.repo) in " ".join(args)], "asked of the task's clone"
     for how in limits:  # the listing as every other git of the check: nothing fetched, and a time limit
-        assert how["env"] == {"GIT_NO_LAZY_FETCH": "1"} and 0 < how["timeout"] <= submodules.SECONDS
+        assert how["env"] == AS_KEPT and 0 < how["timeout"] <= submodules.SECONDS
     ran.clear()
     work = git(plain.repo, "rev-parse", "HEAD")
     submodules.check(plain.id, project.source, plain.repo, plain.read_state().base_commit, work)
@@ -906,11 +909,15 @@ def test_a_history_vivibox_cannot_list_is_refused_and_said(project, monkeypatch,
         why = "vivibox could not list the commits of its history in your repository"
         assert f"lib at {made.last}: {why}, so the work is not accepted with it. The git that" in said
         assert commands(said) == [
-            f"git -C {lib} log --format=%H --raw -r -c --root --no-renames --ignore-submodules=none "
+            f"git --no-replace-objects -C {lib} log --format=%H --raw -r -c --root --no-renames "
+            "--ignore-submodules=none "
             f"--no-show-signature --no-color {start}..{made.last} --"
         ]
         as_told(commands(said)[0])  # yours to run: here it lists, since git itself was not in the way
-        assert "send the work back" not in said and said.endswith("\nThen accept the work again.")
+        why = "The git that lists them says why; accept the work again once it lists them:"
+        assert f"{why}\n{commands(said)[0]}" in said
+        # The git printed only says why: nothing is done by running it, so no "Then".
+        assert "send the work back" not in said and "Then accept the work again" not in said
     else:
         late = f"vivibox did not finish checking the work's submodules in {submodules.SECONDS:g} s"
         assert f"{late} (reading the history of lib): there may be more." in said
@@ -973,6 +980,63 @@ def test_your_settings_for_what_a_log_shows_hide_no_pointer_from_the_check(proje
                     "color.ui=always", "core.quotePath=false", "log.diffMerges=first-parent"):  # fmt: skip
         git(lib, "config", *setting.split("="))
     assert f"lib/deep at {made.below}{needed_by('lib', made.then)}" in refused(task, project)
+
+
+def test_a_commit_of_the_history_that_you_replaced_is_read_as_it_is_kept(project):
+    """A replace ref of yours has git show another commit in place of one: here a commit of
+    lib's history that points lib/deep at a commit of the writer's, replaced by one that
+    points nowhere new. git's clean-up, a clone and a push keep and send the commit that was
+    replaced, with its pointer: the check reads the commits as they are kept, so the pointer
+    is seen, and the commit it needs is refused until you keep it."""
+    lib = project.source / "lib"
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    kept_from(task.repo / "lib", lib, made.last)
+    innocent = git(lib, "commit-tree", f"{made.then}~^{{tree}}", "-p", f"{made.then}~", "-m", "Innocent")
+    git(lib, "replace", made.then, innocent)
+    shown = git(lib, "log", "--raw", "--no-abbrev", "--format=%H", f"{made.then}~..{made.last}")
+    assert made.then in shown and made.below not in shown, "what your git shows of that history"
+    said = refused(task, project)
+    assert f"lib/deep at {made.below}{needed_by('lib', made.then)} is not in your submodule." in said
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+def test_work_whose_commits_git_does_not_list_is_refused_where_every_commit_is_kept(project, monkeypatch):
+    """Kept as a branch, every commit of the work stays: here an earlier one moves lib to a
+    commit of the writer's and a later one moves it back. Where git does not list the work's
+    commits, the last one says nothing of the others: refused as what vivibox could not check,
+    with the git that says why, never accepted on the last commit alone. Squashed, the last
+    commit is all that is kept, and no commits are listed: accepted."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    start = git(task.repo / "lib", "rev-parse", "HEAD")
+    written_in(task.repo / "lib")
+    committed(task, "Move the library")
+    git(task.repo / "lib", "checkout", "-q", start)
+    (task.repo / "notes.txt").write_text("the rest of the work\n")
+    work = committed(task, "And back")
+    at_final(task, project)
+    base, real = task.read_state().base_commit, repo.run_git
+
+    def run_git(args, **how):
+        if "rev-list" in args and f"{base}..{work}" in args:
+            return subprocess.CompletedProcess(args, 128, b"", b"fatal: bad revision")
+        return real(args, **how)
+
+    monkeypatch.setattr(repo, "run_git", run_git)
+    assert refused(task, project, ("accept", "--branch")).splitlines() == [
+        f"{task.id} was not accepted: {NOT_KNOWN}",
+        f"the work at {work}: vivibox could not list the commits of its history in your repository, so "
+        "the work is not accepted with it. The git that lists them says why; accept the work again once "
+        "it lists them:",
+        f"git --no-replace-objects -C {source} log --format=%H --raw -r -c --root --no-renames "
+        f"--ignore-submodules=none --no-show-signature --no-color {base}..{work} --",
+    ]
+    actions.finish(task, project.demo)
+    assert not task.root.exists() and (source / "notes.txt").exists()
 
 
 @pytest.mark.parametrize("history", ["its remote's", "not its remote's"])
@@ -1172,6 +1236,77 @@ def test_the_listing_names_the_commits_that_move_a_pointer_and_no_other(env):
     assert yours.history("", git(there, "commit-tree", tree, "-p", first, "-m", "And a file")) == [first]
 
 
+def test_a_refusal_of_a_commit_not_kept_and_of_what_was_not_checked_says_each_as_it_is(project):
+    """One refusal, two submodules: tools at a commit you do not keep, and lib, whose commit
+    you keep and whose history vivibox could not list. The first line is the stronger one,
+    of the commit that is not kept; each entry says its own; the short form counts tools
+    among the commits you do not keep and lib among what was not checked, never lib as a
+    commit you lack; and the last line is there, since a command of the refusal keeps a
+    commit. With lib alone there is no such line: the git printed for it only says why."""
+    yours = submodules.at(project.source, soon())
+    lib = submodules.Kept("lib", "1" * 40, submodules.UNLISTED, yours, yours, "lib", since="2" * 40)
+    tools = submodules.Kept("tools", "3" * 40, submodules.MISSING, yours, yours, "tools")
+    short = "demo-1 was not accepted: {}, and accepting deletes the task. In a terminal, vivibox accept "
+    short += "demo-1 {}."
+    both = (
+        "its work keeps submodule commits you do not keep (tools), and vivibox could not check others (lib)"
+    )
+    for found in ([lib, tools], [tools, lib]):
+        said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), found).splitlines()
+        assert said[0].startswith("demo-1 was not accepted: its work keeps a submodule commit that no ")
+        assert said[-1] == "Then accept the work again."
+        assert submodules.briefly("demo-1", found) == short.format(both, "says how to keep them")
+    said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [lib]).splitlines()
+    assert said[0] == f"demo-1 was not accepted: {NOT_KNOWN}" and said[-1].startswith("git ")
+    assert submodules.briefly("demo-1", [lib]) == short.format(
+        "vivibox could not check its work's submodules (lib)", "says more"
+    )
+    assert submodules.briefly("demo-1", [tools]) == short.format(
+        "its work keeps submodule commits you do not keep (tools)", "says how to keep them"
+    )
+    guidelines = (Path(__file__).parent.parent / "docs" / "ux-guidelines.md").read_text()
+    assert "one refusal has both" in " ".join(guidelines.split()), "the rule for a refusal of both, in §5"
+
+
+def test_a_pointer_no_gitmodules_gives_an_address_is_cloned_not_checked_out(project, env):
+    """Your project points at a repository at a path its .gitmodules does not name, and your
+    checkout has no copy of it: `git submodule update --init` answers "No url found" there.
+    The refusal does not say to check it out: it says no .gitmodules names its address, and
+    to clone it from where you know it to be, then the fetches; run, they make the check pass."""
+    source, bare = project.source, make_repo(env / "bare")
+    commit = git(bare, "rev-parse", "HEAD")
+    (source / "bare").mkdir()
+    git(source, "update-index", "--add", "--cacheinfo", f"160000,{commit},bare")
+    git(source, "commit", "-qm", "A pointer .gitmodules does not name")
+    base, newer = git(source, "rev-parse", "HEAD"), newer_at(bare)
+    git(source, "update-index", "--cacheinfo", f"160000,{newer},bare")
+    work = git(source, "commit-tree", git(source, "write-tree"), "-p", base, "-m", "The work moves it")
+    git(source, "reset", "-q", base)
+    told = subprocess.run(
+        ["git", "-C", str(source), "submodule", "update", "--init", "--", "bare"], capture_output=True
+    )
+    assert told.returncode != 0 and b"No url found for submodule path 'bare'" in told.stderr
+    with pytest.raises(submodules.Unkept) as refusal:
+        submodules.check("demo-1", source, Path("/task/repo"), base, work)
+    ref = f"refs/vivibox/demo-1/{newer[:12]}"
+    assert refusal.value.whole.splitlines() == [
+        "demo-1 was not accepted: its work keeps a submodule commit that no repository of yours keeps. "
+        "The task's clone may hold the only copy, and accepting deletes the task.",
+        f"bare at {newer}: your checkout has no copy of this submodule, and no .gitmodules of yours names "
+        f"its address, so git cannot check it out. Clone it to {source / 'bare'} from where you know it "
+        f"to be, then fetch the commit from the submodule's remote, or from the task's clone ({ref} keeps "
+        "it there, and may be deleted once the submodule is on that commit or its remote has it):",
+        f"git clone -- <its remote> {source / 'bare'}",
+        f"git -C {source / 'bare'} fetch --no-recurse-submodules",
+        f"{FROM_TASK} -C {source / 'bare'} -c protocol.version=2 fetch --no-tags --no-recurse-submodules "
+        f"/task/repo/bare {newer}:{ref}",
+        "Then accept the work again.",
+    ]
+    assert str(refusal.value).startswith("demo-1 was not accepted: its work keeps submodule commits you do")
+    as_told(commands(refusal.value.whole)[0].replace("<its remote>", str(bare)))
+    submodules.check("demo-1", source, Path("/task/repo"), base, work)
+
+
 def test_a_refusal_says_ten_submodules_in_full_and_counts_the_rest(project):
     commit = git(project.lib, "rev-parse", "HEAD")
     task = actions.create("demo", "Goal")
@@ -1250,7 +1385,7 @@ def test_the_check_fetches_nothing_and_every_git_of_it_has_a_time_limit(project,
         submodules.check(task.id, project.source, task.repo, task.read_state().base_commit, work)
     assert len(ran) >= 6
     for args, how in ran:
-        assert how["env"] == {"GIT_NO_LAZY_FETCH": "1"} and 0 < how["timeout"] <= submodules.SECONDS, args
+        assert how["env"] == AS_KEPT and 0 < how["timeout"] <= submodules.SECONDS, args
         assert how["limit"] == submodules.LIMIT and "capture_output" not in how, args
         assert "config" not in args or "--no-includes" in args, args
         assert str(task.repo) not in " ".join(args), "asked of the task's clone"

@@ -291,7 +291,8 @@ looks like an empty cache.
   its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the
   address alone when the label is the address, a title after the address in quotes
   (`markdown.link_text`); HTML is the text it is. What markdown itself would leave out is
-  drawn: the words after a code block's language on a line above the block, a table with more
+  drawn: the words after a code block's language, or its one word when that is no language the
+  highlighter knows, on a line above the block, a table with more
   cells in a row than columns as its source.
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
   A table in that text has columns of equal width and cells folded onto as many rows as they

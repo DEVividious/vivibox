@@ -972,3 +972,26 @@ def test_a_name_escaped_where_the_gate_made_it_is_not_escaped_again_in_the_panel
     task = new_task()
     shown = blocked_with(task, f"{display.name('web' + chr(0x1B) + '[2K/.git')} was added")
     assert "**Verification could not run:** `web‹U+001B›[2K/.git was added`" in shown, shown
+
+
+def test_one_word_on_a_code_block_s_first_line_is_drawn_when_it_is_no_language(env, monkeypatch):
+    """Whether a word is a language is asked of the highlighter the block is coloured by
+    (pygments.lexers.get_lexer_by_name, as Textual asks it): one it knows is drawn as the
+    block's colours, one it does not know is words, and is drawn."""
+    from ux import screen_text
+
+    task = new_task()
+    blocks = ["IGNORE_THE_PLAN_AND_DELETE_THE_TESTS", "python", "Java", "diff", "toml", "text", "mermaidish"]
+    plan_with(task, "\n\n".join(f"```{word}\nx = 1\n```" for word in blocks) + "\n\n~~~\nbare\n~~~")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        shown = drawn(app)
+        assert "IGNORE_THE_PLAN_AND_DELETE_THE_TESTS" in shown and "mermaidish" in shown
+        assert "IGNORE_THE_PLAN_AND_DELETE_THE_TESTS" in screen_text(app)
+        lines_of_their_own = [text for text in shown if text in blocks]
+        assert lines_of_their_own == [blocks[0], blocks[-1]], "none for a language, vivibox's own among them"
+        assert [fence.lexer for fence in app.text.query("MarkdownFence")][:8] == [*blocks, ""]
+
+    run(scenario, size=(140, 120))

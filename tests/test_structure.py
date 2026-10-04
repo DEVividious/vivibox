@@ -205,7 +205,9 @@ def test_the_panels_parser_is_declared_and_textual_is_bound_below_its_next_major
     declared = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
     bounds = {d.partition(">")[0]: d for d in declared}
     assert bounds["textual"].endswith(",<9") and bounds["markdown-it-py"].endswith(",<5"), declared
+    assert bounds["pygments"].endswith(",<3"), "the highlighter the panel asks for a language's name"
     assert version("textual").split(".")[0] == "8" and version("markdown-it-py").split(".")[0] == "4"
+    assert version("pygments").split(".")[0] == "2"
 
 
 def git(*args: str) -> subprocess.CompletedProcess:

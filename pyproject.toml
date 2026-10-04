@@ -21,8 +21,10 @@ dependencies = [
     # tooltip from markdown (vivibox/markdown.py): the next major is taken up by hand, with its
     # tests run.
     "textual>=8.2.8,<9",
-    # Textual's parser, used directly there (the panel's own rules).
+    # Textual's parser, used directly there (the panel's own rules), and its highlighter, asked
+    # whether a code block's first word is a language.
     "markdown-it-py>=4.2.0,<5",
+    "pygments>=2.21.0,<3",
 ]
 
 [project.urls]

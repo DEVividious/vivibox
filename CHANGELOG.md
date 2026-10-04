@@ -47,8 +47,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
-- vivibox asks for Textual 8 (`textual>=8.2.8,<9`) and names `markdown-it-py` (4.x), which
-  the details panel uses directly: what the panel does with a link and a table's cell is tested
+- vivibox asks for Textual 8 (`textual>=8.2.8,<9`) and names `markdown-it-py` (4.x) and
+  `pygments` (2.x), which the details panel uses directly: what the panel does with a link and a table's cell is tested
   on that Textual, and the next major is taken up with its tests run.
 - A task that tracks a repository of its own (`git init` in a folder, then `git add`) or adds a
   worktree is still stopped, with no way to approve either, but is no longer told to be deleted:
@@ -281,6 +281,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- One word on a code block's first line is drawn, on a line above the block, when it is not a
+  language the highlighter knows (`IGNORE_THE_PLAN_AND_DELETE_THE_TESTS`): it was taken for the
+  block's language and drawn nowhere. A language (`python`, `diff`, `toml`) is still the
+  block's colours and no line of words.
 - A code point spelled in small letters (`˂U+001b˃`, `˂u+001B˃`) is one for the character
   beside it too. In the panel of a verification that could not run, the frame vivibox puts
   around a build's line (`the build said «…»`) stays as it is when the line ends in a spelled

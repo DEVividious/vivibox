@@ -2,7 +2,7 @@
 review's notes, a criterion, a step of the writer's list. It keeps its headings, lists and
 emphasis, and makes no link: nothing in it opens an address on your machine, hides one behind
 other words, or is left out of what you read (but the name of a code block's language, which
-the block's colours stand for).
+the block's colours stand for; a word there that is no language is drawn).
 
 Which links are vivibox's is settled by the function that wrote them, never by where one leads:
 own_link signs a link with a key made when vivibox starts and kept nowhere, and the parser's last
@@ -21,6 +21,8 @@ from markdown_it.rules_block import StateBlock
 from markdown_it.rules_block.table import escapedSplit, getLine, table
 from markdown_it.rules_core import StateCore
 from markdown_it.token import Token
+from pygments.lexers import get_lexer_by_name
+from pygments.util import ClassNotFound
 from textual.app import ComposeResult
 from textual.widgets import Markdown
 from textual.widgets._markdown import MarkdownBlock, MarkdownTable, MarkdownTableContent
@@ -124,15 +126,27 @@ def _whole_tables(tokens: list[Token]) -> list[Token]:
     return out
 
 
+def _language(word: str) -> bool:
+    """Whether the highlighter that colours a block knows word for a language: asked of pygments
+    the way Textual asks it for the block (textual.highlight), by a lexer's name or alias,
+    whatever the case of the letters."""
+    try:
+        get_lexer_by_name(word)
+    except ClassNotFound:
+        return False
+    return True
+
+
 def _fence_words(tokens: list[Token]) -> list[Token]:
-    """The tokens with the first line of a fenced block, when it says more than one word, in a
+    """The tokens with the first line of a fenced block, when it says more than a language, in a
     line of its own above the block, as code: the widget takes that line for the language's name
-    and draws none of it. The block keeps the first word, its language. One word alone is not
-    drawn as text: it is the language, whose colours the block has, or has not."""
+    and draws none of it. The block keeps the first word, its language. One word alone is drawn
+    as the block's colours when the highlighter knows it for a language (_language), and as
+    words when it does not: IGNORE_THE_PLAN is no language."""
     out: list[Token] = []
     for token in tokens:
         words = token.info.split(None, 1) if token.type == "fence" else []
-        if len(words) > 1:
+        if len(words) > 1 or (words and not _language(words[0])):
             said = _block("code_inline", display.terminal(token.info.strip(), ""))
             said.block = False
             out += [_block("paragraph_open"), _block("inline", children=[said]), _block("paragraph_close")]

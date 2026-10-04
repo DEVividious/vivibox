@@ -954,8 +954,6 @@ def test_a_file_the_task_made_too_large_is_the_writers_to_restore(env, monkeypat
     ],
 )
 def test_a_git_failure_in_your_checkout_is_said_in_its_own_words(env, outside, monkeypatch, fails, words):
-    from vivibox import baseline
-
     t, _ = linked_at_base(env, outside)
     real_run = subprocess.run
 
@@ -967,7 +965,7 @@ def test_a_git_failure_in_your_checkout_is_said_in_its_own_words(env, outside, m
         said = b"fatal: detected dubious ownership in repository at '/x'\nTo add an exception: ...\n"
         return subprocess.CompletedProcess(args, 128, b"", said)
 
-    monkeypatch.setattr(baseline.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     said = Approvals(t.meta, t.repo).diff(Change("build.gradle", "changed"))
     assert words in said and "To add an exception" not in said, "its first line"
 

@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import as_verified
+from conftest import as_verified, global_git_config
 from test_control import FLOWS, a_large_repository, binds, commit, git, made, variables
 from test_control import docker as docker  # noqa: F401  (the fixture: a machine and a recording Docker)
 from test_control import starting as starting  # noqa: F401  (the fixture: a start on stand-ins)
@@ -326,13 +326,13 @@ def test_a_view_and_a_working_directory_hold_no_hook_and_run_none_of_yours(tmp_p
     for hook in ("reference-transaction", "pre-commit", "post-commit", "post-checkout"):
         program(tmp_path / "yours" / hook, ran)
     signer = program(tmp_path / "sign.sh", ran, "exit 1")
-    yours = tmp_path / "gitconfig"
-    yours.write_text(
+    global_git_config(
+        monkeypatch,
+        tmp_path / "home",
         f"[core]\n\thooksPath = {tmp_path / 'yours'}\n[commit]\n\tgpgsign = true\n"
-        f"[gpg]\n\tprogram = {signer}\n[init]\n\ttemplateDir = {templates}\n"
+        f"[gpg]\n\tprogram = {signer}\n[init]\n\ttemplateDir = {templates}\n",
     )
     monkeypatch.setenv("GIT_TEMPLATE_DIR", str(templates))
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(yours))
     work, view = tmp_path / "work", tmp_path / "view"
     work.mkdir()
     view.mkdir()

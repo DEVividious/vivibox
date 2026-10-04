@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import make_repo
+from conftest import global_git_config, make_repo
 from rich.text import Text
 from textual.coordinate import Coordinate
 from textual.widgets import Checkbox, Input, Label, OptionList, Select, SelectionList, TextArea
@@ -4941,8 +4941,7 @@ def test_the_header_says_when_the_dns_forwarder_is_down(env, monkeypatch):
 def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeypatch, missing):
     from ux import screen_text
 
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    global_git_config(monkeypatch, env / "home", "")
     for key in ("name", "email") if missing == "both" else (missing,):
         subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
 
@@ -4963,7 +4962,7 @@ def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeyp
 @pytest.mark.parametrize("local", [False, True])
 def test_n_accepts_a_complete_local_or_global_git_identity(env, monkeypatch, local):
     if local:
-        monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+        global_git_config(monkeypatch, env / "home", "")
     else:
         for key in ("name", "email"):
             subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
@@ -4983,7 +4982,7 @@ def test_new_task_rechecks_identity_if_it_disappears_while_form_is_open(env, mon
         await pilot.press("n")
         await pilot.pause()
         assert isinstance(app.screen, newtask.NewTask)
-        monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+        global_git_config(monkeypatch, env / "home", "")
         subprocess.run(["git", "config", "--unset", "user.email"], cwd=env / "repo", check=True)
         app.screen.query_one("#goal", TextArea).load_text("Do something")
         await pilot.press("ctrl+s")

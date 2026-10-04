@@ -596,9 +596,10 @@ def says_it_could_not_run(task, outside):
     assert outside.read_text() == "the host's own file\n"
 
 
-def test_feedback_the_host_cannot_write_stops_the_task_without_using_a_round(task):
+def test_feedback_the_host_cannot_write_stops_the_task_without_using_a_round(env, task):
     """A link in place of verify-feedback.md: a feedback turn would send the writer to a file
-    nobody wrote, so the task stops for you as on a problem outside the code."""
+    nobody wrote, so the task stops for you as on a problem outside the code. env: the panel
+    asks the configuration which tool the writer runs on."""
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         task.transition(s)
     outside = linked_feedback(task)

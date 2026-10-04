@@ -7,10 +7,27 @@ import pytest
 
 # Git's global configuration for the tests: an identity of their own, so a repository they make
 # without one commits the same on this machine and on a runner with no ~/.gitconfig, and nothing
-# the tests do reads or writes yours.
-GIT_CONFIG = Path(tempfile.mkdtemp(prefix="vivibox-tests-")) / "gitconfig"
-GIT_CONFIG.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
+# the tests do reads or writes yours. It is the ~/.gitconfig of a home of the suite's own: the
+# git a test runs itself is pointed at it (GIT_CONFIG_GLOBAL), and the git vivibox runs, which
+# takes no GIT_* variable from the environment (repo.git_environment), reads it where git
+# keeps your settings (own_home).
+IDENTITY = "[user]\n\tname = Test User\n\temail = test@example.com\n"
+# Submodules from local paths are blocked by default since git 2.38.
+LOCAL_SUBMODULES = '[protocol "file"]\n\tallow = always\n'
+HOME = Path(tempfile.mkdtemp(prefix="vivibox-tests-home-"))
+GIT_CONFIG = HOME / ".gitconfig"
+GIT_CONFIG.write_text(IDENTITY)
 os.environ["GIT_CONFIG_GLOBAL"] = str(GIT_CONFIG)
+
+
+def global_git_config(monkeypatch: pytest.MonkeyPatch, home: Path, text: str) -> Path:
+    """Your global git configuration for one test: text as the ~/.gitconfig of home, read by the
+    git the test runs itself and by the git vivibox runs alike. "" is a machine with none."""
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".gitconfig").write_text(text)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    return home / ".gitconfig"
 
 
 def make_repo(path: Path) -> Path:
@@ -65,6 +82,15 @@ def real_machine(request) -> bool:
     model, which runs agents in real pods (tests/behavioural) and is selected by -m model alone,
     never by -m docker, so that no run of the live suites spends money."""
     return "docker" in request.keywords or "model" in request.keywords
+
+
+@pytest.fixture(autouse=True)
+def own_home(request, monkeypatch):
+    """HOME is the suite's, where its git configuration is (GIT_CONFIG): the git vivibox runs
+    reads ~/.gitconfig there and never yours. Not for a test on this machine's Docker, whose
+    client keeps its own settings in your home."""
+    if not real_machine(request):
+        monkeypatch.setenv("HOME", str(HOME))
 
 
 @pytest.fixture(autouse=True)

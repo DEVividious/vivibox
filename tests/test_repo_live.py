@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import make_repo
+from conftest import LOCAL_SUBMODULES, make_repo
 
 from vivibox import image, repo
 from vivibox import secrets as task_secrets
@@ -151,13 +151,12 @@ def lib_task(tmp_path_factory):
     image.build()
     tmp = tmp_path_factory.mktemp("repo-live-lib")
     mp = pytest.MonkeyPatch()
-    # Submodules from local paths are blocked by default since git 2.38.
-    mp.setenv("GIT_CONFIG_COUNT", "1")
-    mp.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
-    mp.setenv("GIT_CONFIG_VALUE_0", "always")
     lib = make_repo(tmp / "lib")
     source = make_repo(tmp / "source")
-    subprocess.run(["git", "submodule", "add", "-q", str(lib), "lib"], cwd=source, check=True)
+    # Submodules from local paths are blocked by default since git 2.38: the fixture's own git
+    # is told on its command line.
+    allowed = ["git", "-c", "protocol.file.allow=always"]
+    subprocess.run([*allowed, "submodule", "add", "-q", str(lib), "lib"], cwd=source, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "Add lib"], cwd=source, check=True)
     tasks_dir = TASKS_ROOT / f".pytest-{secrets.token_hex(4)}"
     cfg = tmp / "config"
@@ -168,7 +167,16 @@ def lib_task(tmp_path_factory):
     )
     (cfg / "projects" / "libcheck.toml").write_text(f'repo = "{source}"\nverify = ["true"]\n')
     mp.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
-    assert main(["new", "libcheck", "Check the submodule", "--draft"]) == 0
+    # The git vivibox runs takes no GIT_* variable from the environment, so the one that makes
+    # the task's clone, and fetches its submodule on the host, reads the setting where git
+    # keeps yours: a configuration folder of the fixture's, for as long as the task is made
+    # (your home stays yours, where the Docker client keeps its own settings).
+    settings = tmp / "xdg" / "git" / "config"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(LOCAL_SUBMODULES)
+    with pytest.MonkeyPatch.context() as making:
+        making.setenv("XDG_CONFIG_HOME", str(tmp / "xdg"))
+        assert main(["new", "libcheck", "Check the submodule", "--draft"]) == 0
     assert main(["pod", "up", "libcheck-1"]) == 0
     pod = task_pod("libcheck-1")
     try:

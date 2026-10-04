@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import make_repo, networks_up
+from conftest import IDENTITY, LOCAL_SUBMODULES, global_git_config, make_repo, networks_up
 
 from vivibox import repo as r
 
@@ -101,10 +101,7 @@ def test_agent_mounts_protect_git_files(cloned):
 
 
 def test_submodule_git_dirs_are_protected(tmp_path, monkeypatch):
-    # Submodules from local paths are blocked by default since git 2.38.
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    global_git_config(monkeypatch, tmp_path / "home", IDENTITY + LOCAL_SUBMODULES)
     sub = make_repo(tmp_path / "lib")
     source = make_repo(tmp_path / "source")
     git(source, "submodule", "add", "-q", str(sub), "lib")
@@ -149,9 +146,7 @@ def agent_git(path: Path, *args: str) -> str:
 @pytest.fixture
 def with_lib(tmp_path, monkeypatch):
     """A task's clone with a submodule, as prepare leaves it."""
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    global_git_config(monkeypatch, tmp_path / "home", IDENTITY + LOCAL_SUBMODULES)
     lib = make_repo(tmp_path / "lib")
     source = make_repo(tmp_path / "source")
     git(source, "submodule", "add", "-q", str(lib), "lib")
@@ -629,13 +624,11 @@ def test_an_index_split_in_two_is_refused(cloned):
     assert ".git/index is an index vivibox cannot read" in refused(repo, meta)
 
 
-def test_vivibox_never_rewrites_the_clones_index(cloned, monkeypatch):
+def test_vivibox_never_rewrites_the_clones_index(cloned, tmp_path, monkeypatch):
     """git status writes the index it refreshed, in the form your own settings ask for (a split
     index, core.splitIndex in your ~/.gitconfig), which the next check could not read."""
     _, repo, meta, _ = cloned
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.splitIndex")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    global_git_config(monkeypatch, tmp_path / "home", IDENTITY + "[core]\n\tsplitIndex = true\n")
     before = (repo / ".git" / "index").read_bytes()
     os.utime(repo / "README.md", (1, 1))  # stale in the index: status would refresh it
     r.in_clone(repo, "status", "--porcelain")

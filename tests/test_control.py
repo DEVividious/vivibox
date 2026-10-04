@@ -8,7 +8,7 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from conftest import as_verified
+from conftest import as_verified, global_git_config
 from test_pod import FakeDocker, applied_policy, flag, starts
 
 from vivibox import (
@@ -490,8 +490,7 @@ def test_the_copy_is_checked_out_without_your_git_lfs_fetching_anything(reading,
     """A filter of your own git configuration (git-lfs: required, and asking a remote the copy
     does not have) would stop the checkout; the copy holds what the commits hold, the pointer."""
     task, pod = reading
-    yours = tmp_path / "gitconfig"
-    yours.write_text(
+    yours = (
         "[user]\n\tname = T\n\temail = t@example.com\n"
         '[filter "lfs"]\n\tsmudge = false\n\tprocess = false\n\trequired = true\n'
     )
@@ -499,7 +498,7 @@ def test_the_copy_is_checked_out_without_your_git_lfs_fetching_anything(reading,
     (task.repo / "model.bin").write_text("version https://git-lfs.github.com/spec/v1\n")
     subprocess.run(["git", "-C", str(task.repo), "add", "."], check=True)
     git(task.repo, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "Add model")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(yours))
+    global_git_config(monkeypatch, tmp_path / "home", yours)
     control.refresh(task, pod)
     assert (pod.control_src / "model.bin").read_text().startswith("version https://git-lfs")
 
@@ -960,8 +959,7 @@ def test_the_hosts_git_in_the_copy_reads_none_of_your_git_configuration(reading,
     program = tmp_path / "smudge.sh"
     program.write_text(f"#!/bin/sh\ntouch {ran}\ncat\n")
     program.chmod(0o755)
-    yours = tmp_path / "gitconfig"
-    yours.write_text(
+    yours = (
         "[user]\n\tname = T\n\temail = t@example.com\n"
         f'[filter "mine"]\n\tsmudge = {program}\n\trequired = true\n'
         "[submodule]\n\trecurse = true\n"
@@ -970,7 +968,7 @@ def test_the_hosts_git_in_the_copy_reads_none_of_your_git_configuration(reading,
     (task.repo / "notes.txt").write_text("notes\n")
     git(task.repo, "add", ".")
     git(task.repo, "-c", "user.name=W", "-c", "user.email=w@example.com", "commit", "-q", "-m", "Add notes")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(yours))
+    global_git_config(monkeypatch, tmp_path / "home", yours)
     control.refresh(task, pod)
     assert (pod.control_src / "notes.txt").read_text() == "notes\n"
     assert not ran.exists(), "your filter ran on what the writer committed"

@@ -147,6 +147,16 @@ def test_a_piece_whose_end_was_cut_off_leaves_the_rest_the_agents():
     assert headings(own) == [] and headings(agents) == [] and "Roles" in bold_lines(agents)
 
 
+def test_a_piece_put_in_a_piece_is_one_piece():
+    """What is handed to prose twice is in one frame, and none of the marks is drawn."""
+    twice = markdown.prose("before\n" + sections.plan_text("# Goal\n\ntext") + "\nafter")
+    tokens = parsed(f"Own.\n{twice}\nOwn again.")
+    own, agents = apart(tokens)
+    assert sum((t.meta or {}).get("prose", False) for t in tokens) == 2, "one frame: its two ends"
+    assert [t.content for t in own if t.type == "inline"] == ["Own.", "Own again."]
+    assert [t.content for t in agents if t.type == "inline"] == ["before", "Goal", "text", "after"]
+
+
 def test_a_link_in_what_an_agent_wrote_is_text_whatever_its_title():
     """Inside a frame nothing is a link, not even one signed as vivibox's own."""
     own = markdown.own_link("198.51.100.2:5173", "http://198.51.100.2:5173")

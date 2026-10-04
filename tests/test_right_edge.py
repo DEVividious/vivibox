@@ -78,6 +78,7 @@ def test_a_long_line_of_a_risky_file_is_on_the_screen_whole(env, monkeypatch, wi
         assert f"+{LONG}" in lines_of(app, fence), "and the line reads as the file has it"
         assert folded(app, fence) == -(-(len(LONG) + 1) // (fence.size.width - 4)) - 1, "a mark on each row"
         assert fence.max_scroll_x == 0, "nothing of it is to the side"
+        assert fence.styles.overflow_x == "hidden" and not fence.allow_horizontal_scroll, "and never is"
 
     run(scenario, size=(width, 60))
 

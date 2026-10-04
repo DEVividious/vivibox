@@ -295,6 +295,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A line of a code block longer than the details panel is on the screen whole. It was drawn as
+  one row, and what was past the panel's edge was not shown, with no sign that the line went
+  on: where you approve risky files "as shown", a line of `build.gradle` with 200 spaces after
+  a harmless start showed the start alone (`vivibox risky` showed all of it). Every code block
+  of the panel (a diff, a risky file, a log, the feedback, a block in a plan, a table shown as
+  its source) now folds such a line onto further rows, each marked `↳` in a column of the
+  block's own, where no text of the block is drawn; the same character in a block's text is
+  shown as `‹U+21B3›`. A fold counts the cells a character takes (two for a wide one, none for
+  a combining mark, a tab to its stop) and is made again when the terminal's width changes. A
+  code block no longer scrolls sideways.
 - When opencode's server does not start in the pod, the end of its log is said escaped, its
   lines under the first, like every other tool's words; it was put into the error as it came.
 - One word on a code block's first line is drawn, on a line above the block, when it is not a

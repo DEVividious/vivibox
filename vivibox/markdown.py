@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import secrets
 from collections.abc import Iterable
+from contextlib import suppress
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
@@ -32,11 +33,16 @@ from markdown_it.rules_core import StateCore
 from markdown_it.token import Token
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
+from rich.cells import cell_len
+from textual import events
 from textual.app import ComposeResult
-from textual.widgets import Markdown
+from textual.content import Content
+from textual.css.query import NoMatches
+from textual.widgets import Label, Markdown
 from textual.widgets._markdown import (
     MarkdownBlock,
     MarkdownBlockQuote,
+    MarkdownFence,
     MarkdownHorizontalRule,
     MarkdownTable,
     MarkdownTableContent,
@@ -57,6 +63,9 @@ _PIECE = re.compile(f"{re.escape(_OPEN)}\n(.*?)(?:\n{re.escape(_CLOSE)}|\\Z)", r
 PROSE = "prose"
 # A horizontal rule's token, by a name the widget leaves to Panel.unhandled_token.
 RULE = "rule"
+# What says of a row of a code block that it goes on from the row above (Fence), in a column of
+# the block's own; the same character in a block's text is shown as its code point.
+MARK = "\u21b3"
 
 
 def prose(text: str) -> str:
@@ -208,6 +217,8 @@ def as_text(state: StateCore) -> None:
             token.children = _plain(token.children, bool(state.env.get(PROSE)))
         elif token.type == "hr":  # the widget draws an hr above whatever it stands in: Panel
             token.type = RULE
+        elif token.type in ("fence", "code_block"):  # the mark of a folded line is Fence's alone
+            token.content = token.content.replace(MARK, display.code_point(MARK))
 
 
 def _rules() -> MarkdownIt:
@@ -307,6 +318,87 @@ class Table(MarkdownTable):
             yield Cells(made.headers, made.rows)
 
 
+def _rows(line: Content, width: int) -> list[Content]:
+    """line on as many rows as it takes at width cells: cut between two characters, by the
+    cells each takes on the screen and not by their count. A character two cells wide that no
+    longer fits goes to the next row whole, and one that takes no cell (a combining mark) stays
+    with the one before it. A row holds a character at least, however narrow it is. One row
+    while the width is not known yet (0)."""
+    if not width or line.cell_length <= width:
+        return [line]
+    cuts, used = [], 0
+    for at, character in enumerate(line.plain):
+        cells = cell_len(character)
+        if used and used + cells > width:
+            cuts.append(at)
+            used = 0
+        used += cells
+    return line.divide(cuts)
+
+
+class Fence(MarkdownFence):
+    """A code block of the panel: a diff, a file, a log, a block in a plan. Every line of it is
+    on the screen whole. Textual draws a line as one row and leaves what is past the block's
+    width to a scroll sideways that nothing announces: of a line of a risky file with 200 spaces
+    in it, the harmless start alone was shown where you approve the file "as shown". Here a line
+    longer than the block is folded onto further rows, each with MARK in the first of two
+    columns that are the block's own: no text of the block is drawn there, so no line of it
+    can be drawn as the rest of the line above, or hide that it is. Folded again whenever the
+    block's width changes; nothing scrolls sideways."""
+
+    DEFAULT_CSS = """
+    Fence {
+        overflow: hidden hidden;
+        & > Label {
+            width: 1fr;
+            padding: 1 2 1 0;
+        }
+    }
+    Fence:ansi > Label {
+        padding: 1 0;
+    }
+    """
+
+    def __init__(self, markdown: Markdown, token: Token, code: str) -> None:
+        super().__init__(markdown, token, code)
+        self._width = 0
+
+    @property
+    def allow_horizontal_scroll(self) -> bool:
+        return False
+
+    def folded(self) -> Content:
+        """The block's text for the width it has: its lines, tabs as the columns they take,
+        each on the rows it needs, the two columns before each row blank or the mark."""
+        mark = Content.styled(f"{MARK} ", "$text-muted")
+        rows = [
+            Content.assemble(mark if more else "  ", row)
+            for line in self._highlighted_code.expand_tabs(8).split("\n", allow_blank=True)
+            for more, row in enumerate(_rows(line, self._width))
+        ]
+        return Content("\n").join(rows)
+
+    def on_resize(self, event: events.Resize) -> None:
+        """The width its text has: the block's, less the two columns of the mark and the
+        label's own padding."""
+        try:
+            label = self.query_one("#code-content", Label)
+        except NoMatches:
+            return
+        width = max(1, event.size.width - 2 - label.styles.gutter.width)
+        if width != self._width:
+            self._width = width
+            label.update(self.folded())
+
+    def set_content(self, content: Content) -> None:
+        self._content = content
+        with suppress(NoMatches):
+            self.query_one("#code-content", Label).update(self.folded())
+
+    def compose(self) -> ComposeResult:
+        yield Label(self.folded(), id="code-content", expand=True, markup=False)
+
+
 class Quote(MarkdownBlockQuote):
     """A quote of the panel. One an agent wrote is drawn as Textual draws a quote. The frame
     around a piece an agent wrote (PROSE) is a rule down its left and nothing else (its look is
@@ -342,6 +434,8 @@ class Panel(Markdown):
         **Markdown.BLOCKS,
         "table_open": Table,
         "blockquote_open": Quote,
+        "fence": Fence,
+        "code_block": Fence,
     }
 
     def unhandled_token(self, token: Token) -> MarkdownBlock | None:

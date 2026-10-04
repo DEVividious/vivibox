@@ -313,6 +313,14 @@ looks like an empty cache.
   A table in that text has columns of equal width and cells folded onto as many rows as they
   take, never cut with an ellipsis, and no tooltip (`markdown.Cells`): an address in a cell is
   on the screen whole, at 80 columns too.
+- Nothing in the panel lies past its right edge. A line of a code block (a diff, a risky file,
+  a log, a block in a plan) longer than the block is folded onto further rows, each with `↳`
+  in the first of the two columns before the text, which are the block's own
+  (`markdown.Fence`): no text of the block is drawn there, and the same character in a block's
+  text is shown as its code point (`‹U+21B3›`), so no line passes for the rest of the line
+  above it and none hides that it goes on. A fold counts the cells a character takes (two for
+  a wide one, none for a combining mark, a tab to its stop) and is made again on every change
+  of width; a code block never scrolls sideways.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

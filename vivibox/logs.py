@@ -4,6 +4,7 @@ verification runs its log is the entry the cursor is on, followed as it is writt
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable
@@ -142,9 +143,20 @@ def archived_entries(kept: Path) -> list[Entry]:
     for log in logs:
         found.append(Entry(log.name, describe(log), pager_command(log, at_end=True)))
     reviews = [(m.group(1), p) for p in kept.glob("review-*.md") if (m := reviewing.NUMBERED.match(p.name))]
+    unread = unread_reviews(kept)
     for n, path in sorted(reviews, key=lambda r: int(r[0]), reverse=True):
-        review = reviewing.parse_review(path.read_text())
+        text = path.read_text(errors="replace")
+        review = reviewing.parse_review(text)
         said = f"review {n} · {len(review.blocking)} blocking · {len(review.not_blocking)} not blocking"
+        # No counts for what is no review: they would read as a clean one. Why, as the supervisor
+        # recorded it; where the archive has no such record, the counted section the text lacks
+        # (what a round keeps when the reviewer's file was not read has none).
+        headings = {line.strip().lower() for line in text.splitlines()}
+        counted = (reviewing.BLOCKING, reviewing.NOT_BLOCKING)
+        if problem := unread.get(int(n), ""):
+            said = f"review {n} · unreadable: {problem.rsplit('/', 1)[-1] if problem[:1] == '/' else problem}"
+        elif int(n) not in unread and (missing := [h for h in counted if h.lower() not in headings]):
+            said = f"review {n} · not a review: the section {missing[0]} is missing"
         found.append(Entry(path.name, said, pager_command(path)))
     supervisor = kept / "log" / "supervisor.log"
     if supervisor.exists():
@@ -155,6 +167,20 @@ def archived_entries(kept: Path) -> list[Entry]:
                 pager_command(supervisor, at_end=True),
             )
         )
+    return found
+
+
+def unread_reviews(kept: Path) -> dict[int, str]:
+    """Each round's review as the archive's events record it: why the supervisor could not read
+    it, "" when it could. No entry for a round the archive has no record of, or cannot read."""
+    found: dict[int, str] = {}
+    try:
+        for line in (kept / "events.jsonl").read_text().splitlines():
+            event = json.loads(line) if line else {}
+            if event.get("type") == "review":
+                found[int(event["data"]["round"])] = str(event["data"].get("problem", ""))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
     return found
 
 

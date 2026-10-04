@@ -268,6 +268,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `l` on a finished task no longer says `0 blocking · 0 not blocking` of a round whose review
+  vivibox could not read: it says `unreadable` and why, as it does while the task lives, from
+  the events the archive kept; in an archive without them, a text with no Blocking or Not
+  blocking section is said to be no review instead of counted.
 - A task stopped on a `question.md` that vivibox did not read (a link, or not a plain file) is
   no longer called `agent asks` in the list and in `vivibox status`: its status is `question
   not read`, and `Why` gives vivibox's reason instead of the path of a file not to open. A

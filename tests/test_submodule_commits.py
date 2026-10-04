@@ -821,10 +821,68 @@ def test_the_history_of_a_commit_the_history_points_at_is_checked_too(project, e
     assert git(source / "top/s/s", "rev-parse", "HEAD") == lower.below
 
 
+def test_the_history_of_a_submodule_your_repository_only_kept_is_listed_there(project):
+    """lib is not checked out: your repository kept it under .git/modules, and keeps the last
+    commit of the writer's there. Its history is listed in that repository all the same, and
+    the commit it points at refused; the commands check lib out, all the way down, and fetch."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    made = moved_and_back(task)
+    at_final(task, project)
+    kept = git(source / "lib", "rev-parse", "--absolute-git-dir")
+    git(source, "submodule", "deinit", "-f", "lib")
+    fetch = ("fetch", "-q", "--no-tags", "--no-recurse-submodules", str(task.repo / "lib"))
+    subprocess.run(["git", "--git-dir", kept, *fetch, f"{made.last}:refs/heads/kept"], check=True)
+    said = refused(task, project)
+    named = f"lib/deep at {made.below}{needed_by('lib', made.then)}"
+    assert f"{named}: your checkout has no copy of this submodule." in said
+    assert commands(said)[0] == f"git -C {source} submodule update --init --recursive -- lib"
+    as_told(commands(said)[0])
+    as_told(commands(said)[2])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
+def test_what_a_commit_of_the_history_points_at_says_the_same_commit_all_the_way_down(project, env):
+    """Three deep. top's history points top/s at a commit of the writer's, which itself
+    points top/s/s at another; top moved back. The one below is needed by the same commit of
+    top's history as the one above it, and is named with it."""
+    source = project.source
+    chain = [make_repo(env / f"level-{n}") for n in range(3)]
+    for above, below in ((chain[1], chain[2]), (chain[0], chain[1])):
+        git(above, "submodule", "add", "-q", str(below), "s")
+        git(above, "commit", "-qm", "One below")
+    git(source, "submodule", "add", "-q", str(chain[0]), "top")
+    git(source, "submodule", "update", "-q", "--init", "--recursive")
+    git(source, "commit", "-qm", "Three deep")
+    task = actions.create("demo", "Goal")
+    top, middle = task.repo / "top", task.repo / "top" / "s"
+    start = git(middle, "rev-parse", "HEAD")
+    lowest = written_in(middle / "s", "the writer's, lowest\n")
+    git(middle, "add", "s")
+    below = written_in(middle, "the writer's, pointing at the lowest\n")
+    git(top, "add", "s")
+    then = written_in(top, "pointing below\n")
+    git(middle, "checkout", "-q", start)
+    git(top, "add", "s")
+    last = written_in(top, "and back\n")
+    at_final(task, project)
+    kept_from(top, source / "top", last)
+    said = refused(task, project)
+    assert f"top/s at {below}{needed_by('top', then)} is not in your submodule." in said
+    as_told(commands(said)[1])
+    said = refused(task, project)
+    assert f"top/s/s at {lowest}{needed_by('top', then)} is not in your submodule." in said
+    as_told(commands(said)[1])
+    actions.finish(task, project.demo)
+    assert not task.root.exists()
+
+
 def test_the_listing_names_the_commits_that_move_a_pointer_and_no_other(env):
     """A history with a commit that adds a pointer, one that changes a file whose name is no
     text, a merge that carries the pointer of one side, a merge that moves it to a commit of
-    its own, and a commit that removes it: the first and the second merge are listed. With
+    its own, a commit that removes it and one after that: the first and the second merge are
+    listed. With
     nothing to count from, a remote's branch that reaches a commit takes it out; a start that
     is no commit of the repository is said, not taken for a history without pointers."""
     there = make_repo(env / "there")
@@ -855,7 +913,8 @@ def test_the_listing_names_the_commits_that_move_a_pointer_and_no_other(env):
     git(there, "update-index", "--cacheinfo", f"160000,{other},sub")
     moves = committed("commit", "-qm", "A merge that moves the pointer")
     git(there, "update-index", "--force-remove", "sub")
-    last = committed("commit", "-qm", "No pointer")
+    committed("commit", "-qm", "No pointer")
+    last = committed("commit", "-qm", "And on", "--allow-empty")
     yours = submodules.at(there, soon())
     assert yours.history(start, last) == [moves, adds] == yours.history("", last)
     assert yours.history(carries, last) == [moves] and yours.history(last, last) == []

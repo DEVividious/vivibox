@@ -6,6 +6,7 @@ be a newer vivibox's. vivibox migrates none of them, and deletes none by itself.
 writes nothing in it."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -660,3 +661,124 @@ def test_a_task_with_one_network_is_from_an_earlier_vivibox():
     created again."""
     assert task_module.TASK_SCHEMA_VERSION >= 5
     assert task_module.classify(4) == task_module.EARLIER
+
+
+# --- a state.json that is no state at all ---------------------------------------------------------
+
+NO_STATE_SAYS = (
+    "demo-1's state is unreadable or damaged: its state.json is not a task's state as vivibox writes "
+    "one, so this vivibox does not run it; delete it and create it again: vivibox delete demo-1"
+)
+
+
+def half(path: Path) -> None:
+    whole = path.read_bytes()
+    path.write_bytes(whole[: len(whole) // 2])  # as a write cut short leaves it
+
+
+def a_folder(path: Path) -> None:
+    path.unlink()
+    path.mkdir()
+
+
+def of_this_layout_without(*fields: str):
+    def damage(path: Path) -> None:
+        data = json.loads(path.read_text())
+        for name in fields:
+            del data[name]
+        path.write_text(json.dumps(data))
+
+    return damage
+
+
+def with_a_field_as(name: str, value):
+    def damage(path: Path) -> None:
+        path.write_text(json.dumps({**json.loads(path.read_text()), name: value}))
+
+    return damage
+
+
+DAMAGED = {
+    "not JSON": lambda path: path.write_text("{not json"),
+    "empty": lambda path: path.write_text(""),
+    "cut short": half,
+    "a list": lambda path: path.write_text("[]"),
+    "text": lambda path: path.write_text('"a state"'),
+    "a number": lambda path: path.write_text("6"),
+    "null": lambda path: path.write_text("null"),
+    "bytes that are no text": lambda path: path.write_bytes(b"\xff\xfe\x00{"),
+    "not readable": lambda path: path.chmod(0),
+    "a folder": a_folder,
+    "this layout, a field missing": of_this_layout_without("state", "created"),
+    "this layout, no id": of_this_layout_without("id"),
+    "this layout, a state it has not": with_a_field_as("state", "some-new-state"),
+    "this layout, sessions no table": with_a_field_as("sessions", "ses_1"),
+}
+
+
+@pytest.fixture(params=list(DAMAGED))
+def damaged(request, env):
+    """A task whose state.json is damaged, beside one that is whole."""
+    task = implementing("Add health endpoint")
+    whole = implementing("Reject expired cards")
+    path = task.meta / "state.json"
+    DAMAGED[request.param](path)
+    yield task, whole
+    if path.exists() and not path.is_dir():
+        path.chmod(0o644)  # so the test's folder can be removed
+
+
+def test_a_damaged_state_never_ends_the_list_or_the_status_of_the_others(damaged, capsys):
+    task, whole = damaged
+    assert main(["status"]) == 0
+    listed = capsys.readouterr().out
+    assert "demo-1" in listed and "state unreadable" in listed, "its row, with what it is"
+    assert "demo-2" in listed and "Reject expired cards" in listed, "the other task as it was"
+    assert main(["status", "demo-2"]) == 0 and "Reject expired cards" in capsys.readouterr().out
+    assert main(["status", "demo-1"]) == 0
+    shown = capsys.readouterr().out
+    assert "state unreadable" in shown and NO_STATE_SAYS in " ".join(shown.split())
+    assert "newer vivibox" not in shown and "earlier vivibox" not in shown
+    assert main(["wait", "demo-1", "--timeout", "0", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["tasks"][0]["status"] == "state unreadable"
+
+
+def test_a_damaged_state_is_not_run_and_nothing_is_written_over_it(damaged, capsys, monkeypatch):
+    task, _ = damaged
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail(f"ran {a}"))
+    path = task.meta / "state.json"
+    before = path.read_bytes() if path.is_file() and os.access(path, os.R_OK) else None
+    for argv in (["start", "demo-1"], ["reply", "demo-1", "go on"], ["accept", "demo-1"]):
+        assert main(argv) == 1
+        assert capsys.readouterr().err.strip() == f"vivibox: {NO_STATE_SAYS}"
+    with pytest.raises(TaskLayoutError):
+        task.set_paused(True)
+    assert actions.started == []
+    if before is not None:
+        assert path.read_bytes() == before, "left as it is, for whoever wants to look"
+
+
+def test_a_damaged_state_is_deleted_and_the_view_offers_that(damaged, monkeypatch, capsys):
+    task, whole = damaged
+    st = task.read_state()
+    assert task_module.layout(st) == "unreadable"
+    keys = panel.keys_for(task, st, False, False, False)
+    assert {action for action, on in keys.items() if on} == {"remove", "show_log"}
+    assert "`x` delete it" in panel.detail(task, st, 3, False, panel.PodView())
+    pods = []
+    monkeypatch.setattr(Pod, "remove", lambda self: pods.append(self.task_id))
+    monkeypatch.setattr(actions, "tmux", lambda *a, **k: None)
+    assert main(["delete", "demo-1", "--yes"]) == 0
+    assert not task.root.exists() and pods == ["demo-1"] and whole.root.exists()
+
+
+def test_a_newer_tasks_state_that_cannot_be_read_is_unreadable_not_newer(env, monkeypatch, capsys):
+    """What says a task is a newer vivibox's is in the file: a file that cannot be read says
+    nothing, so the task is unreadable, and deleted as one, by the rule for a damaged state."""
+    task = implementing("Add health endpoint")
+    written_under(task, "a newer version", monkeypatch)
+    assert task_module.layout(task.read_state()) == "newer"
+    half(task.meta / "state.json")
+    assert task_module.layout(task.read_state()) == "unreadable"
+    monkeypatch.setattr(Pod, "remove", lambda self: None)
+    assert main(["delete", "demo-1", "--yes"]) == 0 and not task.root.exists()

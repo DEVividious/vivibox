@@ -280,6 +280,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task whose `state.json` cannot be read as a state (not JSON, cut short, empty, not an
+  object, not readable, or of this layout with a field missing or of another kind) no longer
+  ends `vivibox status` and the view with a traceback for every task, and can be deleted. It
+  is `state unreadable`, like a state that records no version: shown, not run ("its
+  state.json is not a task's state as vivibox writes one … delete it and create it again"),
+  and deleted by `vivibox delete` and `x`. A file that cannot be read says nothing of the
+  vivibox that wrote it, so a newer vivibox's task with a damaged state is deleted here like
+  any other, of what this vivibox knows a task to have.
 - A review whose work is no longer what the verification passed (its commits moved, or the task
   added what blocks its clone) goes back to the verification once. The second time in a row,
   with no turn of the writer's and no decision of yours between, the task stops for you with

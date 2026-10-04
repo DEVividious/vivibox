@@ -35,6 +35,9 @@ CURRENT, EARLIER, NEWER, UNREADABLE = "current", "earlier", "newer", "unreadable
 # What TaskState holds for a state.json with something written where the version is that no
 # vivibox writes (recorded). Its 0 is the field absent, never a 0 that was written.
 NO_VERSION = -1
+# And for a state.json that is no state at all, whatever version it may name: not readable, not
+# JSON, no object, or of this layout by its number and not a state of it.
+NO_STATE = -2
 # What a task is opened for (find_task): an operation that runs, moves or opens it needs the
 # layout; showing it does not; deleting it needs a layout this vivibox knows the resources of.
 RUN, SHOW, DELETE = "run", "show", "delete"
@@ -252,10 +255,25 @@ class Task:
         self.event("repo", base_commit=commit)
 
     def read_state(self) -> TaskState:
+        """The task's state. A state.json that is no state as vivibox writes one (not readable,
+        not text, not JSON, cut short, no object, or of this layout by its number with a field
+        gone or of another kind) is read as far as it goes and is UNREADABLE (NO_STATE): shown
+        and deleted, never run, and never an error that ends the list for the other tasks."""
         path = self.meta / "state.json"
-        data = json.loads(path.read_text())
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            return self._read_other({}, path, NO_STATE)
         if classify(recorded(data)) != CURRENT:
             return self._read_other(data, path)
+        try:
+            return self._of_this_layout(dict(data))
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return self._read_other(data, path, NO_STATE)
+
+    def _of_this_layout(self, data: dict) -> TaskState:
         data["state"] = State(data["state"])
         # A flow chosen under a name it has since changed (config.RENAMED_MODES).
         data["orchestration"] = current_mode(data.get("orchestration", ""))
@@ -269,13 +287,24 @@ class Task:
             if harness in sessions:
                 sessions.setdefault(role, sessions.pop(harness))
         # Fields a newer vivibox added are ignored: a running supervisor may be older than the CLI.
-        return TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
+        st = TaskState(**{k: v for k, v in data.items() if k in TaskState.__dataclass_fields__})
+        shape = TaskState("", "", "", State.PLAN, 0, False, "", "")
+        if any(type(getattr(st, k)) is not type(getattr(shape, k)) for k in TaskState.__dataclass_fields__):
+            raise TypeError("a field of another kind than this layout writes")
+        if not (_iso(st.created) and _iso(st.updated)):
+            raise ValueError("a time the view cannot count from")
+        return st
 
-    def _read_other(self, data: dict, path: Path) -> TaskState:
+    def _read_other(self, data: dict, path: Path, version: int | None = None) -> TaskState:
         """The state of a task of another layout, for showing it: what it has of the fields this
         vivibox knows, of the types it knows them by; a state it does not know as written; the
-        rest from the folder. Whatever else a newer vivibox keeps is left alone, never written."""
-        when = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(timespec="milliseconds")
+        rest from the folder. Whatever else a newer vivibox keeps is left alone, never written.
+        version: NO_STATE, for a file that is no state; else what the file records."""
+        try:
+            changed = path.stat().st_mtime
+        except OSError:  # nothing to ask: now is as good a time as any to sort it by
+            changed = datetime.now(UTC).timestamp()
+        when = datetime.fromtimestamp(changed, UTC).isoformat(timespec="milliseconds")
         found = TASK_ID.match(self.id)
         shape = asdict(
             TaskState(self.id, found["project"] if found else "", "", State.PLAN, 0, False, when, when)
@@ -289,7 +318,7 @@ class Task:
             state = State(data.get("state"))
         except ValueError:
             state = str(data.get("state", ""))  # a newer vivibox's own, as it wrote it
-        version = recorded(data)
+        version = recorded(data) if version is None else version
         return TaskState(**{**shape, **known, "id": self.id, "state": state, "task_schema_version": version})
 
     def _write_state(self, st: TaskState) -> None:
@@ -401,10 +430,14 @@ def layout_problem(st: TaskState) -> str:
             "delete; use that vivibox, or update this one"
         )
     if found == UNREADABLE:
+        what = (
+            "its state.json is not a task's state as vivibox writes one"
+            if st.task_schema_version == NO_STATE
+            else "what it records as its layout is not a version vivibox writes"
+        )
         return (
-            f"{st.id}'s state is unreadable or damaged: what it records as its layout is not a "
-            "version vivibox writes, so this vivibox does not run it; delete it and create it "
-            f"again: vivibox delete {st.id}"
+            f"{st.id}'s state is unreadable or damaged: {what}, so this vivibox does not run it; "
+            f"delete it and create it again: vivibox delete {st.id}"
         )
     return ""
 

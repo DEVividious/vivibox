@@ -280,6 +280,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Texts of a verification that could not run. A line of the build cut short in a notification
+  has its frame closed before vivibox's own words (`…» (the rest: vivibox status <id>)`).
+  `vivibox status <id>` shows that line under `Why` as text, an escape sequence in it as its
+  code points, as the panel and the notification did. When git ran out of time and the look
+  for a special file stopped at its bound of 100 000 entries, the message says so instead of
+  "found none". A review that could not start for that names one step, the start, not two.
+  A clone with a worktree the task added and, beside it, a change no ordinary work makes is
+  refused for good at once, not first "blocked until it is out"; a worktree and a repository
+  of its own are named together.
 - A `question.md` with bytes that are no UTF-8 no longer ends the view with `UnicodeDecodeError`
   while its task's panel is open, nor stops the task on that error's text: the bytes are shown
   as their codes (`\xff`). The list, `vivibox status`, the panel and the supervisor now read

@@ -847,3 +847,17 @@ def test_an_index_of_too_many_submodules_says_so(cloned):
     (repo / ".git" / "index").write_bytes(b"DIRC" + struct.pack(">II", 4, count) + entries + b"\0" * 20)
     said = refused(repo, meta)
     assert f".git/index holds more than {protection.MAX_GITLINKS:,} submodules" in said
+
+
+def test_a_worktree_added_to_a_submodule_blocks_like_one_added_to_the_clone(with_lib):
+    """Told apart by the git dir it is under, the submodules' among them (the review's M23): a
+    worktree of a submodule is what the writer can take out, as one of the clone is."""
+    repo, meta = with_lib
+    added = repo / ".git" / "modules" / "lib" / "worktrees" / "x"
+    added.mkdir(parents=True)
+    (added / "commondir").write_text("../..\n")
+    with pytest.raises(r.Blocked) as refused:
+        r.check_protection(repo, meta)
+    assert str(refused.value).startswith("the task added a worktree to its clone and is blocked until")
+    assert ".git/modules/lib/worktrees was added" in str(refused.value)
+    assert {change.what for change in refused.value.found} == {"a worktree"}

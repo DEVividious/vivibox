@@ -556,10 +556,13 @@ def check(root: Path, meta: Path) -> list[str]:
         return _upgrade(root, meta, recorded)
     files = {k: v for k, v in recorded.items() if k not in ABOUT}
     found = differences(files, fingerprint(root, recorded["gitfiles"]), recorded["git_dirs"])
-    if found:
+    if any(not isinstance(change, Added) for change in found):
         return found
+    # The git dirs as recorded, or with a worktree added and nothing else: the index is read
+    # too, and what it has is said first, so that what the task can take out is never said
+    # before what it cannot.
     known = set(recorded["gitfiles"])
-    return gitfiles(root, recorded["git_dirs"], lambda rel: rel in known)[1]
+    return [*gitfiles(root, recorded["git_dirs"], lambda rel: rel in known)[1], *found]
 
 
 # --- A clone recorded by an earlier vivibox, which recorded each git dir's config and hooks' names

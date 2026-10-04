@@ -5,6 +5,7 @@ agent would otherwise hang every verification with no word. A call that ran out 
 taken as an answer: not "no uncommitted files", not "no risky changes", not an empty diff."""
 
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -708,3 +709,56 @@ def test_control_characters_reach_no_terminal_in_the_command_lines_error(env, mo
     assert said.startswith("vivibox: the box could not close: git ")
     assert not [c for c in said.rstrip("\n") if ord(c) < 0x20 or ord(c) == 0x7F], repr(said)
     assert "x‹U+001B›[2J‹U+000A›FAKE/.gitignore is a named pipe (FIFO)" in said
+
+
+# --- review round 1 of the texts ------------------------------------------------------------------
+
+
+def test_what_was_looked_at_is_said_when_the_look_stopped_at_its_bound(task, tmp_path, monkeypatch):
+    """The look for a special file stops after a bound of entries: "found none" of a clone it
+    did not look through would be no fact."""
+    for i in range(6):
+        (task.repo / f"file-{i}.txt").write_text("x\n")
+    monkeypatch.setattr(repo, "LOOKED_AT", 3)
+    a_git_that_never_ends(tmp_path, monkeypatch)
+    said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    assert said == (
+        f"git status did not finish in {LIMIT} s in {task.repo}; vivibox looked at the first 3 files and "
+        "folders there for a special file where git reads its settings or refs (a named pipe, a socket, "
+        "a device) and found none among them, and looked no further; try again"
+    )
+
+
+def test_a_review_that_ran_out_of_time_for_no_cause_found_names_one_step(task, tmp_path, monkeypatch):
+    """ "…; try again; then start the task again" were two steps for one: the start is the try."""
+    from types import SimpleNamespace
+
+    from vivibox import reviewing
+
+    as_verified(task)
+    for folder in ("work", "src"):
+        (tmp_path / folder).mkdir()
+    pod = SimpleNamespace(review_work=tmp_path / "work", review_src=str(tmp_path / "src"))
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", LIMIT, raising=False)
+    bin_dir, real = tmp_path / "bin", shutil.which("git")
+    bin_dir.mkdir()
+    # git that never ends where it copies the clone, and is itself everywhere else
+    (bin_dir / "git").write_text(
+        f'#!/bin/sh\ncase " $* " in *" fetch "*) exec sleep 300;; esac\nexec "{real}" "$@"\n'
+    )
+    (bin_dir / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    said = str(in_time(lambda: reviewing.view(task, pod)))
+    assert said.endswith(f"and found none; then start the task again: vivibox start {task.id}")
+    assert "try again" not in said
+
+
+def test_a_box_that_did_not_close_for_no_cause_found_names_one_step(task, tmp_path, monkeypatch):
+    """The box's own way to try again is the one said (M27: nothing held this)."""
+    box_ = a_box(task, monkeypatch)
+    (box_.repo / "work.txt").write_text("by hand\n")
+    slow = repo.timed_out(["add", "-A"], LIMIT, box_.repo)
+    monkeypatch.setattr(box, "commit_in_box", lambda t: (_ for _ in ()).throw(slow))
+    said = str(in_time(lambda: box.close_box(box_, None)))
+    assert said.endswith(f"and found none; then try again: vivibox accept {box_.id}")
+    assert said.count("try again") == 1

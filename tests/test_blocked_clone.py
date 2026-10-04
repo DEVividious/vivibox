@@ -87,16 +87,6 @@ def test_a_worktree_the_task_added_blocks_it_until_it_is_removed(task, tmp_path)
     r.check_protection(task.repo, task.meta)
 
 
-def test_with_both_each_is_said_in_its_turn(task, tmp_path):
-    """What changed in the git dirs is looked at first, and the index only once they are as
-    recorded: the worktree is named, and with it gone the repository."""
-    nested(task.repo)
-    worktree(task.repo, tmp_path / "elsewhere")
-    assert blocked(task).startswith("the task added a worktree to its clone and is blocked ")
-    git(task.repo, "worktree", "remove", str(tmp_path / "elsewhere"))
-    assert blocked(task).startswith("the task added a repository of its own to its clone and is blocked ")
-
-
 @pytest.mark.parametrize("added", ["a repository", "a worktree"])
 def test_nothing_says_the_work_is_lost(task, tmp_path, added):
     nested(task.repo) if added == "a repository" else worktree(task.repo, tmp_path / "elsewhere")
@@ -528,3 +518,30 @@ def test_a_box_with_a_worktree_is_told_how_it_is_removed(task, monkeypatch, tmp_
         "in the box removes it (`git worktree remove` with its path, then `git worktree prune`). Found: "
     )
     assert "reply" not in said and "the writer" not in said and "the task added" not in said
+
+
+# --- review round 1: what is said first when more than one thing is wrong ---------------------------
+
+
+def test_a_worktree_and_a_repository_are_named_together(task, tmp_path):
+    """The index is read too when the git dirs differ by an added worktree alone: one message
+    for both, and the writer is told how each goes."""
+    nested(task.repo)
+    worktree(task.repo, tmp_path / "elsewhere")
+    said = blocked(task)
+    assert said.startswith("the task added a repository of its own and a worktree to its clone and is ")
+    assert "web/.git was added, a repository git would go into" in said
+    at_the_gate(task)
+    fed = (task.meta / "handoff" / "verify-feedback.md").read_text()
+    assert "`git rm -f --cached`" in fed and "`git worktree remove`" in fed
+
+
+def test_a_worktree_beside_what_no_ordinary_work_adds_is_refused_for_good_at_once(task, tmp_path):
+    """ "Blocked until it is out" first, and "delete the task" once the worktree was out, was a
+    promise made before the index was read: the stronger refusal is said first."""
+    worktree(task.repo, tmp_path / "elsewhere")
+    gitfile_elsewhere(task.repo)
+    with pytest.raises(r.RepoError) as e:
+        r.check_protection(task.repo, task.meta)
+    assert not isinstance(e.value, r.Blocked) and "delete the task" in str(e.value)
+    assert "read another repository: web/.git was added, a repository git would go into; " in str(e.value)

@@ -629,7 +629,8 @@ def task_detail(
     if st.state is State.CHECKPOINT_BLOCKED and (
         why := why_blocked(task) if asks else environment_problem(task) or why_blocked(task)
     ):
-        lines.append(f"{style('Why', 'bold')}   {why}")
+        # A path of vivibox's, its own reason, or a line the build printed: as text, whichever.
+        lines.append(f"{style('Why', 'bold')}   {display.under(str(why), 6)}")
     if shown.problem:
         # Its further lines under the first, never at the left edge, where vivibox's own lines start.
         lines.append(f"{style('Why', 'bold')}   {style(display.under(shown.problem, 6), 'red')}")

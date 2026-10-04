@@ -216,6 +216,12 @@ LOOKED_AT = 100_000
 def special_files(clone: Path) -> list[tuple[str, str]]:
     """Files git reads in the clone that are no plain file, as (path from its root, what it is):
     git opens such a file and waits on it."""
+    return _looked_for_special_files(clone)[0]
+
+
+def _looked_for_special_files(clone: Path) -> tuple[list[tuple[str, str]], bool]:
+    """special_files, and whether the look went through the whole clone: it stops past
+    LOOKED_AT entries, and then says nothing of the rest."""
     found, seen = [], 0
     for root, dirs, files in os.walk(clone):
         here = Path(root)
@@ -231,8 +237,8 @@ def special_files(clone: Path) -> list[tuple[str, str]]:
                 found.append(((here / name).relative_to(clone).as_posix(), kind))
         seen += len(dirs) + len(files)
         if seen > LOOKED_AT:
-            break
-    return found
+            return found, False
+    return found, True
 
 
 def timed_out(args: list[str] | tuple[str, ...], seconds: float, clone: Path, slow: str = "") -> GitTimeout:
@@ -260,17 +266,22 @@ def _unanswered(args: list[str], seconds: float, clone: Path, slow: str = "") ->
     while i < len(args) - 1 and args[i].startswith("-"):
         i += 2 if args[i] in ("-c", "-C") else 1
     command = f"git {args[i] if args else ''}"
-    found = special_files(clone)[:3]
+    found, whole = _looked_for_special_files(clone)
+    found = found[:3]
     if not found and slow:
         return (
             f"{command} did not finish in {seconds:g} s in {shown(str(clone))}: {slow} can take this long, "
             f"and nothing where git reads its settings or refs is a named pipe{RETRY}"
         )
     if not found:
+        looked, none = ("looked there", "found none") if whole else (
+            f"looked at the first {LOOKED_AT:,} files and folders there".replace(",", " "),
+            "found none among them, and looked no further",
+        )  # fmt: skip
         return (
-            f"{command} did not finish in {seconds:g} s in {shown(str(clone))}; vivibox looked there for a "
+            f"{command} did not finish in {seconds:g} s in {shown(str(clone))}; vivibox {looked} for a "
             "special file where git reads its settings or refs (a named pipe, a socket, a device) and "
-            f"found none{RETRY}"
+            f"{none}{RETRY}"
         )
     what = f"{command} did not answer in {seconds:g} s"
     # The file from the clone's root first, said to be the clone's: a notification cut short keeps it.

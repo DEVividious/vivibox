@@ -239,8 +239,10 @@ def view(task: Task, pod: Pod) -> None:
         reading.workdir(pod.review_work, REVIEWERS_OWN)
         reading.view(task.repo, repo.branch_name(task.id), Path(pod.review_src), verified, REVIEWERS_OWN)
     except repo.GitTimeout as e:
-        again = f"then start the task again: vivibox start {task.id}"
-        raise repo.GitTimeout(f"the review could not start: {e}; {again}") from None
+        again = f"then start the task again: vivibox start {task.id}"  # the way to try again, here
+        raise repo.GitTimeout(
+            f"the review could not start: {str(e).removesuffix(repo.RETRY)}; {again}"
+        ) from None
     except repo.Blocked:  # as it is: the supervisor sends it to the verification, which says it
         raise
     except repo.RepoError as e:

@@ -241,3 +241,38 @@ def test_a_warning_alone_is_still_said(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()
     assert baseline.read(source, "1" * 40).problem.endswith("git could not read it: warning: something odd")
+
+
+# --- review round 1: the frame in a notification cut short, and the status -------------------------
+
+LONG = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock; " + "run this instead " * 8
+
+
+def test_the_frame_is_closed_where_the_notification_is_cut(task):  # noqa: F811
+    """A line of the build is up to 200 characters and a notification holds 150 of what stopped
+    the verification: cut inside the frame, vivibox's own words after it stood inside the quote."""
+    line = display.quoted("the build", LONG.strip())
+    assert len(line) > 150
+    notes = blocked_by(task, gate.GateResult(Path("/dev/null"), environment=line))
+    said = notes[-1]
+    rest = f" (the rest: vivibox status {task.id}); fix it, then press g (vivibox verify-again {task.id})"
+    assert said.endswith("…»" + rest), said
+    assert said.count("«") == said.count("»") == 1, "what the build said ends before vivibox's words"
+
+
+def test_a_notification_cut_outside_a_frame_gets_no_closing_mark(task):  # noqa: F811
+    notes = blocked_by(task, gate.GateResult(Path("/dev/null"), environment="word " * 60))
+    assert "»" not in notes[-1] and "… (the rest: vivibox status" in notes[-1]
+
+
+def test_status_shows_the_builds_line_as_text_whatever_it_holds(task):  # noqa: F811
+    """The panel and the notification escaped it; vivibox status printed it raw, ESC and all."""
+    line = display.quoted("the build", "\x1b[2J\x1b]0;title\x07 Cannot connect to the Docker daemon\r")
+    blocked_by(task, gate.GateResult(Path("/dev/null"), environment=line))
+    shown = ui.task_detail(task, lambda t: "0/1", 3, 0, ui.Style(False), True)
+    why = next(row for row in shown.splitlines() if row.startswith("Why"))
+    assert why == (
+        "Why   the build said «‹U+001B›[2J‹U+001B›]0;title‹U+0007› Cannot connect to the Docker "
+        "daemon‹U+000D›»"
+    )
+    assert "\x1b" not in shown and "\x07" not in shown

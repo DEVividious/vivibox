@@ -341,6 +341,44 @@ def test_a_forwarder_that_died_is_named_in_the_header_and_started_again(runtime,
     assert hostd.running() not in (None, pid) and hostd.problem("127.0.0.1", port) == ""
 
 
+def test_the_pid_file_names_a_pid_at_every_moment_it_is_rewritten(runtime, monkeypatch):
+    """The forwarder writes its own pid as it comes up, over the one its start wrote, while that
+    start asks ten times a second whether it still runs. A file written in place is empty for a
+    moment: a start that read it just then took its forwarder for ended, failed with "did not
+    start: it ended", and left the forwarder running with no pid file (seen on a busy machine).
+    Planted here: a reader at the moment a file being written has been emptied."""
+    from types import SimpleNamespace
+
+    nobody = 2**22 + 1  # past the kernel's highest pid: no process, a forwarder least of all
+    runtime.mkdir(parents=True)
+    hostd.pid_file().write_text(str(nobody))
+    read = []
+    write_text = Path.write_text
+
+    def emptied_then_read(path, text, *args, **kwargs):
+        path.open("w").close()  # as write_text leaves a file before its text is in it
+        read.append(hostd.recorded())
+        return write_text(path, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", emptied_then_read)
+    monkeypatch.setattr(hostd.subprocess, "Popen", lambda *a, **kw: SimpleNamespace(pid=nobody + 1))
+    assert hostd.start("127.0.0.1", 5353) == nobody + 1
+    assert read == [nobody] and hostd.recorded() == nobody + 1, "the start's own write"
+
+    class Served:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def serve(self):
+            read.append(hostd.recorded())
+
+    monkeypatch.setattr(resolver, "Forwarder", Served)
+    monkeypatch.setattr(hostd.signal, "signal", lambda *args: None)
+    assert hostd.serve("127.0.0.1", 5353, upstream="127.0.0.1:53") == 0
+    assert read == [nobody, nobody + 1, os.getpid()], "the forwarder's, over the start's"
+    assert [p.name for p in runtime.iterdir() if p.name.startswith("hostd.pid")] == [], "nothing left"
+
+
 def test_a_forwarder_that_runs_and_does_not_answer_is_named(runtime):
     port = free_port()
     sleeper = subprocess.Popen(

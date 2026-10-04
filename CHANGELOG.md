@@ -254,6 +254,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   background and, on a busy machine or a slow repository, back only after Esc. The answer is
   dropped (the list of providers is still kept for the next time), and so is what a step
   still under way reports while the view is closing.
+- A task's start on a busy machine no longer fails with `the DNS forwarder … did not start: it
+  ended` while the forwarder was in fact coming up. The forwarder wrote its pid file in place,
+  so the file was empty for a moment, and the start that read it just then took the forwarder
+  for ended and left it running with no pid file. The file is now put in place whole.
 - Git variables exported in the shell vivibox is started from no longer redirect the git it
   runs on your machine. Every `GIT_*` variable but `GIT_TERMINAL_PROMPT` is taken out of that
   git's environment: a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY` (set inside a git

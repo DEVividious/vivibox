@@ -72,6 +72,17 @@ def log_file() -> Path:
     return folder() / "hostd.log"
 
 
+def record(pid: int) -> None:
+    """The pid file naming pid, put in place whole. Written in place it is empty for a moment,
+    and the forwarder writes its own pid as it comes up while its start asks ten times a second
+    whether it still runs (ensure): a start that read the file just then took the forwarder
+    for ended, and left it running with no pid file."""
+    path = pid_file()
+    whole = path.with_name(f"{path.name}.{os.getpid()}")
+    whole.write_text(str(pid))
+    os.replace(whole, path)
+
+
 def recorded() -> int | None:
     try:
         return int(pid_file().read_text())
@@ -144,7 +155,7 @@ def start(address: str, port: int = PORT, upstream: str = "") -> int:
             [*command, *(("--upstream", upstream) if upstream else ())],
             stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
         )  # fmt: skip
-    pid_file().write_text(str(p.pid))
+    record(p.pid)
     return p.pid
 
 
@@ -213,7 +224,7 @@ def serve(address: str, port: int = PORT, upstream: str = "") -> int:
         return 1
     signal.signal(signal.SIGTERM, lambda *_: forwarder.stop())
     signal.signal(signal.SIGINT, lambda *_: forwarder.stop())
-    pid_file().write_text(str(os.getpid()))
+    record(os.getpid())
     print(f"vivibox hostd: forwarding {address}:{port} to {stub[0]}:{stub[1]}", flush=True)
     try:
         forwarder.serve()

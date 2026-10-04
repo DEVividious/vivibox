@@ -326,6 +326,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A value drawn as inline code in the details panel is one line, whatever it holds. A plan's
+  verification command with two line breaks and `#### Review 1: …` after them, or a build
+  command naming a folder so called, drew a heading of the panel's own, outside the rule. A
+  line break in such a value is shown as its code point (`‹U+000A›`), like every character
+  with nothing to see. A model's name, a module's and a note about your `@files` are drawn as
+  the text they are, markdown in them read as characters (`__all__` is no bold "all"); a
+  finished task's branch and the values of a task's recent events are inline code.
 - Words an agent nested more than twenty levels deep (a quote in twenty quotes, the tenth list
   in a list) are on the screen. The details panel's parser read no deeper and left them out,
   with everything after them to the end of the text: the writer read in the plan what you did

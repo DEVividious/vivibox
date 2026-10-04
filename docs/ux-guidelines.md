@@ -311,8 +311,13 @@ looks like an empty cache.
   line whatever line breaks it held: `markdown.listed`), what the browser prompt tells a chat
   about the repository, a finished or deleted task's summary. Why vivibox did not read such a
   file is vivibox's own line, outside the rule. A name or a command an agent chose stands in
-  vivibox's own lines as inline code, and what a tool printed as a code block.
-  `tests/test_structure.py` fails on a file read into the panel's text any other way.
+  vivibox's own lines as inline code, and what a tool printed as a code block. Inline code is
+  one line by how it is made: `display.code` shows a line break as its code point, so no
+  value leaves its span. Other words that are not vivibox's in a line of its own (a model's
+  name, a module's, a note that names a file) are plain text there, nothing in them markdown
+  (`display.words`). `tests/test_structure.py` lists every read of an agent's file, of a
+  proposed command and of the task's events in the panel's modules that stands outside those
+  calls; one more fails it.
 - The panel is markdown, and much of it is not vivibox's (a plan, a question, a review's
   notes). That text keeps its lists and emphasis and makes no link: a link in it is
   its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the

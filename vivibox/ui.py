@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -590,14 +591,15 @@ def task_list(
     return "\n".join(lines) + "\n"
 
 
-def modules_note(task: Task) -> str:
+def modules_note(task: Task, named: Callable[[str], str] = str) -> str:
     """What the verification builds, in a task verified by its modules: said where the plan is
-    decided and after, so a wrong module shows before the work starts."""
+    decided and after, so a wrong module shows before the work starts. named: how a module's
+    name, which the plan chose, is written where the note is drawn."""
     try:
         modules = parse_plan(task.plan_path.read_text()).modules
     except (OSError, PlanError):
         return ""
-    return f"Verified by modules: {', '.join(modules)}" if modules else ""
+    return f"Verified by modules: {', '.join(map(named, modules))}" if modules else ""
 
 
 def task_detail(

@@ -516,13 +516,13 @@ def detail(
         "",
         f"**Next:** {next_steps(task, st, seen, running, pod if pod is not None else pod_view(st.id))}",
         "",
-        *([f"*{note}*", ""] if (note := ui.modules_note(task)) else []),
+        *([f"*{note}*", ""] if (note := ui.modules_note(task, display.words)) else []),
     ]
     if running and code.older_supervisor(task.meta):
         head += [f"*This task's supervisor {OLDER_SUPERVISOR}.*", ""]
     # Before the plan: what the agent sees of the files you mentioned may not be what you have.
     if st.state in (State.PLAN, State.CHECKPOINT_PLAN) and (notes := actions.context_notes(task)):
-        head += [*(f"*{note}.*" for note in notes), ""]
+        head += [*(f"*{display.words(note)}.*" for note in notes), ""]
     said = [e for e in task.events() if e["type"] == "serena"]
     if said and (said[-1]["data"].get("on") or providers.serena_mode() == "auto"):
         head += [f"*Serena: {said[-1]['data']['why']}*", ""]
@@ -655,7 +655,9 @@ def detail(
         body = ["**Recent events**", ""] + [
             f"- `{ui.clock(e['ts'])}` {e['type']} "
             + " ".join(
-                f"{k}={v}" for k, v in e["data"].items() if k in ("current", "reason", "passed", "cost")
+                f"{k}={display.code(str(v))}"
+                for k, v in e["data"].items()
+                if k in ("current", "reason", "passed", "cost")
             )
             for e in events
         ]

@@ -24,7 +24,7 @@ def test_the_panel_counts_turns_and_cost_per_role(env):
     assert "#### Roles" in shown
     assert "- **Planner** · m · 2 turns · $0.03" in shown
     assert "- **Writer** · m · 2 turns · $0.09" in shown
-    assert "- **Reviewer** · other/strong · 1 turn · $0.02" in shown
+    assert "- **Reviewer** · other\\/strong · 1 turn · $0.02" in shown
     assert "- **Total** · 5 turns · $0.14" in shown
     assert "|---|" not in shown, "a line an agent: a table took ten rows for three"
     assert "planning + implementation" not in shown, "the split is the table now, not a sum to read"
@@ -53,7 +53,7 @@ def test_turns_from_before_roles_were_recorded_count_by_state(env):
     shown = detail(task, task.read_state(), 3, running=True)
     assert (
         "- **Planner** · m · 1 turn · $0.03" in shown
-        and "- **Reviewer** · other/strong · 1 turn · $0.02" in shown
+        and "- **Reviewer** · other\\/strong · 1 turn · $0.02" in shown
     )
 
 

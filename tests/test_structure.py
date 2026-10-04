@@ -165,10 +165,17 @@ def test_what_a_tool_said_on_stderr_becomes_an_error_through_display_said():
 # The modules that put the details panel's text together.
 PANEL_MODULES = ("panel.py", "panels.py", "sections.py", "panel_resources.py")
 # What reads a file an agent may have written, by the name it is called by there.
-READERS = {"read", "handed", "read_handoff", "read_text", "read_question", "for_you"}
+# A file's text by any way of reading one, the writer's proposed command, and the task's events,
+# whose text may quote what an agent chose (a command, a folder's name).
+READERS = {
+    "read", "handed", "read_handoff", "read_text", "read_bytes", "readlines", "open", "read_question",
+    "for_you", "proposed", "events",
+}  # fmt: skip
 # Where what was read cannot pass for vivibox's own words: the one function for an agent's prose
-# and those that end in it, a code block, inline code, and a parser that takes values out of it.
-KEPT_APART = {"prose", "listed", "plan_text", "told", "fenced", "code", "parse_plan", "parse_review"}
+# and those that end in it, a code block, and the two that make an inline value one line that
+# is no markdown (display.code, display.words). Not a parser: what it takes out of a text is
+# that text still, and is accounted for where it is read.
+KEPT_APART = {"prose", "listed", "plan_text", "told", "fenced", "code", "words"}
 # The reads that stand outside such a call, and where each one's text goes.
 READS_ACCOUNTED_FOR = {
     "panel.py": [
@@ -177,17 +184,29 @@ READS_ACCOUNTED_FOR = {
         "handed(handoff / 'verify-feedback.md')",  # into display.fenced, two lines below
         "handed(log)",  # build_said: gate.log_excerpt of it, into display.fenced
         "progress.read(task)",  # the writer's steps, into markdown.listed
+        "proposal.proposed(task)",  # the proposed command: display.code, three lines below
         "read(log)",  # the verification's log: its commands into display.code, its tail fenced
+        "read(task.plan_path)",  # plans_verify: the plan's commands, each into display.code
         "read_handoff(path)",  # handed's own body
         "supervisor.read_question(task)",  # agents_question: its text to prose, the reason apart
+        "task.events()",  # removed_tests: a count, and names into display.code(display.name)
+        "task.events()",  # Serena: on or off, and vivibox's own reason, a count of files in it
+        "task.events()",  # recent events: vivibox's names for them, each value into display.code
     ],
     "panels.py": [
         "path.read_text()",  # read's own body
         "view_state_path().read_text()",  # view.json, which vivibox writes: never drawn
     ],
     "sections.py": [
+        "(task.meta / gate.ACCEPTED_PLAN).read_text()",  # criteria: a count of them
+        "(task.meta / gate.ACCEPTED_PLAN).read_text()",  # checklist: each into markdown.listed
         "handoff.read_text(path)",  # the review: counted by parse_review, its notes to prose
         "path.read_text()",  # read's own body
+        "task.events()",  # last_gate: passed or failed, and a time
+        "task.events()",  # gate_failed: passed or not
+        "task.events()",  # build_files_left: a file's name and a command, each display.code
+        "task.events()",  # agents: turns counted and summed by vivibox's own names of roles
+        "task.plan_path.read_text()",  # criteria: a count of them
     ],
 }
 
@@ -218,16 +237,20 @@ def reads_outside() -> dict[str, list[str]]:
 
 
 def test_what_an_agent_wrote_goes_into_the_panel_through_one_function():
-    """A file an agent may have written is read, in the modules that build the panel's text,
-    within a call that keeps its words apart from vivibox's own: markdown.prose (or listed,
-    plan_text, told, which end in it), a code block, inline code. Text joined into the panel's
-    lines any other way is read with vivibox's own, where a heading in it is a section and an
-    open fence takes the sections after it. The reads outside such a call are listed above, each
-    with where its text goes, so one more is a failure until it goes through prose or is
-    accounted for. What this cannot see: a read in another module that these call by another
-    name, and text that comes from the task's state or its events; for those,
-    tests/test_agent_prose.py marks every text an agent writes and looks for the marks among
-    vivibox's own words."""
+    """A file an agent may have written, the command a writer proposed and the task's events are
+    read, in the modules that build the panel's text, within a call that keeps the words apart
+    from vivibox's own: markdown.prose (or listed, plan_text, told, which end in it), a code
+    block, display.code or display.words, which hold an inline value on one line that is no
+    markdown. A parser is no such call: what parse_plan takes out of a plan is the plan's text
+    still. Text joined into the panel's lines any other way is read with vivibox's own, where a
+    heading in it is a section and an open fence takes the sections after it. The reads outside
+    such a call are listed above, each with where its text goes, so one more is a failure until
+    it goes through one of them or is accounted for. What this cannot see: where a listed
+    read's text goes after it is read (the list says, nothing holds it to that); a read in
+    another module that these call by another name (ui.view, ui.modules_note,
+    actions.context_notes, reviewing.unreadable, review.proposed_message); the task's state and
+    the history's entries. For those, tests/test_agent_prose.py marks every text an agent
+    writes and looks for the marks among vivibox's own words."""
     assert reads_outside() == READS_ACCOUNTED_FOR, "an agent's words go into the panel through markdown.prose"
 
 

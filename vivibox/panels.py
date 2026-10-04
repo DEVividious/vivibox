@@ -117,9 +117,9 @@ def finished_detail(entry: dict) -> str:
         return deleted_detail(entry)
     if entry["conflicts"]:
         named = ", ".join(display.code(display.name(c)) for c in entry["conflicts"])
-        where = f"with conflicts in {named}, also on `{entry['branch']}`"
+        where = f"with conflicts in {named}, also on {display.code(display.name(entry['branch']))}"
     elif entry["branch"]:
-        where = f"on branch `{entry['branch']}`"
+        where = f"on branch {display.code(display.name(entry['branch']))}"
     else:
         where = "in your checkout"
     # Tasks accepted before criteria were kept have none; say so rather than show an empty list.

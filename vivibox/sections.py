@@ -143,10 +143,11 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
             continue
         if agent in config.roles:
             chosen = role_of(task, agent, config)
-            found[agent] = Agent(mode.brief_of(agent), chosen.model or "you, in your chat")
+            found[agent] = Agent(mode.brief_of(agent), display.words(chosen.model) or "you, in your chat")
         elif agent == "reviewer" and mode.separate_reviewer:
             # No [roles.reviewer]: the mode's reviewer reads on the writer's model (ADR-0029).
-            found[agent] = Agent("reviewer", f"{role_of(task, 'writer', config).model} (the writer's)")
+            model = display.words(role_of(task, "writer", config).model)
+            found[agent] = Agent("reviewer", f"{model} (the writer's)")
     for event in task.events():
         if event["type"] != "turn":
             continue

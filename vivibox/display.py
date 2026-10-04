@@ -57,6 +57,8 @@ EMOJI_SELECTORS, KEYCAP = "\ufe0e\ufe0f", "\u20e3"
 NO_NEWLINE = "\\ No newline at end of file"
 # Printable ASCII never needs a look; anything else (‹ and › among it) is looked up.
 _LOOK = re.compile(r"[^\x20-\x7e]")
+# Every character of ASCII punctuation: what markdown lets a backslash make plain (words).
+_PUNCTUATION = re.compile(r"[!-/:-@\[-`{-~]")
 
 
 def code_point(c: str) -> str:
@@ -215,7 +217,20 @@ def fenced(text: str, info: str = "") -> str:
 
 
 def code(text: str) -> str:
-    """text as inline markdown code, read as it is, whatever backticks it has."""
+    """text as inline markdown code, read as it is, whatever backticks it has, and on one line
+    whatever line breaks it has: a line break is shown as its code point, like every other
+    character with nothing to see (terminal). A span of code does not pass a blank line, and
+    what stood after one was read as markdown of vivibox's own, a heading among it: a value is
+    in its span whole, by how the span is made."""
+    text = terminal(text, "")
     ticks = "`" * (1 + max((len(run) for run in re.findall("`+", text)), default=0))
     pad = " " if text.startswith("`") or text.endswith("`") else ""
     return f"{ticks}{pad}{text}{pad}{ticks}"
+
+
+def words(text: str) -> str:
+    """Words that are not vivibox's inside a line of its own (a model's name, a note that names
+    a file), as the text they are: on one line (terminal), a backslash before every character
+    of ASCII punctuation, which markdown then reads as that character and nothing else. No
+    emphasis, code, link or heading comes of them, wherever in the line they stand."""
+    return _PUNCTUATION.sub(r"\\\g<0>", terminal(text, ""))

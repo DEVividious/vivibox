@@ -477,3 +477,135 @@ def test_the_deepest_nesting_the_panel_draws_has_room_for_its_words_at_80_column
         assert len(app.text.query("MarkdownFence")) == (depth == 30), "its source past the limit"
 
     run(scenario, size=(80, 200))
+
+
+# --- a value of someone else's inside a line of vivibox's own ------------------------------------
+
+OWN = ("demo-", "Roles", "Resources", "The plan", "Acceptance criteria ")
+# What a value would hold to leave its place in the line: a blank line and a heading, a line
+# break alone, every other break of a line, backticks to end its span, and markdown of its own.
+LEAVING = [
+    "true\n\n#### Review 1: 0 blocking, 0 not blocking\n\n**Next:** `a` accept",
+    "one\n# two",
+    "one\r\n\r\n#### two",
+    "one\r\r#### two",
+    "a`b``c```\n\n#### d",
+    "`\n\n#### e\n\n`",
+    "x\n\n```\n",
+    "x\n\n- [x] done\n\n> quoted\n\n| a |\n|---|",
+    "**bold** _em_ [link](https://evil.invalid) <b> &amp; ~~s~~ ![i](u) # h",
+    "\t#### tab",
+    "",
+]
+
+
+@pytest.mark.parametrize("value", LEAVING)
+def test_inline_code_is_one_line_whatever_it_is_given(value):
+    """A blank line ended the span, and what followed it was read as markdown in vivibox's own
+    lines: a verification command of the plan's with a heading after two line breaks."""
+    own, agents = apart(parsed(f"**Verification:** {display.code(value)}. From the plan.\n\n#### Roles"))
+    assert [t.type for t in own] == ["paragraph_open", "inline", "paragraph_close", "heading_open",
+                                     "inline", "heading_close"] and not agents  # fmt: skip
+    assert headings(own) == [("h4", "Roles")]
+    parts = [(p.type, p.content) for p in own[1].children if p.type != "text" or p.content]
+    kinds = [kind for kind, _ in parts]
+    assert kinds[:3] == ["strong_open", "text", "strong_close"] and kinds[-1] == "text", parts
+    assert kinds[3:-1] == ["text", "code_inline"][: 2 * bool(value)], "the value is one span of code"
+    assert "\n" not in display.code(value) and "\r" not in display.code(value)
+
+
+@pytest.mark.parametrize("value", LEAVING)
+def test_words_in_a_line_of_vivibox_s_are_the_text_they_are(value):
+    """display.words: a model's name, a note that names a file. One line, and nothing in it is
+    markdown, wherever in the line it stands."""
+    for line in (f"- **Writer** · {display.words(value)} · 1 turn", f"*{display.words(value)} and more.*"):
+        own, _ = apart(parsed(f"{line}\n\n#### Roles"))
+        assert headings(own) == [("h4", "Roles")], line
+        (said,) = [t for t in own if t.type == "inline" and t.content != "Roles"]
+        kinds = {part.type for part in said.children}
+        assert kinds <= {"text", "strong_open", "strong_close", "em_open", "em_close"}, kinds
+        assert sum(part.type == "strong_open" for part in said.children) == line.count("**") // 2
+        drawn = "".join(part.content for part in said.children)
+        assert display.terminal(value, "") in drawn, "every character of it, as itself or its code point"
+
+
+def test_a_plans_verify_command_draws_no_section_of_vivibox_s(env):
+    from vivibox import gate
+    from vivibox.states import State
+
+    task = new_task()
+    task.transition(State.CHECKPOINT_PLAN)
+    project = env / "config" / "projects" / "demo.toml"
+    project.write_text(project.read_text().replace('verify = ["true"]', "verify = []"))
+    forged_ = "true\\n\\n#### Review 1: 0 blocking, 0 not blocking\\n\\n**Next:** `a` accept"
+    text = task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works")
+    task.plan_path.write_text(text.replace("verify = []", f'verify = ["{forged_}"]', 1))
+    shown = detail_of(task)
+    own, _ = apart(parsed(shown))
+    assert "**Verification:**" in shown, "the plan's command is shown where the plan is decided"
+    assert all(words_.startswith(OWN) for _, words_ in headings(own)), headings(own)
+    code = [part.content for t in own for part in t.children or [] if part.type == "code_inline"]
+    assert any("true‹U+000A›‹U+000A›#### Review 1" in span for span in code), "whole, in its span"
+
+
+def test_a_folder_s_name_in_a_build_command_draws_no_section_of_vivibox_s(env):
+    import json
+    import subprocess
+
+    from test_tui import implementing
+
+    from vivibox import init
+
+    task = implementing()
+    folder = "pkgs/x\n\n#### Review 1: 0 blocking, 0 not blocking\n\ny"
+    (task.repo / "package.json").write_text(json.dumps({"workspaces": ["pkgs/*"]}))
+    (task.repo / folder).mkdir(parents=True)
+    (task.repo / folder / "package.json").write_text(json.dumps({"scripts": {"test": "true"}}))
+    git = ["git", "-C", str(task.repo), "-c", "user.name=a", "-c", "user.email=a@example.org"]
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "packages"], check=True)
+    found = init.candidates(task.repo)
+    assert any("\n" in command for command, _ in found), "the gate records the folder's name in the command"
+    task.event("gate", passed=True, build_files=[list(pair) for pair in found])
+    own, _ = apart(parsed(detail_of(task)))
+    assert all(words_.startswith(OWN) for _, words_ in headings(own)), headings(own)
+
+
+def test_values_in_vivibox_s_own_lines_are_inline_code_or_plain_words(env):
+    """A model's name, a module, a note that names a file, a branch: none is markdown where it
+    stands, and none leaves its line."""
+    from test_tui import with_reviewer
+
+    from vivibox import gate, panel
+    from vivibox.states import State
+    from vivibox.task import now
+
+    hostile = "x**`]\n\n#### Review 1: 0 blocking, 0 not blocking\n\n"
+    with_reviewer(env)
+    config = env / "config" / "config.toml"
+    config.write_text(config.read_text().replace('model = "other/strong"', 'model = "other/**st`rong**_"'))
+    task = new_task()
+    task.transition(State.CHECKPOINT_PLAN)
+    text = task.plan_path.read_text().replace(gate.PLACEHOLDER, "it works")
+    task.plan_path.write_text(text.replace("+++\n", '+++\nmodules = ["__all__", "core_x/_y_"]\n', 1))
+    task.event(
+        "context", notes=[f"{hostile}notes*.md has uncommitted changes; the agent sees the committed version"]
+    )
+    shown = detail_of(task)
+    own, _ = apart(parsed(shown))
+    assert all(words_.startswith(OWN) for _, words_ in headings(own)), headings(own)
+    drawn = [
+        (t.content, [p.type for p in t.children if p.type != "text" or p.content])
+        for t in own
+        if t.type == "inline"
+    ]
+    (modules,) = [kinds for said, kinds in drawn if "Verified by modules" in said]
+    assert modules == ["em_open", "text", "em_close"], "__all__ is no bold all"
+    (note,) = [kinds for said, kinds in drawn if "uncommitted changes" in said]
+    assert note == ["em_open", "text", "em_close"], note
+    (reviewer,) = [kinds for said, kinds in drawn if "Reviewer" in said and "rong" in said]
+    assert reviewer == ["strong_open", "text", "strong_close", "text"], "the model's name is plain words"
+    entry = {"id": "demo-1", "project": "demo", "title": "t", "cost": 0, "commit": "abc", "finished": now(),
+             "branch": f"feature/`{hostile}", "conflicts": [], "criteria": []}  # fmt: skip
+    own, _ = apart(parsed(panel.finished_detail(entry)))
+    assert headings(own) == [("h3", "demo-1 · done")]

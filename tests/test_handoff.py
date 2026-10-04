@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vivibox import actions, feedback, gate, handoff, reviewing, supervisor
+from vivibox import actions, display, feedback, gate, handoff, reviewing, supervisor
 from vivibox.states import State
 from vivibox.task import create_task
 
@@ -786,7 +786,7 @@ def test_a_review_vivibox_could_not_read_shows_no_counts(task_with_review):
         in_time(sup.step)
     shown = "\n".join(sections.reviewers_notes(sup.task))
     assert "0 blocking" not in shown and "#### Review 1: unreadable" in shown, shown
-    assert f"{out / 'review.md'} {REFUSED}" in shown
+    assert display.words(f"{out / 'review.md'} {REFUSED}") in shown, "as plain words, no markdown"
     said = next(
         e.said for e in logs.entries(sup.task, sup.task.read_state(), False)[0] if e.label == "review-1.md"
     )

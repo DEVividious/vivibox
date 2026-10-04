@@ -93,7 +93,10 @@ def reviewers_notes(task: Task) -> list[str]:
     )
     if problem := reviewing.unreadable(task, int(n)):  # no counts: they would read as a clean review
         rest = [] if kept.strip() == problem else ["", prose(kept.strip())]
-        return ["", f"#### Review {n}: unreadable", "", problem, *rest]
+        # vivibox's words up to the colon; after it what they quote of the review, as data
+        said, _, quoted = problem.partition(": ")
+        why = display.words(said) + (f": {display.code(quoted)}" if quoted else "")
+        return ["", f"#### Review {n}: unreadable", "", why, *rest]
     return [
         "",
         f"#### Review {n}: {len(review.blocking)} blocking, {len(review.not_blocking)} not blocking",

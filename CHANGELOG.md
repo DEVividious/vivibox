@@ -326,6 +326,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Why a review was not read (`Review n: unreadable`) quotes the note it could not act on as
+  inline code. The quote was read as markdown in vivibox's own sentence, and a note of the
+  right width drew `Next: a accept` on a row of its own, bold, the key in the accent, with no
+  rule beside it.
 - A value drawn as inline code in the details panel is one line, whatever it holds. A plan's
   verification command with two line breaks and `#### Review 1: …` after them, or a build
   command naming a folder so called, drew a heading of the panel's own, outside the rule. A

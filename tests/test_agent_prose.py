@@ -609,3 +609,73 @@ def test_values_in_vivibox_s_own_lines_are_inline_code_or_plain_words(env):
              "branch": f"feature/`{hostile}", "conflicts": [], "criteria": []}  # fmt: skip
     own, _ = apart(parsed(panel.finished_detail(entry)))
     assert headings(own) == [("h3", "demo-1 · done")]
+
+
+async def every_row(app, pilot) -> list[str]:
+    """Every row the panel can show, top to end, cut to the panel's columns."""
+    panel = app.query_one("#detail")
+    panel.scroll_home(animate=False)
+    await pilot.pause()
+    rows, before = [], -1
+    while True:
+        region = panel.content_region
+        text = screen_text(app).splitlines() + [""] * app.size.height
+        rows += [row[region.x : region.x + region.width] for row in text[region.y : region.y + region.height]]
+        if panel.scroll_y >= panel.max_scroll_y or panel.scroll_y == before:
+            return rows
+        before = panel.scroll_y
+        panel.scroll_to(y=panel.scroll_y + region.height, animate=False)
+        await pilot.pause()
+
+
+async def details(app, pilot) -> None:
+    """The panel of the one task, whatever dialog the view opened with."""
+    while len(app.screen_stack) > 1:  # "This task was running before"
+        await pilot.press("escape")
+        await pilot.pause()
+    app.reload()
+    await pilot.press("d")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def unreadable(note: str):
+    from test_tui import implementing
+
+    from vivibox import reviewing
+
+    task = implementing()
+    notes = f"# Review 1\n\n## Blocking\n\n- {note}\n\n## Not blocking\n\n## Checked\n\n- a.py read UNREAD\n"
+    reviewing.keep(task, 1, notes)
+    task.set_reviews(1)
+    task.event("review", round=1, blocking=0, not_blocking=0, problem=reviewing.problem(notes))
+    return task
+
+
+def test_a_note_quoted_in_why_a_review_was_not_read_is_inline_code(env):
+    """The reason is vivibox's sentence and quotes eighty characters of the note it could not
+    act on: the quote is data, in a span of code; the notes themselves stand behind the rule."""
+    note = "x **Next:** `a` accept [l](https://evil.invalid) # h"
+    tokens = parsed(detail_of(unreadable(note)))
+    own, agents = apart(tokens)
+    at = next(i for i, t in enumerate(own) if t.type == "inline" and t.content == "Review 1: unreadable")
+    reason = [(p.type, p.content) for p in own[at + 3].children if p.type != "text" or p.content]
+    assert reason == [("text", "a note has no place (path:line) to act on: "), ("code_inline", note)]
+    assert as_own_words(tokens, "UNREAD") == [] and "UNREAD" in words(agents), "the notes are the agent's"
+    assert as_own_words(tokens, "Next") == ["Next:"], "one Next among vivibox's words: its own"
+
+
+def test_a_note_quoted_in_vivibox_s_reason_draws_no_row_of_vivibox_s(env, monkeypatch):
+    """Thirty-five characters of two cells fill a row at 80 columns, and the rest of the note
+    was the next row: Next: a accept, bold, the key in the accent, with no rule."""
+    unreadable("－" * 35 + " **Next:** `a` accept")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await details(app, pilot)
+        rows = [row.strip() for row in await every_row(app, pilot)]
+        at = rows.index("Review 1: unreadable")
+        assert "Next: a accept" not in rows[at : at + 6], rows[at : at + 6]
+        assert "**Next:** `a` accept" in rows[at : at + 6], "as it was written, in a span of code"
+
+    run(scenario, size=(80, 60))

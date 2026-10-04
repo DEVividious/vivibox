@@ -121,3 +121,43 @@ def test_a_question_put_back_after_g_is_quoted(tmp_path):
     sup.step()
     assert notes[-1] == "verification still failing; the agent's question stands: Which port?"
     assert ui.view(task, task.read_state(), True, 3).status == "agent asks"
+
+
+# --- the status reads no more of the agent's file than it needs -------------------------------------
+
+
+def test_a_question_that_is_not_text_does_not_end_the_list(tmp_path):
+    """The list asks what every blocked task waits on at each refresh: bytes that are no UTF-8
+    in one task's question.md must not end it for all of them."""
+    task = planning(tmp_path)
+    blocked_on_a_failed_verification(task, None)
+    (task.meta / "handoff" / supervisor.QUESTION).write_bytes(b"\xff\xfe which port?\n")
+    assert ui.view(task, task.read_state(), True, 3).status == "agent asks"
+    listed = ui.task_list([task], lambda t: "0/1", 3, ui.Style(False), running=lambda t: True)
+    assert "agent asks" in listed
+
+
+def test_the_status_reads_a_large_question_no_further_than_its_first_words(tmp_path):
+    from test_clone_read import bytes_read
+
+    task = planning(tmp_path)
+    blocked_on_a_failed_verification(task, None)
+    size = 64 << 20
+    (task.meta / "handoff" / supervisor.QUESTION).write_bytes(b"Which port?\n" + b"x" * size)
+    st = task.read_state()
+    before = bytes_read()
+    assert ui.view(task, st, True, 3).status == "agent asks"
+    assert bytes_read() - before < size // 8, "a status is asked for at every refresh of the list"
+
+
+def test_white_space_however_much_asks_nothing_within_what_is_read(tmp_path):
+    from vivibox import handoff
+
+    path = tmp_path / "question.md"
+    path.write_text(" \n" * 1000 + "Which port?\n")
+    assert handoff.has_text(path), "found past the first lines"
+    path.write_text(" \n" * 1000)
+    assert not handoff.has_text(path)
+    assert not handoff.has_text(tmp_path / "none.md")
+    path.write_text(" " * 3000)
+    assert handoff.has_text(path, limit=2000), "past the limit it is not taken for empty"

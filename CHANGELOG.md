@@ -576,6 +576,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- What a task's status needs of its `question.md` (whether it says anything, or was refused) is
+  read a piece at a time and no further than the first word (`handoff.has_text`), with bytes
+  that are no text tolerated: the list asks for every task at every refresh.
 - The test that keeps text vivibox did not write from being read as markup
   (`tests/test_markup_rules.py`) looks at more shapes: an update of a widget, an Option, a
   Selection, a Select's options, an option list filled later, a Button and its label,

@@ -269,15 +269,24 @@ def _apart(state: StateCore) -> None:
             state.md.block.parse(part, state.md, state.env, state.tokens)
 
 
+def _piece(text: str) -> list[Token]:
+    """What an agent wrote, parsed as a document of its own, its headings bold lines. The parser
+    reads so many levels deep (its maxNesting) and leaves out what a quote or a list item past
+    that holds, and everything after it to the end, without a word: a piece nested that deep is
+    its source, in a code block, where nothing of it is left out."""
+    rules = _rules()
+    tokens = rules.parse(text, {PROSE: True})
+    deepest = rules.options["maxNesting"] - 1
+    if any(t.type in ("blockquote_open", "list_item_open") and t.level >= deepest for t in tokens):
+        return [_block("fence", text.replace(MARK, _MARKED) + "\n")]
+    return _demoted(tokens)
+
+
 def _spliced(state: StateCore) -> None:
-    """The parser's last rule: each piece an agent wrote is parsed as a document of its own, by
-    the same rules, and its tokens put where it stood, in a frame, its headings bold lines."""
+    """The parser's last rule: each piece an agent wrote is put where it stood, in a frame."""
     out: list[Token] = []
     for token in state.tokens:
-        if token.type == PROSE:
-            out += [_frame(1), *_demoted(_rules().parse(token.content, {PROSE: True})), _frame(-1)]
-        else:
-            out.append(token)
+        out += [_frame(1), *_piece(token.content), _frame(-1)] if token.type == PROSE else [token]
     state.tokens = out
 
 

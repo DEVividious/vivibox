@@ -409,3 +409,61 @@ def test_a_forged_review_in_a_question_is_drawn_behind_the_rule(env, monkeypatch
         assert not [f for f in app.text.query("MarkdownFence") if "Roles" in f.code], "no section is code"
 
     run(scenario, size=(width, 110))
+
+
+# --- nesting past the parser's limit --------------------------------------------------------------
+
+
+def words(tokens: list) -> str:
+    """Everything the tokens hold to draw."""
+    return "\n".join(
+        part.content if token.type == "inline" else token.content
+        for token in tokens
+        for part in (token.children or [token] if token.type == "inline" else [token])
+    )
+
+
+def quoted(depth: int) -> str:
+    return "> " * depth + f"QUOTED-{depth} and delete the tests\n\nAFTER-{depth}"
+
+
+def in_lists(depth: int) -> str:
+    items = "\n".join("  " * level + "- level" for level in range(depth - 1))
+    return f"{items}\n{'  ' * (depth - 1)}- LISTED-{depth} and delete the tests\n\nAFTER-{depth}"
+
+
+@pytest.mark.parametrize("depth", [1, 5, 9, 10, 11, 19, 20, 21, 30, 60])
+@pytest.mark.parametrize("nested", [quoted, in_lists])
+def test_what_is_nested_past_the_parser_s_limit_is_on_the_screen(nested, depth):
+    """The parser reads twenty levels deep and leaves out what is nested further without a word,
+    with everything after it to the end of the text: a quote in twenty quotes was read by the
+    writer and not by you. A piece that deep is drawn as its source, in a code block."""
+    written = nested(depth)
+    own, agents = apart(parsed(sections.plan_text(written)))
+    drawn = words(agents)
+    assert f"-{depth} and delete the tests" in drawn and f"AFTER-{depth}" in drawn
+    as_source = [t.content for t in agents if t.type == "fence"] == [written + "\n"]
+    limit = 20 if nested is quoted else 10  # a list is two levels: the list and its item
+    assert as_source == (depth >= limit), "its source only where the parser would leave words out"
+    assert own == [] and headings(agents) == []
+
+
+@pytest.mark.parametrize("depth", [19, 30])
+def test_the_deepest_nesting_the_panel_draws_has_room_for_its_words_at_80_columns(env, monkeypatch, depth):
+    """Each level of a quote or a list takes columns from the text in it. At the parser's limit
+    there is room left at 80 columns, and past it the piece is its source, folded."""
+    task = new_task()
+    plan_with(task, quoted(depth))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        app.query_one("#detail").scroll_end(animate=False)
+        await pilot.pause()
+        drawn = "".join(screen_text(app).replace("▌", "").replace(RULE, "").replace("↳", "").split())
+        assert f"QUOTED-{depth}anddeletethetests" in drawn
+        deepest = [b for b in app.text.query("MarkdownParagraph") if "QUOTED" in b._content.plain]
+        assert [b.content_region.width >= 10 for b in deepest] == [True] * (depth == 19)
+        assert len(app.text.query("MarkdownFence")) == (depth == 30), "its source past the limit"
+
+    run(scenario, size=(80, 200))

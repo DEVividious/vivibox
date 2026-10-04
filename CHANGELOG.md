@@ -295,6 +295,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Words an agent nested more than twenty levels deep (a quote in twenty quotes, the tenth list
+  in a list) are on the screen. The details panel's parser read no deeper and left them out,
+  with everything after them to the end of the text: the writer read in the plan what you did
+  not. A plan, a question or a review's notes nested that deep is drawn as its source, in a
+  code block.
 - A table with more columns than the details panel has room for is drawn as its source, in a
   code block, every cell's words on the screen: thirty columns at 80 were an empty grid. A
   table is a grid while each column has room for four characters of text a row (ten columns

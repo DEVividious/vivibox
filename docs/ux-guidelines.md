@@ -308,7 +308,8 @@ looks like an empty cache.
   (`markdown.link_text`); HTML is the text it is. What markdown itself would leave out is
   drawn: the words after a code block's language, or its one word when that is no language the
   highlighter knows, on a line above the block, a table with more
-  cells in a row than columns as its source.
+  cells in a row than columns as its source, and a piece nested deeper than the parser reads
+  (twenty levels of quotes and lists) as its source too.
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
   A table in that text has columns of equal width and cells folded onto as many rows as they
   take, never cut with an ellipsis, and no tooltip (`markdown.Cells`): an address in a cell is

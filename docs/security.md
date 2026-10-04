@@ -272,7 +272,7 @@ What an agent writes for you to read (a plan, a question, a review's notes) keep
 lists and emphasis in the details panel, and makes no link there. A link in it, however it is
 written, is shown as text: its label, then the address it leads to, whole, in parentheses
 (`the docs (https://example.org/x)`), so a click opens nothing and no address hides behind other
-words; HTML in it is shown as the text it is. The only links a click opens in the panel are the
+words; a link's title follows its address in quotes; HTML in it is shown as the text it is. The only links a click opens in the panel are the
 addresses of what the task is running, which vivibox writes itself.
 
 ---

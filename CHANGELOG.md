@@ -270,6 +270,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Words of a plan, a question or a review that the details panel left out are drawn: a link's
+  or a picture's title, after its address in quotes (`the docs (https://example.org/x "its
+  title")`), and an address inside a picture's own words; the words after the language on a
+  code block's first line, on a line above the block; and a table with a row of more cells
+  than it has columns, which markdown would draw without them, as its source in a code block.
 - A table in a plan, a question or a review no longer ends the view when the mouse rests on a
   cell that holds brackets (`[/health]`: `MarkupError`), and a cell of valid markup no longer
   draws a tooltip in styles of its own: the panel's tables have no tooltips. Their cells are

@@ -285,3 +285,63 @@ def test_an_ordinary_failure_outside_the_code_reads_as_before(tmp_path):
         "That is outside the code; the user has been told and will run the verification again. Do "
         "not change code for it.\n"
     )
+
+
+# --- found after the verification passed: before or during a review ---------------------------------
+
+
+def in_review(task, tmp_path, blocked_at: str):
+    """A supervisor whose verification passed and whose clone is then blocked by what the task
+    added, found where the review first reads the clone (its HEAD) or where its view is made."""
+    from test_supervisor import CLEAN, gate_result, reviewed
+
+    why = r.Blocked("the task added a worktree to its clone, …", [])
+    blocked_result = gate.GateResult(Path("/dev/null"), environment=str(why))
+    sup, notes, _ = reviewed(task, tmp_path, [CLEAN], results=[gate_result(True), blocked_result])
+
+    def refuse():
+        raise why
+
+    if blocked_at == "its head":
+        sup.ports.head = refuse
+    else:
+        sup.ports.review_up = refuse
+    sup.step()  # implement
+    sup.step()  # verify: green
+    assert task.read_state().state is State.REVIEW
+    return sup, notes
+
+
+@pytest.mark.parametrize("blocked_at", ["its head", "its view"])
+def test_a_clone_blocked_at_the_review_goes_back_to_the_verification_not_to_an_error(
+    task, tmp_path, blocked_at
+):
+    """Stopped on an error in the review, the task had no checkpoint a reply is taken at, and
+    its message told you to reply. The verification says what blocks the clone and waits for
+    you; no round of the writer's is spent."""
+    sup, notes = in_review(task, tmp_path, blocked_at)
+    sup.step()  # the review meets the blocked clone
+    st = task.read_state()
+    assert (st.state, st.paused, st.problem, st.reviews) == (State.VERIFY, False, "", 0)
+    sup.step()  # the verification refuses it, for you
+    st = task.read_state()
+    assert (st.state, st.rounds) == (State.CHECKPOINT_BLOCKED, 0)
+    assert notes[-1].startswith("verification could not run: the task added a worktree to its clone")
+    actions.reply(task, "remove the worktree")
+    assert task.read_state().state is State.IMPLEMENT
+
+
+def test_the_reviews_view_keeps_what_blocks_the_clone_apart_from_other_refusals(task, tmp_path):
+    """reviewing.view words a refusal as the review's ("the review could not start"); what the
+    task added passes as it is, for the supervisor to send to the verification."""
+    from types import SimpleNamespace
+
+    from vivibox import reviewing
+
+    nested(task.repo)
+    task.set_verified_commit(git(task.repo, "rev-parse", "HEAD"))
+    for folder in ("work", "src"):
+        (tmp_path / folder).mkdir()
+    pod = SimpleNamespace(review_work=tmp_path / "work", review_src=str(tmp_path / "src"))
+    with pytest.raises(r.Blocked, match="the task added a repository of its own to its clone"):
+        reviewing.view(task, pod)

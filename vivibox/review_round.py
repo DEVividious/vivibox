@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from . import gate, handoff, reviewing, ui
+from . import gate, handoff, repo, reviewing, ui
 from . import supervisor as _sup
 from .prompts import (
     REVIEW_AGAIN_PREFIX,
@@ -20,6 +20,16 @@ from .task import TaskState
 
 class ReviewRound:
     def _review(self, st: TaskState) -> None:
+        """The round, unless the task added to its clone, since the verification, what vivibox
+        reads no clone with (repo.Blocked): then back to the verification, which says so and
+        waits for you at a checkpoint your reply is taken at, where an error would have stopped
+        the task with no such checkpoint. No round of the writer's is spent."""
+        try:
+            self._round(st)
+        except repo.Blocked:
+            self._go(State.VERIFY, "the task's clone is blocked by what it added")
+
+    def _round(self, st: TaskState) -> None:
         """A round of the reviewer's after a green gate, kept as handoff/review-N.md: in the review
         container a fresh view of the commits and a fresh conversation, or the supervisor in its
         control container, on its copy of the commits, in the conversation it planned in. Blocking notes

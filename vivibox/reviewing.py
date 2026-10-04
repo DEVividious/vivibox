@@ -241,6 +241,8 @@ def view(task: Task, pod: Pod) -> None:
     except repo.GitTimeout as e:
         again = f"then start the task again: vivibox start {task.id}"
         raise repo.GitTimeout(f"the review could not start: {e}; {again}") from None
+    except repo.Blocked:  # as it is: the supervisor sends it to the verification, which says it
+        raise
     except repo.RepoError as e:
         raise repo.RepoError(f"the review could not start: {e}") from None
 

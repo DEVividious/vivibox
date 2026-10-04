@@ -634,27 +634,37 @@ def test_a_submodule_the_history_points_into_that_you_have_not_checked_out_is_re
     assert not task.root.exists()
 
 
-@pytest.mark.parametrize("listing", ["takes longer than the check has", "fails"])
+LISTINGS = ["takes longer than the check has", "is still being read when the check's time is out", "fails"]
+
+
+@pytest.mark.parametrize("listing", LISTINGS)
 def test_a_history_vivibox_cannot_list_is_refused_and_said(project, monkeypatch, listing):
     """You keep every commit, the one lib's history points at too: only the listing of that
-    history is in the way. One that outlasts the check's time, or that git refuses, is no
-    history without pointers: refused, saying which."""
+    history is in the way. One that outlasts the check's time, in git or in the reading of
+    what git printed, or that git refuses, is no history without pointers: refused, saying
+    which."""
     task = actions.create("demo", "Goal")
     made = moved_and_back(task)
     at_final(task, project)
     kept_from(task.repo / "lib", project.source / "lib", made.last)
     kept_from(task.repo / "lib" / "deep", project.source / "lib" / "deep", made.below)
-    real = repo.run_git
+    real, clock, later = repo.run_git, time.monotonic, [0.0]
 
     def run_git(args, **how):
         if "log" not in args:
             return real(args, **how)
         if listing == "fails":
             return subprocess.CompletedProcess(args, 128, b"", b"")
-        raise subprocess.TimeoutExpired(args, how["timeout"])
+        if listing == LISTINGS[0]:
+            raise subprocess.TimeoutExpired(args, how["timeout"])
+        done = real(args, **how)
+        later[0] = submodules.SECONDS  # git answered in time; what it printed is read past it
+        return done
 
     monkeypatch.setattr(repo, "run_git", run_git)
+    monkeypatch.setattr(submodules, "time", SimpleNamespace(monotonic=lambda: clock() + later[0]))
     said = refused(task, project)
+    later[0] = 0.0
     if listing == "fails":
         start = git(project.source / "lib", "rev-parse", "HEAD")
         why = f"vivibox could not list the commits of its history in your repository since {start}"
@@ -666,6 +676,48 @@ def test_a_history_vivibox_cannot_list_is_refused_and_said(project, monkeypatch,
     monkeypatch.setattr(repo, "run_git", real)
     actions.finish(task, project.demo)
     assert not task.root.exists()
+
+
+def printed(monkeypatch, listed: bytes) -> None:
+    """git's answer to the check from here on, whatever it is asked: a listing as given."""
+    monkeypatch.setattr(submodules, "_git", lambda args, until: (0, listed))
+
+
+ROW = ":160000 160000 1111111 2222222 M\tdeep\n"
+
+
+def test_a_long_listing_is_read_in_one_pass_and_within_the_checks_time(project, monkeypatch):
+    """Fifty thousand commits, each moving the pointer: read once through, in a time that does
+    not grow with the square of their number (seconds then, minutes at ten times as many),
+    and not at all once the check's time is out, which is said as git's own lateness is."""
+    lib = submodules.at(project.source / "lib", soon())
+    moves = [f"{n:040x}" for n in range(1, 50_001)]
+    printed(monkeypatch, "".join(f"{commit}\n\n{ROW}" for commit in moves).encode())
+    began = time.monotonic()
+    assert lib.history("a" * 40, moves[0]) == moves[1:]
+    assert time.monotonic() - began < 5, "the reading grows with the square of the commits"
+    with pytest.raises(submodules.Late):
+        submodules.Repository(lib.tree, lib.git_dir, time.monotonic() - 1).history("a" * 40, moves[0])
+
+
+COMMIT = "c" * 40 + "\n"
+NO_LISTINGS = {
+    "a line that is no commit": "gpg: Signature made\n" + COMMIT + ROW,
+    "a change before any commit": ROW + COMMIT,
+    "a change with a field missing": COMMIT + ":160000 160000 1111111 M\tdeep\n",
+    "a merge's change with one parent's fields": COMMIT + ":" + ROW,
+}
+
+
+@pytest.mark.parametrize("what", NO_LISTINGS)
+def test_a_listing_with_a_line_the_check_does_not_know_is_no_listing(project, monkeypatch, what):
+    """A line that is neither a commit's id nor a change as git log --raw prints one: the
+    listing is not one vivibox can answer from, and is said so, never read around."""
+    lib = submodules.at(project.source / "lib", soon())
+    printed(monkeypatch, (COMMIT + ROW).encode())
+    assert lib.history("a" * 40, "b" * 40) == ["c" * 40]
+    printed(monkeypatch, NO_LISTINGS[what].encode())
+    assert lib.history("a" * 40, "b" * 40) is None
 
 
 def test_your_settings_for_what_a_log_shows_hide_no_pointer_from_the_check(project):

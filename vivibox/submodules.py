@@ -119,25 +119,32 @@ class Repository:
         """The commits of commit's history that add or move a submodule pointer (a merge: to
         where no parent of it points), commit itself left out: those since before, or, with
         no before, those no branch of a remote here reaches. None when git cannot list them,
-        or prints what is no such listing. One git, whatever the history holds."""
+        or prints what is no such listing. One git, whatever the history holds, and what it
+        printed read once through, for as long as the check has left (Late past it)."""
         since = [f"{before}..{commit}"] if before else [commit, "--not", "--remotes"]
         code, listed = self.git(*HISTORY, *since, "--")
         if code != 0:
             return None
-        found, last = [], ""
-        for line in filter(None, listed.split(b"\n")):
+        found, last, counted = [], "", True  # counted: last is in found, or is not to be
+        for n, line in enumerate(listed.split(b"\n")):
+            if n % 1024 == 0 and time.monotonic() >= self.until:
+                raise Late
+            if not line:
+                continue
             parents = len(line) - len(line.lstrip(b":"))
             if not parents:
                 last = line.decode("ascii", "replace")
                 if not COMMIT.fullmatch(last):
                     return None
+                counted = last == commit
                 continue
             # :<mode of each parent> <mode> <id of each parent> <id> <what changed>, a tab, the path
             fields = line[parents:].split(b"\t")[0].split()
             if not last or len(fields) != 2 * parents + 3:
                 return None
-            if fields[parents] == GITLINK.encode() and last != commit and last not in found:
+            if fields[parents] == GITLINK.encode() and not counted:
                 found.append(last)
+                counted = True
         return found
 
     def modules(self, commit: str) -> dict[str, tuple[str, str]]:
@@ -253,8 +260,8 @@ def look(
     Kept.via says of a commit found under `afters`."""
     was = (yours.gitlinks(before) if before else None) or {}
     names = yours.modules(before) if before and was else {}
-    for after in [*afters, *past]:
-        via = (prefix.rstrip("/"), after) if after in past else via
+    for n, after in enumerate([*afters, *past]):
+        via = (prefix.rstrip("/"), after) if n >= len(afters) else via
         now, named = yours.gitlinks(after), None  # named: what after's .gitmodules says, read once
         if now is None or depth > DEEPEST:
             deep = f"submodules more than {DEEPEST} deep are not followed" if now is not None else ""

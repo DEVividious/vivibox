@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import GIT_CONFIG, make_repo
+from conftest import GIT_CONFIG, HOME, make_repo, suites_own
 
 from vivibox import about, baseline, context, keys_work, reading, repo, version
 
@@ -418,6 +418,38 @@ def test_git_on_the_host_gets_what_vivibox_sets_for_it_and_nothing_else_of_gits(
     assert reading.HOST_GIT == {
         "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_LAZY_FETCH": "1",
     }  # fmt: skip
+
+
+def test_the_suites_home_hides_the_settings_your_shell_points_git_and_vivibox_at(tmp_path, monkeypatch):
+    """A shell that exports XDG_CONFIG_HOME keeps git's global settings in git/config there, and
+    vivibox's git reads them where git does. Every test starts in a home of the suite's own
+    (conftest.own_home), the folders a shell names apart from HOME included: an identity and a
+    hook of yours reach no git a test has vivibox run, and vivibox keeps its configuration, its
+    keys, its history and what it remembers of the models in the suite's home, not in yours."""
+    from vivibox import config, keys, review, roles
+
+    named = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+    assert all(Path(os.environ[name]).is_relative_to(HOME) for name in named), "as every test starts"
+    yours, ran = tmp_path / "yours", tmp_path / "ran"
+    for hook in ("reference-transaction", "post-checkout"):
+        script(yours / "hooks" / hook, f'echo "$0" >> "{ran}"')
+    (yours / "git").mkdir()
+    (yours / "git" / "config").write_text(
+        f"[user]\n\tname = Yours\n\temail = yours@example.com\n[core]\n\thooksPath = {yours}/hooks\n"
+    )
+    source = make_repo(tmp_path / "source")
+    for name in named:  # your shell, as the suite is started from it
+        monkeypatch.setenv(name, str(yours))
+    monkeypatch.delenv("VIVIBOX_CONFIG_DIR", raising=False)
+    suites_own(monkeypatch)  # what own_home does before every test
+    meta = tmp_path / "task" / ".task"
+    meta.mkdir(parents=True)
+    repo.prepare(source, tmp_path / "task" / "repo", "demo-1", meta)
+    names = repo.git("config", "--get-all", "user.name", cwd=tmp_path / "task" / "repo").stdout
+    assert names.splitlines() == ["Test User"], "the suite's identity, and no other"
+    assert not ran.exists(), "a hook of your own git settings ran in a test"
+    for kept in (config.config_dir(), keys.store(), review.history_path(), roles.models_cache()):
+        assert kept.is_relative_to(HOME), f"{kept} is not the suite's"
 
 
 def test_the_environment_of_git_keeps_everything_that_is_not_gits(monkeypatch):

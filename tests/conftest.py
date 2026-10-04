@@ -84,13 +84,32 @@ def real_machine(request) -> bool:
     return "docker" in request.keywords or "model" in request.keywords
 
 
+# The folders a shell may name apart from HOME, by where each is under a home: git reads its
+# global settings in $XDG_CONFIG_HOME/git/config beside ~/.gitconfig, and vivibox keeps its
+# configuration, its keys and history, and what it remembers of the models there.
+OWN_FOLDERS = {
+    "XDG_CONFIG_HOME": ".config",
+    "XDG_DATA_HOME": ".local/share",
+    "XDG_CACHE_HOME": ".cache",
+    "XDG_STATE_HOME": ".local/state",
+}
+
+
+def suites_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HOME and every folder a shell can name apart from it (OWN_FOLDERS) are the suite's."""
+    monkeypatch.setenv("HOME", str(HOME))
+    for name, folder in OWN_FOLDERS.items():
+        monkeypatch.setenv(name, str(HOME / folder))
+
+
 @pytest.fixture(autouse=True)
 def own_home(request, monkeypatch):
-    """HOME is the suite's, where its git configuration is (GIT_CONFIG): the git vivibox runs
-    reads ~/.gitconfig there and never yours. Not for a test on this machine's Docker, whose
-    client keeps its own settings in your home."""
+    """HOME is the suite's, where its git configuration is (GIT_CONFIG), and so is every folder
+    your shell may name apart from it (suites_own): the git vivibox runs reads its settings
+    there and never yours, hooks and all, and vivibox writes its cache there. Not for a test on
+    this machine's Docker, whose client keeps its own settings in your home."""
     if not real_machine(request):
-        monkeypatch.setenv("HOME", str(HOME))
+        suites_own(monkeypatch)
 
 
 @pytest.fixture(autouse=True)

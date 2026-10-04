@@ -25,6 +25,9 @@ dependencies = [
     # whether a code block's first word is a language.
     "markdown-it-py>=4.2.0,<5",
     "pygments>=2.21.0,<3",
+    # What Textual draws with, used directly too: it counts the cells of a code block's row as
+    # the row is drawn (vivibox/blocks.py), and escapes markup in the view's own texts.
+    "rich>=15.0.0,<16",
 ]
 
 [project.urls]

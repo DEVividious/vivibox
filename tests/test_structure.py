@@ -300,6 +300,41 @@ def test_the_panels_parser_is_declared_and_textual_is_bound_below_its_next_major
     assert bounds["pygments"].endswith(",<3"), "the highlighter the panel asks for a language's name"
     assert version("textual").split(".")[0] == "8" and version("markdown-it-py").split(".")[0] == "4"
     assert version("pygments").split(".")[0] == "2"
+    assert bounds.get("rich", "").endswith(",<16") and version("rich").split(".")[0] == "15", (
+        "what counts the cells of a code block's row as the row is drawn (blocks._cuts)"
+    )
+
+
+def test_what_the_panel_s_widgets_take_from_inside_textual_is_still_there():
+    """vivibox/blocks.py is built on names Textual does not promise (its module of markdown
+    widgets is private) and on how its widget walks the tokens. A Textual that moved one would
+    fail when the view starts, or at the first table; one that stopped handing an unknown token
+    to unhandled_token would fail without a word: an agent's --- would be drawn nowhere."""
+    from markdown_it.token import Token
+    from textual.widgets import Markdown
+    from textual.widgets import _markdown as theirs
+
+    from vivibox import blocks, markdown
+
+    for name in ("MarkdownBlock", "MarkdownBlockQuote", "MarkdownFence", "MarkdownHorizontalRule",
+                 "MarkdownTable", "MarkdownTableContent"):  # fmt: skip
+        assert isinstance(getattr(theirs, name, None), type), name
+    assert {"fence", "code_block", "table_open", "blockquote_open"} <= set(Markdown.BLOCKS)
+    used = {
+        theirs.MarkdownFence: ("highlight", "set_content", "notify_style_update"),
+        theirs.MarkdownTable: ("_get_headers_and_rows",),
+        Markdown: ("_parse_markdown", "unhandled_token", "update", "source"),
+    }
+    for owner, inside in used.items():
+        assert all(hasattr(owner, name) for name in inside), owner
+    panel = blocks.Panel.__new__(blocks.Panel)  # no app: the walk of the tokens alone
+    asked = []
+    panel.unhandled_token = lambda token: asked.append(token.type)
+    assert list(Markdown._parse_markdown(panel, [Token(markdown.RULE, "hr", 0)])) == []
+    assert asked == [markdown.RULE], "a token Textual does not know is handed over, the rule among them"
+    (frame, *inner, end) = markdown.parser().parse(markdown.prose("above\n\n---\n\nbelow"))
+    assert (frame.type, end.type) == ("blockquote_open", "blockquote_close") and frame.meta[markdown.PROSE]
+    assert markdown.RULE in [token.type for token in inner] and "hr" not in [token.type for token in inner]
 
 
 def git(*args: str) -> subprocess.CompletedProcess:

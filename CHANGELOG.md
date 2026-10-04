@@ -812,6 +812,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- vivibox names `rich` (15.x) among its dependencies: it was imported directly and came only
+  with Textual. A test fails if a name the panel's widgets take from inside Textual is gone.
 - The widgets the details panel's text is drawn with (the panel, the frame, the code block, the
   table) are in `vivibox/blocks.py`; `vivibox/markdown.py` keeps what reads the text.
 - A test holds that a tool's stderr becomes a message only through `display.said`

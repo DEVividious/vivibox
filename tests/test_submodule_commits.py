@@ -905,6 +905,65 @@ def test_a_submodule_of_yours_without_the_commit_the_task_started_from_gets_the_
     assert not task.root.exists()
 
 
+def test_the_git_that_tells_a_missing_start_from_a_failed_listing_is_one_of_the_checks(project, monkeypatch):
+    """Your lib lacks the commit your project had it at: the listing of its history fails, and
+    one more git says which of the two refusals it is (cat-file, of that commit, in your
+    lib). It runs as every git of the check does: in your repository and never the task's
+    clone, with nothing to read from, fetching nothing, within the check's time and limit."""
+    source, lib = project.source, project.source / "lib"
+    stood, newer = git(lib, "rev-parse", "HEAD"), newer_at(project.lib)
+    git(source, "update-index", "--cacheinfo", f"160000,{newer},lib")
+    git(source, "commit", "-qm", "Pulled; the submodule not updated")
+    task = actions.create("demo", "Goal")
+    git(task.repo / "lib", "checkout", "-q", stood)
+    at_final(task, project)
+    ran, real = [], repo.run_git
+    monkeypatch.setattr(repo, "run_git", lambda args, **how: ran.append((args, how)) or real(args, **how))
+    work = git(task.repo, "rev-parse", "HEAD")
+    with pytest.raises(submodules.Unkept):
+        submodules.check(task.id, source, task.repo, task.read_state().base_commit, work)
+    assert [args for args, _ in ran if "cat-file" in args] == [
+        ["-C", str(lib), "cat-file", "-e", f"{newer}^{{commit}}"]
+    ]
+    for args, how in ran:
+        assert str(task.repo) not in " ".join(args) and how["stdin"] == subprocess.DEVNULL, args
+        assert how["env"] == AS_KEPT and 0 < how["timeout"] <= submodules.SECONDS, args
+        assert how["limit"] == submodules.LIMIT, args
+
+
+def test_what_a_commit_of_the_history_needs_says_so_whatever_is_in_the_way(project):
+    """A commit only a submodule's history needs, in a submodule you have not checked out: the
+    way out for where neither its remote nor the task has it follows the commands, as it does
+    where the submodule is checked out. And where your submodule lacks the commit it was at
+    when the task started, the entry says that, with the fetch, and names what needs it."""
+    yours = submodules.at(project.source, soon())
+    below, then, start = "5" * 40, "4" * 40, "6" * 40
+    named = f"lib/deep at {below}{needed_by('lib', then)}"
+    out = submodules.Kept(
+        "lib/deep", below, submodules.NOT_CHECKED_OUT, None, yours, "deep", via=("lib", then)
+    )
+    said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [out]).splitlines()
+    assert said[1].startswith(f"{named}: your checkout has no copy of this submodule. Check it out, then ")
+    assert said[2:4] == [
+        f"git -C {project.source} submodule update --init -- deep",
+        "git -C /yours/lib/deep fetch --no-recurse-submodules",
+    ]
+    assert said[5:] == [
+        'If neither has it, send the work back with a reply (vivibox reply demo-1 "…") for work that does '
+        f"not keep lib at {then}.",
+        "Then accept the work again.",
+    ]
+    lacks = submodules.Kept(
+        "lib/deep", below, submodules.NO_START, yours, yours, "deep", via=("lib", then), since=start
+    )
+    assert submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [lacks]).splitlines()[1:] == [
+        f"{named}: your submodule does not have {start}, the commit lib had it at when the task started, "
+        "so vivibox cannot tell which commits of its history are new. Fetch it from the submodule's remote:",
+        "git -C /yours/lib/deep fetch --no-recurse-submodules",
+        "Then accept the work again.",
+    ]
+
+
 LISTINGS = ["takes longer than the check has", "is still being read when the check's time is out", "fails"]
 
 
@@ -980,6 +1039,15 @@ def test_a_long_listing_is_read_in_one_pass_and_within_the_checks_time(project, 
     assert time.monotonic() - began < 5, "the reading grows with the square of the commits"
     with pytest.raises(submodules.Late):
         submodules.Repository(lib.tree, lib.git_dir, time.monotonic() - 1).history("a" * 40, moves[0])
+
+
+def test_a_commit_that_moves_two_pointers_is_listed_once(project, monkeypatch):
+    """One commit of a history moves two submodules: it is one commit to look at, and is
+    listed once, so that its pointers are read once."""
+    lib = submodules.at(project.source / "lib", soon())
+    two, one = "d" * 40, "e" * 40
+    printed(monkeypatch, f"{two}\n\n{ROW}{ROW.replace('deep', 'other')}{one}\n\n{ROW}".encode())
+    assert lib.history("a" * 40, "b" * 40) == [two, one]
 
 
 COMMIT = "c" * 40 + "\n"

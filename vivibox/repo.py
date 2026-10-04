@@ -482,11 +482,18 @@ def check_protection(repo: Path, meta: Path) -> None:
             # What ordinary work adds: the task is blocked while it is there, not lost.
             what = " and ".join(sorted({change.what for change in changed}))
             # The state and the step first: a notification holds the first 150 characters.
+            found = f"Found: {named}. git on your machine would run what its settings say, so until then"
+            if undoes(meta) == IN_A_BOX:
+                how = "; ".join(IN_A_BOX_HOW[kind] for kind in sorted({change.what for change in changed}))
+                raise Blocked(
+                    f"this box's clone has {what} in it and the box cannot close until it is out: "
+                    f"{how}. {found} vivibox runs no git in the clone, and the work is not brought back",
+                    changed,
+                )
             raise Blocked(
-                f"the task added {what} to its clone and is blocked until it is out: {undoes(meta)} "
-                f"removes it, or takes it out of what git tracks. Found: {named}. git on your machine "
-                "would run what its settings say, so until then vivibox runs no git in the clone, and "
-                "the work is neither verified nor brought back",
+                f"the task added {what} to its clone and is blocked until it is out: {WRITER} "
+                f"removes it, or takes it out of what git tracks. {found} vivibox runs no git in the "
+                "clone, and the work is neither verified nor brought back",
                 changed,
             )
         raise RepoError(
@@ -518,6 +525,19 @@ def named_changes(changed: list[str]) -> str:
 # Who takes back what a task changed in its clone, and how you get them to, as the start of the
 # sentence that says what they do: your reply sends the writer; a box has no writer.
 WRITER, IN_A_BOX = "reply, and the writer", "whoever works in this box, which has no writer,"
+# How each addition goes out of a box's clone, which nobody is sent to: closing a box commits
+# with git add -A, so what is only taken out of the index is listed there again.
+IN_A_BOX_HOW = {
+    protection.REPOSITORY: (
+        "whoever works in the box removes its folder, or has git ignore it (the folder in "
+        ".gitignore, and `git rm -f --cached` with its path), or keeps its files as ordinary ones "
+        "(`git rm -f --cached` with its path, and the `.git` inside it deleted). Out of the index "
+        "alone it comes back: closing a box adds every file git does not ignore"
+    ),
+    protection.WORKTREE: (
+        "whoever works in the box removes it (`git worktree remove` with its path, then `git worktree prune`)"
+    ),
+}
 
 
 def undoes(meta: Path) -> str:

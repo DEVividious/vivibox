@@ -117,10 +117,8 @@ def test_in_a_box_nobody_is_said_to_be_replied_to(task):
     nested(task.repo)
     said = blocked(task)
     assert "reply" not in said and "the writer" not in said
-    assert (
-        "is blocked until it is out: whoever works in this box, which has no writer, removes it, or "
-        "takes it out of what git tracks. Found: web/.git was added"
-    ) in said
+    assert said.startswith("this box's clone has a repository of its own in it and the box cannot close")
+    assert "takes it out of what git tracks" not in said, "which does not last in a box"
 
 
 CHANGES = {
@@ -430,3 +428,103 @@ def test_neither_file_the_writer_reads_tells_it_what_you_are_told(task):
         said = (task.meta / "handoff" / name).read_text()
         assert "web/.git was added" in said, name
         assert "reply" not in said and "the writer" not in said, name
+
+
+# --- in a box ------------------------------------------------------------------------------------------
+
+BOX_REPOSITORY = (
+    "this box's clone has a repository of its own in it and the box cannot close until it is out: "
+    "whoever works in the box removes its folder, or has git ignore it (the folder in .gitignore, and "
+    "`git rm -f --cached` with its path), or keeps its files as ordinary ones (`git rm -f --cached` "
+    "with its path, and the `.git` inside it deleted). Out of the index alone it comes back: closing a "
+    "box adds every file git does not ignore. Found: tool/.git was added, a repository git would go "
+    "into. git on your machine would run what its settings say, so until then vivibox runs no git in "
+    "the clone, and the work is not brought back"
+)
+
+
+def a_box_with_a_tool(task, monkeypatch):
+    """A box where you cloned a tool to use it: a repository of its own, untracked, which the
+    check lets be. Closing the box runs git add -A in its pod, which lists it in the index."""
+    from test_git_timeout import a_box
+
+    box_ = a_box(task, monkeypatch)
+    make_repo(box_.repo / "tool")
+    (box_.repo / "work.txt").write_text("by hand\n")
+    r.check_protection(box_.repo, box_.meta)
+    monkeypatch.setattr(actions, "prepare_review", lambda task, project: Path("review"))
+    return box_
+
+
+def close(box_):
+    from types import SimpleNamespace
+
+    from vivibox import box
+
+    return box.close_box(box_, SimpleNamespace(risky_extra=[]))
+
+
+def test_a_box_that_cannot_close_for_a_repository_in_it_is_told_what_works_there(task, monkeypatch):
+    box_ = a_box_with_a_tool(task, monkeypatch)
+    with pytest.raises(r.Blocked) as refused:
+        close(box_)
+    assert str(refused.value) == BOX_REPOSITORY
+    assert box_.read_state().state is State.IMPLEMENT, "still open"
+
+
+def remove_the_folder(clone: Path) -> None:
+    __import__("shutil").rmtree(clone / "tool")
+
+
+def have_git_ignore_it(clone: Path) -> None:
+    (clone / ".gitignore").write_text("tool/\n")
+    git(clone, "rm", "-q", "-f", "--cached", "tool")
+
+
+def keep_its_files(clone: Path) -> None:
+    git(clone, "rm", "-q", "-f", "--cached", "tool")
+    __import__("shutil").rmtree(clone / "tool" / ".git")
+
+
+WAYS_OUT = {
+    "its folder removed": remove_the_folder,
+    "ignored": have_git_ignore_it,
+    "its files kept": keep_its_files,
+}
+
+
+@pytest.mark.parametrize("way", WAYS_OUT)
+def test_each_way_the_box_is_told_closes_it(task, monkeypatch, way):
+    box_ = a_box_with_a_tool(task, monkeypatch)
+    with pytest.raises(r.Blocked):
+        close(box_)
+    WAYS_OUT[way](box_.repo)
+    assert close(box_) == Path("review")
+    tracked = git(box_.repo, "ls-files", "-s")
+    assert "160000" not in tracked, "no submodule is left in what the box commits"
+    assert ("tool/README.md" in tracked) == (way == "its files kept")
+    assert (box_.repo / "tool" / ".git").exists() == (way == "ignored"), "ignored, the tool stays to be used"
+
+
+def test_out_of_the_index_alone_it_comes_back_as_the_box_is_told(task, monkeypatch):
+    box_ = a_box_with_a_tool(task, monkeypatch)
+    with pytest.raises(r.Blocked):
+        close(box_)
+    git(box_.repo, "rm", "-q", "-f", "--cached", "tool")
+    git(box_.repo, "-c", "user.name=You", "-c", "user.email=you@example.com", "commit", "-q", "-m", "Out")
+    r.check_protection(box_.repo, box_.meta)
+    with pytest.raises(r.Blocked):
+        close(box_)
+
+
+def test_a_box_with_a_worktree_is_told_how_it_is_removed(task, monkeypatch, tmp_path):
+    from test_git_timeout import a_box
+
+    box_ = a_box(task, monkeypatch)
+    worktree(box_.repo, tmp_path / "elsewhere")
+    said = blocked(box_)
+    assert said.startswith(
+        "this box's clone has a worktree in it and the box cannot close until it is out: whoever works "
+        "in the box removes it (`git worktree remove` with its path, then `git worktree prune`). Found: "
+    )
+    assert "reply" not in said and "the writer" not in said and "the task added" not in said

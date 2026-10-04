@@ -47,6 +47,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- vivibox asks for Textual 8 (`textual>=8.2.8,<9`) and names `markdown-it-py` (4.x), which
+  the details panel uses directly: what the panel does with a link and a table's cell is tested
+  on that Textual, and the next major is taken up with its tests run.
 - A task that tracks a repository of its own (`git init` in a folder, then `git add`) or adds a
   worktree is still stopped, with no way to approve either, but is no longer told to be deleted:
   it is blocked until what it added is removed or taken out of what git tracks. The

@@ -221,6 +221,7 @@ wheels = [
 name = "vivibox"
 source = { editable = "." }
 dependencies = [
+    { name = "markdown-it-py" },
     { name = "textual" },
 ]
 
@@ -233,7 +234,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "textual", specifier = ">=8.2.8" }]
+requires-dist = [
+    { name = "markdown-it-py", specifier = ">=4.2.0,<5" },
+    { name = "textual", specifier = ">=8.2.8,<9" },
+]
 
 [package.metadata.requires-dev]
 dev = [

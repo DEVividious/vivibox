@@ -195,6 +195,19 @@ def test_no_module_is_past_the_limit():
     assert not big, f"split before adding to it: {big}"
 
 
+def test_the_panels_parser_is_declared_and_textual_is_bound_below_its_next_major():
+    """vivibox/markdown.py imports Textual's parser itself, and its rules hold for the way this
+    Textual builds a link, a cell and a tooltip. An install from git reads pyproject.toml, never
+    uv.lock: without the bound it would take a Textual nobody ran the panel's tests on."""
+    import tomllib
+    from importlib.metadata import version
+
+    declared = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    bounds = {d.partition(">")[0]: d for d in declared}
+    assert bounds["textual"].endswith(",<9") and bounds["markdown-it-py"].endswith(",<5"), declared
+    assert version("textual").split(".")[0] == "8" and version("markdown-it-py").split(".")[0] == "4"
+
+
 def git(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
 

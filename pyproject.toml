@@ -17,7 +17,12 @@ classifiers = [
     "Topic :: Software Development",
 ]
 dependencies = [
-    "textual>=8.2.8",
+    # The details panel's safety rests on how this Textual builds a link, a table's cell and a
+    # tooltip from markdown (vivibox/markdown.py): the next major is taken up by hand, with its
+    # tests run.
+    "textual>=8.2.8,<9",
+    # Textual's parser, used directly there (the panel's own rules).
+    "markdown-it-py>=4.2.0,<5",
 ]
 
 [project.urls]

@@ -18,7 +18,9 @@ import secrets
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import StateCore
 from markdown_it.token import Token
+from textual.app import ComposeResult
 from textual.widgets import Markdown
+from textual.widgets._markdown import MarkdownBlock, MarkdownTable, MarkdownTableContent
 
 from . import display
 
@@ -88,9 +90,40 @@ def parser() -> MarkdownIt:
     return found
 
 
+class Cells(MarkdownTableContent):
+    """A table's cells as the panel draws them: each whole, on as many rows as it takes. Textual
+    draws a cell on one row, cut with an ellipsis, and gives it its text as a tooltip to read the
+    rest by. A tooltip of a string is markup, and a cell's text is an agent's: none is made here,
+    and none is needed, as nothing is cut. An address in a cell is on the screen whole."""
+
+    DEFAULT_CSS = """
+    Cells {
+        grid-columns: 1fr;
+    }
+    Cells > .cell, Cells > .header {
+        text-overflow: fold;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        for cell in super().compose():
+            cell.tooltip = None  # before it is on the screen: nothing of it is ever a tooltip
+            yield cell
+
+
+class Table(MarkdownTable):
+    """A table of the panel: Textual's, its cells drawn by Cells."""
+
+    def compose(self) -> ComposeResult:
+        for made in super().compose():
+            yield Cells(made.headers, made.rows)
+
+
 class Panel(Markdown):
     """The details panel's text. A click opens an address in your browser, and the only
     addresses a click finds are vivibox's own (own_link)."""
+
+    BLOCKS: dict[str, type[MarkdownBlock]] = {**Markdown.BLOCKS, "table_open": Table}
 
     def __init__(self, **kwargs) -> None:
         super().__init__("", parser_factory=parser, **kwargs)

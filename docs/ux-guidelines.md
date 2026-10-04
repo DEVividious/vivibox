@@ -290,6 +290,9 @@ looks like an empty cache.
   its label, then its address whole in parentheses (`the docs (https://example.org/x)`), the
   address alone when the label is the address (`markdown.link_text`); HTML is the text it is.
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
+  A table in that text has columns of equal width and cells folded onto as many rows as they
+  take, never cut with an ellipsis, and no tooltip (`markdown.Cells`): an address in a cell is
+  on the screen whole, at 80 columns too.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

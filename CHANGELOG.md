@@ -270,6 +270,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A table in a plan, a question or a review no longer ends the view when the mouse rests on a
+  cell that holds brackets (`[/health]`: `MarkupError`), and a cell of valid markup no longer
+  draws a tooltip in styles of its own: the panel's tables have no tooltips. Their cells are
+  drawn whole instead, folded onto as many rows as they take in columns of equal width, where
+  a cell was one row cut with an ellipsis: a long address in a cell is on the screen to its end.
 - Three prints of the command line showed text of an agent's or a chat's as it came, control
   characters and all: `vivibox plan import` naming the criterion it refuses (to you, and in
   the words for the chat), `vivibox review <id> --import` naming a note without a place, and

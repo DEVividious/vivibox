@@ -701,3 +701,79 @@ def test_wait_says_a_problem_escaped_its_lines_under_the_first(env, capsys):
     main(["wait", task.id, "--timeout", "0", "--json"])
     found = json.loads(capsys.readouterr().out)["tasks"][0]
     assert found["problem"] in (forged, forged.partition(": ")[2]), "as it is, for a script"
+
+
+# --- a table in the panel -------------------------------------------------------------------------
+
+
+def with_tooltips(scenario, size=(140, 60)) -> None:
+    """The view as you run it: the suite's run() starts it with tooltips off."""
+    import asyncio
+
+    from vivibox.tui import Vivibox
+
+    async def go():
+        app = Vivibox()
+        async with app.run_test(size=size, tooltips=True) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await scenario(app, pilot)
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize(
+    "cell",
+    ["[/health]", "see [black on black]hidden[/] [@click=app.open_url('https://evil.invalid')]docs[/]"],
+)
+def test_resting_the_mouse_on_a_table_s_cell_reads_nothing_as_markup(env, monkeypatch, cell):
+    """Textual gives a cell its text as a tooltip, and a tooltip of a string is markup: [/health]
+    in a plan's table ended the view half a second after the mouse came to rest on it, and a cell
+    of valid markup drew a tooltip in the agent's own styles, with a place to click."""
+    from textual.widgets._markdown import MarkdownTableCellContents
+    from textual.widgets._tooltip import Tooltip
+
+    task = new_task()
+    plan_with(task, f"| endpoint | what |\n|---|---|\n| {cell} | returns 200 |")
+    opened = opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        cells = list(app.query(MarkdownTableCellContents))
+        found = next(c for c in cells if "returns 200" not in str(c.render()) and "]" in str(c.render()))
+        assert cell in str(found.render()), "the cell itself is its text, whole"
+        assert [c.tooltip for c in cells] == [None] * len(cells), "nothing to draw over it"
+        await pilot.hover(found, offset=(2, 0))
+        await pilot.pause(1.0)
+        tooltip = app.screen.get_child_by_type(Tooltip)
+        assert not tooltip.display and opened == []
+
+    with_tooltips(scenario)
+
+
+@pytest.mark.parametrize("width", [80, 100, 140])
+def test_an_address_in_a_table_s_cell_is_on_the_screen_whole(env, monkeypatch, width):
+    """A cell was one row, cut with an ellipsis: of a long address the part before the @ stayed,
+    which reads as the host, and the host it leads to was cut off."""
+    from ux import screen_text
+
+    address = "https://accounts.example.com/" + "a" * 90 + "@evil.invalid/END"
+    task = new_task()
+    rows = f"| sign in | [the docs]({address}) |\n| second row | short |"
+    plan_with(task, f"| what | where |\n|---|---|\n{rows}")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        app.query_one("#detail").scroll_end(animate=False)
+        await pilot.pause()
+        cells = [str(c.render()) for c in app.query("MarkdownTableCellContents")]
+        assert f"the docs ({address})" in cells, "the cell holds the label and the address"
+        lines = screen_text(app).splitlines()
+        drawn_rows = [line for line in lines if "│" in line or "aaaa" in line or "evil" in line]
+        folded = "".join(part.strip() for line in drawn_rows for part in line.split("│")[2:3])
+        assert address in folded, "\n".join(lines)
+        assert "…" not in "".join(drawn_rows), "nothing of a cell is cut"
+        assert any("sign in" in line for line in lines), "the other column is still read"
+
+    run(scenario, size=(width, 120))

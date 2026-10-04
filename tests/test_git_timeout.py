@@ -73,12 +73,40 @@ def fifo(clone: Path, rel: str) -> None:
     os.mkfifo(path)
 
 
+def git_reads(clone: Path, rel: str) -> None:
+    """The tracked file rel as a writer leaves one mid-work, so that git status reads it and, for
+    it, the .gitattributes of its folders: that read is the one that waits on a FIFO there.
+
+    git status reads .gitattributes only for a file it has to read. A file whose time and size
+    are the index's it takes as unchanged without reading it, unless the index was written in
+    the same second as the file (its racy-timestamp rule: then it reads every such file to be
+    sure). A test that put the FIFO in a fresh clone and left the rest to the clock had git wait
+    when all of it ran within one second and answer at once when a second's boundary fell in
+    between; under load it failed, once in several runs.
+
+    So the clone is first made what the clock would make it a second later (every tracked file
+    older than the index, the index refreshed), in which git status reads nothing; and then rel
+    gets other text of the same length at another time than the index has for it, which git can
+    only tell from unchanged by reading it. (Another length would not do: the size alone says
+    the file changed.)"""
+    run = lambda *a: subprocess.run(["git", *a], cwd=clone, check=True, capture_output=True, text=True)  # noqa: E731
+    for tracked in filter(None, run("ls-files", "-z").stdout.split("\0")):
+        then = (clone / tracked).stat().st_mtime - 3600
+        os.utime(clone / tracked, (then, then))
+    run("update-index", "-q", "--refresh")
+    path = clone / rel
+    then = path.stat().st_mtime - 60
+    path.write_text(path.read_text().swapcase())
+    os.utime(path, (then, then))
+
+
 # .git/packed-refs: rev-parse HEAD, the verification's first question, waits on it too.
 WHERE_GIT_READS = [".gitignore", "sub/.gitignore", ".gitattributes", ".git/info/exclude", ".git/packed-refs"]
 
 
 @pytest.mark.parametrize("rel", WHERE_GIT_READS)
 def test_a_fifo_where_git_reads_ends_the_verification_in_time_and_not_green(task, rel):
+    git_reads(task.repo, "README.md")  # .gitattributes is read for a file git reads
     fifo(task.repo, rel)
     pod = FakePod()
     began = time.monotonic()
@@ -300,6 +328,7 @@ def test_no_git_process_is_left_after_a_timeout(task, tmp_path, monkeypatch):
 
 
 def test_the_reason_says_what_timed_out_and_what_to_do(task):
+    git_reads(task.repo, "README.md")
     fifo(task.repo, ".gitattributes")
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
     assert said.startswith(f"git status did not answer in {LIMIT} s: in the task's clone, ")
@@ -319,6 +348,7 @@ def test_a_file_the_commits_have_is_restored_not_deleted(task):
     """Deleted, a committed .gitattributes is an uncommitted change, and the next verification
     spends a round of the writer's on it. (A committed .gitignore git reads from its index.)"""
     commit_file(task.repo, ".gitattributes", "* text=auto\n")
+    git_reads(task.repo, "README.md")
     fifo(task.repo, ".gitattributes")
     said = str(in_time(lambda: gate.uncommitted(task.repo)))
     assert said.endswith(f"restore it from the commits; the clone is {task.repo}")
@@ -336,12 +366,11 @@ def test_a_name_the_agent_chose_is_never_part_of_a_command_to_paste(task, tmp_pa
     if variant == "restore":
         commit_file(task.repo, f"{folder}/.gitattributes", "* text=auto\n")
         commit_file(task.repo, f"{folder}/f.txt", "one\n")
-        (task.repo / folder / "f.txt").write_text("two\n")  # a change there: git diff reads its attributes
+        git_reads(task.repo, f"{folder}/f.txt")  # a change there: git status reads its folder's attributes
         fifo(task.repo, f"{folder}/.gitattributes")
-        said = str(in_time(lambda: list(gate.added_lines(task.repo, _base(task)))))
     else:
         fifo(task.repo, f"{folder}/.gitignore")
-        said = str(in_time(lambda: gate.uncommitted(task.repo)))
+    said = str(in_time(lambda: gate.uncommitted(task.repo)))
     assert "did not answer" in said, said
     assert not [c for c in COMMANDS if c in said], f"a command to paste: {said}"
     assert f"in the task's clone, {folder}/.git" in said, "the name as text, whole"

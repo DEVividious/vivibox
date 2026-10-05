@@ -344,6 +344,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The command kept at `review the command` is the one that was shown. `vivibox accept <id>`
+  without `--verify` read the writer's file again at that moment, so a file rewritten after
+  the checkpoint's notification was kept for the project and run, and said only afterwards;
+  `vivibox status` showed no command at all. The command the task comes to the checkpoint
+  with is now on the task's record: status, the panel and the field under `a` show that one,
+  a plain accept keeps that one, and when the writer's file names another by then, that is
+  said and not kept. A command you give yourself (`--verify`, or typed) is yours as before.
 - `p` approves the risky files that are on the screen, and nothing when none are. It carried
   the identity of the panel's first drawing for the task: a state drawn first, replaced on the
   screen by a refresh and put back in the clone was approved while the screen showed another,

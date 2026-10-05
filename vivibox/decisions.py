@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-from . import actions, comments, feedback, gate, handoff, manual, prompts, repo, supervisor
+from . import actions, comments, feedback, gate, handoff, manual, prompts, proposal, repo, supervisor
 from .config import Project, config_dir
 from .risky import Approvals, Shown
 from .states import State
@@ -27,11 +27,19 @@ def accept_plan(task: Task, project: Project) -> None:
 
 def accept_command(task: Task, project: Project, command: str = "") -> None:
     """Keeps the command the writer proposed, or the one you give instead, for the project, and
-    sends the task on to its first verification."""
+    sends the task on to its first verification. The proposed one is the one the task came to
+    the checkpoint with, as the supervisor read it then and every place has shown it since
+    (proposal.at_checkpoint): never what the writer's file says by now."""
     st = task.read_state()
     if st.state is not State.CHECKPOINT_COMMAND:
         raise gate.GateError(f"{task.id} has no command waiting for you")
-    chosen = command.strip() or actions.proposed(task)
+    recorded = proposal.at_checkpoint(task)
+    if not command.strip() and recorded is None:
+        raise gate.GateError(
+            f"{task.id} has no command on record at this checkpoint (an earlier vivibox brought it "
+            f'here), so none is kept unseen; give the one to keep: vivibox accept {task.id} --verify "…"'
+        )
+    chosen = command.strip() or recorded
     if not chosen:
         raise gate.GateError(
             f'no command came from the writer; give one: vivibox accept {task.id} --verify "…",'

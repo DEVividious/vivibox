@@ -13,6 +13,7 @@ from .config import MODULES_TOKEN, Project, by_modules
 from .gate import ACCEPTED_PLAN
 from .gate import narrowed_proposal as narrowed_proposal_in
 from .plan import Plan, PlanError, parse_plan
+from .states import State
 from .task import Task
 
 PROPOSAL = "verify-proposal.md"
@@ -44,6 +45,38 @@ def proposed(task: Task) -> str:
         if command:
             return command
     return ""
+
+
+def at_checkpoint(task: Task) -> str | None:
+    """The command the task waits with at `review the command`: the proposal as the supervisor
+    read it once when the task got there, from the state's event, which the host alone writes
+    (through your approval of risky files too, when that came first). "" when the writer
+    proposed none; None when the checkpoint has none on record (an earlier vivibox's)."""
+    command = str(State.CHECKPOINT_COMMAND)
+    for event in reversed(task.events()):
+        data = event["data"]
+        if event["type"] != "state":
+            continue
+        if "command" in data and command in (data.get("current"), data.get("then")):
+            return str(data["command"] or "")
+        if data.get("current") == command and data.get("previous") == str(State.APPROVAL_RISKY):
+            continue  # approved on the way: the record is with the event before
+        return None
+    return None
+
+
+def shown(task: Task) -> str:
+    """The command to show at `review the command`: the recorded one; the file's where the
+    checkpoint has none on record, and then no plain accept keeps it (decisions.accept_command)."""
+    recorded = at_checkpoint(task)
+    return proposed(task) if recorded is None else recorded
+
+
+def moved(task: Task) -> str:
+    """The command the writer's file names now, when it is not the one the task waits with: to
+    be said, and never kept. "" while they are the same, or nothing is on record."""
+    recorded, now = at_checkpoint(task), proposed(task)
+    return now if recorded is not None and now != recorded else ""
 
 
 def nothing_to_build(task: Task) -> bool:

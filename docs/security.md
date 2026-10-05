@@ -37,7 +37,11 @@ on your machine until you have approved it.
   as recorded, has no risky change, and is on the commit that was verified. A clone the check
   refuses, a verification that fails or cannot run, and a clone that changed by then leave the
   plan to you and the project's settings as they were. The last look and the write are two
-  steps: a change made between them is not seen before the next verification. A kept command
+  steps: a change made between them is not seen before the next verification. By hand, the
+  command a task waits with at `review the command` is the one vivibox read once when the task
+  got there, recorded where the pod cannot write: the notification, `vivibox status`, the panel
+  and the field under `a` show that one, and a plain accept keeps and runs that one; what the
+  writer's file names later is said and never kept. A kept command
   is written into the project's file as one string: nothing in it ends the list or the line
   it is on, so it sets no other setting of the project.
 - **A task's use of your machine is bounded.** Every container of its pod runs with a memory

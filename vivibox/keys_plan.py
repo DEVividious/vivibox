@@ -94,7 +94,7 @@ class PlanKeys:
         and the verification runs with it; typed over, yours is kept instead; empty, nothing is
         decided. The box that leaves it to the writer is not offered: the writer just had its say."""
         project = actions.load(task.id)[1]
-        command = proposal.proposed(task)
+        command = proposal.shown(task)  # the one the task waits with, as the panel has it
         if not command:
             heading = (
                 f"No command came from the writer of {task.id}. Type the one that builds {project.name}"

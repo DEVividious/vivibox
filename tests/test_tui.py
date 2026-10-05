@@ -544,8 +544,8 @@ def at_command_checkpoint(env, command="npm ci && npm test"):
     gate.accept_plan(task)
     if command:
         (task.meta / "handoff" / proposal.PROPOSAL).write_text(f"`{command}`\n")
-    for state in (State.IMPLEMENT, State.CHECKPOINT_COMMAND):
-        task.transition(state)
+    task.transition(State.IMPLEMENT)
+    task.transition(State.CHECKPOINT_COMMAND, command=command)  # on the record, as the supervisor reads it
     return task
 
 

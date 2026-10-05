@@ -340,7 +340,7 @@ PANEL_MODULES = ("panel.py", "panels.py", "sections.py", "panel_resources.py")
 # whose text may quote what an agent chose (a command, a folder's name).
 READERS = {
     "read", "handed", "read_handoff", "read_text", "read_bytes", "readlines", "open", "read_question",
-    "for_you", "proposed", "events",
+    "for_you", "proposed", "shown", "moved", "events",
 }  # fmt: skip
 # Where what was read cannot pass for vivibox's own words: the one function for an agent's prose
 # and those that end in it, a code block, and the two that make an inline value one line that
@@ -355,7 +355,8 @@ READS_ACCOUNTED_FOR = {
         "handed(handoff / 'verify-feedback.md')",  # into display.fenced, two lines below
         "handed(log)",  # build_said: gate.log_excerpt of it, into display.fenced
         "progress.read(task)",  # the writer's steps, into markdown.listed
-        "proposal.proposed(task)",  # the proposed command: display.code, three lines below
+        "proposal.moved(task)",  # what the writer's file names now: display.code, on the next line
+        "proposal.shown(task)",  # the command the task waits with: display.code, three lines below
         "read(log)",  # the verification's log: its commands into display.code, its tail fenced
         "read(task.plan_path)",  # plans_verify: the plan's commands, each into display.code
         "read_handoff(path)",  # handed's own body

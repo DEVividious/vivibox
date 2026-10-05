@@ -627,6 +627,14 @@ def task_detail(
             else []
         ),
     ]
+    if st.state is State.CHECKPOINT_COMMAND:
+        from . import proposal  # the command the task waits with, which a plain accept keeps
+
+        if command := proposal.shown(task):
+            lines.append(f"{style('Command', 'bold')}  `{display.name(command)}`")
+        if later := proposal.moved(task):
+            said = f"the writer's file names another now, which is not kept: `{display.name(later)}`"
+            lines.append(f"{style('Note', 'bold')}     {said}")
     asks = asked(task)[0]  # first, as in the status it has
     if st.state is State.CHECKPOINT_BLOCKED and (
         why := why_blocked(task) if asks else environment_problem(task) or why_blocked(task)

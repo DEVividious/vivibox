@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import actions, answers, display, gate, manual, risky, submodules, ui
+from . import actions, answers, display, gate, manual, proposal, risky, submodules, ui
 from .config import load_project
 from .plan import PlanError
 from .states import State
@@ -34,9 +34,12 @@ def cmd_accept(args: argparse.Namespace) -> int:
         print(f"Plan accepted; {task.id} moves on to implementation.")
         carry_on(task)
     elif st.state is State.CHECKPOINT_COMMAND:
+        later = "" if args.verify else proposal.moved(task)  # before the task moves on
         actions.accept_command(task, project, args.verify or "")
         kept = display.name(load_project(project.name).verify[0])
         print(f"{project.name} is verified with `{kept}` from now on; {task.id} is verifying.")
+        if later:
+            print(f"The writer's file names another command now, which was not kept: `{display.name(later)}`")
         carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
         try:

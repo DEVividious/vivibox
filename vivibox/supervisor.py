@@ -461,15 +461,15 @@ class Supervisor(Planning, Verifying, ReviewRound):
             return RISKY_CHANGED
         return self.ports.clone_refused()
 
-    def _checkpoint(self, target: State, reason: str, kind: str = "") -> None:
+    def _checkpoint(self, target: State, reason: str, kind: str = "", **data) -> None:
         # Every checkpoint first checks risky files: you may open the project in IntelliJ at a checkpoint.
         if self.ports.risky_changes():
-            self._go(State.APPROVAL_RISKY, reason, then=str(target))
+            self._go(State.APPROVAL_RISKY, reason, then=str(target), **data)
             self.ports.notify(
                 self.task.id, f"{reason}; risky files changed, run 'vivibox risky {self.task.id}' first"
             )
         else:
-            self._go(target, reason)
+            self._go(target, reason, **data)
             self.ports.notify(self.task.id, reason, kind=kind)
 
     def _asks(self) -> str:
@@ -560,7 +560,9 @@ class Supervisor(Planning, Verifying, ReviewRound):
                 f"command proposed: `{command}`; keep it for every task of {st.project}, change it,"
                 " or send it back"
             )
-        self._checkpoint(State.CHECKPOINT_COMMAND, reason, kind="command")
+        # On the record with the checkpoint: the one command every place shows from here on, and
+        # the only one a plain accept keeps (proposal.at_checkpoint), whatever the file says later.
+        self._checkpoint(State.CHECKPOINT_COMMAND, reason, kind="command", command=command)
 
     def _asks_for_command(self) -> bool:
         """The project has no command, and neither it nor the task says there is nothing to build."""

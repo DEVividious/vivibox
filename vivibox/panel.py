@@ -195,7 +195,7 @@ def plans_verify(task: Task, st: TaskState) -> list[str]:
 def command_to_review(task: Task) -> list[str]:
     """The command the writer proposed, before the first verification: what it is, what is odd
     about it, and that keeping it settles the project's verification."""
-    command = proposal.proposed(task)
+    command = proposal.shown(task)
     if not command:
         why = (
             refused(task.meta / "handoff", proposal.PROPOSAL)
@@ -207,6 +207,12 @@ def command_to_review(task: Task) -> list[str]:
             "",
         ]
     lines = [f"**Proposed command:** {display.code(command)}", ""]
+    if later := proposal.moved(task):
+        lines += [
+            f"*The writer's file names another command now ({display.code(later)}): it is not the one "
+            "this task waits with, and is not kept. `r` asks the writer to propose again.*",
+            "",
+        ]
     if (selection := gate.narrowed_proposal(command)) and gate.DEBUG_OUTPUT.fullmatch(selection):
         lines += [
             f"*This command has debug output on ({display.code(selection)}): every verification log would be"

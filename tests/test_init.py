@@ -429,7 +429,7 @@ def test_accepting_the_command_keeps_it_for_the_project_and_starts_the_verificat
         actions.accept_plan(task, load_project("clinic"))
         if command:
             (task.meta / "handoff" / proposal.PROPOSAL).write_text(f"{command}\n")
-        task.transition(State.CHECKPOINT_COMMAND)
+        task.transition(State.CHECKPOINT_COMMAND, command=command)  # as the supervisor records it
         return task
 
     task = at_checkpoint("Add Pet tests", "./mvnw -B verify")

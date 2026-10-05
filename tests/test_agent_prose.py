@@ -787,14 +787,16 @@ def test_only_an_error_from_drawing_a_piece_is_taken_and_only_once(env, monkeypa
     async def not_from_a_piece(app, pilot):
         await show(app, pilot)
         (roles, *_) = app.text.query("MarkdownH4")  # a widget of the panel, of vivibox's own lines
-        for bug in (
+        item = app.text.query("Quote.prose MarkdownBulletList").last()
+        assert app.text.drew(raised_by(item, KeyError("a piece's"))), "a widget in a piece's frame"
+        others = (
             KeyError("anywhere"),
             raised_by(app, KeyError("the app")),
             raised_by(roles, KeyError("own")),
-        ):
-            app._exception = None
-            app._handle_exception(bug)
-            assert app._exception is bug, bug
+        )
+        assert [app.text.drew(bug) for bug in others] == [False, False, False]
+        app._handle_exception(others[0])
+        assert app._exception is others[0]
         assert app.text.query("Quote.prose MarkdownBulletList"), "and the plan is drawn as it was"
         assert not [n for n in app._notifications if "What an agent wrote" in str(n.message)]
 

@@ -427,3 +427,15 @@ def a_cancelled_worker_is_one_that_ended(monkeypatch):
     from textual.worker_manager import WorkerManager
 
     monkeypatch.setattr(WorkerManager, "wait_for_complete", threads_done)
+
+
+@pytest.fixture(autouse=True)
+def nothing_remembered_of_another_test_s_code_blocks():
+    """The panel's code blocks remember what they read and folded, and the width each was drawn
+    at, for the whole process: a test that counts that work starts with none done."""
+    import sys
+
+    if blocks := sys.modules.get("vivibox.blocks"):
+        blocks._read.cache_clear()
+        blocks._folded.cache_clear()
+        blocks._DRAWN_AT.clear()

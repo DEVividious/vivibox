@@ -4,6 +4,7 @@ is added to it. Checked here so the debt is seen when it is made, not after."""
 import ast
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 LIMIT = 800
@@ -320,11 +321,26 @@ def test_what_the_panel_s_widgets_take_from_inside_textual_is_still_there():
                  "MarkdownTable", "MarkdownTableContent"):  # fmt: skip
         assert isinstance(getattr(theirs, name, None), type), name
     assert {"fence", "code_block", "table_open", "blockquote_open"} <= set(Markdown.BLOCKS)
+    from textual.app import App
+    from textual.rlock import RLock
+    from textual.widget import Widget
+
     used = {
         theirs.MarkdownFence: ("highlight", "set_content", "notify_style_update"),
         theirs.MarkdownTable: ("_get_headers_and_rows",),
         Markdown: ("_parse_markdown", "unhandled_token", "update", "source"),
+        # blocks.Kept and Panel.gives_up: where Textual hands every error, and the panel's lock
+        App: ("_handle_exception", "call_later"),
+        Widget: (
+            "render_line",
+            "get_content_height",
+            "get_content_width",
+            "get_selection",
+            "remove_children",
+        ),
     }
+    assert callable(RLock) and isinstance(Widget.__new__(Widget).__dict__, dict)
+    assert "self.lock = RLock()" in Path(sys.modules[Widget.__module__].__file__).read_text(), "Widget.lock"
     for owner, inside in used.items():
         assert all(hasattr(owner, name) for name in inside), owner
     panel = blocks.Panel.__new__(blocks.Panel)  # no app: the walk of the tokens alone

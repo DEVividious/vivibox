@@ -417,9 +417,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   divided by zero, and the view closed each time that task's panel was opened. A table is
   drawn as a grid only once its width is known and has room, never first and looked at after,
   and a grid is never laid out narrower than a grid with room is.
-- An error raised while the panel draws what an agent wrote no longer ends the view: the
-  agent's pieces in that text are drawn again as their source, and a notification says so,
-  with the error's name. An error that is raised again after that ends the view as before.
+- An error raised by a widget that draws what an agent wrote, or in its layout, no longer ends
+  the view: the agent's pieces in that text are drawn again as their source, and a
+  notification says so, with the error's name. Any other error, and one that is raised again
+  after that, ends the view as before.
 - Why a review was not read (`Review n: unreadable`) quotes the note it could not act on as
   inline code. The quote was read as markdown in vivibox's own sentence, and a note of the
   right width drew `Next: a accept` on a row of its own, bold, the key in the accent, with no

@@ -434,10 +434,28 @@ def test_what_stands_in_numbered_lists_is_on_the_screen(env, monkeypatch, width,
     run(scenario, size=(width, 40))
 
 
-SHAPES = {"numbered": numbered, "bulleted": bulleted, "quoted": quoted_in, "mixed": mixed}
+def numbered_short(depth: int, last: str) -> str:
+    """Lists numbered 12345: eight columns a level, so the ten columns a block needs fall
+    between two depths (fourteen left at seven, six at eight)."""
+    return numbered(depth, last, "12345")
+
+
+def two_items(depth: int, last: str) -> str:
+    """Lists of two items that begin at 999999999: the second is drawn 1000000000, a digit more,
+    and the list takes its columns by that one."""
+    by = 11
+    lines = [" " * by * level + f"999999999. level {level}" for level in range(depth - 1)]
+    inner = " " * by * (depth - 1)
+    lines.append(f"{inner}999999999. " + last.replace("\n", "\n" + inner + " " * by))
+    lines += [" " * by * level + f"1. the second of {level}" for level in reversed(range(depth))]
+    return "\n\n".join(lines) + "\n\nAFTER-THE-LISTS"
+
+
+SHAPES = {"numbered": numbered, "bulleted": bulleted, "quoted": quoted_in, "mixed": mixed,
+          "numbered 12345": numbered_short, "two items": two_items}  # fmt: skip
 # The deepest of each that is drawn as markdown: one level more, and a block of it would have
 # fewer than ten columns in a terminal of 80.
-DEEPEST = {"numbered": 5, "bulleted": 9, "quoted": 19, "mixed": 6}
+DEEPEST = {"numbered": 5, "bulleted": 9, "quoted": 19, "mixed": 6, "numbered 12345": 7, "two items": 4}
 LASTS = {"words": WORDS, "code": f"see:\n\n```\n{WORDS}\n```", "table": "| a | b |\n|---|---|\n| c | d |"}
 
 
@@ -679,9 +697,11 @@ def test_a_block_costs_the_work_of_its_long_lines_alone_and_once(env, monkeypatc
         await pilot.pause()
         assert len(cut) == len(set(cut)) and {n for n, _ in cut} == {301, 501}, "those two, once a width"
         assert len(read) == 1
-        done = len(cut)
         await pilot.resize_terminal(140, 50)
         await pilot.pause()
+        await pilot.pause()
+        done = len(cut)  # whatever widths the layout went through on its way: none of them twice
+        assert done == len(set(cut))
         app.shown = ""  # as when anything else in the panel's text changes: every block is made anew
         app.show_detail()
         await pilot.pause()
@@ -941,3 +961,49 @@ def test_a_commit_keeps_its_branch_its_message_and_its_buttons_on_the_screen_at_
         assert "LAST-FILE.py" in screen_text(app) and "Leave uncommitted" in screen_text(app)
 
     run(scenario, size=(80, 24))
+
+
+# --- what the round's mutations passed through ---------------------------------------------------
+
+
+def test_a_cut_leaves_every_colour_on_the_characters_it_was_on():
+    """A cut puts a line break and a column into the text: the spans after it move with it."""
+    code = "x = [" + "None, 'text', 12, " * 12 + "]\nreturn " + "len(x) + " * 20 + "1  # a comment\ny = 2"
+    read, _, _ = blocks._read(code, "python", False, True)
+    folded_, _, cuts = blocks._folded(code, "python", False, True, 30)
+    assert len(cuts) > 10 and len(read.spans) == len(folded_.spans) > 1
+    for before, after in zip(read.spans, folded_.spans, strict=True):
+        assert (
+            folded_.plain[after.start : after.end].replace(blocks.GONE_ON, "")
+            == read.plain[before.start : before.end]
+        )
+        assert before.style == after.style
+
+
+def test_a_block_made_anew_is_drawn_at_once_as_it_was_and_none_is_narrower_than_three(env, monkeypatch):
+    from textual import events
+    from textual.geometry import Size
+
+    made = []
+    init = blocks.Marks.__init__
+    monkeypatch.setattr(
+        blocks.Marks, "__init__", lambda self, rows, **how: made.append(rows) or init(self, rows, **how)
+    )
+    task = new_task()
+    risky(task, LONG)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        assert made == [""], "its width is not known when it is first made"
+        app.shown = ""
+        app.show_detail()
+        await pilot.pause()
+        await pilot.pause()
+        (again,) = app.text.query("MarkdownFence")
+        assert again is not fence and MARK in made[-1], "made with its rows cut already, for the width it had"
+        again.on_resize(events.Resize(Size(5, 9), Size(5, 9)))
+        assert again._width == 3, "a character of two cells, and the column a further row stands in"
+
+    run(scenario, size=(80, 60))

@@ -194,7 +194,7 @@ def no_real_start(request, monkeypatch):
 # A throwaway container that lists the models (roles.py) leaves nothing behind either.
 READ_ONLY_DOCKER = (("inspect",), ("image", "inspect"), ("info",), ("version",), ("ps",), ("run", "--rm"))
 FAKE_DOCKER = """#!/bin/sh
-printf '%s\\n' "$*" >> "$VIVIBOX_TEST_DOCKER_LOG"
+[ -z "$VIVIBOX_TEST_DOCKER_LOG" ] || printf '%s\\n' "$*" >> "$VIVIBOX_TEST_DOCKER_LOG"
 echo "the tests reach no Docker (tests/conftest.py: no_real_docker)" >&2
 exit 1
 """
@@ -260,14 +260,56 @@ def review_made(pod) -> None:
         (folder / ".git").mkdir()
 
 
+# The programs of this machine a test finds a stand-in for, each with what the stand-in does.
+# docker answers as a daemon with nothing in it and writes down what it was asked. sudo refuses:
+# the root helper is the person's to run, through host/setup.sh and a pod's start. tmux answers
+# as a machine with no server of vivibox's: the agent's windows are sessions of one tmux server
+# (tmux -L vivibox), named by the task's id, and every stop, accept and delete closes the task's;
+# the real one would close the window of a task of yours that has a test's id (demo-1).
+STOOD_IN_FOR = {
+    "docker": FAKE_DOCKER,
+    "sudo": '#!/bin/sh\necho "the tests reach no sudo (tests/conftest.py)" >&2\nexit 1\n',
+    "tmux": '#!/bin/sh\necho "no server running: the tests reach no tmux (tests/conftest.py)" >&2\nexit 1\n',
+}
+# What every subprocess call starts its process with, as the standard library has it.
+STARTS_A_PROCESS = subprocess.Popen._execute_child
+
+
+def stand_ins(folder: Path) -> Path:
+    """A stand-in for each of STOOD_IN_FOR in folder, to put first on PATH."""
+    for name, script in STOOD_IN_FOR.items():
+        (folder / name).write_text(script)
+        (folder / name).chmod(0o755)
+    return folder
+
+
+# Stand-ins for the whole run, behind each test's own: for what is started when no test's PATH
+# holds (a thread of the view that outlives its test asks Docker where a pod answers). They write
+# nothing down and fail no test: there is none to fail by then.
+LATE = stand_ins(Path(tempfile.mkdtemp(prefix="vivibox-tests-late-")))
+
+
+def stand_ins_for_the_run(items) -> bool:
+    """Whether the run gets stand-ins on PATH from its collection on: one with no test marked
+    docker or model, whose fixtures of a module or a session are made on this machine's Docker
+    before any fixture of a test could take a stand-in away."""
+    return not any(item.get_closest_marker("docker") or item.get_closest_marker("model") for item in items)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(items) -> None:
+    if stand_ins_for_the_run(items) and str(LATE) not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = f"{LATE}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
 def past_the_stand_ins(folder: Path, args, executable, env) -> str:
-    """What a process about to be started would run in place of the stand-in for docker or sudo
-    in folder, or "": the stand-ins are found by PATH, so a docker named by its whole path
-    (/usr/bin/docker), or looked up on a PATH of the caller's own that does not lead to them
-    (an env= without PATH is looked up in the system's folders), is this machine's."""
+    """What a process about to be started would run in place of the stand-in for docker, sudo
+    or tmux in folder, or "": the stand-ins are found by PATH, so a docker named by its whole
+    path (/usr/bin/docker), or looked up on a PATH of the caller's own that does not lead to
+    them (an env= without PATH is looked up in the system's folders), is this machine's."""
     program = os.fsdecode(executable or (args if isinstance(args, str | bytes | os.PathLike) else args[0]))
     name = os.path.basename(program)
-    if name not in ("docker", "sudo"):
+    if name not in STOOD_IN_FOR:
         return ""
     found = shutil.which(program, path=os.pathsep.join(os.get_exec_path(env)))
     return "" if found in (None, str(folder / name)) else found
@@ -275,12 +317,13 @@ def past_the_stand_ins(folder: Path, args, executable, env) -> str:
 
 @pytest.fixture(autouse=True)
 def no_real_docker(request, monkeypatch, tmp_path_factory):
-    """No test but one marked docker reaches the machine's Docker, nor sudo: a docker first on PATH answers
-    every call as a daemon with nothing in it would, and a test that asked it to change something
-    fails, so a stand-in that stops intercepting (a pod built another way) is caught. A task's pod
-    (actions.Pod) answers the same way without asking, as a test's own stand-in may still do.
-    A docker or a sudo that would be found past the stand-ins is not started at all
-    (past_the_stand_ins), and the test fails."""
+    """No test but one marked docker reaches the machine's Docker, nor sudo, nor tmux
+    (STOOD_IN_FOR): a docker first on PATH answers every call as a daemon with nothing in it
+    would, and a test that asked it to change something fails, so a stand-in that stops
+    intercepting (a pod built another way) is caught. A task's pod (actions.Pod) answers the
+    same way without asking, as a test's own stand-in may still do. A docker, a sudo or a tmux
+    that would be found past the stand-ins is not started at all (past_the_stand_ins), and the
+    test fails."""
     if real_machine(request):
         yield
         return
@@ -296,19 +339,12 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
         return subprocess.CompletedProcess(list(cmd), 1, "", "Error: No such object")
 
     monkeypatch.setattr(actions, "Pod", partial(Pod, runner=nothing_there))
-    folder = tmp_path_factory.mktemp("docker")
-    fake = folder / "docker"
-    fake.write_text(FAKE_DOCKER)
-    fake.chmod(0o755)
-    # Nor sudo: the root helper is the person's to run, through host/setup.sh and a pod's start.
-    sudo = folder / "sudo"
-    sudo.write_text('#!/bin/sh\necho "the tests reach no sudo (tests/conftest.py)" >&2\nexit 1\n')
-    sudo.chmod(0o755)
+    folder = stand_ins(tmp_path_factory.mktemp("docker"))
     log = folder / "calls.log"
     monkeypatch.setenv("VIVIBOX_TEST_DOCKER_LOG", str(log))
     monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ.get('PATH', '')}")
     strayed: list[str] = []
-    start = subprocess.Popen._execute_child  # what every subprocess call starts its process with
+    start = subprocess.Popen._execute_child  # STARTS_A_PROCESS, or what a test's own tool put over it
 
     def start_unless_it_strays(self, args, executable, preexec_fn, close_fds, pass_fds, cwd, env, *rest):
         if real := past_the_stand_ins(folder, args, executable, env):

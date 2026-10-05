@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_tui import implementing, rows, run
@@ -664,8 +665,66 @@ def test_the_tests_reach_no_docker():
     assert Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).read_text() == "inspect vivibox-demo-1-dind\n"
 
 
+def test_the_tests_reach_no_tmux(env):
+    """vivibox keeps the agent's windows on a tmux server of its own (tmux -L vivibox), and
+    closes a task's window whenever the task stops or goes: the same server, and the same
+    session's name, as a real task of a project called demo has on this machine. The tmux a
+    test finds is a stand-in that answers as a machine with no such server does."""
+    import os
+    import shutil
+
+    from vivibox import actions, window
+
+    stand_ins = Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).parent
+    assert shutil.which("tmux") == str(stand_ins / "tmux"), "the machine's tmux: not called here"
+    closed = window.tmux("kill-session", "-t", window.tmux_session("demo-1"))
+    assert closed.returncode == 1 and closed.stderr.startswith("no server running: the tests reach no tmux")
+    assert not actions.tmux_has(window.tmux_session("demo-1"))
+    task = actions.create("demo", "Add health endpoint")
+    actions.stop_supervisor(task)  # what every stop, accept and delete does: no window of yours goes
+
+
+def test_a_program_started_after_its_test_is_over_meets_a_stand_in_too():
+    """A stand-in is on PATH for one test, and a thread of the view may still ask Docker where
+    a pod answers once its test has ended and PATH is as it was. In a run with no test for this
+    machine's Docker, a second folder of stand-ins stays on PATH from the collection on, behind
+    each test's own: what comes late meets it, never the machine's docker, sudo or tmux."""
+    import os
+    import shutil
+
+    import conftest
+
+    own = Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).parent
+    path = os.environ["PATH"].split(os.pathsep)
+    assert path[:2] == [str(own), str(conftest.LATE)], "each test's own, then the run's"
+    for name in conftest.STOOD_IN_FOR:
+        late = shutil.which(name, path=os.pathsep.join(path[1:]))  # PATH, as it is between two tests
+        assert late == str(conftest.LATE / name), name
+        assert Path(late).read_text() == conftest.STOOD_IN_FOR[name], "the same stand-in as a test's own"
+    assert set(conftest.STOOD_IN_FOR) == {"docker", "sudo", "tmux"}
+    # A run with a test marked docker or model has none: those are made on this machine's.
+    live = SimpleNamespace(get_closest_marker=lambda name: name == "docker")
+    unit = SimpleNamespace(get_closest_marker=lambda name: None)
+    assert conftest.stand_ins_for_the_run([unit, unit]) and not conftest.stand_ins_for_the_run([unit, live])
+    assert not conftest.stand_ins_for_the_run(
+        [SimpleNamespace(get_closest_marker=lambda name: name == "model")]
+    )
+
+
+def test_the_guard_on_the_stand_ins_reads_what_subprocess_hands_it_in_the_order_it_knows():
+    """The guard wraps what every subprocess call starts its process with, a name inside the
+    standard library, and reads its arguments by their place. A Python that moved one would
+    have the guard read another argument for env, and say nothing."""
+    import inspect
+
+    import conftest
+
+    known = ["self", "args", "executable", "preexec_fn", "close_fds", "pass_fds", "cwd", "env"]
+    assert list(inspect.signature(conftest.STARTS_A_PROCESS).parameters)[:8] == known
+
+
 def test_a_docker_that_is_not_the_stand_in_is_not_started(tmp_path, no_real_docker):
-    """The stand-ins for docker and sudo are found by PATH. A docker named by its whole path, or
+    """The stand-ins for docker, sudo and tmux are found by PATH. One named by its whole path, or
     looked up on a PATH of the caller's own (an env= without PATH is looked up in the system's
     folders, where this machine's is), would be the real one: it is not started, and the test
     that asked for it fails. Shown on programs of the test's own, so nothing real runs even
@@ -681,7 +740,7 @@ def test_a_docker_that_is_not_the_stand_in_is_not_started(tmp_path, no_real_dock
         tmp_path / "ran",
     )
     elsewhere.mkdir()
-    for name in ("docker", "sudo"):
+    for name in ("docker", "sudo", "tmux"):
         (elsewhere / name).write_text(f"#!/bin/sh\necho {name} >> {ran}\n")
         (elsewhere / name).chmod(0o755)
     own_path = {"PATH": f"{elsewhere}{os.pathsep}{stand_ins}"}
@@ -690,6 +749,8 @@ def test_a_docker_that_is_not_the_stand_in_is_not_started(tmp_path, no_real_dock
         (["docker", "ps"], own_path),
         (["sudo", "-n", "true"], own_path),
         ([elsewhere / "sudo", "-n", "true"], {}),
+        (["tmux", "-L", "vivibox", "kill-session", "-t", "vivibox-demo-1"], own_path),
+        ([str(elsewhere / "tmux"), "-L", "vivibox", "kill-session", "-t", "vivibox-demo-1"], None),
     ):
         real = str(elsewhere / Path(args[0]).name)
         assert conftest.past_the_stand_ins(stand_ins, args, None, env) == real
@@ -698,8 +759,8 @@ def test_a_docker_that_is_not_the_stand_in_is_not_started(tmp_path, no_real_dock
         with pytest.raises(AssertionError, match="is not the tests' stand-in"):
             subprocess.Popen(["anything"], executable=real, env=env)
     assert not ran.exists(), "neither was started"
-    assert len(no_real_docker) == 8 and set(no_real_docker) == {
-        str(elsewhere / n) for n in ("docker", "sudo")
+    assert len(no_real_docker) == 12 and set(no_real_docker) == {
+        str(elsewhere / n) for n in ("docker", "sudo", "tmux")
     }
     no_real_docker.clear()  # each would fail this test when it ends, as it fails any other
     # An env= without PATH: the system's folders, where the stand-ins are not.
@@ -939,7 +1000,7 @@ def test_a_parameter_called_as_a_mark_is_no_mark_and_the_test_gets_no_real_machi
     assert word in request.keywords, "what the fixtures used to ask"
     assert not conftest.marked(request, word) and not conftest.real_machine(request)
     stand_ins = Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).parent
-    assert [Path(shutil.which(name)).parent for name in ("docker", "sudo")] == [stand_ins, stand_ins]
+    assert [Path(shutil.which(name)).parent for name in ("docker", "sudo", "tmux")] == [stand_ins] * 3
     assert os.environ["HOME"] == str(conftest.HOME), "the suite's home, never yours"
     assert actions.start("demo-1") == "m" and actions.started == ["demo-1"], "the stand-in for a start"
     assert hostd.ensure("192.0.2.1") is None, "no forwarder is started"

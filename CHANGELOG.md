@@ -335,6 +335,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A verification command kept for a project is written into the project's file as one string,
+  whatever it holds. A command with a quote or a backslash in it broke the file, and one with
+  `\n` written out added lines to it: a writer's proposal, kept by `--auto` without you, could
+  set other settings of the project that way (`pass_env`, `host_services`). A command that is
+  no text leaves the file as it was; it emptied it.
 - `--auto` decides nothing before its check has passed. The command a writer proposes, in a
   project with none, was written into the project's settings before the verification ran,
   and so before a clone whose git files the task had changed was refused: it is now written

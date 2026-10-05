@@ -5,6 +5,7 @@ command line has task logic of its own."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -73,13 +74,24 @@ NO_BUILD = "no build: the verification checks the criteria and the commits only"
 WRITER_PROPOSES = "the next task's writer proposes it, for you to accept"
 
 
+def _toml(text: str) -> str:
+    """text as one basic string of TOML, whatever it holds: a quote, a backslash and a control
+    character escaped (JSON's escapes are TOML's), DEL too, which JSON leaves and TOML refuses."""
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def save_verify(project: Project, commands: list[str], no_build: bool = False) -> None:
     """Keeps what the plan chose, or what you picked, so the project's next task does not decide
-    again: the commands, or that there is nothing to build (verify = false)."""
+    again: the commands, or that there is nothing to build (verify = false). A command may be a
+    writer's (--auto keeps one without you): it is written as a string and never as text of
+    the file, so nothing in it ends the list or its line, and put in place as it is, never as a
+    pattern's replacement, where a backslash would be read. The file is opened only once all
+    of it can be written: a command that is no text leaves it as it was."""
     path = config_dir() / "projects" / f"{project.name}.toml"
     text = path.read_text()
-    line = "verify = false" if no_build else "verify = [" + ", ".join(f'"{c}"' for c in commands) + "]"
-    path.write_text(re.sub(r"^verify = (\[.*?\]|false)", line, text, count=1, flags=re.MULTILINE | re.DOTALL))
+    line = "verify = false" if no_build else "verify = [" + ", ".join(_toml(c) for c in commands) + "]"
+    found = re.compile(r"^verify = (\[.*?\]|false)", re.MULTILINE | re.DOTALL)
+    path.write_bytes(found.sub(lambda _: line, text, count=1).encode())
 
 
 def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:

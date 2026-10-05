@@ -37,7 +37,9 @@ on your machine until you have approved it.
   as recorded, has no risky change, and is on the commit that was verified. A clone the check
   refuses, a verification that fails or cannot run, and a clone that changed by then leave the
   plan to you and the project's settings as they were. The last look and the write are two
-  steps: a change made between them is not seen before the next verification.
+  steps: a change made between them is not seen before the next verification. A kept command
+  is written into the project's file as one string: nothing in it ends the list or the line
+  it is on, so it sets no other setting of the project.
 - **A task's use of your machine is bounded.** Every container of its pod runs with a memory
   limit (swap bounded to the same figure), a process limit and the pod's CPUs, under one cgroup
   slice of the task's that counts what the pod's own Docker runs as well; what the task writes

@@ -363,13 +363,7 @@ ACCOUNTED_FOR: dict[tuple[str, str, str], tuple[int, str]] = {
 }
 # Printed as it is, and not vivibox's own: known, and not escaped yet. An entry leaves this list
 # with the print it names.
-RAW_STILL: dict[tuple[str, str, str], tuple[int, str]] = {
-    # Why a state changed, in the supervisor's window: "verification failed: `<command>` failed"
-    # names a command a plan or a writer wrote, and a checkpoint's reason quotes the note of a
-    # review that could not be read (reviewing.problem). ports.notify, on the next line of most
-    # callers, escapes the same words; this print does not.
-    ("supervisor.py", "Supervisor._go", "reason"): (1, "a command's or a note's text, as it is"),
-}
+RAW_STILL: dict[tuple[str, str, str], tuple[int, str]] = {}
 
 
 def pieces_printed() -> Counter:

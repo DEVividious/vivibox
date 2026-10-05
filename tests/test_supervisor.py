@@ -1713,3 +1713,14 @@ def test_a_supervisor_run_by_a_test_puts_nothing_on_the_desktop(
     assert not ran, ran
     assert said in capsys.readouterr().out
     assert [(i, m[: len(said)]) for i, m in no_real_notifications.desktop] == [(t.id, said)]
+
+
+def test_why_a_state_changed_is_text_in_the_supervisors_window(task, capsys):
+    """The reason can quote a command a writer proposed or the note of a review that was not
+    read: in the supervisor's window, as in its notification, no control character of it is one
+    and nothing in it turns the line round."""
+    sup, _ = make(task, FakeHarness(task))
+    sup._go(State.CHECKPOINT_PLAN, "command proposed: `make\x1b[2K\rcheck ‮`; keep it")
+    said = capsys.readouterr().out
+    assert "\x1b" not in said and "\r" not in said and "‮" not in said, repr(said)
+    assert "→ checkpoint:plan: command proposed: `make‹U+001B›[2K‹U+000D›check ‹U+202E›`; keep it" in said

@@ -445,7 +445,8 @@ class Supervisor(Planning, Verifying, ReviewRound):
         """Every change of state, with why, on the record and in the supervisor's window: the log
         used to say only some, and a used-up round had to be worked out from the timeline."""
         st = self.task.transition(target, reason=reason, **data)
-        print(f"[{time.strftime('%H:%M:%S')}] → {target}: {reason}", flush=True)
+        # The reason may quote what an agent wrote (a command, a review's note): text, on one line.
+        print(f"[{time.strftime('%H:%M:%S')}] → {target}: {display.terminal(reason, '')}", flush=True)
         return st
 
     def _not_by_itself(self) -> str:

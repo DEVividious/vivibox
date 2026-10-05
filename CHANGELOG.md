@@ -344,6 +344,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The supervisor's window (`supervisor.log`, read under `l`) shows why a state changed as text:
+  a control or an invisible character in a proposed command or in a quoted review's note is
+  its code point there, as in the notification beside it.
 - An accept refused because the list of a submodule's own files, as the task found it, is past
   the 64 MiB vivibox reads of one git said that no work of a task of the project could be
   accepted and that a reply to the agent changed nothing. That is true of your project's own

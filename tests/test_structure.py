@@ -460,13 +460,17 @@ def starters(source: str) -> dict[str, int]:
     that names docker in a string (the word, a path that ends in it, a word of a command line)
     and writes one of VERBS, by how many it writes: a string that is the verb, or a verb after
     docker in a command line. However the two are put together there: side by side, in lists
-    added up, with an option of docker's own between them, in a list built a word at a time."""
+    added up, with an option of docker's own between them, in a list built a word at a time,
+    or with the verb in a string that is split into words (*"run -d image".split()), each of
+    which is a string of its own then."""
     tree = parsed(source)
     told = docstrings(tree)
     found = {}
     for name, nodes in scopes(tree):
-        texts = [n.value for n in nodes if isinstance(n, ast.Constant) and id(n) not in told]
-        texts = [text for text in texts if isinstance(text, str)]
+        split = {id(text) for call in nodes if _splits(call) for text in strings(call)}
+        written = [n for n in nodes if isinstance(n, ast.Constant) and id(n) not in told]
+        written = [n for n in written if isinstance(n.value, str)]
+        texts = [text for n in written for text in (_words(n.value) if id(n) in split else [n.value])]
         if not any(_is_docker(word) for text in texts for word in _words(text)):
             continue
         count = sum(1 for text in texts if text in VERBS)
@@ -476,6 +480,11 @@ def starters(source: str) -> dict[str, int]:
         if count:
             found[name or "the module itself"] = count
     return found
+
+
+def _splits(node) -> bool:
+    """Whether a node is a call that splits a string into words: "…".split(), shlex.split("…")."""
+    return isinstance(node, ast.Call) and _called(node) == "split"
 
 
 def test_only_the_pod_starts_a_container_of_a_pod():
@@ -501,8 +510,14 @@ def test_the_guard_on_starting_a_container_sees_the_command_however_it_is_put_to
         'run(["/usr/bin/docker", *options, "unpause", name])',
         'run(["sh", "-c", "exec docker --log-level error restart name"])',
         'command = ["docker"]\ncommand += options\ncommand.append("run")',
+        'run(["docker", *"run -d image".split()])',
+        'run(["docker"] + shlex.split("start -a name"))',
+        'run(["docker", *shlex.split(f"unpause {name}")])',
     ):
         assert not STARTER_AS_TEXT.findall(shape) and starters(shape) == {"the module itself": 1}, shape
+    assert starters('said = "docker is not running"\nwords = "run it again, then start".split()') == {
+        "the module itself": 2
+    }, "the words of any string that is split, where docker is named: no command, and counted"
     inside = 'class Pod:\n    def again(self):\n        self._run("docker", "-D", "start", self.agent)\n'
     assert starters(inside) == {"Pod.again": 1}
     for quiet in (
@@ -660,8 +675,33 @@ def test_a_container_that_mounts_the_task_s_folder_gets_your_replies_read_only_o
         "reviewing.py": 1,  # up: the reviewer's, which has the task's folder read-only and no handoff
     }
     assert {module: alone for module, (_, alone) in found.items() if alone} == {}
-    written = [bind.value for _, source in modules() for bind in strings(parsed(source))]
-    assert not [bind for bind in written if re.search(r":/task(?:/handoff)?(?::|$)", bind)], "a bind by hand"
+    assert not [bind for _, source in modules() for bind in binds_by_hand(source)], "a bind by hand"
+    for shape in (
+        'run("-v", f"{task.meta}:/task:ro")',
+        'run("-v", f"{task.meta / \'handoff\'}:/task/handoff")',
+        'run("--mount", f"type=bind,source={task.meta},target=/task")',
+        'run("--mount", f"type=bind,src={meta}/handoff,dst=/task/handoff,readonly")',
+        'run(f"--mount=type=bind,source={task.meta},destination=/task,ro")',
+        'run("--mount", "type=bind,target=/task/handoff,source=" + str(folder))',
+    ):
+        assert len(binds_by_hand(shape)) == 1, shape
+    for other in (
+        'run("-v", f"{out}:/task/review")',
+        'run("--mount", f"type=bind,source={out},target=/task/review")',
+        'ADD_DIRS = ("/task/handoff", HARNESS_MOUNT)',
+        'said = "read /task/plan.md and /task/handoff/criteria.md"',
+    ):
+        assert binds_by_hand(other) == [], other
+
+
+# The task's folder or its handoff as where a bind lands, written by hand: after the colon of
+# -v, or as the target of --mount.
+BIND_BY_HAND = re.compile(r"(?::|\b(?:target|destination|dst)=)/task(?:/handoff)?(?:[:,]|$)")
+
+
+def binds_by_hand(source: str) -> list[str]:
+    """The strings of a source that bind something at /task or /task/handoff without Mount."""
+    return [text.value for text in strings(parsed(source)) if BIND_BY_HAND.search(text.value)]
 
 
 def test_the_guard_on_your_replies_sees_a_list_of_mounts_without_them():

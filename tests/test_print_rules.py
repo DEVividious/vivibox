@@ -133,8 +133,9 @@ MADE_OF = ("join", "format")
 
 def prints(source: str) -> list[tuple[str, int, list[str]]]:
     """(the function it is in, its line, its pieces) for everything a source sends to the
-    terminal: print, but for one into a file of its own, and a write to sys.stdout or
-    sys.stderr."""
+    terminal: print, but for one into a file of its own; a write to sys.stdout or sys.stderr,
+    by either name of them; a question (input, getpass); and what the process is ended with
+    (sys.exit, SystemExit), which Python prints when it is words."""
     tree = ast.parse(source)
     found = []
 
@@ -156,17 +157,27 @@ def prints(source: str) -> list[tuple[str, int, list[str]]]:
 def _to_the_terminal(call: ast.Call) -> bool:
     func = call.func
     if isinstance(func, ast.Name) and func.id == "print":
-        to = next((ast.unparse(k.value) for k in call.keywords if k.arg == "file"), "sys.stdout")
-        return to in STREAMS
-    if isinstance(func, ast.Name) and func.id in PROMPTS:
+        to = next((k.value for k in call.keywords if k.arg == "file"), None)
+        return to is None or _a_stream(to)
+    if isinstance(func, ast.Name) and func.id in (*PROMPTS, *EXITS):
         return True
     return isinstance(func, ast.Attribute) and (
-        (func.attr == "write" and ast.unparse(func.value) in STREAMS)
-        or ast.unparse(func) == "getpass.getpass"
+        (func.attr == "write" and _a_stream(func.value))
+        or ast.unparse(func) in ("getpass.getpass", "sys.exit")
     )
 
 
-STREAMS = ("sys.stdout", "sys.stderr", "sys.__stdout__", "sys.__stderr__")
+def _a_stream(node) -> bool:
+    """Whether what is written to is the terminal's: sys.stdout or sys.stderr, by that name, by
+    the bare one an import from sys gives it, or as one of the two a choice is made between."""
+    if isinstance(node, ast.IfExp):
+        return _a_stream(node.body) or _a_stream(node.orelse)
+    return ast.unparse(node) in STREAMS
+
+
+STREAMS = ("sys.stdout", "sys.stderr", "sys.__stdout__", "sys.__stderr__", "stdout", "stderr")
+# What ends the process with words: Python prints them on stderr before it goes.
+EXITS = ("SystemExit",)
 # What asks you something in the terminal, its question printed first: input, and the one
 # function of the command line that asks through it (cli_providers._yes).
 PROMPTS = ("input", "_yes")
@@ -252,6 +263,8 @@ ACCOUNTED_FOR: dict[tuple[str, str, str], tuple[int, str]] = {
     ("cli.py", "cmd_box", "found.name"): (1, "a name made of your folder's (init.project_name)"),
     ("cli.py", "cmd_box", "Path(args.new).expanduser().resolve()"): (1, YOURS),
     ("cli.py", "main", "e.returncode"): (1, "an exit code"),
+    ("cli.py", "", "main()"): (1, "sys.exit with the number main returns: no words are printed"),
+    ("__main__.py", "", "main()"): (1, "the same"),
     ("cli_agent.py", "cmd_wait", "task['status']"): (1, "a status of the table in docs/ux-guidelines.md"),
     ("cli_agent.py", "cmd_wait", "task['next'][0]"): (1, "a command of vivibox's with the task's id"),
     ("cli_agent.py", "cmd_skill", "p.cli"): (1, "an agent CLI vivibox knows (skill.PLACES)"),
@@ -429,6 +442,12 @@ def test_the_guard_on_prints_sees_text_from_outside_however_it_is_printed():
         "sys.stderr.write(f'vivibox: {x}\\n')",
         "input(f'Delete {x}? [y/N] ')",
         "getpass.getpass(f'API key for {x}: ')",
+        "sys.exit(f'vivibox: {x}')",
+        "sys.exit(x)",
+        "raise SystemExit(f'vivibox: {x}')",
+        "from sys import stderr\nprint(x, file=stderr)",
+        "from sys import stdout\nstdout.write(x)",
+        "print(x, file=sys.stderr if failed else sys.stdout)",
         "def f():\n    said = f'why: {x}'\n    print(said)",
         "def f():\n    said = display.name(x)\n    said = x\n    print(said)",
         "def f():\n    for line in x.splitlines():\n        print(line)",
@@ -453,6 +472,9 @@ def test_the_guard_on_prints_sees_text_from_outside_however_it_is_printed():
         "def f():\n    for line in map(display.name, x):\n        pass\n    print('done')",
         "def f():\n    for a, b in ((display.name(c), display.name(d)) for c, d in x):\n        print(a, b)",
         "print(x, file=log)",  # a file of vivibox's own, which no terminal reads as it is written
+        "sys.exit(1)",
+        "sys.exit(f'vivibox: {display.name(x)}')",
+        "raise SystemExit(2)",
         "log.write(x)",
     ):
         assert unaccounted(safe) == [], safe

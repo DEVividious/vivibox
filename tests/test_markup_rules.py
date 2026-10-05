@@ -8,7 +8,8 @@ Every place a string becomes what a widget draws is looked at here, by its shape
 (asked of anything, now or handed on for later), a Label, a Static, a Button, a Checkbox, an
 Option, a Selection, a Select's options and its words while nothing is chosen, a list of options
 as it is made and as it is filled later, a table's headings and cells, an update of a widget,
-from_markup, a tooltip, a border's title, a button's label; each by its first argument or by the
+from_markup, a tooltip, a border's title, a button's label, a widget's content set by hand, an
+update handed on to be made later; each by its first argument or by the
 name it takes it by, and each also where it is a class of vivibox's own made of one (the panel's
 Code is a Label), under whatever name it was imported. What it is given is
 a plain string, or says markup=False, or is made by something that cannot be markup (escape, Text,
@@ -99,6 +100,14 @@ VIVIBOX_MARKUP: dict[tuple[str, str, str, str], str] = {
     ("table.py", "TaskTable.fill_table", "update", "'' if ids else NO_PROJECTS"): "a constant of vivibox's",
     ("table.py", "TaskTable.cell", "from_markup", "markup"): "a cell of the list, as above",
     ("blocks.py", "Panel._redraw", "update", "self.source"): "the panel's own text again: markdown",
+    (
+        "markdown.py",
+        "_text",
+        "content",
+        "display.terminal(content)",
+    ): "a token of the panel's parser, no widget: its text is drawn as markdown's, never as markup",
+    ("markdown.py", "_plain", "content", "display.terminal(child.content)"): "the same: a token's text",
+    ("markdown.py", "as_text", "content", "token.content.replace(MARK, _MARKED)"): "the same: a token's text",
     (
         "app_support.py",
         "LiveFooter.compose",
@@ -194,6 +203,11 @@ FILLED = {
 # What draws every argument it is given in a row: the strings of a list of options, a table's cells
 # and headings.
 SPREAD = ("OptionList", "SelectionList", "add_row", "add_columns")
+# What is given rows, each a row of cells that are drawn.
+ROWS = ("add_rows",)
+# A method that draws what it is given, handed on to be called later with it
+# (call_from_thread(label.update, text)), as a notification is.
+HANDED_ON = ("update",)
 # What draws the argument at a place of its own: where, and by which name.
 PLACED = {
     "from_markup": (0, ("text", "markup")),
@@ -207,7 +221,7 @@ PLACED = {
 # A word of these, given by name to anything, is drawn by what takes it: a widget's tooltip, a
 # Select's words while nothing is chosen, a row's label.
 DRAWN_BY_NAME = {"tooltip": "tooltip", "prompt": "Select", "label": "add_row"}
-ASSIGNED = ("border_title", "border_subtitle", "label", "tooltip")
+ASSIGNED = ("border_title", "border_subtitle", "label", "tooltip", "content")
 # What makes text that is not markup, whatever it is given: rich's escape, and text objects.
 PLAIN = ("escape", "Text", "Content", "assemble")
 # vivibox's own: the helpers of look.py that wrap a tag of the palette around text they escape,
@@ -257,6 +271,11 @@ def _textual_notify(func) -> bool:
     owner = func.value
     named = owner.id if isinstance(owner, ast.Name) else getattr(owner, "attr", "")
     return named not in TASKS_OWN
+
+
+def _handed_on(node) -> bool:
+    """A widget's update named and not called: label.update, self.query_one("#a").update."""
+    return isinstance(node, ast.Attribute) and node.attr in HANDED_ON
 
 
 def _given(call: ast.Call, place: int, names: tuple[str, ...] | str, args: list | None = None):
@@ -497,15 +516,39 @@ class Sinks(ast.NodeVisitor):
         elif what in SPREAD:
             for item in (item for arg in node.args for item in self.members(arg)):
                 self.add(node, what, item.elts[0] if _pair(item) else item, _off(node))
+        elif what in ROWS and node.args:
+            for row in self.rows(node.args[0]):
+                for cell in row.elts if isinstance(row, ast.Tuple | ast.List) else [row]:
+                    self.add(node, what, cell)
         elif what == "update" and self.view:
-            owner = node.func.value
-            asked = _queried(owner) or (self.names.get(owner.id, "") if isinstance(owner, ast.Name) else "")
-            self.add_given(node, what, _given(node, 0, "content"), asked in self.off_ids)
+            self.add_given(node, what, _given(node, 0, "content"), self.off(node.func.value))
+        elif later := next((i for i, arg in enumerate(node.args) if self.view and _handed_on(arg)), None):
+            # call_later(label.update, text): the update, made when the view gets to it
+            given = _given(node, 0, "content", node.args[later + 1 :])
+            self.add_given(node, "update", given, self.off(node.args[later].value))
+        elif node.args and self.view and _handed_on(node.args[0]):
+            self.add_given(
+                node, "update", _given(node, 0, "content", node.args[1:]), self.off(node.args[0].value)
+            )
         for keyword in node.keywords:
             taken = DRAWN_BY_NAME.get(keyword.arg or "")
             if taken and (taken == "tooltip" or taken == what):
                 self.add(node, taken if taken == "tooltip" else f"{what} {keyword.arg}", keyword.value)
         self.generic_visit(node)
+
+    def off(self, owner) -> bool:
+        """Whether the widget an update is asked of was made with markup=False: by the id it is
+        asked for by, there or where the name it has was given it."""
+        asked = _queried(owner) or (self.names.get(owner.id, "") if isinstance(owner, ast.Name) else "")
+        return asked in self.off_ids
+
+    def rows(self, node) -> list:
+        """The rows of what add_rows is given, as written: of a list its members, of a
+        comprehension the one it makes, of a variable of the function what it was given."""
+        node = self.listed(node)
+        if isinstance(node, ast.ListComp | ast.GeneratorExp):
+            return [node.elt]
+        return list(node.elts) if isinstance(node, ast.List | ast.Tuple) else [node]
 
     def add_given(self, node, what: str, text, off: bool = False) -> None:
         if text is not None:
@@ -692,6 +735,12 @@ def test_the_guard_sees_every_shape_a_string_is_drawn_through():
         "self.ports.notify(task.id, x)",
         "Label(Content.assemble(x, (y, 'bold')))",
         "Input(x, placeholder=y)",
+        "label.content = escape(x)",
+        "table.add_rows([(Text(x), escape(y))])",
+        "self.call_later(label.update, Content(x))",
+        "def f(self):\n    yield Label('', id='a', markup=False)\n"
+        "    self.call_from_thread(self.query_one('#a', Label).update, x)",
+        "self.call_from_thread(self.busy_with, task_id, x)",  # a method of the view's own: looked at there
     ):
         assert flagged(safe) == [], safe
     # A name, a list made elsewhere, a widget whose markup is on: not taken on trust.
@@ -756,6 +805,14 @@ BY_ANOTHER_SHAPE = (
     "FooterKey(key, shown, said, action, tooltip=x)",
     "Text.from_markup(text=x)",
     "Content.from_markup(markup=x)",
+    "self.query_one('#a', Static).content = x",
+    "label.content = x",
+    "table.add_rows([(x, 1)])",
+    "table.add_rows([('1', x), ('2', '3')])",
+    "table.add_rows((x, '1') for x in rows)",
+    "self.call_from_thread(self.query_one('#a', Label).update, x)",
+    "self.app.call_later(label.update, x)",
+    "self.call_after_refresh(self.text.update, content=x)",
 )
 # And what was taken for plain by a name alone, whatever it was a name of.
 BY_A_NAME_ALONE = (
@@ -786,7 +843,7 @@ def test_the_shapes_a_review_found_are_each_an_offender_now_and_were_none_before
                         or getattr(node.func.value, "attr", "") == "app"
                     )
                 )
-                later = what == "call_from_thread" and len(node.args) > 1
+                later = what == "call_from_thread" and getattr(first, "attr", "") == "notify"
                 drawn = (
                     what in ("Label", "Static", "Button", "Option", "Selection", "from_markup")
                     or app_s
@@ -862,11 +919,11 @@ def test_a_name_taken_for_plain_is_the_one_that_makes_plain_text():
     names. Asked of something, the name must be that thing's (look.muted, Content.assemble:
     re.escape and html.escape leave a bracket as it is); bare, it must have come from where the
     real one lives, in every module of the package."""
-    sources = {path.name: path.read_text() for path in sorted(PACKAGE.glob("*.py"))}
+    sources = modules()
     found = {
         name: odd
         for name, source in sources.items()
-        if of_the_view(name, source) and (odd := strangers(name, source))
+        if of_the_view(Path(name).name, source) and (odd := strangers(Path(name).name, source))
     }
     assert found == {}, "a name the guard on markup takes for plain, bound to something else"
     assert sum(of_the_view(name, source) for name, source in sources.items()) >= 20, "the view's modules"
@@ -897,8 +954,8 @@ def test_every_widget_of_textual_s_in_the_package_is_one_the_guard_knows():
     takes from Textual's widgets are all known here, each either with its shape above or said
     to draw no markup (NOT_MARKUP)."""
     taken = set()
-    for path in sorted(PACKAGE.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
+    for source in modules().values():
+        for node in ast.walk(tree_of(source)):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("textual.widgets"):
                 taken |= {alias.name for alias in node.names}
     assert taken <= KNOWN_WIDGETS, f"decide how each is drawn, then add it: {sorted(taken - KNOWN_WIDGETS)}"

@@ -1,5 +1,5 @@
 """vivibox's own Serena in the writer's container: started on the project where that container
-has the task's clone."""
+has the task's clone, and with no report of its use to its makers."""
 
 import json
 
@@ -18,6 +18,8 @@ AS_IT_WAS = [
     "serena", "start-mcp-server", "--context", "ide", "--project", "/task/repo",
     "--enable-web-dashboard", "false", "--open-web-dashboard", "false",
 ]  # fmt: skip
+# What Serena's entry starts it with besides: no report of its use.
+QUIET = {"SERENA_USAGE_REPORTING": "false"}
 # A task's configuration without an MCP server, whole.
 WITHOUT_SERENA = {
     "$schema": "https://opencode.ai/config.json",
@@ -83,7 +85,8 @@ def test_the_mount_and_serenas_project_are_one_value(starting, monkeypatch):  # 
 
 def test_nothing_else_of_a_tasks_configuration_changed(env, tmp_path):
     """With Serena off the configuration is as it was, whole; with Serena on it differs from
-    what it was in one argument, the project's folder."""
+    what it was in one argument, the project's folder, and in the variable Serena is started
+    with."""
     small = files_in(tmp_path / "small", 3)
     big = files_in(tmp_path / "big", providers.SERENA_MIN_FILES)
     assert opencode.config(MODEL, repo=small) == WITHOUT_SERENA
@@ -92,7 +95,7 @@ def test_nothing_else_of_a_tasks_configuration_changed(env, tmp_path):
     assert list(on) == [*list(WITHOUT_SERENA)[:-1], "mcp", "instructions"], "and in the order it had"
     serena = on["mcp"].pop("serena")
     assert on["mcp"] == {}, "no other server"
-    assert serena == {"type": "local", "command": serena["command"]}
+    assert serena == {"type": "local", "command": serena["command"], "environment": QUIET}
     assert serena["command"] != AS_IT_WAS
     assert [arg if arg != str(big) else "/task/repo" for arg in serena["command"]] == AS_IT_WAS
 
@@ -114,4 +117,19 @@ def test_serena_asked_for_without_a_clone_names_no_project(env):
     command = providers.task_mcp()["serena"]["command"]
     assert "--project" not in command and "/task/repo" not in command
     assert command == [arg for arg in AS_IT_WAS if arg not in ("--project", "/task/repo")]
+    assert providers.mcp_secrets() == []
+
+
+def test_serena_is_started_with_no_report_of_its_use(env, tmp_path):
+    """Serena as installed asks its makers' server at every start, with its version, the
+    system and how it was started, unless SERENA_USAGE_REPORTING is false in its environment.
+    vivibox starts this server itself, and starts it with that: in the environment of its
+    entry, which opencode hands to a local MCP server. The value is no secret, and nothing is
+    mounted for it."""
+    big = files_in(tmp_path / "big", providers.SERENA_MIN_FILES)
+    written = opencode.config(MODEL, repo=big)
+    assert written["mcp"]["serena"].get("environment") == QUIET
+    assert providers.mounted(written) == ["deepseek"], "the provider's key, and no secret of Serena's"
+    providers.set_serena_mode("on")
+    assert providers.task_mcp()["serena"].get("environment") == QUIET, "with a project or without"
     assert providers.mcp_secrets() == []

@@ -346,6 +346,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Serena as vivibox starts it reports nothing of its use to its makers. As installed it asks
+  their server at every start, with its version, the system and how it was started; vivibox
+  now starts it with `SERENA_USAGE_REPORTING=false`, which turns that off.
 - Serena, the MCP server that comes with vivibox, works on the task's repository. It was
   started on `/task/repo`, a folder the writer's container does not have (the clone is mounted
   there at the path it has on your machine), so it ran with no project and its tools answered

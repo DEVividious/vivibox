@@ -80,12 +80,16 @@ def definition(provider: str) -> dict:
 
 
 # MCP servers vivibox brings itself, installed in the agent image: off until you turn one on.
-# Serena's command is without its project, which a task's own names (serena_on).
+# Serena's command is without its project, which a task's own names (serena_on). Its
+# environment: Serena as installed (1.7.0) asks its makers' server at every start, with its
+# version, the system and how it was started, unless this variable is "false"; a server
+# vivibox starts itself reports nothing. A value, not a secret: nothing is mounted for it.
 BUILTIN_MCP = {
     "serena": {
         "type": "local",
         "command": ["serena", "start-mcp-server", "--context", "ide",
                     "--enable-web-dashboard", "false", "--open-web-dashboard", "false"],
+        "environment": {"SERENA_USAGE_REPORTING": "false"},
     },
 }  # fmt: skip
 

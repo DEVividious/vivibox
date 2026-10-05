@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import review_made
 
-from vivibox import pod_network, toolchain
+from vivibox import pod_network, podspec, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import HELPER as HELPER_PATH
 from vivibox.pod import SOCKET_DIR, Mount, Pod, PodError
@@ -1400,6 +1400,24 @@ def test_every_container_of_the_pod_runs_under_the_tasks_slice_with_its_limits(p
         "2048", "4096", "4096", "1024",
     ]  # fmt: skip
     assert not any("--oom-kill-disable" in cmd for cmd in commands.values())
+
+
+def test_no_container_of_the_pod_is_made_to_come_back_by_itself(pod, tmp_path):
+    """Docker's default restart policy is none, and docs/security.md's "no pod container starts
+    by itself after" a restart of the machine stands on it: the host's rules are gone by then.
+    No command the pod makes a container with names a policy, the planner's among them, nor
+    does anything it runs while its containers come up."""
+    pod.control_mounts = []
+    commands = {**commands_of(pod, tmp_path), "control": pod.control_command()}
+    assert set(commands) == set(podspec.ROLES), "every container a task's limits name"
+    for role, cmd in commands.items():
+        assert cmd[:3] == ["docker", "run", "-d"] and not [a for a in cmd if "restart" in a], role
+    pod.up()
+    pod.gate_up()
+    review_made(pod)
+    pod.review_start([], {})
+    made = pod.runner.find("docker", "run")
+    assert len(made) == 5 and not [a for cmd in pod.runner.calls for a in cmd if a.startswith("--restart")]
 
 
 def test_memory_swap_equals_memory_so_a_container_cannot_swap_past_its_limit(pod, tmp_path):

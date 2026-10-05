@@ -2,6 +2,7 @@
 is added to it. Checked here so the debt is seen when it is made, not after."""
 
 import ast
+import functools
 import re
 import subprocess
 import sys
@@ -96,9 +97,15 @@ def test_git_on_the_host_runs_only_through_the_helper_that_cleans_its_environmen
 
 def git_argv(source: str) -> int:
     """How many argument lists of a source begin with "git": all the guard above counts."""
-    lists = (n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.List | ast.Tuple))
+    lists = (n for n in ast.walk(parsed(source)) if isinstance(n, ast.List | ast.Tuple))
     firsts = (n.elts[0] for n in lists if n.elts)
     return sum(1 for first in firsts if isinstance(first, ast.Constant) and first.value == "git")
+
+
+@functools.cache
+def parsed(source: str) -> ast.Module:
+    """A source as a tree, read once however many guards look at it; none of them changes it."""
+    return ast.parse(source)
 
 
 def modules() -> list[tuple[str, str]]:
@@ -182,7 +189,7 @@ GIT_STRINGS = {
 def git_named(source: str) -> list[str]:
     """Every place a source names git as a program in a string (GIT_NAMED), and every string it
     splits into words that has the word git, by the first words from git on."""
-    tree = ast.parse(source)
+    tree = parsed(source)
     found = {
         (id(node), match.start()): match.group(1)
         for node in strings(tree)
@@ -453,7 +460,7 @@ def starters(source: str) -> dict[str, int]:
     and writes one of VERBS, by how many it writes: a string that is the verb, or a verb after
     docker in a command line. However the two are put together there: side by side, in lists
     added up, with an option of docker's own between them, in a list built a word at a time."""
-    tree = ast.parse(source)
+    tree = parsed(source)
     told = docstrings(tree)
     found = {}
     for name, nodes in scopes(tree):
@@ -510,7 +517,7 @@ def builder_sites(source: str) -> list[str]:
     """Every place a source names one of the builders of a pod container's argv, as it is
     written there: its definition with the class it is in, the name with what it is asked of
     (self.review_command, podspec.review_command, pod.review_command), an import, a string."""
-    tree = ast.parse(source)
+    tree = parsed(source)
     found = []
     for _, nodes in scopes(tree):
         for node in nodes:
@@ -557,6 +564,133 @@ def test_the_guard_on_the_builders_tells_the_view_s_own_from_the_pod_s():
         assert builder_sites(swapped) != builder_sites(view), swapped
     assert builder_sites(view) == ["def Keys.review_command", "self.review_command"]
     assert builder_sites("from .podspec import agent_command as made") == ["import agent_command"]
+
+
+# Where a restart policy is written, how many, and why. Docker's default is none, and on it
+# stands docs/security.md's "no pod container starts by itself after" a restart of the machine:
+# the host's rules are gone by then, and a container that came back would run without them.
+RESTART_POLICIES = {
+    # the Docker Hub mirror, a container of your Docker and of no pod, which comes back with Docker
+    "mirror.py": 1,
+}
+
+
+def restart_policies(source: str) -> int:
+    """How many strings of a source say --restart: the option alone, with its value, or in a
+    command line (docker run's, docker update's)."""
+    return sum(1 for node in strings(parsed(source)) if "--restart" in node.value)
+
+
+def test_no_command_of_a_pod_names_a_restart_policy():
+    """No pod container is made to come back by itself, nor made so afterwards (docker update):
+    --restart is written in one place, which is no pod's. tests/test_pod.py looks at the
+    commands themselves."""
+    found = {module: n for module, source in modules() if (n := restart_policies(source))}
+    assert found == RESTART_POLICIES, "a container that restarts by itself runs past the host's rules"
+    for shape in (
+        'run(["docker", "run", "-d", "--restart", "unless-stopped", image])',
+        'run(["docker", "run", "-d", "--restart=always", image])',
+        'run(["docker", "update", f"--restart={policy}", name])',
+        'run("docker update --restart on-failure name".split())',
+    ):
+        assert restart_policies(shape) == 1, shape
+    assert restart_policies('"""--restart, as a docstring says it."""\nrun(["docker", "restart", name])') == 0
+
+
+def _called(call: ast.Call) -> str:
+    return call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", "")
+
+
+def _of_the_task(call: ast.Call) -> bool:
+    """Whether a call makes a Mount of the task's folder or of its handoff: by what it mounts
+    (… .meta, … .meta / "handoff") or by where (/task, /task/handoff)."""
+    if _called(call) != "Mount":
+        return False
+    given = dict(zip(("source", "target"), call.args, strict=False))
+    given.update({k.arg: k.value for k in call.keywords})
+    target = given.get("target")
+    there = isinstance(target, ast.Constant) and target.value in ("/task", "/task/handoff")
+    what = ast.unparse(given["source"]) if "source" in given else ""
+    return there or bool(re.search(r"\bmeta(?: / 'handoff')?\)?$", what))
+
+
+def _your_replies(node) -> bool:
+    """comments.mount(…): your replies, read-only, over the handoff folder's own file."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "mount"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "comments"
+    )
+
+
+def task_mounts(source: str) -> tuple[int, list[str]]:
+    """The mounts of the task's folder or its handoff a source writes: how many, and those with
+    no comments.mount after them in the list they are written in, as written."""
+    tree = parsed(source)
+    above = {id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    mounts = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and _of_the_task(n)]
+    alone = []
+    for mount in mounts:
+        node, kept = mount, False
+        while not kept and (parent := above.get(id(node))) is not None:
+            if isinstance(parent, ast.List):
+                kept = any(_your_replies(later) for later in parent.elts[parent.elts.index(node) + 1 :])
+            node = parent
+        if not kept:
+            alone.append(ast.unparse(mount))
+    return len(mounts), alone
+
+
+def test_a_container_that_mounts_the_task_s_folder_gets_your_replies_read_only_over_it():
+    """Your replies are read at /task/handoff/comments.md, a place in the folder the agent
+    writes: a container that has the task's folder or its handoff without comments.mount over
+    it reads there whatever the agent left, as yours. Every list of mounts that names the
+    task's folder or its handoff names comments.mount after it (over the folder's mount, so
+    it comes after it). The containers a task has today are held to it as they are made
+    (tests/test_control.py, over every docker run of a task's pod); this holds the next list
+    of mounts, wherever it is written. What this cannot see: a mount whose source is put
+    together elsewhere and handed in by a name that does not end in meta."""
+    found = {module: task_mounts(source) for module, source in modules()}
+    assert {module: n for module, (n, _) in found.items() if n} == {
+        "actions.py": 2,  # pod_of: the agent's container
+        "control.py": 2,  # mounts: the planner's control container
+        "reviewing.py": 1,  # up: the reviewer's, which has the task's folder read-only and no handoff
+    }
+    assert {module: alone for module, (_, alone) in found.items() if alone} == {}
+    written = [bind.value for _, source in modules() for bind in strings(parsed(source))]
+    assert not [bind for bind in written if re.search(r":/task(?:/handoff)?(?::|$)", bind)], "a bind by hand"
+
+
+def test_the_guard_on_your_replies_sees_a_list_of_mounts_without_them():
+    kept = (
+        "mounts = [\n    Mount(str(task.meta), '/task', read_only=True),\n"
+        "    Mount(str(task.meta / 'handoff'), '/task/handoff'),\n    comments.mount(task.meta),\n"
+        "    *([Mount(str(task.meta / 'review'), MOUNT)] if own else []),\n]\n"
+    )
+    assert task_mounts(kept) == (2, [])
+    folder, handoff = (
+        "Mount(str(task.meta), '/task', read_only=True)",
+        "Mount(str(task.meta / 'handoff'), '/task/handoff')",
+    )
+    assert task_mounts(kept.replace("    comments.mount(task.meta),\n", "")) == (2, [folder, handoff])
+    first = kept.replace("    comments.mount(task.meta),\n", "").replace(
+        "mounts = [\n", "mounts = [\n    comments.mount(task.meta),\n"
+    )
+    assert task_mounts(first) == (2, [folder, handoff]), "your replies under the handoff's mount, not over it"
+    for shape in (
+        f"mounts = [{folder}]",
+        f"mounts = [comments.mount(task.meta)]\nmounts.append({handoff})",
+        f"mounts = [*base, *([{handoff}] if writes else [])]",
+        "mounts = [Mount(str(meta / 'handoff'), '/elsewhere'), Mount(str(run), '/run/secrets')]",
+        "mounts = [Mount(source=str(found), target='/task/handoff')]",
+        "mounts = [Mount(str(task.meta), where)]",
+        f"mounts = [{handoff}, other.mount(task.meta)]",
+    ):
+        assert len(task_mounts(shape)[1]) == 1, shape
+    assert task_mounts(f"mounts = [*base, *([{handoff}] if writes else []), comments.mount(meta)]") == (1, [])
+    assert task_mounts("mounts = [Mount(str(task.meta / 'review'), '/task/review')]") == (0, [])
 
 
 def test_no_module_is_past_the_limit():

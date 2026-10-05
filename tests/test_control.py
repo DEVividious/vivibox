@@ -288,9 +288,10 @@ def test_every_container_that_mounts_the_handoff_mounts_your_replies_over_it(doc
 
     as_verified(task)
     reviewing.up(task, pod, load_config())
+    pod.gate_up()
     replies = f"{task.meta / 'comments.md'}:/task/handoff/comments.md:ro"
-    seen = []
-    for run in docker.find("docker", "run", "-d", "--name"):
+    seen, made = [], docker.find("docker", "run", "-d", "--name")
+    for run in made:
         mounted = binds(run)
         over = [m for m in mounted if m.split(":")[1] in ("/task", "/task/handoff")]
         if over:
@@ -298,6 +299,11 @@ def test_every_container_that_mounts_the_handoff_mounts_your_replies_over_it(doc
             assert replies in mounted, run[4]
             assert all(mounted.index(replies) > mounted.index(m) for m in over), run[4]
     assert seen == ["agent", "control", "review"]
+    # Every container a task has was made here; the two that are not named above have nothing
+    # of the task's folder at all, by any path in the container.
+    assert [run[4].rsplit("-", 1)[1] for run in made] == ["dind", "agent", "control", "review", "gate"]
+    for run in (made[0], made[-1]):
+        assert not [m for m in binds(run) if m.split(":")[0].startswith(str(task.meta))], run[4]
 
 
 def test_the_control_container_starts_after_the_agent_on_rules_already_loaded(docker):

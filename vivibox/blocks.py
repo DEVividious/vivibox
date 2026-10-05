@@ -401,6 +401,7 @@ class Panel(Markdown):
     def __init__(self, **kwargs) -> None:
         self._as_source: frozenset[str] = frozenset()
         self._redrawing = False
+        self._gone: set[int] = set()  # the widgets taken out for a redraw, until it is made
         super().__init__("", parser_factory=lambda: parser(self._as_source), **kwargs)
 
     def _parse_markdown(self, tokens: Iterable[Token]) -> Iterable[MarkdownBlock]:
@@ -423,23 +424,46 @@ class Panel(Markdown):
                 own, piece = [], []
         yield from super()._parse_markdown(own + piece)
 
+    def drew(self, error: Exception) -> bool:
+        """Whether error was raised while a piece an agent wrote was drawn: by a widget inside a
+        piece's frame, or in the layout of one. Read from the error's own traceback: a call in
+        it is a method of such a widget, or lays one out (Textual's layout names the widget it
+        arranges parent or widget). The widgets taken out for a redraw count while they are on
+        their way out. An error with no such call is none of a piece's: a key's action, what
+        follows a dialog's answer, a dialog's own handler, a worker."""
+        at = error.__traceback__
+        while at is not None:
+            for name in ("self", "parent", "widget"):
+                node = at.tb_frame.f_locals.get(name)
+                if id(node) in self._gone:
+                    return True
+                while isinstance(node, Widget) and node is not self:
+                    if isinstance(node, Quote) and node.has_class(PROSE) and self in node.ancestors:
+                        return True
+                    node = node.parent
+            at = at.tb_next
+        return False
+
     def gives_up(self, error: Exception) -> bool:
-        """After an error while this text was drawn: every piece an agent wrote in it is drawn
-        again as its source, which no widget reads as anything, and stays so while the panel
-        shows it; you are told once. The widgets that raised are taken out at once, and what
-        else is raised until they are gone is the same error (a layout that fails does so
-        wherever a size is asked for). False when there is no piece to draw so, or they were so
-        drawn already: the error is not theirs."""
+        """After an error raised while a piece of this text was drawn (drew): every piece an
+        agent wrote in it is drawn again as its source, which no widget reads as anything, and
+        stays so while the panel shows it; you are told once. The widgets that raised are taken
+        out at once, and what else they raise until they are gone is the same error (a layout
+        that fails does so wherever a size is asked for). False for any other error, and when
+        the pieces were drawn as their source already: the error is not cured by that."""
+        if not self.drew(error):
+            return False
         found = pieces(self.source)
         if self._redrawing or found <= self._as_source:
             return self._redrawing
         self._as_source, self._redrawing = found, True
+        self._gone = {id(node) for node in self.walk_children()}
         self.remove_children()  # out of the panel now; a widget that raised may never say it is gone
         self.app.call_later(self._redraw, type(error).__name__)
         return True
 
     def _redraw(self, error: str) -> None:
-        self._redrawing = False  # what is raised from here on is not theirs
+        self._redrawing, self._gone = False, set()  # what is raised from here on is not theirs
         # The drawing that failed may wait for ever on a widget that raised, the panel's lock held.
         self.lock = RLock()
         self.update(self.source)
@@ -450,8 +474,9 @@ class Kept:
     """For the app the panel is in: an error raised while the panel draws what an agent wrote
     does not end the view. Textual ends the app on any error of a widget, in its layout too,
     which no widget of the panel can catch for the others; here the panel draws the agent's
-    pieces as their source instead (Panel.gives_up), once for a text, and says so. An error
-    that is still raised after that ends the view as before."""
+    pieces as their source instead (Panel.gives_up), once for a text, and says so. That error
+    alone: every other one, and one that is still raised after that, is Textual's to handle as
+    it always did, with its traceback and its return code."""
 
     def _handle_exception(self, error: Exception) -> None:
         try:

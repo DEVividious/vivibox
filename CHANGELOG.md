@@ -335,6 +335,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An error of vivibox's own is shown as one again. What keeps an agent's text from ending the
+  view when it cannot be drawn took every error raised while the panel held such text: a bug
+  in a key's action closed the view with no traceback and no return code, and one in what
+  follows a dialog's answer was said to be "what an agent wrote", the plan redrawn as its
+  source. Only an error raised by a widget that draws a piece of an agent's text, or in its
+  layout, is taken now, as its traceback says.
 - A reviewer changed with `m` while its task runs reviews its next round whole on the new
   choice. The next round's container already had the new provider's configuration and key,
   but the reviewer's harness went on asking for the model the task had started with: the old

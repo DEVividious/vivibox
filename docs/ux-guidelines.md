@@ -353,7 +353,8 @@ looks like an empty cache.
   and its numbered lists (their longest number and three more) take (`markdown._whole`). That
   is decided on what the parser found, for 80 columns, whatever the terminal's width. An
   error raised while a piece is drawn does not end the view either: the pieces of that text
-  are drawn again as their source, and a notification says so (`blocks.Kept`).
+  are drawn again as their source, and a notification says so (`blocks.Kept`); that error
+  alone, by its traceback: any other ends the view with its traceback, as ever.
   The only links are vivibox's own, the addresses of what the task runs (`markdown.own_link`).
   A table in that text has columns of equal width and cells folded onto as many rows as they
   take, never cut with an ellipsis, and no tooltip (`blocks.Cells`): an address in a cell is

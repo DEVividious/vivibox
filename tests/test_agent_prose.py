@@ -748,35 +748,124 @@ def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on
     run(scenario, size=(80, 110), notifications=True)
 
 
-def test_an_error_after_the_pieces_are_drawn_as_their_source_ends_the_view_as_before(env, monkeypatch):
-    """Once for a text: the error that comes when its pieces are their source already is not
-    theirs, and neither is one that comes while the panel shows no piece at all."""
+def raised_by(widget, error: Exception) -> Exception:
+    """error as a method of widget would raise it: with the widget in its traceback."""
+
+    def draw(self):
+        raise error
+
+    try:
+        draw(widget)
+    except type(error) as raised:
+        return raised
+
+
+def test_only_an_error_from_drawing_a_piece_is_taken_and_only_once(env, monkeypatch):
+    """The guard is for what an agent's text does to the widgets that draw it. It took every
+    error in the view while the panel held a piece: a bug in a key's action closed the view
+    without a word, and one in what follows a dialog's answer was said to be the agent's."""
     task = new_task()
     plan_with(task, "- an item")
     opening(monkeypatch)
 
     async def scenario(app, pilot):
         await show(app, pilot)
-        app._handle_exception(RuntimeError("first"))
+        item = app.text.query("Quote.prose MarkdownBulletList").last()
+        app._handle_exception(raised_by(item, RuntimeError("first")))
         for _ in range(3):
             await pilot.pause()
         assert app._exception is None and len(app.text.query("Quote.prose MarkdownFence")) == 1
         assert not app.text.query("Quote.prose MarkdownBulletList"), "the piece is its source now"
-        again = ValueError("again")
+        (source,) = app.text.query("Quote.prose MarkdownFence")
+        again = raised_by(source, ValueError("again"))
         app._handle_exception(again)
-        assert app._exception is again
+        assert app._exception is again, "once: the error that comes when the pieces are their source"
 
     with pytest.raises(ValueError, match="again"):
         run(scenario, size=(80, 60))
 
-    async def with_no_piece(app, pilot):
-        await pilot.press("up")  # the project's row: its panel holds nothing an agent wrote
-        await pilot.press("enter")
-        await pilot.pause()
-        app._handle_exception(KeyError("no piece"))
+    async def not_from_a_piece(app, pilot):
+        await show(app, pilot)
+        (roles, *_) = app.text.query("MarkdownH4")  # a widget of the panel, of vivibox's own lines
+        for bug in (
+            KeyError("anywhere"),
+            raised_by(app, KeyError("the app")),
+            raised_by(roles, KeyError("own")),
+        ):
+            app._exception = None
+            app._handle_exception(bug)
+            assert app._exception is bug, bug
+        assert app.text.query("Quote.prose MarkdownBulletList"), "and the plan is drawn as it was"
+        assert not [n for n in app._notifications if "What an agent wrote" in str(n.message)]
 
     with pytest.raises(KeyError):
-        run(with_no_piece, size=(80, 60))
+        run(not_from_a_piece, size=(80, 60), notifications=True)
+
+
+@pytest.mark.parametrize("where", ["what follows the answer", "the dialog's own handler"])
+def test_an_error_around_a_dialog_is_vivibox_s_and_is_shown_as_one(env, monkeypatch, where):
+    from vivibox import widgets
+
+    task = new_task()
+    plan_with(task, "a plain plan")
+    opening(monkeypatch)
+    bug = KeyError(f"a bug in {where}")
+
+    def fail(*args):
+        raise bug
+
+    if where == "the dialog's own handler":
+        monkeypatch.setattr(widgets.Confirm, "key_escape", fail)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        app.push_screen(widgets.Confirm("Really?", "Yes"), fail)
+        await pilot.pause()
+        await pilot.press("enter" if where == "what follows the answer" else "escape")
+        for _ in range(3):
+            await pilot.pause()
+        told = [str(note.message) for note in app._notifications]
+        assert not [said for said in told if "What an agent wrote" in said], told
+        assert app._exception is bug, "the error is vivibox's, and is shown as one"
+
+    with pytest.raises(KeyError):  # the view ends with the error, as it did
+        run(scenario, size=(80, 40), notifications=True)
+
+
+def test_an_error_of_an_action_of_the_view_ends_it_with_the_error_and_its_code(env, monkeypatch):
+    """Textual ends the app when its own loop raises; swallowed, the view closed with no
+    traceback and no return code."""
+    import asyncio
+
+    from textual import events
+
+    from vivibox.tui import Vivibox
+
+    task = new_task()
+    plan_with(task, "a plain plan")
+    opening(monkeypatch)
+    seen = {}
+
+    def bug(self):
+        raise RuntimeError("a bug of vivibox's own")
+
+    async def go():
+        app = Vivibox()
+        running = asyncio.create_task(app.run_async(headless=True, size=(80, 40)))
+        await asyncio.sleep(1.5)  # the view starts
+        app.reload()
+        app.post_message(events.Key("d", "d"))  # the panel, with the plan in it
+        await asyncio.sleep(1.0)
+        monkeypatch.setattr(Vivibox, "action_details", bug)
+        app.post_message(events.Key("d", "d"))
+        await asyncio.sleep(1.5)
+        seen.update(ended=running.done(), error=app._exception, code=app.return_code)
+        if not running.done():
+            running.cancel()
+
+    asyncio.run(asyncio.wait_for(go(), 30))
+    assert seen["ended"], "Textual ends the app when its own loop raises"
+    assert isinstance(seen["error"], RuntimeError) and seen["code"] == 1, seen
 
 
 def test_the_criteria_of_a_task_at_work_stand_behind_the_rule(env):

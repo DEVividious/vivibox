@@ -112,7 +112,9 @@ class Verifying:
                     "set it under e on the project",
                 )
             return
-        self.ports.keep_command(command)
+        if self.ports.keep_command(command) is False:  # yours, set since the look above: as it is
+            self.task.event(NOT_KEPT, command=command, why=self._own(st))
+            return
         self.task.event(KEPT, command=command, commit=result.commit)
         self.ports.notify(
             self.task.id, f"the verification passed with `{command}`: kept for every task of {st.project}"

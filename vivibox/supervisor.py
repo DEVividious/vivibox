@@ -215,7 +215,8 @@ class Ports:
     prepare_review: Callable[[], Path | None] = lambda: None
     # Keeps the command the writer proposed for the project, when --auto takes it without you:
     # called once the gate has passed the work with it (verifying.Verifying._keep), never before.
-    keep_command: Callable[[str], None] = lambda command: None
+    # False when it wrote nothing because the project had a command of its own by the write.
+    keep_command: Callable[[str], bool | None] = lambda command: None
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
     session_started: Callable[[TaskState], None] = lambda st: None

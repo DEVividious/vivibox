@@ -210,18 +210,21 @@ def make_supervisor(
             return str(e)
         return ""
 
-    def keep_command(command: str) -> None:
-        """The project's file, written with the command and read again: kept is said only of
-        what a later task will be verified with. The change is --auto's, on the record as such
-        (command_kept), and so not one of yours for now() to record."""
+    def keep_command(command: str) -> bool:
+        """The project's file, written with the command only if, as it is at the write, it has
+        none (decisions.save_verify: one step, yours is never written over; False then), and
+        read again: kept is said only of what a later task will be verified with. The change
+        is --auto's, on the record as such (command_kept), and so not one of yours for now()."""
         nonlocal seen
-        actions.save_verify(now(), [command])
+        if not actions.save_verify(now(), [command], only_unset=True):
+            return False
         kept = load_project(project.name)
         if kept.verify != [command]:
             raise ConfigError(
                 f"{project.name}'s file did not take the command; set it under e on the project"
             )
         seen = kept
+        return True
 
     def review_up() -> Path:
         """A round's container and its harness, of one role, read once: what you chose under m

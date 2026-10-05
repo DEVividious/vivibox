@@ -5,12 +5,16 @@ command line has task logic of its own."""
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import re
+import shutil
+import tomllib
 from pathlib import Path
 
 from . import actions, comments, feedback, gate, handoff, manual, prompts, proposal, repo, supervisor
-from .config import Project, config_dir
+from .config import ConfigError, Project, config_dir
 from .risky import Approvals, Shown
 from .states import State
 from .task import Task
@@ -88,18 +92,68 @@ def _toml(text: str) -> str:
     return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
-def save_verify(project: Project, commands: list[str], no_build: bool = False) -> None:
+def _beside(path: Path, data: bytes) -> Path:
+    """data in a new file beside path, to be put in its place whole: on the same disk, with the
+    mode path has."""
+    made = path.with_name(f".{path.name}.{os.getpid()}.new")
+    try:
+        made.write_bytes(data)
+        shutil.copymode(path, made)
+    except BaseException:  # a full disk: nothing half written stays beside the file
+        made.unlink(missing_ok=True)
+        raise
+    return made
+
+
+# Times a write looks again at a file somebody else saved while it was made, before it gives up.
+LOOKS = 3
+
+
+def save_verify(
+    project: Project, commands: list[str], no_build: bool = False, only_unset: bool = False
+) -> bool:
     """Keeps what the plan chose, or what you picked, so the project's next task does not decide
     again: the commands, or that there is nothing to build (verify = false). A command may be a
     writer's (--auto keeps one without you): it is written as a string and never as text of
     the file, so nothing in it ends the list or its line, and put in place as it is, never as a
-    pattern's replacement, where a backslash would be read. The file is opened only once all
-    of it can be written: a command that is no text leaves it as it was."""
-    path = config_dir() / "projects" / f"{project.name}.toml"
-    text = path.read_text()
+    pattern's replacement, where a backslash would be read.
+
+    The file is written beside itself and put in place whole (a write that fails, or a command
+    that is no text, leaves it as it was), by one keep at a time (the projects' folder is held
+    while it is made), and only if it is still the bytes that were read: saved by you meanwhile,
+    it is read again. only_unset: for a keep nobody is there to see: nothing is written, and
+    False returned, when the file as it is at the write names a command or says there is
+    nothing to build. Yours is never written over."""
+    path = Path(os.path.realpath(config_dir() / "projects" / f"{project.name}.toml"))
     line = "verify = false" if no_build else "verify = [" + ", ".join(_toml(c) for c in commands) + "]"
     found = re.compile(r"^verify = (\[.*?\]|false)", re.MULTILINE | re.DOTALL)
-    path.write_bytes(found.sub(lambda _: line, text, count=1).encode())
+    folder = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(folder, fcntl.LOCK_EX)
+        for _ in range(LOOKS):
+            raw = path.read_bytes()
+            text = raw.decode()
+            if only_unset and _verify_set(text, path):
+                return False
+            made = _beside(path, found.sub(lambda _: line, text, count=1).encode())
+            try:
+                if path.read_bytes() == raw:
+                    made.replace(path)
+                    return True
+            finally:
+                made.unlink(missing_ok=True)
+        raise ConfigError(f"{path} was saved again each time vivibox went to write it; try again")
+    finally:
+        os.close(folder)  # and the hold with it
+
+
+def _verify_set(text: str, path: Path) -> bool:
+    """Whether a project file's text names a verification, or says there is none to run."""
+    try:
+        said = tomllib.loads(text).get("verify", [])
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{path}: {e}") from None
+    return said is False or bool(said)
 
 
 def reply(task: Task, comment: str, criteria: list[str] | tuple = ()) -> State:

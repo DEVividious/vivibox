@@ -308,3 +308,91 @@ def test_a_proposal_that_would_add_lines_to_the_project_file_adds_none(project_f
     project = load_project("demo")
     assert project.verify == [hostile], "kept, as the one command it is"
     assert project.pass_env == [] and project_file.read_text().count("\n") == lines
+
+
+# --- the write of the project's file -------------------------------------------------------------------
+
+
+def test_a_write_that_fails_half_way_leaves_the_project_file_as_it_was(project_file, monkeypatch):
+    """The file is written beside itself and put in place whole: a disk that fills while it is
+    written leaves the project's file byte for byte, and nothing beside it."""
+    before, write = project_file.read_bytes(), Path.write_bytes
+
+    def full(self, data):
+        write(self, data[:10])
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", full)
+    with pytest.raises(OSError, match="No space left"):
+        actions.save_verify(load_project("demo"), [COMMAND])
+    assert project_file.read_bytes() == before
+    assert sorted(p.name for p in project_file.parent.iterdir()) == ["demo.toml"], "no half file left"
+
+
+def test_a_keep_holds_the_projects_folder_to_itself_while_it_writes(project_file, monkeypatch):
+    """Two keeps at once (two tasks of one project, each at the end of its verification) take
+    turns: the second reads the file the first left, whole, never an empty one in between."""
+    import fcntl
+    import os
+
+    from vivibox import decisions
+
+    beside, held = decisions._beside, []
+
+    def another_keep_tries(path, data):
+        fd = os.open(project_file.parent, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            held.append(True)
+        finally:
+            os.close(fd)
+        return beside(path, data)
+
+    monkeypatch.setattr(decisions, "_beside", another_keep_tries)
+    assert actions.save_verify(load_project("demo"), [COMMAND], only_unset=True) is True
+    assert held == [True] and load_project("demo").verify == [COMMAND]
+    assert actions.save_verify(load_project("demo"), ["make other"], only_unset=True) is False
+    assert load_project("demo").verify == [COMMAND], "the second keep finds the first one's, and leaves it"
+
+
+def test_a_command_you_set_as_the_keep_is_written_is_not_written_over(project_file, monkeypatch):
+    """The interleaving, by hand: the keep has read the file (no command) and made its new one
+    beside it; you save yours (an editor takes no lock); the keep looks at the file again
+    before it puts its own in place, finds yours, and writes nothing."""
+    from vivibox import decisions
+
+    beside = decisions._beside
+
+    def and_you_save_yours(path, data):
+        made = beside(path, data)
+        project_file.write_text(project_file.read_text().replace("verify = []", 'verify = ["make mine"]'))
+        return made
+
+    monkeypatch.setattr(decisions, "_beside", and_you_save_yours)
+    assert actions.save_verify(load_project("demo"), [COMMAND], only_unset=True) is False
+    assert load_project("demo").verify == ["make mine"]
+    assert sorted(p.name for p in project_file.parent.iterdir()) == ["demo.toml"]
+
+
+def test_a_command_you_set_during_the_checks_after_the_gate_stays_yours(project_file, monkeypatch):
+    """The reviewer's case, end to end: the verification has passed, and while the supervisor
+    reads the risky files for its decision you set the project's command under e. The check that
+    the project has none and the write are one step, at the write: yours stays, nothing says kept."""
+    task, sup, pod, notes = supervised(monkeypatch, [plans, works])
+    sup.step()
+    sup.step()
+    scan, set_once = sup.ports.risky_changes, []
+
+    def while_you_set_yours():
+        if pod.commands and not set_once:  # after the gate ran, at the decision's own scan
+            set_once.append(actions.save_verify(load_project("demo"), ["make mine"]))
+        return scan()
+
+    sup.ports.risky_changes = while_you_set_yours
+    sup.step()
+    assert set_once and load_project("demo").verify == ["make mine"], "yours, not written over"
+    assert kept(task) == []
+    said = [e["data"]["why"] for e in task.events() if e["type"] == "command_not_kept"]
+    assert said == ["demo has a command of its own now"]
+    assert not [note for note in notes if "kept for every task" in note]

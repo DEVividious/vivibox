@@ -36,8 +36,10 @@ on your machine until you have approved it.
   writer's file and recorded it where the pod cannot write, and only if the clone is then still
   as recorded, has no risky change, and is on the commit that was verified. A clone the check
   refuses, a verification that fails or cannot run, and a clone that changed by then leave the
-  plan to you and the project's settings as they were. The last look and the write are two
-  steps: a change made between them is not seen before the next verification. By hand, the
+  plan to you and the project's settings as they were. The last look at the clone and the
+  write are two steps: a change made between them is not seen before the next verification.
+  Whether the project still has no command is looked at as its file is written, one keep at a
+  time, and the file is put in place whole: a command you set meanwhile is not written over. By hand, the
   command a task waits with at `review the command` is the one vivibox read once when the task
   got there, recorded where the pod cannot write: the notification, `vivibox status`, the panel
   and the field under `a` show that one, and a plain accept keeps and runs that one; what the

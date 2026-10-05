@@ -344,6 +344,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A project's file is written whole or not at all when a verification command is kept: beside
+  itself, then put in place. A write that failed half way left the start of the file, and two
+  keeps at once could leave it empty. And a command you set under `e` while `--auto` was in
+  its checks after the verification is no longer written over by the writer's: whether the
+  project has none is looked at as the file is written, one keep at a time.
 - The command kept at `review the command` is the one that was shown. `vivibox accept <id>`
   without `--verify` read the writer's file again at that moment, so a file rewritten after
   the checkpoint's notification was kept for the project and run, and said only afterwards;

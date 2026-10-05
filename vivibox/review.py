@@ -306,8 +306,10 @@ def finish(
                 done.new_branch = new_branch(project.repo, task_kind(task), st.goal, task.id)
     except BaseException as stopped:
         # Not accepted, whatever stopped it (a refusal, an error, Ctrl-C): the ref is put back.
-        # Stopped while the work was being brought, it is put back from where git left it.
-        brought = commit or _ref_at(project.repo, task.id)
+        # Interrupted while the work was being brought, it is put back from where git left it.
+        # Where bringing it failed, git has not moved it: where it stands is another's doing
+        # (a review copy made meanwhile, whose fetch git let before this one), and stays.
+        brought = commit or ("" if isinstance(stopped, Exception) else _ref_at(project.repo, task.id))
         if brought and (left := _put_back(task, project.repo, found, brought)):
             if isinstance(stopped, submodules.Unkept):
                 stopped.whole += f"\n{left}"

@@ -778,6 +778,39 @@ def test_an_accept_interrupted_while_it_brings_the_work_takes_back_the_ref_too(p
     assert git(source, "for-each-ref") == before and task.read_state().state is State.CHECKPOINT_FINAL
 
 
+def test_an_accept_that_could_not_bring_the_work_leaves_a_ref_another_moved_meanwhile(project, monkeypatch):
+    """vivibox review in one terminal and vivibox accept in another, on the same task: both
+    bring the work under the same ref, and git lets one of them. The accept that git refused
+    has not moved the ref: where it stands now is the review copy's doing, and the accept that
+    took it for its own put it back to where it had found it, under the copy that shows the
+    newer work. An accept puts back from where git left the ref only when it was interrupted
+    (the test above), never when bringing the work failed."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    (task.repo / "calc.py").write_text("x = 1\n")
+    earlier = committed(task, "Work in progress")
+    actions.prepare_review(task, project.demo)  # the review copy, from before: the ref is on it
+    (task.repo / "more.txt").write_text("more\n")
+    at_final(task, project, reviewed=False)
+    later, ref = git(task.repo, "rev-parse", "HEAD"), f"refs/vivibox/{task.id}"
+    assert ref_of_the_work(task, source) == f"{earlier} commit\t{ref}"
+    git(source, "fetch", "-q", str(task.repo), later)  # the other terminal has the commit by now
+
+    def another_was_first(*args, **how):
+        git(source, "update-ref", ref, later)  # its fetch moved the ref; its copy is not made yet
+        raise repo.RepoError(
+            f"git fetch…: error: cannot lock ref '{ref}': is at {later} but expected {earlier}"
+        )
+
+    monkeypatch.setattr(repo, "fetch_to", another_was_first)
+    with pytest.raises(repo.RepoError, match="cannot lock ref"):
+        actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source) == f"{later} commit\t{ref}", (
+        "the other's move, undone by this accept"
+    )
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+
+
 def test_an_accept_refused_before_it_brings_the_work_changes_no_ref(project, monkeypatch):
     """Refused where it would bring the work (risky files not approved), the accept has changed
     nothing: the ref the review copy left is where it was."""

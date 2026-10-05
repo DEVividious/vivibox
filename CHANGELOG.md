@@ -426,7 +426,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   not held up, and the reply that asks for such work.
 - An accept interrupted while it brought the work, between git's fetch and the accept reading
   which commit that was, left `refs/vivibox/<id>` on the work. It is put back as it was found
-  there too, as after every accept that stops.
+  there too, as after every accept that stops. An accept that could not bring the work (git
+  refused it or ran out of time) has not moved the ref, and leaves it where it stands: that
+  may be where a review copy made in another terminal meanwhile put it.
 - `vivibox auth import` on a file whose provider or MCP server has a name that cannot be one
   in vivibox said that name as it came: a line break in it drew a second line at the left edge,
   reading as vivibox's own. The name is on one line now, its line break shown as a code point.

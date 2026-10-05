@@ -100,7 +100,9 @@ def history(limit: int | None = 20) -> list[dict]:
     path = history_path()
     if not path.exists():
         return []
-    done = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    # A record a line feed, as the event log is read: one written before record() may hold a
+    # character other readers of lines split at.
+    done = [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
     # One entry per task, the newest: older versions could write a number down twice.
     newest = {e["id"]: e for e in done}
     return [e for e in reversed(done) if newest[e["id"]] is e][:limit]
@@ -113,7 +115,7 @@ def forget(task_id: str) -> None:
     if not path.exists():
         return
     kept = [
-        line for line in path.read_text().splitlines() if line.strip() and json.loads(line)["id"] != task_id
+        line for line in path.read_text().split("\n") if line.strip() and json.loads(line)["id"] != task_id
     ]
     path.write_text("".join(line + "\n" for line in kept))
 

@@ -344,6 +344,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The history of finished tasks written by an earlier vivibox is read whatever a goal in it
+  holds: an entry with a line separator (U+2028, U+2029, U+0085) in it kept the whole history
+  from loading.
 - A review round is not started while Docker does not remove the container of the round
   before: the new round's key was written all the same into the directory that container
   mounts. The task stops with what Docker said and what to do.

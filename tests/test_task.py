@@ -155,3 +155,24 @@ def test_a_record_written_before_is_read_whole_and_a_name_that_is_no_text_is_kep
     found = task.events()[before:]
     assert [e["type"] for e in found] == ["old", "risky_approved"]
     assert found[0]["data"]["p"] == "a b" and found[1]["data"]["paths"] == ["a\udc80b"]
+
+
+@pytest.mark.parametrize("split", [" ", " ", "\u0085"])
+def test_a_history_written_before_is_read_and_kept_whatever_a_goal_in_it_holds(tmp_path, monkeypatch, split):
+    """history.jsonl from before its records were one line for every reader: an entry whose goal
+    holds a line separator as it was written then is read whole, and stays when another task is
+    forgotten."""
+    from vivibox import review
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    path = review.history_path()
+    path.parent.mkdir(parents=True)
+    old = [
+        {"id": "demo-1", "goal": f"a{split}b", "project": "demo"},
+        {"id": "demo-2", "goal": "x", "project": "demo"},
+    ]
+    path.write_text("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in old), encoding="utf-8")
+    assert [e["id"] for e in review.history()] == ["demo-2", "demo-1"]
+    assert review.history()[1]["goal"] == f"a{split}b"
+    review.forget("demo-2")
+    assert [(e["id"], e["goal"]) for e in review.history()] == [("demo-1", f"a{split}b")]

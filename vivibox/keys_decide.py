@@ -98,15 +98,18 @@ class DecideKeys:
         self.reload()
 
     def action_approve_risky(self) -> None:
-        """p approves the risky files as the panel showed them: the identity of that drawing goes
-        with the approval, taken here, before the question, and files that are no longer those
-        are refused whole. The panel then draws them as they are, for you to read again."""
-        task, _ = self.selected()
-        shown = self.risky_shown.get(task.id)
-        if shown is None:
+        """p approves the risky files that are on the screen: the view the panel is drawn from
+        is the one whose identity goes with the approval (risky_bound, set and cleared with the
+        drawing), taken here, before the question. With no such drawing on the screen nothing is
+        asked and nothing approved. Files that are no longer that view's are refused whole, and
+        the panel is drawn again, from the files as they are."""
+        task, st = self.selected()
+        bound = self.risky_bound
+        if bound is None or bound[:2] != (task.id, st.updated) or self.panel.has_class("hidden"):
             said = f"The risky files of {task.id} are not shown: open the details (d), read them, then p."
             self.notify(said, severity="error", timeout=10, markup=False)
             return
+        shown = bound[2].identity
 
         def approve(yes: bool) -> None:
             if not yes:
@@ -118,16 +121,15 @@ class DecideKeys:
                     markup=False,
                 )
             except risky.NotAsShown as e:
-                # Drawn again now, as they are: that drawing is what the next p approves.
-                self.risky_shown.pop(task.id, None)
-                self.show_detail()
                 again = "the details show them as they are now: read them again, then p"
                 self.fail(risky.NotAsShown(f"{e}; {again}"))
             except Exception as e:
                 self.fail(e)
             else:
-                self.risky_shown.pop(task.id, None)
                 self.go_on(task)
+            # Whatever the answer was, what is drawn next is drawn from the files as they are.
+            self.risky_bound = None
+            self.show_detail()
             self.reload()
 
         # Said in the one question: a block too large to fold shows the start of its long lines.

@@ -93,14 +93,18 @@ approval, stopping just the pod keeps the decision in Waiting for you, its label
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
   agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.
-- `p` approves the risky files as the details panel showed them, and its question stays one
-  step. With the panel closed it approves nothing and says to open it (`d`). The identity of
-  the drawing you opened goes with the key (`risky.Shown`, `panel.Shows`); a drawing a refresh
-  made since does not replace it. Files that are no longer what was drawn are refused whole,
-  the refusal says they changed since they were shown and to read them again, and the panel is
-  drawn again as they are. `vivibox risky` ends with the command that approves what it
-  printed; `vivibox approve-risky` without it, or after a change, approves nothing and says to
-  look again.
+- `p` approves the risky files that are on the screen, and its question stays one step. The
+  diffs the panel draws and the identity `p` carries are one view (`risky.Shown`, the view's
+  `risky_bound`), set with the drawing and cleared with it: the details closed, another row,
+  the task no longer waiting for that approval. With none on the screen `p` asks nothing,
+  approves nothing and says to open the details (`d`). What you read is not replaced by a
+  refresh you did not ask for: while the files are shown, the drawing stays, and when the
+  files change a line of vivibox's own above the diffs says so, that `p` approves nothing of
+  it, and that `d` twice draws them as they are now (`panel.RISKY_MOVED`). Only your own keys
+  draw them anew: opening the details, coming back to the row, and a `p` that was refused,
+  which says they changed since they were shown and to read them again. `vivibox risky` ends
+  with the command that approves what it printed; `vivibox approve-risky` without it, or
+  after a change, approves nothing and says to look again.
 - `m` says when its choice applies: a reviewer's `from its next review`, whose container is
   made for each round; the other roles' `from the next start`.
 - `v` runs the app only while nobody works in the pod: once the work is back with you, or in a

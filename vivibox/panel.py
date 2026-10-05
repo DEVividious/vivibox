@@ -44,6 +44,7 @@ from .panels import save_collapsed as save_collapsed
 from .panels import save_view as save_view
 from .panels import view_state_path as view_state_path
 from .plan import parse_plan
+from .risky import Shown
 from .sections import (  # noqa: F401 (criteria and checklist: the list reads them from here)
     build_files_left,
     checklist,
@@ -489,13 +490,23 @@ def watchable(task: Task, st: TaskState, running: bool) -> bool:
     return bool(actions.watchable_session(task, st))
 
 
+# vivibox's own line over risky files drawn before they changed: the drawing stays, and says so.
+RISKY_MOVED = (
+    "*The files changed after this was drawn. Below is what they were, and `p` approves nothing of "
+    "it: `d` closes the details, and `d` again opens them on the files as they are now.*"
+)
+
+
 @dataclass
 class Shows:
-    """What one drawing of the panel showed that a decision of yours is bound to: the identity
-    of the risky files as it showed them (risky.Shown.identity), "" when it could not show them
-    whole, None when it showed none."""
+    """The risky files as a drawing of the panel has them, between the panel and whoever puts
+    its text on the screen. Given: the view that is on the screen now (risky.Shown), which this
+    drawing then keeps as it is, whatever the clone holds by now: what you read is never
+    replaced by a refresh you did not ask for, and when the files are others the drawing says
+    so (RISKY_MOVED). Handed back: the view whose diffs are in this drawing's text, whose
+    identity is the only one p carries; None when the drawing shows no risky files."""
 
-    risky: str | None = None
+    risky: Shown | None = None
 
 
 def detail(
@@ -506,8 +517,11 @@ def detail(
     pod: PodView | None = None,
     shows: Shows | None = None,
 ) -> str:
-    """What you need to decide on this task, as markdown. shows: filled with what this drawing
-    shows that a decision is bound to, for the caller that puts it on the screen."""
+    """What you need to decide on this task, as markdown. shows: the risky files' view on the
+    screen now, kept by this drawing, and handed back as what this drawing shows (Shows)."""
+    on_screen = shows.risky if shows is not None else None
+    if shows is not None:
+        shows.risky = None  # until this drawing shows risky files
     seen = ui.view(task, st, running, max_iterations)
     if layout(st) != CURRENT:  # of a task this vivibox does not run, nothing is read but its state
         up = (pod if pod is not None else pod_view(st.id)).address
@@ -623,16 +637,17 @@ def detail(
         ]
     elif st.state is State.APPROVAL_RISKY:
         try:
-            view = actions.risky_view(task, actions.load(st.id)[1])
-            diffs, identity = view.diffs, view.identity
+            now = actions.risky_view(task, actions.load(st.id)[1])
         except Exception as e:  # shown, and nothing an approval could be of
-            diffs, identity = [str(e)], ""
+            now = Shown([str(e)], "")
+        drawn = on_screen or now  # one view: its diffs below, its identity for p, and no other's
         if shows is not None:
-            shows.risky = identity
+            shows.risky = drawn
         body = [
             "**Risky files changed.** They run code on your machine when your IDE imports the project.",
             "",
-            *(display.fenced(d.rstrip(), "diff") for d in diffs),
+            *([RISKY_MOVED, ""] if drawn != now else []),
+            *(display.fenced(d.rstrip(), "diff") for d in drawn.diffs),
         ]
     elif st.state is State.CHECKPOINT_BLOCKED:
         question = agents_question(task, "**The agent asks:**")

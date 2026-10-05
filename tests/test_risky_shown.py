@@ -7,6 +7,7 @@ Here: the identity itself, the refusal for each way the state can move between t
 approval, the approval that passes, the race inside it, and the view (p) and the command line
 (vivibox risky, then the command it ends with) each from end to end."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -17,7 +18,7 @@ from conftest import make_repo
 from test_gate import PLAN
 from test_tui import run as run_view
 
-from vivibox import actions, clone_read, risky
+from vivibox import actions, clone_read, panel, risky
 from vivibox import repo as r
 from vivibox.cli import main
 from vivibox.config import load_config
@@ -391,10 +392,10 @@ def test_p_refuses_files_that_changed_since_the_panel_showed_them(env):
     run_view(scenario, notifications=True)
 
 
-def test_a_drawing_that_replaces_what_you_read_is_not_what_p_approves(env):
+def test_a_refresh_nobody_asked_for_never_replaces_what_you_read(env):
     """The panel is drawn again for its own reasons (the pod answered, the list changed) after
-    the file was edited: it shows the file as it is, and p is still an approval of what was drawn
-    first, so it refuses once. A redraw you did not ask for never moves what you approve."""
+    the file was edited: what you read stays, a line of vivibox's own says the files changed,
+    and p on that drawing approves nothing."""
     t, record = at_approval(env)
     before = record.read_bytes()
 
@@ -402,15 +403,208 @@ def test_a_drawing_that_replaces_what_you_read_is_not_what_p_approves(env):
         app.reload()
         await pilot.press("d")
         await pilot.pause()
-        (t.repo / "pom.xml").write_text("<project><evil/></project>\n")
+        (t.repo / "pom.xml").write_text(EVIL)
         app.show_detail()  # as a refresh that found something changed draws it
         await pilot.pause()
-        assert "evil" in app.shown, "the panel never lies about what is there"
+        assert "+<project/>" in app.shown and "evil" not in app.shown, "what you read is still there"
+        assert panel.RISKY_MOVED in app.shown, "and it says the files are others now"
         await pilot.press("p")
         await pilot.press("enter")
         await pilot.pause()
         assert record.read_bytes() == before and t.read_state().state is State.APPROVAL_RISKY
         assert "changed since they were shown" in said_in(app)[-1]
+        assert "evil" in app.shown and panel.RISKY_MOVED not in app.shown, "drawn again, as they are"
+
+    run_view(scenario, notifications=True)
+
+
+EVIL, BENIGN = "<project><evil/></project>\n", "<project><benign/></project>\n"
+
+
+def identity_of(t, content: str) -> str:
+    """The identity a view has while pom.xml holds content."""
+    was = (t.repo / "pom.xml").read_text()
+    (t.repo / "pom.xml").write_text(content)
+    try:
+        return approvals(t).view().identity
+    finally:
+        (t.repo / "pom.xml").write_text(was)
+
+
+def on_screen(app, t) -> str:
+    """What the panel shows of pom.xml and what p would carry, which are one thing or the test
+    fails here: "" for neither, else the content whose view is drawn and bound."""
+    bound = app.risky_bound
+    shown = [name for name, mark in (("evil", "<evil/>"), ("benign", "<benign/>")) if mark in app.shown]
+    if bound is None:
+        return ""
+    assert not app.panel.has_class("hidden") and app.selected()[0].id == bound[0] == t.id
+    held = {identity_of(t, EVIL): "evil", identity_of(t, BENIGN): "benign"}[bound[2].identity]
+    assert shown == [held], f"the screen shows {shown}, p would approve {held}"
+    assert all(diff.rstrip() in app.shown for diff in bound[2].diffs), "the bound view's own diffs"
+    return held
+
+
+def test_p_approves_what_is_on_the_screen_when_the_first_drawing_was_another(env):
+    """E, then B, then E again. Whatever was drawn first, what p approves is what the screen
+    shows at the key: here E stays on the screen through the refresh, said to have changed
+    while it had, so the approval of E is an approval of what was read."""
+    t, record = at_approval(env)
+    (t.repo / "pom.xml").write_text(EVIL)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("d")  # the first drawing: E
+        await pilot.pause()
+        assert on_screen(app, t) == "evil"
+        (t.repo / "pom.xml").write_text(BENIGN)
+        app.show_detail()  # a redraw nobody asked for
+        await pilot.pause()
+        assert on_screen(app, t) == "evil" and panel.RISKY_MOVED in app.shown, "never B under your eyes"
+        (t.repo / "pom.xml").write_text(EVIL)
+        app.show_detail()
+        await pilot.pause()
+        assert on_screen(app, t) == "evil" and panel.RISKY_MOVED not in app.shown
+        await pilot.press("p")
+        assert on_screen(app, t) == "evil", "at the key"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert json.loads(record.read_text())["pom.xml"] == hashlib.sha256(EVIL.encode()).hexdigest()
+
+    run_view(scenario, notifications=True)
+
+
+def test_p_never_approves_a_state_the_screen_does_not_show(env):
+    """The other direction: B is on the screen (asked for, with d) and the clone holds E at the
+    key. Refused; the screen is then E's, and that is what the next p carries."""
+    t, record = at_approval(env)
+    (t.repo / "pom.xml").write_text(EVIL)
+    before = record.read_bytes()
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("d")
+        await pilot.pause()
+        (t.repo / "pom.xml").write_text(BENIGN)
+        await pilot.press("d")
+        await pilot.press("d")  # looked again: B, by your own key
+        await pilot.pause()
+        assert on_screen(app, t) == "benign"
+        (t.repo / "pom.xml").write_text(EVIL)  # back; nothing redraws the panel for a file
+        app.reload()
+        await pilot.pause()
+        assert on_screen(app, t) == "benign"
+        await pilot.press("p")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert record.read_bytes() == before and t.read_state().state is State.APPROVAL_RISKY
+        assert "changed since they were shown" in said_in(app)[-1]
+        assert on_screen(app, t) == "evil"
+
+    run_view(scenario, notifications=True)
+
+
+def test_p_with_the_details_closed_approves_no_row_drawn_earlier(env):
+    """The details open, the cursor across the risky row, the details closed on another row,
+    back: nothing of the risky files is on the screen, so nothing is asked and nothing approved."""
+    t, record = at_approval(env)
+    assert main(["new", "demo", "Other", "--draft"]) == 0
+    other = find_task(load_config().tasks_dir, "demo-2")
+    before = record.read_bytes()
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.pause()
+        assert [task.id for task, _ in app.pairs] == [other.id, t.id] and app.selected()[0].id == other.id
+        await pilot.press("d")  # the details, open
+        await pilot.press("down")  # the cursor on the risky row: drawn
+        await pilot.pause()
+        assert app.risky_bound is not None and app.risky_bound[0] == t.id
+        await pilot.press("up")
+        await pilot.pause()
+        assert app.risky_bound is None, "another row on the screen: nothing bound"
+        await pilot.press("d")  # closed, on the other row
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.selected()[0].id == t.id and app.panel.has_class("hidden") and app.risky_bound is None
+        await pilot.press("p")
+        await pilot.pause()
+        assert type(app.screen).__name__ != "Confirm", "no question with nothing shown"
+        assert said_in(app)[-1].startswith(f"The risky files of {t.id} are not shown")
+        assert record.read_bytes() == before and t.read_state().state is State.APPROVAL_RISKY
+
+    run_view(scenario, notifications=True)
+
+
+def test_the_screen_and_what_p_carries_are_one_view_after_every_kind_of_redraw(env):
+    """The timer's refresh, the pod's answer, the row left and come back to, the details closed
+    and opened, a dialog opened and closed, a refusal: after each, with the clone moved between
+    E and B at every step, on_screen holds (it fails where the screen and the binding differ),
+    and only your own keys move what is shown. A resize is the test after this one."""
+    t, record = at_approval(env)
+    assert main(["new", "demo", "Other", "--draft"]) == 0
+    (t.repo / "pom.xml").write_text(EVIL)
+
+    async def scenario(app, pilot):
+        clone = t.repo / "pom.xml"
+        app.reload()
+        await pilot.press("down")
+        await pilot.press("d")
+        await pilot.pause()
+        assert on_screen(app, t) == "evil"
+        clone.write_text(BENIGN)
+        app.reload()  # the timer
+        app.pods_answered({t.id: panel.PodView("198.51.100.2", [])})  # the pod answered
+        await pilot.pause()
+        assert on_screen(app, t) == "evil", "no refresh of its own moves it"
+        await pilot.press("question_mark")  # a dialog opened, the timer under it, and closed
+        app.reload()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert on_screen(app, t) == "evil"
+        await pilot.press("up")  # the row left
+        await pilot.pause()
+        assert on_screen(app, t) == ""
+        await pilot.press("down")  # and come back to: your look, at the files as they are
+        await pilot.pause()
+        assert on_screen(app, t) == "benign"
+        clone.write_text(EVIL)
+        await pilot.press("d")  # the details closed
+        await pilot.pause()
+        assert on_screen(app, t) == ""
+        await pilot.press("d")  # and opened
+        await pilot.pause()
+        assert on_screen(app, t) == "evil"
+        clone.write_text(BENIGN)
+        await pilot.press("p")  # a refusal
+        await pilot.press("enter")
+        await pilot.pause()
+        assert t.read_state().state is State.APPROVAL_RISKY and on_screen(app, t) == "benign"
+        await pilot.press("p")  # asked, and not answered yes
+        await pilot.press("escape")
+        await pilot.pause()
+        assert on_screen(app, t) == "benign" and t.read_state().state is State.APPROVAL_RISKY
+
+    run_view(scenario, notifications=True)
+
+
+def test_a_resize_draws_nothing_of_the_files_as_they_are_now(env):
+    """A resize builds the list again, and may leave the cursor on another row: then nothing is
+    bound. Where the row stays, so does what was read. Never B, which nobody asked to see."""
+    t, record = at_approval(env)
+    (t.repo / "pom.xml").write_text(EVIL)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await pilot.press("d")
+        await pilot.pause()
+        assert on_screen(app, t) == "evil"
+        (t.repo / "pom.xml").write_text(BENIGN)
+        for size in ((100, 30), (140, 40), (80, 24)):
+            await pilot.resize_terminal(*size)
+            await pilot.pause()
+            assert on_screen(app, t) in ("evil", ""), size
+            assert "benign" not in app.shown, size
 
     run_view(scenario, notifications=True)
 

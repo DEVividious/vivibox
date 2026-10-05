@@ -20,7 +20,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.content import Content
 from textual.widgets import DataTable, Markdown, Static
 
-from . import actions, blocks, code, display, gate, handoff, ide, look, probe, skill, ui
+from . import actions, blocks, code, display, gate, handoff, ide, look, probe, risky, skill, ui
 from .app_support import LeavingExecutor, LiveFooter
 from .config import ConfigError, load_config
 from .dialogs import (
@@ -144,8 +144,9 @@ class Vivibox(
         self.config = load_config()
         self.executor = LeavingExecutor()
         self.shown = ""
-        # The risky files' identity as the panel first drew them, by task (panel.Shows): what p approves.
-        self.risky_shown: dict[str, str] = {}
+        # The risky files on the screen: the task, its state's time and the view drawn (risky.Shown),
+        # whose identity is what p approves; None while the panel shows none (show_detail).
+        self.risky_bound: tuple[str, str, risky.Shown] | None = None
         # What the table was last drawn from; a refresh that matches it does no work.
         self.drawn: tuple = ()
         self.pairs: list[tuple[Task, TaskState]] = []
@@ -401,9 +402,16 @@ class Vivibox(
         return task_id in self.running
 
     def show_detail(self) -> None:
+        """The panel for the selected row. The risky files it shows and the identity p carries
+        are one view (risky_bound), set here with the text it is drawn in and cleared here with
+        it: the details closed, another row, a task no longer waiting for that approval. A
+        drawing nobody asked for keeps the view that is on the screen (panel.Shows)."""
         if self.panel.has_class("hidden"):
+            self.risky_bound = None
             return
-        pick, shows = self.selected(), Shows()
+        pick, bound = self.selected(), self.risky_bound
+        kept = bound[2] if pick and bound and bound[:2] == (pick[1].id, pick[1].updated) else None
+        shows = Shows(kept)
         if pick:
             running = self.agent_running(pick[1].id)
             text = detail(*pick, self.config.max_rounds, running, self.pod, shows)
@@ -418,12 +426,7 @@ class Vivibox(
         if text != self.shown:  # redrawing resets the scroll position
             self.shown = text
             self.text.update(display.terminal(text))  # nothing the agent wrote reaches the terminal as is
-        if pick and shows.risky is None:
-            self.risky_shown.pop(pick[1].id, None)
-        elif pick:
-            # p approves what was first drawn here, never what a later drawing replaced it with
-            # while you read: that one is on the screen, and p says once that it changed.
-            self.risky_shown.setdefault(pick[1].id, shows.risky)
+        self.risky_bound = (pick[1].id, pick[1].updated, shows.risky) if pick and shows.risky else None
 
     def action_toggle_done(self) -> None:
         self.show_done = not self.show_done
@@ -441,8 +444,7 @@ class Vivibox(
     def action_details(self) -> None:
         """The list is what you look at; the plan, the diff or the agent's question on request."""
         self.panel.set_class(not self.panel.has_class("hidden"), "hidden")
-        if pick := self.selected():  # opened by you: what is drawn now is what you look at
-            self.risky_shown.pop(pick[1].id, None)
+        self.risky_bound = None  # opened by you: drawn as the files are now; closed: nothing shown
         self.show_detail()
 
     @on(DataTable.RowSelected)

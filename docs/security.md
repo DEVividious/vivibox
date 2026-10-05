@@ -278,7 +278,13 @@ the details panel) has an identity: a SHA-256, whole, over the record of the las
 over every risky file as that view's scan found it: its path, what it is (a file, a link and
 where it leads, a special file), its content's digest, and whether a plain file can be run,
 all read as vivibox reads the clone, following no link out of it. `p` carries the identity of
-the drawing of the panel you opened, which no later refresh replaces, and `vivibox
+the view the panel is drawn from at the moment of the key: the diffs on the screen and that
+identity are one scan's, set together and cleared together (the details closed, another row,
+the task no longer waiting for the approval), and with none on the screen `p` approves
+nothing. A refresh you did not ask for does not replace what you are reading: the drawing
+stays, a line above it says the files changed, and only your own key draws them anew. The
+identity is bound when the text is handed to the panel, which paints it in the same turn of
+its loop; a key pressed in between is yours, on a drawing you asked for. And `vivibox
 approve-risky <id> <identity>` the one `vivibox risky` printed; the command line approves
 nothing it printed itself in the same run, which nobody would have read. The approval scans
 again, and when the clone or the record of the last approval no longer gives that identity it

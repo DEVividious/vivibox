@@ -344,6 +344,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `p` approves the risky files that are on the screen, and nothing when none are. It carried
+  the identity of the panel's first drawing for the task: a state drawn first, replaced on the
+  screen by a refresh and put back in the clone was approved while the screen showed another,
+  and a row drawn earlier was approved with the details closed. The diffs drawn and the
+  identity are one view now, kept while it is shown: a refresh no longer replaces what you
+  are reading, a line above the diffs says when the files have changed, and `d` twice, or a
+  refused `p`, draws them as they are.
 - Whether a risky file can be run is shown and approved with it. A file made executable before
   you looked was approved with nothing saying so, and one made executable after its approval
   was not found again. The view and `vivibox risky` now say `executable`, `now executable` or

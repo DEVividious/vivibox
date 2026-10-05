@@ -1,8 +1,9 @@
 """vivibox's own Serena in the writer's container of a real pod, on the configuration vivibox
 writes for a task: it is told a folder that container has, it starts with the project active,
-and a question of the project is answered. No model and no turn: Serena is asked over its own
-protocol (MCP, JSON-RPC on its standard input and output), and opencode's server is asked which
-MCP servers it started.
+and a question of the project is answered; and what is Serena's own stays in the writer's
+home, so that the clone is as git has it afterwards, whatever .serena the project commits. No
+model and no turn: Serena is asked over its own protocol (MCP, JSON-RPC on its standard input
+and output), and opencode's server is asked which MCP servers it started.
 
 The question is a search for a pattern, which needs no language server. The image has none:
 for the Python file of the project here Serena fetches one through the pod's network when it
@@ -12,8 +13,10 @@ Needs host/setup.sh to have run, Docker, and internet access (images).
 Run with: uv run pytest -m docker tests/test_serena_live.py
 """
 
+import contextlib
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import mock_provider
@@ -28,13 +31,21 @@ from vivibox.pod_egress import helper_missing
 
 pytestmark = [pytest.mark.docker, pytest.mark.real_start]
 
+# The variables vivibox gives the writer's container of a task with one agent, whose project
+# names no JDK and passes no variable of yours, by name; the rest of its environment is the
+# image's own.
+GIVEN = {
+    "DOCKER_HOST", "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "TESTCONTAINERS_HOST_OVERRIDE",
+    "TESTCONTAINERS_RYUK_CONTAINER_IMAGE", "HUSKY", "MAVEN_OPTS", "OPENCODE_CONFIG", "CLAUDE_CONFIG_DIR",
+}  # fmt: skip
 # The folder Serena was told before, which no container of a task has.
 NOWHERE = "/task/repo"
 # Serena's own words for a tool asked of it while it has no project.
 NO_PROJECT = "No active project"
 
 # In the writer's container: starts Serena as the task's opencode.json there defines it (its
-# command, with the variables of its entry), or on another folder when one is given, and asks
+# command, with the variables of its entry), or on another folder when one is given, or as
+# installed (Serena's own command of the entry alone, in the home it has by itself), and asks
 # it over MCP on its standard input and output: who it is, which tools it offers, and each call
 # asked for. Prints what it found, one JSON object, whatever happened; every wait is bounded.
 ASK = r"""
@@ -42,13 +53,16 @@ import json, os, queue, subprocess, sys, threading
 
 asked = json.loads(sys.argv[1])
 entry = json.load(open(os.environ["OPENCODE_CONFIG"]))["mcp"]["serena"]
-command = list(entry["command"])
+command, variables = list(entry["command"]), dict(entry.get("environment", {}))
+if asked.get("as_installed"):
+    command = command[command.index("serena"):]
+    variables.pop("SERENA_HOME", None)
 where = command.index("--project") + 1
 command[where] = asked.get("project") or command[where]
 log = "/tmp/serena-asked.log"
 server = subprocess.Popen(
     command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(log, "w"), text=True,
-    env={**os.environ, **entry.get("environment", {})},
+    env={**os.environ, **variables},
 )
 lines = queue.Queue()
 
@@ -105,7 +119,8 @@ finally:
 """
 
 # In the writer's container: every Serena that runs there as an MCP server, with the arguments
-# it was started with, where it works, and what its environment says of reporting its use.
+# it was started with, where it works, and what its environment says of reporting its use and
+# of its home.
 RUNNING = r"""
 import json, os
 
@@ -117,25 +132,32 @@ for pid in filter(str.isdigit, os.listdir("/proc")):
             continue
         variables = open(f"/proc/{pid}/environ", "rb").read().decode().split("\0")
         reporting = [v.split("=", 1)[1] for v in variables if v.startswith("SERENA_USAGE_REPORTING=")]
-        found.append({"argv": argv[2:], "cwd": os.readlink(f"/proc/{pid}/cwd"), "reporting": reporting})
+        home = [v.split("=", 1)[1] for v in variables if v.startswith("SERENA_HOME=")]
+        where = os.readlink(f"/proc/{pid}/cwd")
+        found.append({"argv": argv[2:], "cwd": where, "reporting": reporting, "home": home})
     except (OSError, IndexError):
         continue
 print(json.dumps(found))
 """
 
 
-@pytest.fixture(scope="module")
-def writer(tmp_path_factory):
-    """A task with one agent, made and started by vivibox itself (its pod, its keys and harness
-    files, the writer's server), with Serena set on: the project is a few lines, which Serena's
-    automatic mode leaves without it. A stand-in provider is named and never asked."""
+def ready() -> None:
+    """The machine can run a pod, and the agent's image is built."""
     if not TASKS_ROOT.is_dir():
         pytest.skip("run host/setup.sh first")
     if why := helper_missing():
         pytest.skip(why)
     image.build()
+
+
+@contextlib.contextmanager
+def a_started_task(folder: Path, files: dict[str, str] | None = None):
+    """A task with one agent, made and started by vivibox itself (its pod, its keys and harness
+    files, the writer's server), with Serena set on: the project is a few lines, which Serena's
+    automatic mode leaves without it. files: what the project commits besides its one source
+    file. A stand-in provider is named and never asked. Everything of the task is removed at
+    the end."""
     machine = load_config()  # this machine's pool and address, before the test's own files
-    folder = tmp_path_factory.mktemp("own")
     name = f"srn{check_id('x').split('-')[0][1:]}"
     source = folder / "source"
     source.mkdir()
@@ -146,6 +168,9 @@ def writer(tmp_path_factory):
     ):
         sh("git", *args, cwd=source)
     (source / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    for path, text in (files or {}).items():
+        (source / path).parent.mkdir(parents=True, exist_ok=True)
+        (source / path).write_text(text)
     sh("git", "add", ".", cwd=source)
     sh("git", "commit", "-q", "-m", "Base", cwd=source)
     cfg = folder / "config"
@@ -181,6 +206,14 @@ def writer(tmp_path_factory):
         own.undo()
 
 
+@pytest.fixture(scope="module")
+def writer(tmp_path_factory):
+    """The writer's container of a task whose project has no .serena of its own."""
+    ready()
+    with a_started_task(tmp_path_factory.mktemp("own")) as started:
+        yield started
+
+
 def inspected(what: str, container: str):
     return json.loads(sh("docker", "inspect", "-f", f"{{{{json {what}}}}}", container).stdout)
 
@@ -190,15 +223,36 @@ def project_of(written: dict) -> str:
     return command[command.index("--project") + 1]
 
 
-def ask(pod, calls: list, project: str = "") -> dict:
+def ask(pod, calls: list, project: str = "", as_installed: bool = False) -> dict:
     """What Serena answers in the writer's container, started as the task's configuration there
-    has it; project: on that folder in place of the configuration's."""
-    done = pod.exec("python3", "-c", ASK, json.dumps({"project": project, "calls": calls}), check=False)
+    has it; project: on that folder in place of the configuration's; as_installed: without
+    what vivibox starts it with besides its own command (its start script and its home)."""
+    asked = json.dumps({"project": project, "calls": calls, "as_installed": as_installed})
+    done = pod.exec("python3", "-c", ASK, asked, check=False)
     assert done.returncode == 0 and done.stdout.strip(), f"the question itself failed: {done.stderr[-2000:]}"
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
 SEARCH = ["search_for_pattern", {"substring_pattern": "def add"}]
+# Where Serena keeps its project file for the task's project, in the writer's container.
+OWN_PROJECT_FILE = f"{providers.SERENA_HOME}/project/project.yml"
+
+
+def git_sees(pod) -> str:
+    """What git in the writer's container says is not as committed in the clone, changed or
+    new: what the verification asks before it builds. "" for a clone that is as git has it."""
+    seen = bash(pod, "git status --porcelain --untracked-files=all")
+    assert seen.returncode == 0, seen.stderr
+    return seen.stdout
+
+
+def answered(found: dict) -> None:
+    """Serena, started on the project, answered the search with the line of the project's file."""
+    assert "gave_up" not in found, f"{found.get('gave_up')}: {found['log']}"
+    (search,) = found["calls"]
+    assert not search["failed"], f"{search['said']}: {found['log']}"
+    matches = json.loads(search["said"])
+    assert list(matches) == ["calc.py"] and "def add(a, b):" in matches["calc.py"][0], search["said"]
 
 
 def test_serena_is_told_the_folder_the_writers_container_mounts_and_works_in(writer):
@@ -229,13 +283,9 @@ def test_the_project_is_active_and_a_search_of_it_is_answered(writer):
     So that it starts says nothing; what it answers does."""
     pod = writer.pod
     here = ask(pod, [SEARCH])
-    assert "gave_up" not in here, f"{here.get('gave_up')}: {here['log']}"
+    answered(here)
     assert here["server"] == "Serena" and here["there"] and here["project"] == str(writer.task.repo)
     assert "search_for_pattern" in here["tools"] and "activate_project" not in here["tools"], here["tools"]
-    (search,) = here["calls"]
-    assert not search["failed"], f"{search['said']}: {here['log']}"
-    matches = json.loads(search["said"])
-    assert list(matches) == ["calc.py"] and "def add(a, b):" in matches["calc.py"][0], search["said"]
     nowhere = ask(pod, [SEARCH], project=NOWHERE)
     assert "gave_up" not in nowhere, f"{nowhere.get('gave_up')}: {nowhere['log']}"
     assert nowhere["server"] == "Serena" and not nowhere["there"], "it starts without the folder too"
@@ -244,11 +294,26 @@ def test_the_project_is_active_and_a_search_of_it_is_answered(writer):
     assert refused["failed"] and NO_PROJECT in refused["said"], refused["said"]
 
 
+def test_serena_leaves_nothing_in_a_clone_that_has_no_serena_folder(writer):
+    """Serena started on the project and asked keeps its project file, its caches and its
+    memories in its own home in the writer's container: the clone has no .serena, and git
+    there sees nothing changed or new."""
+    pod = writer.pod
+    answered(ask(pod, [SEARCH]))
+    assert pod.exec("test", "-s", OWN_PROJECT_FILE, check=False).returncode == 0, (
+        "its project file, in its home"
+    )
+    assert not (writer.task.repo / ".serena").exists()
+    assert pod.exec("test", "-e", f"{writer.task.repo}/.serena", check=False).returncode != 0
+    assert git_sees(pod) == ""
+
+
 def test_opencode_starts_serena_on_the_project_and_with_no_report_of_its_use(writer):
     """The writer's own server, started by the task's start, starts the MCP servers of its
     configuration when it is first asked for them: Serena is connected, runs on the project's
     folder with the arguments vivibox wrote, and has in its environment the variable that
-    turns its usage reporting off, which opencode took from the entry."""
+    turns its usage reporting off and the one that names its home, which opencode took from
+    the entry."""
     pod = writer.pod
     servers = (
         f'curl -fsS --max-time 120 -u "opencode:$(cat {secrets.MOUNT}/{secrets.PASSWORD})" {opencode.URL}/mcp'
@@ -264,10 +329,15 @@ def test_opencode_starts_serena_on_the_project_and_with_no_report_of_its_use(wri
     assert running, "the Serena opencode started is running"
     command = writer.written["mcp"]["serena"]["command"]
     for serena in running:
-        assert serena["argv"] == command[1:], "started with the arguments of the configuration"
+        asked = command[command.index("start-mcp-server") :]
+        assert serena["argv"] == asked, "started with Serena's arguments of the configuration"
         assert serena["cwd"] == project_of(writer.written)
         assert serena["reporting"] == ["false"], "no report of its use"
-    assert writer.written["mcp"]["serena"]["environment"] == {"SERENA_USAGE_REPORTING": "false"}
+        assert serena["home"] == [providers.SERENA_HOME], "in its own home"
+    assert writer.written["mcp"]["serena"]["environment"] == {
+        "SERENA_USAGE_REPORTING": "false",
+        "SERENA_HOME": providers.SERENA_HOME,
+    }
 
 
 def test_the_writers_container_has_the_mounts_and_the_secrets_it_had(writer):
@@ -276,7 +346,9 @@ def test_the_writers_container_has_the_mounts_and_the_secrets_it_had(writer):
     the shared caches, what a build installs, the host's authorities, the protected parts of
     the clone, the task's files with the handoff, your replies and the review folder, and its
     secrets), its secrets are the server's password alone (the provider here takes no key and
-    Serena none), and no variable of Serena's is in the container's own environment."""
+    Serena none), and its environment has the variables of the image and those vivibox gives
+    a writer's container, by name, and no other: Serena's are its entry's, not the
+    container's."""
     task, pod = writer.task, writer.pod
     disk, meta = task.root / "disk", task.meta
     expected = [
@@ -296,8 +368,51 @@ def test_the_writers_container_has_the_mounts_and_the_secrets_it_had(writer):
     assert sorted(inspected(".HostConfig.Binds", pod.agent)) == sorted(expected)
     assert bash(pod, f"ls -A {secrets.MOUNT}").stdout.split() == [secrets.PASSWORD]
     assert sorted(p.name for p in secrets.runtime_dir(task.id).iterdir()) == [secrets.PASSWORD]
-    variables = inspected(".Config.Env", pod.agent)
-    assert not [v for v in variables if "SERENA" in v.upper()], (
-        "the variable is the entry's, not the container's"
-    )
+    names = sorted(variable.split("=", 1)[0] for variable in inspected(".Config.Env", pod.agent))
+    assert names == sorted(set(image.env(pod.image)) | GIVEN), "the image's and vivibox's, each once"
+    assert not [name for name in names if "SERENA" in name.upper()]
     assert providers.mounted(writer.written) == [], "the configuration reads no secret"
+
+
+# A project file of Serena's as a repository commits one, in another shape than Serena writes.
+MINIMAL = "project_name: demo\nlanguages:\n- python\n"
+# A key of the project file Serena 1.7.0 writes, on a line of its own there.
+A_KEY = "ignored_memory_patterns"
+
+
+def test_a_project_file_your_repository_tracks_is_left_as_it_is(tmp_path_factory):
+    """A project that commits .serena/project.yml, in two shapes Serena writes whole again
+    when it reads them: a few keys, and the file this Serena writes itself with one key taken
+    out (what a project file of another version of Serena is). After Serena started on the
+    project and answered the search, the clone is as git has it (nothing changed, nothing
+    new, no file beside the tracked one) and the tracked file is the bytes that were committed.
+
+    The control, last: the same Serena as installed, without the script and the home vivibox
+    starts it with, takes the project's own .serena and leaves the tracked file changed. So
+    the check can fail, and what keeps the file is how vivibox starts Serena."""
+    ready()
+    with a_started_task(tmp_path_factory.mktemp("tracked"), {".serena/project.yml": MINIMAL}) as started:
+        task, pod = started.task, started.pod
+        tracked = task.repo / ".serena" / "project.yml"
+        assert tracked.read_bytes() == MINIMAL.encode() and git_sees(pod) == "", (
+            "the clone as vivibox made it"
+        )
+        answered(ask(pod, [SEARCH]))
+        assert git_sees(pod) == ""
+        assert tracked.read_bytes() == MINIMAL.encode(), "the bytes that were committed"
+        assert sorted(path.name for path in tracked.parent.iterdir()) == ["project.yml"], "nothing beside it"
+        own = pod.exec("cat", OWN_PROJECT_FILE).stdout
+        another = "".join(line for line in own.splitlines(keepends=True) if not line.startswith(A_KEY))
+        assert own and another != own, "Serena's own file, in its home, and that file without a key"
+        tracked.write_text(another)
+        committed = bash(
+            pod, "git commit -q -a -m 'Another project file of Serena' && git status --porcelain"
+        )
+        assert committed.returncode == 0 and committed.stdout == "", committed.stderr
+        answered(ask(pod, [SEARCH]))
+        assert git_sees(pod) == ""
+        assert tracked.read_bytes() == another.encode(), "the bytes that were committed"
+        installed = ask(pod, [], as_installed=True)
+        assert "gave_up" not in installed, f"{installed.get('gave_up')}: {installed['log']}"
+        assert " M .serena/project.yml" in git_sees(pod).splitlines(), "as installed, Serena writes it again"
+        assert tracked.read_bytes() != another.encode()

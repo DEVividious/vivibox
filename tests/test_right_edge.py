@@ -896,7 +896,7 @@ def test_approving_risky_files_says_when_what_is_shown_is_not_folded(env, monkey
         await pilot.pause()
         asked = " ".join(" ".join(str(label.render()) for label in app.screen.query("Label")).split())
         assert f"Approve the risky files of {task.id} as shown?" in asked and "Approve" in screen_text(app)
-        told = f"{lines} lines of what is shown are longer than the panel and are not folded"
+        told = f"{lines} lines of 1 risky file shown are longer than the panel and are not folded"
         assert (told in asked) == (lines == BIG), asked
         if lines == BIG:
             assert "Tab" in asked and f"vivibox risky {task.id}" in asked
@@ -1142,3 +1142,80 @@ def test_the_note_above_a_block_left_unfolded_is_not_copied_and_the_arrow_moves_
         assert side.scroll_x == side.size.width - 4
 
     copies(env, monkeypatch, "\n".join(["z" * 3500] * 40), check)
+
+
+# --- what the approval's question says of blocks left unfolded -----------------------------------
+
+
+def two_risky(task, second: str) -> None:
+    from vivibox.risky import Approvals
+
+    for name in ("build.gradle", "settings.gradle"):
+        (task.repo / name).write_text("plugins { id 'java' }\n")
+    Approvals(task.meta, task.repo).approve()
+    (task.repo / "build.gradle").write_text("plugins { id 'java' }\napply plugin: 'x'\n")
+    (task.repo / "settings.gradle").write_text(second + "\n")
+
+
+def question(app) -> str:
+    return " ".join(" ".join(str(label.render()) for label in app.screen.query("Label")).split())
+
+
+@pytest.mark.parametrize("risky_unfolded", [False, True])
+def test_the_question_speaks_of_risky_files_left_unfolded_and_of_no_other_block(
+    env, monkeypatch, risky_unfolded
+):
+    """A block of the plan left unfolded made the question say "not folded" while every risky
+    file was folded and whole: an agent could hang that on every approval. Said of the risky
+    files alone, with how many of them it is true of."""
+    from test_agent_prose import details
+    from test_tui import implementing
+
+    from vivibox import gate
+    from vivibox.states import State
+
+    task = implementing()
+    plan = task.meta / gate.ACCEPTED_PLAN
+    plan.write_text(plan.read_text() + "\n\n" + display.fenced("\n".join(["q" * 3500] * 40), "text") + "\n")
+    two_risky(task, big() if risky_unfolded else "rootProject.name = 'x'")
+    for state in (State.VERIFY, State.APPROVAL_RISKY):
+        task.transition(state)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await details(app, pilot)
+        notes = [" ".join(str(note.render()).split()) for note in app.text.query("#code-unfolded")]
+        assert len(notes) == 1 + risky_unfolded and "40 lines of this block" in notes[-1]
+        assert [f"vivibox risky {task.id}" in note for note in notes] == [True, False][1 - risky_unfolded :]
+        await pilot.press("p")
+        await pilot.pause()
+        asked = question(app)
+        assert f"Approve the risky files of {task.id} as shown?" in asked
+        told = f"{BIG} lines of 1 risky file shown are longer than the panel and are not folded"
+        assert (told in asked) == risky_unfolded and ("not folded" in asked) == risky_unfolded, asked
+        assert not risky_unfolded or f"vivibox risky {task.id}" in asked
+
+    run(scenario, size=(100, 50))
+
+
+def test_a_block_the_panel_no_longer_holds_is_not_kept(env, monkeypatch):
+    """What was read and folded of a block is kept while the panel's text holds the block, for
+    the next drawing of it; two megabytes of a file stayed for the life of the view."""
+    task = new_task()
+    risky(task, big(300))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        assert [key[0] for key in blocks._read.kept] == [fence.code] and blocks._folded.kept
+        app.shown = ""
+        app.show_detail()
+        await pilot.pause()
+        assert [key[0] for key in blocks._read.kept] == [fence.code], "the same block again: still kept"
+        await pilot.press("up")  # the project's row: its settings, another block
+        await pilot.pause()
+        await pilot.pause()
+        assert fence.code not in [key[0] for key in (*blocks._read.kept, *blocks._folded.kept)]
+
+    run(scenario, size=(80, 60))

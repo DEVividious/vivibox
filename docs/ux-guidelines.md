@@ -381,14 +381,16 @@ looks like an empty cache.
   diff nothing of it is in the column of `+` and `-`. A fold counts cells as what draws the
   row counts them (two for a wide character and for a symbol with its emoji selector, none
   for a combining mark, a tab to its stop) and is made again when the width changes, by the
-  work of the long lines alone; a code block never scrolls sideways. What is copied from a
+  work of the long lines alone; a folded block never scrolls sideways. What is copied from a
   folded line is the line as it was written, with no mark.
 - A block too large to fold says so. Where folding would add more than 2,000 rows at 80
   columns (`blocks.unfolded`), the block keeps a row a line and scrolls sideways, with a
   scrollbar that is always there; vivibox's own line above it, which the block's text cannot
   write, says how many lines are not folded and how to read them whole (Tab, then → or End;
-  `vivibox risky <id>`). Where such a block is a risky file, the question that approves the
-  files says the same, in its one step: "as shown" is never said of what was not.
+  `vivibox risky <id>`, named where the block is a risky file). Where such a block is a risky
+  file, the question that approves the files says the same, of those files alone and how many
+  of them, in its one step: "as shown" is never said of what was not. The threshold is
+  reckoned for the width the block's own text has at 80 columns, wherever it stands.
 - `vivibox status <id>` ends with the same next steps as commands, never with itself.
 - No dead ends: for every label above there is a way out the screen names.
 

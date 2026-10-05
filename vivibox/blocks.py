@@ -8,7 +8,6 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
-from functools import lru_cache
 from itertools import accumulate
 
 from markdown_it.token import Token
@@ -36,6 +35,7 @@ from textual.widgets._markdown import (
     MarkdownTableContent,
 )
 
+from . import display
 from .markdown import AT_80, MARK, PROSE, ROOM_AT_80, RULE, parser, pieces, source
 
 COLUMN = 4
@@ -136,9 +136,55 @@ MOST = 2000
 # of what, and the task whose risky files a terminal prints whole.
 NOT_FOLDED = (
     "{} lines of {} are longer than the panel and are not folded: it is too large to fold. Their ends "
-    "are off the screen until you scroll sideways (Tab to the block, then → or End), or read a risky "
-    "file whole in a terminal: vivibox risky {}"
+    "are off the screen until you scroll sideways (Tab to the block, then → or End)"
 )
+# And after it, where the block is a risky file: the task whose files a terminal prints whole.
+IN_A_TERMINAL = ", or read a risky file whole in a terminal: vivibox risky {}"
+
+
+def drawn_as(texts: Iterable[str]) -> set[str]:
+    """What the code blocks that draw these texts hold (Fence.code), as the panel is handed them:
+    escaped, the mark of a folded row as its code point, no white space at their end."""
+    return {display.terminal(text).replace(MARK, display.code_point(MARK)).rstrip() for text in texts}
+
+
+def not_folded(panel: Widget, texts: Iterable[str], task: str) -> str:
+    """What is said where risky files are approved, of those among texts (their diffs, as the
+    panel was handed them) that the panel draws unfolded: how many lines of how many files,
+    and how to read them whole. "" when every one of them is folded, whatever else in the panel
+    is not: a block of a plan is no file you approve."""
+    wanted = drawn_as(texts)
+    left = [block for block in panel.query(Fence) if block.unfolded and block.code in wanted]
+    files = f"{len(left)} risky file{'s' * (len(left) != 1)} shown"
+    said = NOT_FOLDED.format(sum(block.unfolded for block in left), files) + IN_A_TERMINAL.format(task)
+    return said if left else ""
+
+
+def _kept(function):
+    """function with what it returned kept by its arguments, the first of them a block's text:
+    for the next drawing of the same block, and no longer than the panel holds the block
+    (forget). Twelve at most, the oldest going first."""
+
+    def asked(*how):
+        if how not in asked.kept:
+            while len(asked.kept) >= 12:
+                del asked.kept[next(iter(asked.kept))]
+            asked.kept[how] = function(*how)
+        return asked.kept[how]
+
+    asked.kept = {}
+    asked.cache_clear = asked.kept.clear
+    return asked
+
+
+def forget(held: set[str]) -> None:
+    """What was read and folded of every block but those the panel's text holds now is dropped:
+    a file of megabytes is not kept for the life of the view."""
+    for kept in (_read.kept, _folded.kept):
+        for how in [how for how in kept if how[0] not in held]:
+            del kept[how]
+
+
 # The longest line a code block is drawn with before its width is known (Fence.folded).
 LIKELY = 60
 # The width each of the last few code blocks was drawn at, by its text.
@@ -161,7 +207,7 @@ def _cuts(line: str, width: int) -> list[int]:
     return cuts
 
 
-@lru_cache(maxsize=8)
+@_kept
 def _read(
     code: str, language: str, ansi: bool, dark: bool
 ) -> tuple[Content, tuple[int, ...], tuple[int, ...]]:
@@ -177,7 +223,7 @@ def _read(
     return content, tuple(starts), tuple(cells)
 
 
-@lru_cache(maxsize=8)
+@_kept
 def _folded(
     code: str, language: str, ansi: bool, dark: bool, width: int
 ) -> tuple[Content, str, tuple[int, ...]]:
@@ -398,8 +444,13 @@ class Fence(MarkdownFence):
     def compose(self) -> ComposeResult:
         text, marks, _ = self.folded()
         if self.unfolded:
-            task = getattr(self.app, "selected_id", lambda: None)() or "<task>"
-            yield Note(NOT_FOLDED.format(self.unfolded, "this block", task), id="code-unfolded", markup=False)
+            # The task and its risky files as the panel was handed them, where the view has them.
+            bound = getattr(self.app, "risky_bound", None)
+            risky = bound is not None and self.code in drawn_as(bound[2].diffs)
+            said = NOT_FOLDED.format(self.unfolded, "this block") + (
+                IN_A_TERMINAL.format(bound[0]) if risky else ""
+            )
+            yield Note(f"{said}.", id="code-unfolded", markup=False)
             yield Sideways(Code(text, id="code-content", markup=False), id="code-sideways")
         else:
             yield Marks(marks, id="code-marks")
@@ -512,6 +563,7 @@ class Panel(Markdown):
         of the panel as it is."""
         own: list[Token] = []
         piece: list[Token] = []
+        tokens = list(tokens)
         for token in tokens:
             framing = token.type.startswith("blockquote_") and (token.meta or {}).get(PROSE)
             (piece if piece or framing else own).append(token)
@@ -527,6 +579,9 @@ class Panel(Markdown):
                 yield from made
                 own, piece = [], []
         yield from super()._parse_markdown(own + piece)
+        held = {token.content.rstrip() for token in tokens if token.type in ("fence", "code_block")}
+        tables = [token.meta for token in tokens if token.type == "table_open" and token.meta]
+        forget(held | {source(meta.get("source", ""), 0).content.rstrip() for meta in tables})
 
     def drew(self, error: Exception) -> bool:
         """Whether error was raised while a piece an agent wrote was drawn: its widgets

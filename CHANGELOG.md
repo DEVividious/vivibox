@@ -344,6 +344,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The question that approves risky files says "not folded" only of the risky files, and of how
+  many of them. It said so whenever any block of the panel was left unfolded: a block of the
+  plan put it on an approval whose every file was folded and whole. The note above a block
+  that is no risky file no longer names `vivibox risky`.
+- What the panel read and folded of a code block is dropped when its text no longer holds the
+  block; the last eight were kept for the life of the view, megabytes of a file among them.
 - What is copied from a line of a code block with a tab after a wide character is the whole
   line: `漢⇥字` was copied as `漢⇥`, and fifty wide characters before a tab lost the line
   fifty characters of its end. The note above a block left unfolded is not copied with it.

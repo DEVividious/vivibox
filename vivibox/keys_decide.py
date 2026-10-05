@@ -132,8 +132,8 @@ class DecideKeys:
             self.show_detail()
             self.reload()
 
-        # Said in the one question: a block too large to fold shows the start of its long lines.
-        unfolded = sum(block.unfolded for block in self.text.query(blocks.Fence))
-        about = blocks.NOT_FOLDED.format(unfolded, "what is shown", task.id) if unfolded else ""
+        # Said in the one question, of the risky files alone: one too large to fold is drawn
+        # with the start of its long lines, and "as shown" is true of it only if that is said.
+        about = blocks.not_folded(self.text, bound[2].diffs, task.id)
         asked = f"Approve the risky files of {task.id} as shown?"
         self.push_screen(Confirm(asked, "Approve", about=about), approve)

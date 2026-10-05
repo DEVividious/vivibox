@@ -17,6 +17,7 @@ import os
 import re
 import shlex
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,17 +171,20 @@ NOT_THE_COPY = "vivibox's copy of what was approved is not what was approved"
 NOT_AS_SHOWN = "the risky files changed since they were shown, so nothing was approved"
 
 
-def identity(approved: dict[str, str], now: dict[str, str], modes: dict[str, str]) -> str:
+def identity(
+    approved: dict[str, str], now: dict[str, str], modes: dict[str, str], ran: Iterable[str] = ()
+) -> str:
     """What a view of the risky files shows, as one digest: the approval its diffs are made
     against (each approved path and its digest) and the files as the view's scan found them (each
     path with the digest scan gave it, which says what it is, a file's content, a link's target
-    and what it leads to, a special file's kind, and with a plain file's permission bits), in
+    and what it leads to, a special file's kind, and with whether a plain file can be run, which
+    the view says: modes; ran: the files the approval before recorded as ones that can), in
     the order of their paths, whatever order they were found in. The same definition as the
     approval's own record, which is that scan: an approval takes the files only while its scan
     and the approval before it give this digest again. Whole, never a prefix: the task writes
     the files, and two states that share a short prefix can be searched for."""
     stated = [sorted(approved.items()), sorted((path, d, modes.get(path, "")) for path, d in now.items())]
-    return hashlib.sha256(json.dumps(stated).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([*stated, sorted(ran)]).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -423,6 +427,23 @@ class Approvals:
     def approved(self) -> dict[str, str]:
         return json.loads(self.record.read_text()) if self.record.exists() else {}
 
+    @property
+    def runs(self) -> Path:
+        return self.dir / "executable.json"
+
+    def approved_executable(self) -> set[str] | None:
+        """The approved files that could be run when they were approved; None for an approval
+        that recorded none (an earlier vivibox's), which says nothing of modes: none is compared
+        with it, and the next approval records them."""
+        return set(json.loads(self.runs.read_text())) if self.runs.exists() else None
+
+    def _running(self, now: dict[str, str]) -> set[str]:
+        """The files of a scan that can be run now: a plain file, or what a link inside the
+        repository leads to, with a bit that says so, read as the scan reads (clone_read.mode).
+        The other permission bits travel with no commit and are not part of what is shown."""
+        modes = {path: clone_read.mode(self.repo, self.repo / path) for path in now}
+        return {path for path, mode in modes.items() if mode and int(mode, 8) & 0o111}
+
     def unapprovable(self, now: dict[str, str]) -> dict[str, str]:
         """The risky files of now that no approval takes, each with why, against your repository
         at the task's base commit (baseline), read only when there is something to ask it."""
@@ -444,7 +465,10 @@ class Approvals:
         return sum(base.sizes.get(p, 0) for p in self.approved()) > clone_read.SCAN_BUDGET
 
     def approve(
-        self, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
+        self,
+        now: dict[str, str] | None = None,
+        budget: clone_read.Budget | None = None,
+        runs: set[str] | None = None,
     ) -> dict[str, str]:
         """Takes the current state as approved (at task start: the state of your repository), or now,
         a scan's of this pass, whose budget the copies for later diffs draw from too. After the
@@ -478,16 +502,20 @@ class Approvals:
             fresh.rename(files)
         shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
         self.dir.mkdir(parents=True, exist_ok=True)
-        temporary = self.record.with_name(self.record.name + ".new")
-        temporary.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
-        temporary.replace(self.record)  # whole, or as it was
+        runs = self._running(current) if runs is None else runs  # with now: that pass's own
+        for path, kept in ((self.runs, sorted(runs)), (self.record, current)):
+            temporary = path.with_name(path.name + ".new")
+            temporary.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
+            temporary.replace(path)  # whole, or as it was
         return current
 
-    def _found(self, budget: clone_read.Budget) -> tuple[dict[str, str], str]:
-        """One scan of the clone, and the identity of what it found against the last approval."""
+    def _found(self, budget: clone_read.Budget) -> tuple[dict[str, str], str, set[str]]:
+        """One scan of the clone, the identity of what it found against the last approval, and
+        which of its files can be run."""
         now = scan(self.repo, self.extra, budget)
-        modes = {path: clone_read.mode(self.repo, self.repo / path) for path in now}
-        return now, identity(self.approved(), now, modes)
+        runs = self._running(now)
+        found = identity(self.approved(), now, dict.fromkeys(runs, "x"), self.approved_executable() or ())
+        return now, found, runs
 
     def approve_changes(self, shown: str) -> list[Change]:
         """p: the changes since the last approval and their approval, from one scan in one budget,
@@ -497,8 +525,8 @@ class Approvals:
         (Shown.identity), and while this pass's scan and the approval before it do not give that
         identity again, NotAsShown, with nothing taken; none ("") is never one."""
         budget = clone_read.Budget()
-        now, found = self._found(budget)
-        changes = self.changes(now)
+        now, found, runs = self._found(budget)
+        changes = self.changes(now, runs)
         if self.record.exists():
             refused = list(self.unapprovable(now).values())
             refused += [
@@ -508,7 +536,7 @@ class Approvals:
                 raise Unapprovable("; ".join(refused))
         if not shown or found != shown:
             raise NotAsShown(NOT_AS_SHOWN)
-        self.approve(now, budget)
+        self.approve(now, budget, runs)
         return changes
 
     def verified(self, budget: clone_read.Budget | None = None) -> tuple[list[Change], dict[str, str]]:
@@ -527,8 +555,8 @@ class Approvals:
         the identity of what that scan found, for the approval of exactly this (approve_changes);
         no identity while a change was not shown whole, or is one no approval takes."""
         budget = clone_read.Budget()
-        now, found = self._found(budget)
-        shown = [self._show(change, now, budget) for change in self.changes(now)]
+        now, found, runs = self._found(budget)
+        shown = [self._show(change, now, budget) for change in self.changes(now, runs)]
         # Before the first approval nothing is held to being shown: it is your repository's own.
         whole = not self.record.exists() or (all(seen for _, seen in shown) and not self.unapprovable(now))
         return Shown([said for said, _ in shown], found if whole else "")
@@ -536,8 +564,10 @@ class Approvals:
     def diffs(self) -> list[str]:
         return self.view().diffs
 
-    def changes(self, now: dict[str, str] | None = None) -> list[Change]:
-        """Since the last approval, by now: a scan's of this pass, or a scan of its own."""
+    def changes(self, now: dict[str, str] | None = None, runs: set[str] | None = None) -> list[Change]:
+        """Since the last approval, by now: a scan's of this pass, or a scan of its own. A file
+        whose content is as approved and that can be run where it could not, or the other way
+        round, is a change too (runs: the files of now that can, read here when not given)."""
         before, now = self.approved(), scan(self.repo, self.extra) if now is None else now
         # Approved before git ignored it (a build's output, approved before those were left out):
         # still there, and out of the scan now, so not a removal to approve.
@@ -548,7 +578,11 @@ class Approvals:
         result += [Change(p, "removed") for p in before if p not in now]
         # Never taken as checked, whatever the record says: for you, on every check.
         stuck = self.unapprovable(now)
-        result += [Change(p, "changed") for p in stuck if p in before and now[p] == before[p]]
+        same = [p for p in now if p in before and now[p] == before[p]]
+        result += [Change(p, "changed") for p in same if p in stuck]
+        if (ran := self.approved_executable()) is not None:
+            runs = self._running(now) if runs is None else runs
+            result += [Change(p, "changed") for p in same if p not in stuck and (p in runs) != (p in ran)]
         return sorted(result, key=lambda c: c.path)
 
     def diff(
@@ -569,7 +603,7 @@ class Approvals:
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
-        head = f"{display.name(change.path)}: {change.kind}"
+        head = f"{display.name(change.path)}: {change.kind}{self._mode_said(change)}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         digest = "" if now is None else now.get(change.path, "")
@@ -627,11 +661,22 @@ class Approvals:
             return (linked + note or f"{head}\n") + diff, True
         if change.kind == "removed" and not old.exists():  # a removal, and nothing kept to show of it
             return f"{head} (vivibox kept no copy of what was approved, so there is nothing to show)\n", True
+        if digest and digest == self.approved().get(change.path):  # only whether it runs changed
+            return f"{linked}{head} (its content is as approved)\n", True
         if not b:  # nothing to show, and nothing in it unshown
             return f"{linked}{head} (empty)\n", True
         # Never a change taken as seen with nothing of it shown.
         nothing = "the difference is in nothing vivibox shows as lines"
         return f"{linked}{head}: not shown: {self._unseen(change.path, nothing)}\n", False
+
+    def _mode_said(self, change: Change) -> str:
+        """Whether the changed file can be run, after its change's kind: said of one that can, and
+        of one that could when it was approved and cannot now."""
+        ran = self.approved_executable()
+        was = None if ran is None or change.kind == "added" else change.path in ran
+        if change.kind != "removed" and self._running({change.path: ""}):
+            return ", now executable" if was is False else ", executable"
+        return ", no longer executable" if was and change.kind != "removed" else ""
 
     def _unseen(self, path: str, why: str = "") -> str:
         """Why the task's change to path cannot be approved when you could not read it, and what

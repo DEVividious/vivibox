@@ -344,6 +344,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Whether a risky file can be run is shown and approved with it. A file made executable before
+  you looked was approved with nothing saying so, and one made executable after its approval
+  was not found again. The view and `vivibox risky` now say `executable`, `now executable` or
+  `no longer executable` after the change's kind, the approval records it, and a change of it
+  alone is a risky change at the next check. A task approved before this has no such record:
+  nothing is compared until its next approval. The other permission bits are not looked at.
 - No approval of risky files covers a file vivibox cannot show whole. A named pipe, a socket or
   a device the work put under a risky name was shown as what it is and approved; so was a link
   to a folder (`.idea -> stuff`), by its target's name, with nothing of the folder shown or

@@ -831,6 +831,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The supervisor's plan state and its verify state are in `vivibox/planning.py` and
+  `vivibox/verifying.py`, moved out of `supervisor.py` as they were (as `review_round.py`
+  holds the review round), which is 540 lines now.
 - vivibox names `rich` (15.x) among its dependencies: it was imported directly and came only
   with Textual. A test fails if a name the panel's widgets take from inside Textual is gone.
 - The widgets the details panel's text is drawn with (the panel, the frame, the code block, the

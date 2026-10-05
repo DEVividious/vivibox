@@ -17,16 +17,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, display, feedback, gate, handoff, limits, manual, orchestration, proposal, transcript, ui
+from . import brief, display, gate, handoff, limits, orchestration, proposal, transcript, ui
 from . import init as project_init
 from .config import DEFAULT_VERIFY_TIMEOUT, Project, by_modules
 from .harness import Harness, HarnessError, Turn
-from .plan import Plan, PlanError, parse_plan, without_notes
+from .plan import PlanError, parse_plan
+from .planning import Planning
 from .prompts import (
-    FEEDBACK_PROMPT,
     IMPLEMENT_PROMPT,
-    PLAN_PROMPT,
-    PLAN_REPAIR_PROMPT,
     PREPARED_PREFIX,
     PROPOSE_FOUND,
     PROPOSE_PREFIX,
@@ -34,9 +32,10 @@ from .prompts import (
     SELF_REVIEW_PROMPT,
 )
 from .review_round import ReviewRound
-from .risky import Change, stop_said
+from .risky import Change
 from .states import State, waits_for_user
 from .task import CURRENT, Task, TaskState, layout
+from .verifying import Verifying
 
 NEXT_PROMPT = "next-prompt.md"
 QUESTION = "question.md"
@@ -225,7 +224,7 @@ class Ports:
 
 
 @dataclass
-class Supervisor(ReviewRound):
+class Supervisor(Planning, Verifying, ReviewRound):
     task: Task
     harness: Harness
     ports: Ports
@@ -445,46 +444,6 @@ class Supervisor(ReviewRound):
             self._go(target, reason)
             self.ports.notify(self.task.id, reason, kind=kind)
 
-    def _plan(self, st: TaskState) -> None:
-        if (plan := self._your_plan(st)) is not None:
-            self._plan_ready(st, plan, yours=True)
-            return
-        if self.planner is not None and self.planner.manual:
-            self._plan_manually(st)
-            return
-        if self._turn(st, next_prompt(self.task, PLAN_PROMPT)) is None:
-            return
-        if q := self._asks():
-            self._checkpoint(State.CHECKPOINT_PLAN, q)
-            return
-        text, plan, problem = self._read_draft()
-        if problem:
-            # One turn to fix what acceptance would refuse anyway (the placeholder left in, no
-            # criteria, no verify command): cheaper than your reply, and once, not a loop. What
-            # was wrong goes with the turn, so the timeline says why the planner took a second.
-            repair = f"plan repair: {problem[:120]}"
-            if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem), kind=repair) is None:
-                return
-            if q := self._asks():
-                self._checkpoint(State.CHECKPOINT_PLAN, q)
-                return
-            text, plan, problem = self._read_draft()
-        if problem:
-            # The planner's draft, when it is a plan at all, is what you fix under e: one line short
-            # of acceptable is not a reason to start again from the template.
-            try:
-                parse_plan(text)
-                self.task.plan_path.write_text(without_notes(text))
-            except (OSError, PlanError):
-                pass
-            self._checkpoint(
-                State.CHECKPOINT_PLAN, f"no valid plan draft ({problem}); edit the plan yourself or reply"
-            )
-            return
-        # Without the template's notes: from here the plan is yours to read, not a form to fill.
-        self.task.plan_path.write_text(without_notes(text))
-        self._plan_ready(st, plan)
-
     def _asks(self) -> str:
         """Why the task stops for the agent's question, "" when it asked none: the question, or
         vivibox's own reason for a question.md it did not read, with the key that moves it away."""
@@ -492,39 +451,6 @@ class Supervisor(ReviewRound):
         if why:
             return f"{QUESTION_NOT_READ}: {why}; press r to answer (vivibox reply {self.task.id})"
         return f"question from the agent: {text[:200]}" if text else ""
-
-    def _your_plan(self, st: TaskState) -> Plan | None:
-        """The plan as you left it, when it is finished (--draft, then e) and this is the task's first
-        planning: acceptance would take it as it is, so no planner, yours or an agent, is asked to
-        write it again. A plan still carrying the template's placeholder is a starting point for the
-        planner. After your reply, or a stop mid-planning, the next prompt is set, and the planner
-        goes on."""
-        if (self.task.meta / NEXT_PROMPT).exists() or (self.task.meta / "handoff" / "plan-draft.md").exists():
-            return None
-        try:
-            plan = parse_plan(self.task.plan_path.read_text())
-            gate.check_plan(plan)
-        except (OSError, PlanError, gate.GateError):
-            return None
-        return plan
-
-    def _plan_ready(self, st: TaskState, plan: Plan, yours: bool = False) -> None:
-        if plan.summary:
-            self.task.set_goal(plan.summary)
-        if st.auto_plan and not self.ports.risky_changes():
-            # Through the plan checkpoint, so the event log reads the same as when you accept.
-            self._go(State.CHECKPOINT_PLAN, "plan ready")
-            try:
-                accept_plan(self.task, "plan accepted automatically")
-                print(f"[{time.strftime('%H:%M:%S')}] plan accepted automatically", flush=True)
-            except gate.GateError as e:
-                self.ports.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
-            return
-        self._checkpoint(
-            State.CHECKPOINT_PLAN,
-            "your plan is ready for review" if yours else "plan ready for review",
-            kind="plan",
-        )
 
     @property
     def by_module(self) -> bool:
@@ -539,63 +465,6 @@ class Supervisor(ReviewRound):
             return parse_plan((self.task.meta / gate.ACCEPTED_PLAN).read_text()).modules
         except (OSError, PlanError):
             return []
-
-    def _read_draft(self):
-        """The draft's text, read once, and the draft as a plan, or what keeps it from being one:
-        unreadable (a link or a special file is not read: its text is ""), or one acceptance would
-        refuse."""
-        text = ""
-        try:
-            text = handoff.read_file(self.task.meta / "handoff" / "plan-draft.md")
-            plan = parse_plan(text)
-            gate.check_plan(plan)
-        except (OSError, PlanError, gate.GateError) as e:
-            return text, None, str(e)
-        if problem := proposal.modules_missing(plan, self.by_module):
-            return text, None, problem
-        return text, plan, ""
-
-    def _plan_manually(self, st: TaskState) -> None:
-        """You plan in your own chat. A chat in a browser cannot see the repository, so the writer
-        first reports on it, for cents; a new project has nothing to report, and an agent's CLI
-        reads your checkout itself."""
-        context = self.task.meta / "handoff" / manual.CONTEXT
-        known = st.plan_in_cli or context.exists() or manual.repository_is_empty(self.task.repo)
-        if not known and self._turn(st, manual.RECON_PROMPT, "writer") is None:
-            return
-        manual.write_prompts(self.task, self.source or self.task.repo, self.project_verify)
-        self.task.set_awaiting_plan(True)
-        self._checkpoint(
-            State.CHECKPOINT_PLAN,
-            f"plan it in your own chat: vivibox plan prompt {self.task.id}, "
-            f"then vivibox plan import {self.task.id}",
-        )
-
-    def _watch_answer(self) -> None:
-        """A CLI you plan with writes its answer to the file itself, and nothing else would tell
-        vivibox it is there: you would press e only to find the plan waiting. Only an answer newer
-        than the prompt counts, so one left from an earlier round is not taken for the new one, and
-        only one that has stopped changing, so a file still being written is not read half-done."""
-        answer, prompt = self.task.meta / manual.ANSWER, self.task.meta / manual.PROMPT
-        try:
-            written, asked = answer.stat().st_mtime, prompt.stat().st_mtime
-        except OSError:
-            return
-        if written <= asked or written == self.answer_seen or time.time() - written < 1:
-            return
-        self.answer_seen = written
-        try:
-            manual.import_answer(self.task)
-        except (OSError, PlanError) as e:
-            self.task.event("plan_unreadable", error=str(e)[:500])
-            self.ports.notify(
-                self.task.id, f"the plan in {answer.name} is not readable yet ({e}); press e to see it"
-            )
-            return
-        count = len(parse_plan(self.task.plan_path.read_text()).criteria)
-        self.ports.notify(
-            self.task.id, f"your plan is in, {count} criteria; review and accept it", kind="plan"
-        )
 
     def _implement(self, st: TaskState) -> None:
         if self.ports.preparing():
@@ -668,116 +537,3 @@ class Supervisor(ReviewRound):
         """The project has no command, and neither it nor the task says there is nothing to build."""
         nothing = self.project_no_build or proposal.nothing_to_build(self.task)
         return not self.project_verify and not nothing
-
-    def _verify(self, st: TaskState) -> None:
-        self.ports.limits_baseline()
-        result = self.ports.run_gate(self.task)
-        if self._limits_hit():  # the limit's, not the code's: no round, verified again at the start
-            return
-        target = gate.next_state(result, st.rounds, self.max_rounds)
-        if result.passed:
-            self.task.set_verified_commit(result.commit)
-        if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
-            feedback.write_feedback(self.task, result)
-        if (could_not := self._could_not_run(result))[0]:
-            # No turn of the agent's: it cannot fix this, and a feedback turn would have it try.
-            # Blocked whatever the target was: a feedback file vivibox did not write is found late,
-            # after the gate's event, so the state's event carries why for the view.
-            self._go(State.CHECKPOINT_BLOCKED, "verification could not run", environment=could_not[0])
-            # The risky check out of budget has its own way out: g would scan the same files again.
-            again = (
-                ""
-                if result.risky_stopped
-                else f"; fix it, then press g (vivibox verify-again {self.task.id})"
-            )
-            self.ports.notify(self.task.id, f"verification could not run: {could_not[1]}{again}")
-        elif not result.passed and (kept := held_question(self.task)):
-            # You pressed g on the agent's question and the build failed again: the question is
-            # still unanswered, so it comes back to you; a feedback turn would have the agent work
-            # around what it asked about. No attempt is spent.
-            kept.rename(kept.with_name(QUESTION))
-            asked = ((question(self.task) or "").splitlines() or ["(its question.md is empty)"])[0][:150]
-            self._go(State.CHECKPOINT_BLOCKED, "verification still failing; the agent's question stands")
-            self.ports.notify(
-                self.task.id, f"verification still failing; the agent's question stands: {asked}"
-            )
-        elif target is State.IMPLEMENT:
-            set_next_prompt(self.task, FEEDBACK_PROMPT)
-            why = gate.why_red(result)
-            self._go(target, f"verification failed: {why}", why=why)
-        elif target is State.CHECKPOINT_BLOCKED:
-            self._go(target, f"verification still failing: {gate.why_red(result)}")
-            self.ports.notify(
-                self.task.id,
-                f"verification still failing after {ui.count(st.rounds, 'fix turn')}",
-            )
-        elif self.mode.supervisor or (self.mode.separate_reviewer and self.reviewer is not None):
-            self.last_gate = result
-            self._go(State.REVIEW, "verification passed")
-        elif not self._whole_build_holds(st):
-            return
-        elif target is State.APPROVAL_RISKY:
-            self._go(target, "verification passed", then=str(State.CHECKPOINT_FINAL))
-            self.ports.notify(
-                self.task.id, f"done pending your approval of risky files: 'vivibox risky {self.task.id}'"
-            )
-        else:
-            self._go(target, "verification passed")
-            self.ports.notify(self.task.id, self._review_message(result), kind="review")
-
-    def _could_not_run(self, result: gate.GateResult) -> tuple[str, str]:
-        """Why a verification could not run, whole for the view and briefly for a notification; ""
-        twice when it ran. The risky check's stop is said from its own record, whole, never found
-        in what a build printed; another problem besides is pointed to, not left out."""
-        stop = stop_said(result.risky_stopped, self.task.id)
-        whole = "; ".join(filter(None, [stop, result.environment]))
-        if not stop:
-            return whole, self._briefly(result.environment)
-        more = f"; and more, see vivibox status {self.task.id}" if result.environment else ""
-        return whole, stop + more
-
-    def _briefly(self, environment: str) -> str:
-        """For a notification: the task's own files by their place in it, so the sentence fits;
-        cut short, never in a word, it says where the rest is: vivibox status gives it whole."""
-        said = environment.replace(f"{self.task.meta}/", "")  # the clone's are said to be its: kept whole
-        rest = f" (the rest: vivibox status {self.task.id})"
-        cut = said[:150].rsplit(" ", 1)[0] + "…"
-        # A line of the build cut inside its frame (display.quoted): closed before vivibox's words.
-        return said if len(said) <= 150 else cut + "»" * (cut.count("«") > cut.count("»")) + rest
-
-    def _whole_build_holds(self, st: TaskState) -> bool:
-        """The whole build, when the work is about to come to you and it was verified by its modules
-        only; red, it goes back to the writer like any failed verification. True to go on."""
-        self.ports.limits_baseline()
-        result = self.ports.run_whole_gate(self.task)
-        if result is not None and self._limits_hit():
-            return False
-        if result is None or result.passed:
-            return True
-        feedback.write_feedback(self.task, result)
-        target = gate.next_state(result, st.rounds, self.max_rounds)
-        why = gate.why_red(result)
-        if (could_not := self._could_not_run(result))[0]:
-            self._go(State.CHECKPOINT_BLOCKED, "the whole build could not run", environment=could_not[0])
-            self.ports.notify(self.task.id, f"the whole build could not run: {could_not[1]}")
-        elif target is State.IMPLEMENT:
-            set_next_prompt(self.task, FEEDBACK_PROMPT)
-            self._go(target, f"the whole build failed: {why}", why=why)
-        else:
-            self._go(target, f"the whole build still failing: {why}")
-            self.ports.notify(
-                self.task.id, f"the whole build still failing after {ui.count(st.rounds, 'fix turn')}"
-            )
-        return False
-
-    def _head_moved(self, st: TaskState) -> bool:
-        """The commits are not the ones the verification ran on (you talked to the agent under w,
-        an agent committed after its turn, a stop fell between states): back to the verification,
-        for no round of the writer's; what is reviewed and what comes to you is what was verified."""
-        head = self.ports.head()
-        if not head or not st.verified_commit or head == st.verified_commit:
-            return False
-        reason = f"commits changed since the verification ({st.verified_commit[:7]} → {head[:7]})"
-        self.task.event("unverified_head", verified=st.verified_commit, head=head)
-        self._abandon(reason)  # to the verification; to you, the second time in a row
-        return True

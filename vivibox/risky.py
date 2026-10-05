@@ -164,6 +164,8 @@ class NotAsShown(Unapprovable):
     nothing of them is approved until you have looked again."""
 
 
+# The record's key for what is kept beside the digests (which files could be run): no path is "".
+WITH = ""
 # A copy kept for diffs that the record's digest is not of (from before copies were held to it).
 NOT_THE_COPY = "vivibox's copy of what was approved is not what was approved"
 # What NotAsShown says; whoever asked adds how the files are looked at again there.
@@ -276,7 +278,7 @@ def _undo(path: str, base: baseline.Baseline) -> str:
 
 def _cannot(
     path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False,
-    who: str = git_repo.WRITER, leads: str = "",
+    who: str = git_repo.WRITER, leads: str = "", was: str = "",
 ) -> str:  # fmt: skip
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
@@ -321,10 +323,12 @@ def _cannot(
         )
     # A link recorded by its target alone (to a folder, to nothing, to a special file): what it
     # leads to is neither shown nor checked, now or later. One your repository had, to the same
-    # target, is not the work's change, and stays recorded as it was.
+    # target, and that the approval before already holds as this (it led to no file to show when
+    # the task began) is not the work's change. One that led to a file the work has since removed
+    # or replaced is: it is said as what it leads to now.
     if digest.startswith(LINK) and _content(digest) is None:
         target = digest.removeprefix(LINK)
-        if base.links.get(path) == target:
+        if base.links.get(path) == target and was == digest:
             return ""
         return (
             f"{name} is a link to {leads or 'no file'} ({display.name(target)}): vivibox can show "
@@ -423,18 +427,21 @@ class Approvals:
     def record(self) -> Path:
         return self.dir / "approved.json"
 
-    def approved(self) -> dict[str, str]:
+    def _recorded(self) -> dict:
         return json.loads(self.record.read_text()) if self.record.exists() else {}
 
-    @property
-    def runs(self) -> Path:
-        return self.dir / "executable.json"
+    def approved(self) -> dict[str, str]:
+        """Each approved path and its digest."""
+        return {path: digest for path, digest in self._recorded().items() if path != WITH}
 
     def approved_executable(self) -> set[str] | None:
-        """The approved files that could be run when they were approved; None for an approval
-        that recorded none (an earlier vivibox's), which says nothing of modes: none is compared
-        with it, and the next approval records them."""
-        return set(json.loads(self.runs.read_text())) if self.runs.exists() else None
+        """The approved files that could be run when they were approved, from the same record as
+        their digests (under WITH, which is no path): one file, put in place by one rename, so
+        an approval is whole or the one before. None for an approval that recorded none (an
+        earlier vivibox's), which says nothing of modes: none is compared with it, and the next
+        approval records them."""
+        said = self._recorded().get(WITH)
+        return None if said is None else set(said["executable"])
 
     def _running(self, now: dict[str, str]) -> set[str]:
         """The files of a scan that can be run now: a plain file, or what a link inside the
@@ -450,11 +457,11 @@ class Approvals:
             return {}
         base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
         heavy, who = self._heavy(base), git_repo.undoes(self.dir.parent)
-        found = {}
+        found, approved = {}, self.approved()
         for path, digest in now.items():
             bare = digest.startswith(LINK) and _content(digest) is None
             leads = _leads_to(self.repo, self.repo / path) if bare else ""
-            if why := _cannot(path, digest, base, task_id, heavy, who, leads):
+            if why := _cannot(path, digest, base, task_id, heavy, who, leads, approved.get(path, "")):
                 found[path] = why
         return found
 
@@ -489,23 +496,28 @@ class Approvals:
             ):
                 (fresh / rel).parent.mkdir(parents=True, exist_ok=True)
                 # Where the agent reads (/task): never a file of yours, swapped in since the scan.
-                with contextlib.suppress(clone_read.Refused):
-                    if clone_read.copy(self.repo, self.repo / rel, fresh / rel, budget=budget) == digest:
-                        continue
-                    if not first:
-                        shutil.rmtree(fresh, ignore_errors=True)
-                        raise NotAsShown(NOT_AS_SHOWN)
-                    (fresh / rel).unlink()  # your own repository, changed as the task was made: no copy
+                try:
+                    copied = clone_read.copy(self.repo, self.repo / rel, fresh / rel, budget=budget)
+                except clone_read.Refused:
+                    continue  # no copy of it: the next diff shows the file whole
+                except OSError:
+                    copied = ""  # gone as it was copied
+                if copied == digest:
+                    continue
+                if not first:
+                    shutil.rmtree(fresh, ignore_errors=True)
+                    raise NotAsShown(NOT_AS_SHOWN)
+                (fresh / rel).unlink(missing_ok=True)  # your own repository, changed meanwhile: no copy
         shutil.rmtree(files, ignore_errors=True)
         if fresh.exists():
             fresh.rename(files)
         shutil.rmtree(self.dir / "view", ignore_errors=True)  # an earlier vivibox's copies to read
         self.dir.mkdir(parents=True, exist_ok=True)
         runs = self._running(current) if runs is None else runs  # with now: that pass's own
-        for path, kept in ((self.runs, sorted(runs)), (self.record, current)):
-            temporary = path.with_name(path.name + ".new")
-            temporary.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
-            temporary.replace(path)  # whole, or as it was
+        kept = {**current, WITH: {"executable": sorted(runs)}}
+        temporary = self.record.with_name(self.record.name + ".new")
+        temporary.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
+        temporary.replace(self.record)  # the approval: whole, or the one before
         return current
 
     def _found(self, budget: clone_read.Budget) -> tuple[dict[str, str], str, set[str]]:
@@ -529,7 +541,7 @@ class Approvals:
         if self.record.exists():
             refused = list(self.unapprovable(now).values())
             refused += [
-                said.strip() for said, seen in (self._show(c, now, budget) for c in changes) if not seen
+                said.strip() for said, seen in (self._show(c, now, budget, runs) for c in changes) if not seen
             ]
             if refused:
                 raise Unapprovable("; ".join(refused))
@@ -555,7 +567,7 @@ class Approvals:
         no identity while a change was not shown whole, or is one no approval takes."""
         budget = clone_read.Budget()
         now, found, runs = self._found(budget)
-        shown = [self._show(change, now, budget) for change in self.changes(now, runs)]
+        shown = [self._show(change, now, budget, runs) for change in self.changes(now, runs)]
         # Before the first approval nothing is held to being shown: it is your repository's own.
         whole = not self.record.exists() or (all(seen for _, seen in shown) and not self.unapprovable(now))
         return Shown([said for said, _ in shown], found if whole else "")
@@ -592,7 +604,11 @@ class Approvals:
         return self._show(change, now, budget)[0]
 
     def _show(
-        self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
+        self,
+        change: Change,
+        now: dict[str, str] | None = None,
+        budget: clone_read.Budget | None = None,
+        runs: set[str] | None = None,
     ) -> tuple[str, bool]:
         """change's diff, and whether you could read what it is: a new or changed file, or what a
         link inside the repository points to, is shown whole, as text, and what was shown is what
@@ -603,7 +619,7 @@ class Approvals:
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
-        head = f"{display.name(change.path)}: {change.kind}{self._mode_said(change)}"
+        head = f"{display.name(change.path)}: {change.kind}{self._mode_said(change, runs)}"
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         digest = "" if now is None else now.get(change.path, "")
@@ -674,12 +690,15 @@ class Approvals:
         nothing = "the difference is in nothing vivibox shows as lines"
         return f"{linked}{head}: not shown: {self._unseen(change.path, nothing)}\n", False
 
-    def _mode_said(self, change: Change) -> str:
+    def _mode_said(self, change: Change, runs: set[str] | None = None) -> str:
         """Whether the changed file can be run, after its change's kind: said of one that can, and
-        of one that could when it was approved and cannot now."""
+        of one that could when it was approved and cannot now. runs: the files that can, as the
+        pass's one read found them, which the identity and the record are of too; read here
+        only for a change shown by itself (diff)."""
         ran = self.approved_executable()
         was = None if ran is None or change.kind == "added" else change.path in ran
-        if change.kind != "removed" and self._running({change.path: ""}):
+        can = bool(self._running({change.path: ""})) if runs is None else change.path in runs
+        if change.kind != "removed" and can:
             return ", now executable" if was is False else ", executable"
         return ", no longer executable" if was and change.kind != "removed" else ""
 

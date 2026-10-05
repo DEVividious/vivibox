@@ -303,8 +303,12 @@ to read, since a copy made for reading would follow the clone and not the view y
 one past the total vivibox reads in a pass, one it cannot open, a special file (a named pipe, a socket, a device),
 a link that leads out of the repository, and a link to a folder, to nothing or to a special
 file, of which nothing can be shown or checked. Each is said as what it is, with the reply
-that has the writer take it out. A link your repository already had at the task's base, to the
-same target, is not the work's change: it stays recorded by its target alone, never followed. What is recorded as approved is that
+that has the writer take it out. A link your repository already had at the task's base that led
+to no file vivibox shows when the task began (to a folder, say), and still names the same
+target, is not the work's change: it stays recorded by its target alone, never followed. One
+that led to a file is read through like any link inside the repository: when the work changes
+or removes that file, the link is a change, shown as what it leads to now and refused when
+that cannot be shown. What is recorded as approved is that
 scan's digests, and the copy kept of each file, which the next view's diff is drawn against,
 is the bytes its digest is of: the copy is made beside the ones kept before and says what it
 wrote, and when that is not the scan's digest (the file was another for that moment) nothing
@@ -314,11 +318,13 @@ clone again as the approved content: the verification compares a new scan's dige
 record, and the review copy is made of the commits, not of these copies. A file changed
 after an approval is a risky change again at the next check. Whether a
 plain file can be run is part of what it is: the view says it after the change's kind
-(`executable`, `now executable`, `no longer executable`), the identity holds it, and the
-approval records it, so a file made executable after its approval is a risky change again at
+(`executable`, `now executable`, `no longer executable`), from the same read the identity
+holds, and the approval records it in the one record that holds the digests, put in place by
+one rename (an approval cut short is the one before, whole), so a file made executable after its approval is a risky change again at
 the next check, shown as that. The other permission bits are not looked at: no commit carries
 them. A task approved by an earlier vivibox has no record of which files could be run:
-nothing is compared with it until the task's next approval, which records them. Not covered:
+nothing is compared with it until the task's next approval, which records every risky file
+that can be run then, also one whose content did not change and which the view does not list. Not covered:
 nothing tells whether you read what was drawn.
 
 A checkout that is a partial clone (`git clone --filter=…`) is not supported as a project: a

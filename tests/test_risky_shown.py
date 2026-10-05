@@ -913,7 +913,8 @@ def test_an_approval_from_before_modes_were_recorded_says_nothing_of_them(task):
     until its next approval, which records them; a file that can be run is still said to be."""
     path = hook(task)
     approvals(task).approve_changes(approvals(task).view().identity)
-    (task.meta / "risky" / "executable.json").unlink()
+    record = task.meta / "risky" / "approved.json"
+    record.write_text(json.dumps(approvals(task).approved()))  # as an earlier vivibox wrote it
     assert approvals(task).approved_executable() is None
     path.chmod(0o755)
     assert approvals(task).changes() == [], "the record says nothing of modes: nothing to compare"
@@ -1005,3 +1006,106 @@ def test_nothing_you_are_told_to_read_follows_the_clone_while_the_view_stays(env
         assert "shows no file that large" in said_in(app)[-1]
 
     run_view(scenario, notifications=True)
+
+
+# --- round 2: a base link whose target the work changed, the mode's one read, one record -------------
+
+
+def with_a_base_link(env):
+    """A project whose repository has a risky link to a file with a name that is not risky."""
+    import subprocess
+
+    source = env / "repo"
+    (source / "conf").mkdir()
+    (source / "conf" / "rules.txt").write_text(RULES)
+    (source / "build.gradle").symlink_to("conf/rules.txt")
+    for args in (("add", "-A"), ("commit", "-q", "-m", "Share the rules")):
+        subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    return find_task(load_config().tasks_dir, "demo-1")
+
+
+def test_a_base_link_whose_target_the_work_removed_is_the_works_change(env):
+    """Your repository's link, to the same name as at the base, and the file it led to is gone:
+    it leads to nothing now, which is said and covered by no approval; nor is a pipe put there."""
+    t = with_a_base_link(env)
+    assert approvals(t).changes() == [] and approvals(t).view().identity
+    (t.repo / "conf" / "rules.txt").unlink()
+    view = approvals(t).view()
+    assert view.identity == "", "no approval of a link to nothing"
+    assert "build.gradle is a link to nothing (conf/rules.txt): vivibox can show nothing" in view.diffs[0]
+    os.mkfifo(t.repo / "conf" / "rules.txt")
+    view = approvals(t).view()
+    assert view.identity == "" and "build.gradle is a link to a FIFO (conf/rules.txt)" in view.diffs[0]
+    assert approvals(t).verified()[0] == [Change("build.gradle", "changed")]
+
+
+def test_a_base_link_whose_target_the_work_edited_is_shown_as_what_it_leads_to(env):
+    t = with_a_base_link(env)
+    (t.repo / "conf" / "rules.txt").write_text("plugins { id 'evil' }\n")
+    view = approvals(t).view()
+    assert (
+        view.identity
+        and "symlink to conf/rules.txt" in view.diffs[0]
+        and "+plugins { id 'evil' }" in view.diffs[0]
+    )
+
+
+def test_what_the_view_says_of_a_files_mode_is_the_read_its_identity_is_of(task, monkeypatch):
+    """The interleaving, by hand: after the view's one read of which files can be run, the file
+    is made a plain one again. The line says what the identity and the record hold: executable."""
+    (task.repo / "pom.xml").chmod(0o755)
+    found = Approvals._found
+
+    def found_then_chmod(self, budget):
+        result = found(self, budget)
+        (task.repo / "pom.xml").chmod(0o644)
+        return result
+
+    monkeypatch.setattr(Approvals, "_found", found_then_chmod)
+    view = approvals(task).view()
+    monkeypatch.undo()
+    assert view.diffs[0].startswith("pom.xml: added, executable\n"), view.diffs[0]
+    (task.repo / "pom.xml").chmod(0o755)
+    assert approvals(task).view() == view, "the same view: its text and its identity are one read's"
+
+
+def test_an_approval_that_ends_half_way_is_the_one_before_whole(task, monkeypatch):
+    """Digests and which files can be run are one record, put in place by one rename: an
+    approval cut short at it leaves the approval before, never the new modes with the old
+    digests."""
+    (task.repo / "Makefile").chmod(0o755)
+    shown, before = approvals(task).view().identity, kept(task)
+    was = (approvals(task).approved(), approvals(task).approved_executable())
+    replace, renames = Path.replace, []
+
+    def cut_short(self, target):
+        renames.append(Path(target).name)
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Path, "replace", cut_short)
+    with pytest.raises(OSError, match="Input/output"):
+        approvals(task).approve_changes(shown)
+    monkeypatch.setattr(Path, "replace", replace)
+    assert renames == ["approved.json"], "one rename is the approval"
+    assert (approvals(task).approved(), approvals(task).approved_executable()) == was
+    assert [name for name, _ in kept(task) if name.endswith(".json")] == [
+        n for n, _ in before if n.endswith(".json")
+    ]
+    assert Change("Makefile", "changed") in approvals(task).changes(), "its mode still waits for you"
+
+
+def test_a_file_gone_as_the_approval_copies_it_is_said_to_have_changed(task, monkeypatch):
+    shown, before = approvals(task).view().identity, kept(task)
+    copy = clone_read.copy
+
+    def gone_first(root, path, target, *a, **k):
+        if str(path).endswith("pom.xml"):
+            (task.repo / "pom.xml").unlink()
+        return copy(root, path, target, *a, **k)
+
+    monkeypatch.setattr(clone_read, "copy", gone_first)
+    with pytest.raises(risky.NotAsShown):
+        approvals(task).approve_changes(shown)
+    monkeypatch.undo()
+    assert kept(task) == before

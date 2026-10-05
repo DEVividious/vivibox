@@ -344,6 +344,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A link your repository had at the task's base is tolerated by its target's name only while
+  it leads to no file vivibox shows, as when the task began. One that led to a file the work
+  then removed was shown as `changed, symlink to …` and approved, and a named pipe put at its
+  target afterwards was no change; it is now said as a link to nothing, or to the pipe, and
+  covered by no approval.
+- What the view says of whether a risky file can be run comes from the read its identity is
+  of (it was read again, and could say otherwise), and an approval's digests and its modes
+  are one record put in place at once: an approval cut short left the new modes with the old
+  digests. A file removed as an approval copies it is said to have changed since it was
+  shown, where it ended with the system's bare error.
 - A risky file larger than vivibox shows of one file (64 MiB) is covered by no approval. It was
   not drawn, and the view said to read a copy of it before approving; every refresh wrote that
   copy again from the clone, so what you read there could be another state than the one `p`

@@ -32,11 +32,13 @@ def run(
 ) -> subprocess.CompletedProcess:
     """command in a session of its own, what it prints read here as it comes, as bytes, and
     counted, stdout and stderr together. Past limit bytes (TooMuch) or timeout seconds
-    (subprocess.TimeoutExpired), whichever comes first, it goes down with every process it
-    started, and nothing it printed is handed on: a listing cut short is no listing. Both
-    pipes are read to their end or closed here, so a process that holds one after the program
-    ended is waited on no longer than the time. how: stdin and cwd, as subprocess.Popen takes
-    them."""
+    (subprocess.TimeoutExpired), whichever comes first, its session is ended: the program
+    and every process it started that did not leave the session. Nothing it printed is handed
+    on: a listing cut short is no listing. Both pipes are read to their end or closed here, so
+    a process that holds one after the program ended is waited on no longer than the time; one
+    that left the session is not ended, and not waited on either. All of it is this process's
+    doing, on its way out of an interrupt too: where vivibox itself is ended by another signal,
+    the program runs to its own end. how: stdin and cwd, as subprocess.Popen takes them."""
     until = time.monotonic() + timeout
     (out, out_w), (err, err_w) = os.pipe(), os.pipe()
     read: dict[int, list[bytes]] = {out: [], err: []}

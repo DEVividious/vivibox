@@ -239,7 +239,8 @@ no repository of yours, since accepting deletes the task's clone. That check rea
 `.gitmodules` of the work, which the agent may have written, as data: without its includes,
 with nothing fetched, within a time limit, and reading no more than 64 MiB of what one git
 prints (a few objects of the agent's make a listing of gigabytes): past it git is ended with
-every process it started, and the accepting refused.
+the processes of its session (what it started that did not leave it), and the accepting
+refused.
 
 ## Limits of the boundary
 

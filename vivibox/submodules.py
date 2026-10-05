@@ -234,8 +234,8 @@ class Repository:
 
 def _git(args: list[str], until: float) -> tuple[int, bytes]:
     """git on the host (repo.run_git), fetching nothing, for as long as the check has left, and
-    what it prints read up to LIMIT, as it comes: past either, git is ended with what it
-    started, and what it printed by then is no answer (Late, Over)."""
+    what it prints read up to LIMIT, as it comes: past either, git's session is ended
+    (counted.run), and what it printed by then is no answer (Late, Over)."""
     left = until - time.monotonic()
     if left <= 0:
         raise Late

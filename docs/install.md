@@ -4,11 +4,13 @@ The setup script targets **Ubuntu on x86-64**, tested on 24.04. It uses apt/dpkg
 amd64 Sysbox and uv packages; it is not a distribution-independent installer. macOS and Windows
 are not supported.
 
-Git needs to be 2.45 or newer, or an earlier one that carries the security fixes of May 2024
-(2.39.4 to 2.44.1; Ubuntu 24.04's 2.43.0 has them): those are the first that know
-`GIT_NO_LAZY_FETCH`, which vivibox sets where git reads what an agent wrote or pointed at. An
-older Git ignores it, and in a repository of yours that is a partial clone goes to its remote
-for an object it lacks. vivibox does not check the version.
+Git needs to know `GIT_NO_LAZY_FETCH`, which vivibox sets where git reads what an agent wrote
+or pointed at. Git 2.45.0 and every release after it does. Of the older series, these releases
+do and the ones before them in each series do not: 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4 and
+2.44.1. A distribution's build that carries the same fix under an older number does too:
+Ubuntu's `1:2.43.0-1ubuntu7.1` and later, which 24.04 installs. A Git without it ignores the
+variable, and in a repository of yours that is a partial clone goes to its remote for an
+object it lacks. vivibox does not check the version.
 
 Before starting, install Git and [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
 and make sure `docker info` works as your user without sudo (Docker's

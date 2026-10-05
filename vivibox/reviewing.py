@@ -293,8 +293,10 @@ def up(
     # A reader's configuration: no language server, no Serena of vivibox's (opencode.READER).
     settings = opencode.config(role.model, (), task.repo, reader=True)
     # Exactly what its opencode.json reads: its provider's key and its MCP servers' secrets.
-    runtime = secrets.prepare(secrets_id(task.id), providers.mounted(settings))
+    # The container of the round before goes first (one may have outlived its round): the
+    # secrets are written into the directory it mounts, and are this round's alone.
     pod.review_fresh()
+    runtime = secrets.prepare(secrets_id(task.id), providers.mounted(settings))
     harness = pod.review_dir / "harness"
     harness.mkdir()
     branch = repo.branch_name(task.id)

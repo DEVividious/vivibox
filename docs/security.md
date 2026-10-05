@@ -64,8 +64,9 @@ on your machine until you have approved it.
   secrets of the MCP servers you brought, and its harness asks that provider for that role's
   model. A reviewer you put on another provider gets, from its next round, a container with
   the new provider's key and without the old one's; the round under way ends as it began,
-  with the key and the model it was made with. A round whose container cannot be made (no key
-  for the provider) is not started.
+  with the key and the model it was made with. The container of the round before is removed before the
+  new round's key is written into the directory it mounted. A round whose container cannot be
+  made (no key for the provider) is not started.
 
 ## How the pod is built
 

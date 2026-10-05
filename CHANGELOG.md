@@ -344,6 +344,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A review round's key is written once the container of the round before is removed. It was
+  written first, into the directory that container mounts: one that had outlived its round
+  (a supervisor ended in the middle of it) could read the next round's key for a moment.
 - A project's file is written whole or not at all when a verification command is kept: beside
   itself, then put in place. A write that failed half way left the start of the file, and two
   keeps at once could leave it empty. And a command you set under `e` while `--auto` was in

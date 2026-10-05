@@ -215,3 +215,27 @@ def test_m_says_when_each_choice_applies(env):
         ]
 
     run_view(scenario, notifications=True)
+
+
+@pytest.mark.real_start
+def test_a_rounds_key_is_written_only_once_the_container_before_it_is_gone(env, monkeypatch):
+    """A container that outlived its round (a supervisor ended in the middle of one) mounts the
+    directory the next round's key is written to: it is removed first, so it never sees a key
+    that is not its round's."""
+    task, sup, pod = supervised(env, monkeypatch, reviewer=(OC, "anthropic/read"))
+    round_of(task, sup, pod)  # and no review_down: the round's container is still there
+    choose(task, "reviewer", "openai/read")
+    seen: list[list[str]] = []
+    down = pod.review_down
+
+    def removed():
+        seen.append(held(f"{task.id}-review"))  # what the container being removed can read
+        down()
+
+    monkeypatch.setattr(pod, "review_down", removed)
+    del pod.asked[:]
+    assert round_of(task, sup, pod) == as_one("openai", "openai/read")
+    assert seen and all(keys == ["anthropic"] for keys in seen), seen
+    gone = next(i for i, c in enumerate(pod.asked) if c[:3] == ["docker", "rm", "-f"] and pod.review in c)
+    made = next(i for i, c in enumerate(pod.asked) if c[:2] == ["docker", "run"] and pod.review in c)
+    assert gone < made, "removed, then made anew"

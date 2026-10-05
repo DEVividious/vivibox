@@ -1038,6 +1038,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- `podspec.agent_repo` says in its own words what it is the one source of (the clone's mount in
+  the agent's container, its working directory, Serena's project) and what names the host's
+  path itself, so that it is not taken for a way to move the clone.
 - The view's decision keys other than `a` (the work brought into your checkout, `r`, `g`, `p`)
   are in `vivibox/keys_decide.py`, moved out of `tui.py` as they were, which is 694 lines now.
 - The supervisor's plan state and its verify state are in `vivibox/planning.py` and

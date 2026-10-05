@@ -351,9 +351,17 @@ def docker_env(pod: Pod) -> list[str]:
 
 def agent_repo(repo) -> str:
     """Where the agent's container has the task's clone: at the path the clone has on the host.
-    The one place that says so, for the container's mount of the clone and its working
-    directory (agent_command) and for what is told there where the project is (vivibox's own
-    Serena, providers.task_mcp)."""
+    The one place that says so for three things, which a test holds to one value: the
+    container's mount of the clone and its working directory (agent_command), and what is told
+    there where the project is (vivibox's own Serena, providers.task_mcp).
+
+    Not a way to move the clone: everything else that names it in a container says the host's
+    path itself. The parts of the clone mounted over it (repo.agent_mounts: .git, and its
+    config and hooks read-only), the folder the agent's brief names, the working directory of
+    what is started there besides the harness (the project's preparation, its app, a box's
+    shell), the sidecar's and the gate's mounts of the clone, and the readers' copies of the
+    commits at the path the writer has its clone. Changed alone, this leaves the clone at a new
+    path with none of its protected parts."""
     return str(repo)
 
 

@@ -249,7 +249,11 @@ vivibox could not check (a history it could not list, submodules too deep to fol
 time out, a listing past the 64 MiB it reads of one git), the first line says that, and not
 that a commit is not kept; a history it could not list comes with what you run: the fetch
 that brings the commit your submodule lacks, or the git that says why; a listing past the
-limit says the limit, what was being read, and the reply that sends the work back. Where
+limit says the limit, what was being read, and the reply that sends the work back, or, where
+the listing is of your own project as the task found it, which no work changes, that no task
+of the project can be accepted while it is that large, and no step that does nothing. A
+refusal that stopped at the limit never ends "Then accept the work again.", which would end
+there again, and its short form names the limit beside the commits you do not keep. Where
 one refusal has both, a commit that is not kept and a submodule vivibox could not check, the
 first line is the stronger one, of the commit that is not kept; each entry says its own; and
 the short form names each submodule among what it is (`commits you do not keep (tools), and

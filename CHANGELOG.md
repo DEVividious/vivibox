@@ -57,8 +57,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `%XX`, or with no path is not. An address left out of the command was only said to be
   there; it is now shown whole as text, between `«` and `»`, with its invisible characters as
   code points, and the command keeps a place for the address you know. The same for a
-  submodule that only a submodule's history has, whose `.gitmodules` the agent may have
-  written. The command reaches the address as a remote and nothing else, wherever it is
+  submodule that only a submodule's history has, and for one a submodule's own commit adds
+  below it, whose `.gitmodules` the agent may have written. The command reaches the address as a remote and nothing else, wherever it is
   pasted (`git -C / -c protocol.file.allow=never clone -- …`): `git clone` by itself takes
   its argument for a path first, and `https://host/x` is also the path `https:/host/x`, so
   in the review copy, which holds the work's files, it cloned a file the agent had committed
@@ -71,7 +71,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   memory, three times over while it read it. Past the limit git is ended with every process
   it started, nothing of the answer cut short is used, and the accepting is refused as what
   vivibox could not check: the limit, what was being read (`reading the history of lib`), and
-  the reply that sends the work back. The time limit holds as before, whichever comes first,
+  the reply that sends the work back. Where what is past the limit is the list of your own
+  project's files at the commit the task started from, which no work changes, the refusal
+  says that no task of the project can be accepted while the list is that large, and names
+  no reply. A refusal that also has commits you do not keep says so of its commands, and its
+  short form names both. The time limit holds as before, whichever comes first,
   and now ends the processes git started too: one that held git's output after git ended was
   left running. The task and your repositories are as they were.
 - The verification fails when the work lists a folder in the index as a submodule that is

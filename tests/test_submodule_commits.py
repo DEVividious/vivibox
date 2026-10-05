@@ -1682,9 +1682,11 @@ PRINTS_ON += "exec sleep 600"
 
 @pytest.mark.parametrize(
     "word, stream",
-    [("log", ""), ("log", ">&2"), ("ls-tree", ""), ("config", ""), ("rev-list", "")],
-    ids=["a history", "git's words on a history", "a commit's files", "a .gitmodules", "the work's commits"],
-)
+    [("log", ""), ("log", ">&2"), ("the work", ""), ("config", ""), ("rev-list", ""), ("your project", ""),
+     ("lib", "")],
+    ids=["a history", "git's words on a history", "the work's files", "a .gitmodules", "the work's commits",
+         "your project's own files", "your submodule's own files"],
+)  # fmt: skip
 def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
     project, monkeypatch, word, stream
 ):
@@ -1694,10 +1696,16 @@ def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
     git is ended with every process it started, nothing of the answer cut short is used (it
     is a listing with a pointer in it), and the work is refused as what vivibox could not
     check, saying the limit, what was being read where that is known, and what to do; the
-    task and your repositories are as they were. Every git of the check is read that way."""
+    task and your repositories are as they were. Every git of the check is read that way.
+
+    What to do is to send the work back for less to list, where the listing is of what the work
+    brings. Where it is of your own project as the task found it (its files at the commit the
+    task started from, a submodule's at the commit it stood on), no work changes it and no
+    reply helps: the refusal says that, and names no step that does nothing."""
     assert submodules.LIMIT == 64 * 2**20
     lib = project.source / "lib"
     task = actions.create("demo", "Goal")
+    stood = git(lib, "rev-parse", "HEAD")
     commit = written_in(task.repo / "lib")
     at_final(task, project)
     kept_from(task.repo / "lib", lib, commit)  # you keep it: what is left is to read its history
@@ -1705,7 +1713,9 @@ def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
     before = everything(task, project)
     monkeypatch.setattr(submodules, "LIMIT", 16 * BLOCK)
     monkeypatch.setattr(submodules, "SECONDS", 20)  # were it read to its end: a failure, not a hang
-    git_ = stand_in(project.source.parent / "stand-in", word, PRINTS_ON % (BLOCKS, stream))
+    # The listing of a commit's files is asked for by the commit: the one that is cut short.
+    listed = {"the work": work, "your project": base, "lib": stood}.get(word, word)
+    git_ = stand_in(project.source.parent / "stand-in", listed, PRINTS_ON % (BLOCKS, stream))
     with monkeypatch.context() as patched:
         patched.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
         with pytest.raises(submodules.Unkept) as said:
@@ -1713,19 +1723,140 @@ def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
     assert ended(git_.pids), "a process of the git that printed too much is still there"
     written = len(git_.written.read_text()) * BLOCK
     assert written <= submodules.LIMIT + 4 * BLOCK, "read past the limit: what git wrote was taken"
-    where = {"log": " (reading the history of lib)", "ls-tree": f" (listing the files of commit {base})"}
-    assert said.value.whole.splitlines() == [
-        f"{task.id} was not accepted: {NOT_KNOWN}",
-        "vivibox stopped checking the work's submodules at a safety limit: git printed more than 1 MiB"
-        f"{where.get(word, '')}. Nothing of an answer cut short is used, so there may be more. Send the "
-        f'work back with a reply (vivibox reply {task.id} "…") for work that leaves git less to list there.',
-    ]
+    where = {
+        "log": " (reading the history of lib)",
+        "the work": f" (listing the files of commit {work})",
+        "your project": f" (listing the files of your project at {base}, as it was when the task started)",
+        "lib": f" (listing the files of lib at {stood}, as it was when the task started)",
+    }.get(word, "")
+    stopped = "vivibox stopped checking the work's submodules at a safety limit: git printed more than "
+    stopped += f"1 MiB{where}"
+    step = (
+        "Nothing of an answer cut short is used, so there may be more. Send the work back with a reply "
+        f'(vivibox reply {task.id} "…") for work that leaves git less to list there.'
+    )
+    if word in ("your project", "lib"):
+        step = (
+            "Those files are your own, and the list of them is that large, so no work of a task of this "
+            "project can be accepted while it is: a reply to the agent does not change it. The task is as "
+            f"it was, with its work in its clone, {task.repo}."
+        )
+    assert said.value.whole.splitlines() == [f"{task.id} was not accepted: {NOT_KNOWN}", f"{stopped}. {step}"]
+    assert "vivibox reply" not in step or word not in ("your project", "lib"), "a step that does nothing"
     assert str(said.value) == (
-        f"{task.id} was not accepted: vivibox stopped checking the work's submodules at a safety limit: git "
-        f"printed more than 1 MiB{where.get(word, '')}, and accepting deletes the task. In a terminal, "
+        f"{task.id} was not accepted: {stopped}, and accepting deletes the task. In a terminal, "
         f"vivibox accept {task.id} says more."
     )
     assert everything(task, project) == before and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_a_commit_not_kept_and_the_limit_in_one_refusal_do_not_end_in_accept_again(project, monkeypatch):
+    """The writer commits in lib, which you do not keep, and in tools, which you keep and whose
+    history is past the limit. The refusal has the commands that keep lib's commit and the
+    limit's line with its reply, and does not end "Then accept the work again.": that would
+    end at the limit again. The short form names the limit too, and does not say that keeping
+    the commit is how the work gets accepted."""
+    task = actions.create("demo", "Goal")
+    commit = written_in(task.repo / "lib")
+    kept_from(task.repo / "tools", project.source / "tools", written_in(task.repo / "tools"))
+    at_final(task, project)
+    base, work = task.read_state().base_commit, git(task.repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(submodules, "LIMIT", 16 * BLOCK)
+    monkeypatch.setattr(submodules, "SECONDS", 20)
+    git_ = stand_in(project.source.parent / "stand-in", "log", PRINTS_ON % (BLOCKS, ""))
+    with monkeypatch.context() as patched:
+        patched.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
+        with pytest.raises(submodules.Unkept) as said:
+            submodules.check(task.id, project.source, task.repo, base, work)
+    assert ended(git_.pids)
+    whole = said.value.whole.splitlines()
+    assert (
+        whole[1].startswith(f"lib at {commit} is not in your submodule.")
+        and len(commands(said.value.whole)) == 2
+    )
+    over = "git printed more than 1 MiB (reading the history of tools)"
+    assert whole[4:] == [
+        f"vivibox stopped checking the work's submodules at a safety limit: {over}. Nothing of an answer cut "
+        'short is used, so there may be more. Send the work back with a reply (vivibox reply demo-1 "…") '
+        "for work that leaves git less to list there. The commands above keep those commits, and this "
+        "work is still not accepted."
+    ]
+    assert str(said.value) == (
+        f"{task.id} was not accepted: its work keeps submodule commits you do not keep (lib), and the check "
+        f"stopped at a safety limit: {over}, and accepting deletes the task. In a terminal, vivibox accept "
+        f"{task.id} says more."
+    )
+
+
+OVER = "git printed more than 64 MiB (reading the history of lib)"
+
+
+@pytest.mark.parametrize("own", [False, True], ids=["of what the work brings", "of your own project"])
+def test_a_refusal_at_the_limit_with_a_commit_not_kept_says_each_ones_step_and_names_both(project, own):
+    """One refusal: tools at a commit you do not keep, and the check stopped at the limit.
+    The commands keep the commit; the limit's line says its own step, or that there is none;
+    and nothing says to accept again, since that ends at the limit as before. The short form
+    names both, and does not say that keeping the commit is how the work gets accepted."""
+    yours = submodules.at(project.source, soon())
+    tools = submodules.Kept("tools", "3" * 40, submodules.MISSING, yours, yours, "tools")
+    said = submodules.refusal(
+        "demo-1", Path("/yours"), Path("/task/repo"), [tools], "", OVER, own
+    ).splitlines()
+    assert said[0].startswith("demo-1 was not accepted: its work keeps a submodule commit that no ")
+    assert (
+        said[1].startswith(f"tools at {'3' * 40} is not in your submodule.") and len(commands(said[2])) == 1
+    )
+    assert len(said) == 5 and "Then accept the work again." not in said
+    stopped = f"vivibox stopped checking the work's submodules at a safety limit: {OVER}. "
+    step = (
+        "Nothing of an answer cut short is used, so there may be more. Send the work back with a reply "
+        '(vivibox reply demo-1 "…") for work that leaves git less to list there.'
+    )
+    if own:
+        step = (
+            "Those files are your own, and the list of them is that large, so no work of a task of this "
+            "project can be accepted while it is: a reply to the agent does not change it. The task is as "
+            "it was, with its work in its clone, /task/repo."
+        )
+    assert (
+        said[4]
+        == f"{stopped}{step} The commands above keep those commits, and this work is still not accepted."
+    )
+    assert submodules.briefly("demo-1", [tools], "", OVER) == (
+        "demo-1 was not accepted: its work keeps submodule commits you do not keep (tools), and the check "
+        f"stopped at a safety limit: {OVER}, and accepting deletes the task. In a terminal, vivibox accept "
+        "demo-1 says more."
+    )
+    lib = submodules.Kept("lib", "1" * 40, submodules.UNLISTED, yours, yours, "lib", since="2" * 40)
+    assert submodules.briefly("demo-1", [lib], "", OVER) == (
+        "demo-1 was not accepted: vivibox could not check its work's submodules (lib), and the check "
+        f"stopped at a safety limit: {OVER}, and accepting deletes the task. In a terminal, vivibox accept "
+        "demo-1 says more."
+    )
+    alone = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [], "", OVER, own).splitlines()
+    assert alone[1] == f"{stopped}{step}", "no commands above: nothing said of them"
+
+
+def test_a_submodule_added_below_another_is_not_said_to_be_named_by_the_works_own_gitmodules(project):
+    """The work moves lib to a commit that adds a submodule, lib/new. Its address is in the
+    .gitmodules of lib at that commit, which may be the remote's and not the agent's: said
+    so, not as the work's own .gitmodules that the agent wrote."""
+    yours = submodules.at(project.source, soon())
+    for url, told in (
+        (
+            "https://example.com/new.git",
+            "The address in the command is the one the .gitmodules of lib names: ",
+        ),
+        ("/a/folder", "As its address the .gitmodules of lib said «/a/folder»: "),
+    ):
+        one = submodules.Kept("lib/new", "7" * 40, submodules.ADDED, None, yours, "new", url)
+        said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [one]).splitlines()[1]
+        assert said.startswith(f"lib/new at {'7' * 40}: the work adds this submodule, and your checkout has")
+        assert f"{told}the agent may have written it, and vivibox has not checked it" in said
+        assert "the work's .gitmodules" not in said and "the agent wrote it" not in said
+    none = submodules.Kept("lib/new", "7" * 40, submodules.ADDED, None, yours, "new", "")
+    said = submodules.refusal("demo-1", Path("/yours"), Path("/task/repo"), [none]).splitlines()[1]
+    assert "The .gitmodules of lib names no address for it." in said
 
 
 def test_a_process_that_holds_gits_output_after_git_ended_goes_when_the_time_is_out(project, monkeypatch):

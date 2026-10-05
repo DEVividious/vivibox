@@ -252,7 +252,10 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   was replaced, with the pointers it has. The check reads no more than 64 MiB of what one git prints
   for it (a history's listing, the files of a commit), since a listing is as long as the
   writer made it: past that it ends git, uses nothing of the answer cut short and refuses,
-  with the reply that sends the work back. A commit the history needs that neither the submodule's remote
+  with the reply that sends the work back. The files of your own project, at the commit the
+  task started from, are listed the same way: where that list alone is past the limit (some
+  half a million files), no work changes it, and the refusal says so, that no task of the
+  project can be accepted while it is, without a reply that would do nothing. A commit the history needs that neither the submodule's remote
   nor the task's clone has cannot be kept: the work goes back with a reply, for work that does
   not keep that part of the history.
 - `vivibox review <id>` updates the copy by hand, for example to look at work in progress.

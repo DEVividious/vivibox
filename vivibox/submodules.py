@@ -118,6 +118,11 @@ class Over(Exception):
     read then, where that is known."""
 
 
+class Own(Over):
+    """The same, of a listing of what is yours as the task found it (your project's files at
+    the commit it started from, a submodule's at the commit it stood on): no work changes it."""
+
+
 @dataclass(frozen=True)
 class Repository:
     """A repository of yours: your checkout, or a submodule of it. tree: its work tree, None for
@@ -318,7 +323,11 @@ def look(
     you keep one, those its own commit and the commits of its new history add or move. past:
     the commits of this repository's own new history to look at as `afters` are; via: what
     Kept.via says of a commit found under `afters`."""
-    was = (yours.gitlinks(before) if before else None) or {}
+    try:
+        was = (yours.gitlinks(before) if before else None) or {}
+    except Over:
+        whose = display.name(prefix.rstrip("/")) or "your project"
+        raise Own(f"listing the files of {whose} at {before}, as it was when the task started") from None
     names = yours.modules(before) if before and was else {}
     for n, after in enumerate([*afters, *past]):
         via = (prefix.rstrip("/"), after) if n >= len(afters) else via
@@ -371,7 +380,7 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
     history: the accepting keeps every commit of the work (a branch), not its last tree alone,
     so each of them is looked at. Nothing is changed, here or in the task. clone: the task's,
     named in what to do, never read."""
-    found, late, over = Found(), "", ""
+    found, late, over, own = Found(), "", "", False
     try:
         yours = at(source, time.monotonic() + SECONDS)
         if yours is None:
@@ -390,11 +399,11 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
         late = f"vivibox did not finish checking the work's submodules in {SECONDS:g} s"
         late += f" ({reading})" if str(reading) else ""
     except Over as reading:
-        over = "vivibox stopped checking the work's submodules at a safety limit: git printed more than "
-        over += f"{LIMIT // 2**20} MiB" + (f" ({reading})" if str(reading) else "")
+        over = f"git printed more than {LIMIT // 2**20} MiB" + (f" ({reading})" if str(reading) else "")
+        own = isinstance(reading, Own)
     if found.unkept or late or over:
-        said = refusal(task_id, source, clone, found.unkept, late, over)
-        raise Unkept(briefly(task_id, found.unkept, late or over), said)
+        said = refusal(task_id, source, clone, found.unkept, late, over, own)
+        raise Unkept(briefly(task_id, found.unkept, late, over), said)
 
 
 def _whose(one: Kept) -> str:
@@ -402,10 +411,15 @@ def _whose(one: Kept) -> str:
     return "the work" if one.path == "." else display.name(one.path)
 
 
-def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
+# How a refusal begins what it says of a check that stopped at LIMIT, before what git printed.
+AT_LIMIT = "vivibox stopped checking the work's submodules at a safety limit: "
+
+
+def briefly(task_id: str, found: list[Kept], late: str = "", over: str = "") -> str:
     """The refusal for a notification, which wraps and is gone in seconds: what was refused and
     why, which submodules, and where the whole of it is said. A submodule vivibox could not
-    check is never counted among the commits you do not keep."""
+    check is never counted among the commits you do not keep; a check that stopped at the limit
+    is named beside them, and then keeping commits is not said to be the way."""
 
     def named(lacking: bool) -> str:
         """In brackets, where found has a commit you do not keep (lacking), or where it has
@@ -419,20 +433,24 @@ def briefly(task_id: str, found: list[Kept], late: str = "") -> str:
     if known:  # each among what it is: a submodule vivibox could not check is not a commit you lack
         what = f"its work keeps submodule commits you do not keep{known}"
         what += f", and vivibox could not check others{unknown}" if unknown else ""
+    if over:
+        what = f"{what}, and the check stopped at a safety limit: {over}" if what else AT_LIMIT + over
+    says = "how to keep them" if known and not over else "more"
     return (
         f"{task_id} was not accepted: {what}, and accepting deletes the task. "
-        f"In a terminal, vivibox accept {task_id} says {'how to keep them' if known else 'more'}."
+        f"In a terminal, vivibox accept {task_id} says {says}."
     )
 
 
 def refusal(
-    task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "", over: str = ""
-) -> str:
+    task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "", over: str = "",
+    own: bool = False,
+) -> str:  # fmt: skip
     """What was refused, why, and what to do, for each commit: commands whole, to paste, with
     the folders they are run in and read from named in full. The first LISTED in full. The
     first line says a commit is not kept only where vivibox found one that is not. late, over:
     what stopped the check before its end (its time, what it reads of one git), as check says
-    it."""
+    it; own: what was past the limit is a listing of your own project as the task found it."""
     known = "its work keeps a submodule commit that no repository of yours keeps. The task's clone may "
     known += "hold the only copy, and accepting deletes the task."
     unknown = "vivibox could not check that you keep every submodule commit its work keeps. The task's "
@@ -499,27 +517,34 @@ def refusal(
             # No copy in the task's clone either: a pod cannot make a submodule's repository.
             # The address is from a .gitmodules the agent may have written: said to be that,
             # whole, and in the command only when it is one that does nothing but fetch.
-            what, whose, wrote = "the work adds this submodule", "the work's", "the agent wrote it"
+            what, whose, wrote = (
+                "the work adds this submodule",
+                "the work's .gitmodules",
+                "the agent wrote it",
+            )
             kept = "you keep the commit"
             if one.via:  # the history's, which the work may not leave there: not said to be the work's
-                what, whose = "that history has a submodule here", "that history's"
+                what, whose = "that history has a submodule here", "that history's .gitmodules"
                 wrote = "the agent may have written it"
                 kept += "; where the work leaves no submodule there, git shows the folder as one it "
                 kept += "does not track"
+            elif one.path != one.inside:  # named by a submodule's commit, which may be its remote's
+                above = display.name(one.path.removesuffix(one.inside).rstrip("/"))
+                whose, wrote = f"the .gitmodules of {above}", "the agent may have written it"
             entry, to = f"{named}: {what}, and your checkout has no copy of it.", display.name(str(mine))
             if ADDRESS.fullmatch(one.url):
                 lines += [
                     f"{entry} Clone it to {to}, so that {kept}. The address in the command is the one "
-                    f"{whose} .gitmodules names: {wrote}, and vivibox has not checked it. Look at it "
+                    f"{whose} names: {wrote}, and vivibox has not checked it. Look at it "
                     "before you run the command, which takes it for a remote wherever it is run, never "
                     "for a file of that name; clone from where you know the submodule to be if that is "
                     "elsewhere:",
                     f"{CLONE} {shlex.quote(one.url)} {quoted(mine.absolute())}",
                 ]
                 continue
-            told = f"{whose.capitalize()} .gitmodules names no address for it."
+            told = f"T{whose[1:]} names no address for it."
             if one.url:  # whole, as text: between marks it cannot close, on the line it is said on
-                told = f"As its address {display.quoted(f'{whose} .gitmodules', one.url)}: {wrote}, and "
+                told = f"As its address {display.quoted(whose, one.url)}: {wrote}, and "
                 told += "vivibox has not checked it and puts it in no command."
             lines += [
                 f"{entry} {told} Clone it to {to} from where you know the submodule to be, so that {kept}:",
@@ -563,11 +588,22 @@ def refusal(
         lines.append(f"And {len(found) - LISTED} more submodule commits, said once these are kept.")
     if late:
         lines.append(f"{late}: there may be more.")
-    if over:  # no command of yours makes the listing shorter: the work goes back
-        lines.append(
-            f"{over}. Nothing of an answer cut short is used, so there may be more. Send the work back "
-            f'with a reply (vivibox reply {task_id} "…") for work that leaves git less to list there.'
+    does = any(one.kind not in (UNCHECKED, UNLISTED) for one in found)  # a command above does something
+    if over:
+        # No command of yours makes the listing shorter. What the work brings goes back for less;
+        # what is yours as the task found it no work changes, and no step is named that does nothing.
+        step = (
+            "Nothing of an answer cut short is used, so there may be more. Send the work back with a "
+            f'reply (vivibox reply {task_id} "…") for work that leaves git less to list there.'
         )
-    if any(one.kind not in (UNCHECKED, UNLISTED) for one in found):  # a command above does something
+        if own:
+            step = (
+                "Those files are your own, and the list of them is that large, so no work of a task of "
+                "this project can be accepted while it is: a reply to the agent does not change it. The "
+                f"task is as it was, with its work in its clone, {display.name(str(clone))}."
+            )
+        still = " The commands above keep those commits, and this work is still not accepted." if does else ""
+        lines.append(f"{AT_LIMIT}{over}. {step}{still}")
+    elif does:  # never after the limit: accepting again ends there again
         lines.append("Then accept the work again.")
     return "\n".join(lines)

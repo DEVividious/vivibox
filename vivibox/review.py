@@ -37,7 +37,7 @@ from .plan import PlanError, parse_plan
 from .pod import PodError, RulesLeft
 from .risky import Approvals
 from .states import State
-from .task import Task, now
+from .task import Task, now, record
 
 
 def fetch_work(task: Task, project: Project) -> str:
@@ -223,8 +223,8 @@ def remember(done: Finished, project: Project, commit: str) -> None:
         # Which build accepted it: what a bug report about the work starts with.
         "version": version.current(),
     }
-    with path.open("a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with path.open("ab") as f:
+        f.write(record(entry))  # a line a record, whatever a goal or a name holds
 
 
 @dataclass
@@ -363,9 +363,8 @@ def _put_back(task: Task, source: Path, found: str, commit: str) -> str:
 
 def note(task_id: str, type_: str, **data) -> None:
     """An event on a task that is gone: on the record its archive keeps (l shows it)."""
-    line = json.dumps({"ts": now(), "task": task_id, "type": type_, "data": data}, ensure_ascii=False)
-    with (archive_path(task_id) / "events.jsonl").open("a") as f:
-        f.write(line + "\n")
+    with (archive_path(task_id) / "events.jsonl").open("ab") as f:
+        f.write(record({"ts": now(), "task": task_id, "type": type_, "data": data}))
 
 
 def suggested_message(

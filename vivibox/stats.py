@@ -113,7 +113,7 @@ def collect(sources: Iterable[tuple[list[dict], bool]], since: str = "") -> Stat
 
 def read_events(path: Path) -> list[dict]:
     try:
-        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        return [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
     except (OSError, ValueError):
         return []
 

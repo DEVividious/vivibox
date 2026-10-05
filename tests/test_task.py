@@ -124,3 +124,34 @@ def test_a_blocked_task_can_go_back_to_verification_without_the_agent():
     from vivibox.states import check_transition
 
     check_transition(State.CHECKPOINT_BLOCKED, State.VERIFY)
+
+
+@pytest.mark.parametrize("split", [" ", " ", "\u0085", "\r", "\x0b", "\x0c", "\x1c", "\x1e", "\n"])
+def test_no_character_of_a_name_splits_a_record_of_the_event_log(tmp_path, split):
+    """A file's name is the agent's, and goes on the record (the paths of an approval): a
+    character that ends a line for some reader of the log must not end the record."""
+    task = create_task(tmp_path, "demo", "Goal", "+++\n+++\n")
+    before = len(task.events())
+    name = f"a{split}b.gradle"
+    task.event("risky_approved", paths=[name])
+    task.event("after")
+    assert [e["type"] for e in task.events()[before:]] == ["risky_approved", "after"]
+    assert task.events()[before]["data"]["paths"] == [name], "and the name is the one that was written"
+    text = (task.meta / "events.jsonl").read_text()
+    assert len(text.splitlines()) == len(text.split("\n")) - 1, "a line a record, for every reader"
+
+
+def test_a_record_written_before_is_read_whole_and_a_name_that_is_no_text_is_kept(tmp_path):
+    """A log from before, with such a character as it was written then; and a name of bytes
+    that are no UTF-8, which the record holds as what it is instead of failing the write."""
+    import json
+
+    task = create_task(tmp_path, "demo", "Goal", "+++\n+++\n")
+    before = len(task.events())
+    old = json.dumps({"ts": "t", "task": task.id, "type": "old", "data": {"p": "a b"}}, ensure_ascii=False)
+    with (task.meta / "events.jsonl").open("a") as file:
+        file.write(old + "\n")
+    task.event("risky_approved", paths=["a\udc80b"])
+    found = task.events()[before:]
+    assert [e["type"] for e in found] == ["old", "risky_approved"]
+    assert found[0]["data"]["p"] == "a b" and found[1]["data"]["paths"] == ["a\udc80b"]

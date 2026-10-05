@@ -344,6 +344,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A task's event log stays readable whatever a file's name holds. A risky file named with a
+  line separator (U+2028, U+2029, U+0085) split the record of its approval in two, and the
+  task could not be read again; a name of bytes that are no UTF-8 failed the write. A record
+  is one line for every reader now, and a log written before is read by its line feeds alone.
 - The supervisor's window (`supervisor.log`, read under `l`) shows why a state changed as text:
   a control or an invisible character in a proposed command or in a quoted review's note is
   its code point there, as in the notification beside it.

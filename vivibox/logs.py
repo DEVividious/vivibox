@@ -175,7 +175,7 @@ def unread_reviews(kept: Path) -> dict[int, str]:
     it, "" when it could. No entry for a round the archive has no record of, or cannot read."""
     found: dict[int, str] = {}
     try:
-        for line in (kept / "events.jsonl").read_text().splitlines():
+        for line in (kept / "events.jsonl").read_text().split("\n"):  # a record a line feed
             event = json.loads(line) if line else {}
             if event.get("type") == "review":
                 found[int(event["data"]["round"])] = str(event["data"].get("problem", ""))

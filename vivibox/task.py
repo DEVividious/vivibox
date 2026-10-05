@@ -118,6 +118,21 @@ class TaskState:
     created_by_version: str = ""
 
 
+# The characters json.dumps leaves as they are that end a line for str.splitlines, which other
+# readers of a log split its records with (the next line, the line and paragraph separators).
+ENDS_A_LINE = {ord(c): f"\\u{ord(c):04x}" for c in "\x85\u2028\u2029"}
+
+
+def record(entry: dict) -> bytes:
+    """entry as one line of a log of records, a line each: JSON, whose strings escape every
+    character that ends a line for any reader (ENDS_A_LINE; the control characters are escaped
+    by JSON itself), so that nothing a name or a message holds can end the record or start
+    another. A name that is no text (bytes that are not UTF-8, as the file system gave them)
+    is written as the escapes JSON has for it, and read back as the same name."""
+    line = json.dumps(entry, ensure_ascii=False).translate(ENDS_A_LINE)
+    return line.encode("utf-8", "backslashreplace") + b"\n"
+
+
 class Task:
     def __init__(self, root: Path):
         self.root = root
@@ -348,15 +363,17 @@ class Task:
         (self.meta / self.LIVE_TURN).unlink(missing_ok=True)
 
     def event(self, type_: str, **data) -> None:
-        line = json.dumps({"ts": now(), "task": self.id, "type": type_, "data": data}, ensure_ascii=False)
-        with (self.meta / "events.jsonl").open("a") as f:
-            f.write(line + "\n")
+        with (self.meta / "events.jsonl").open("ab") as f:
+            f.write(record({"ts": now(), "task": self.id, "type": type_, "data": data}))
 
     def events(self) -> list[dict]:
         path = self.meta / "events.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line]
+        # A record ends at a line feed and nowhere else: one written before record() escaped
+        # them may hold a character other readers of lines split at.
+        text = path.read_bytes().decode("utf-8", "surrogateescape")
+        return [json.loads(line) for line in text.split("\n") if line.strip()]
 
     def transition(self, target: State, **data) -> TaskState:
         st = self.read_state()

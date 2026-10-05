@@ -26,13 +26,11 @@ from .config import ConfigError, load_config
 from .dialogs import (
     NO_PROJECTS,
     ChooseSession,
-    CommitWork,
     DeleteTask,
     Help,
-    Reply,
-    ReplyWithCriteria,
 )
 from .keys_box import BoxKeys
+from .keys_decide import DecideKeys
 from .keys_demo import DemoKeys
 from .keys_models import ModelKeys
 from .keys_new import NewKeys
@@ -75,7 +73,17 @@ DOCKER_EVERY = 30.0
 
 
 class Vivibox(
-    TaskTable, BoxKeys, DemoKeys, ModelKeys, NewKeys, ProjectKeys, PlanKeys, RunKeys, WorkKeys, App
+    TaskTable,
+    BoxKeys,
+    DecideKeys,
+    DemoKeys,
+    ModelKeys,
+    NewKeys,
+    ProjectKeys,
+    PlanKeys,
+    RunKeys,
+    WorkKeys,
+    App,
 ):
     TITLE = "vivibox"
     # Textual's own palette (themes, screenshots) took a tenth of a narrow footer.
@@ -550,108 +558,6 @@ class Vivibox(
         ids = [str(key.value) for key in self.table.rows]
         if task_id in ids:
             self.table.move_cursor(row=ids.index(task_id))
-
-    @work(thread=True)
-    def finish(self, task_id: str) -> None:
-        self.call_from_thread(self.busy_with, task_id, "accepting…")
-        try:
-            task, project = actions.load(task_id)
-            done = actions.finish(task, project, on_ready=lambda d: self.call_from_thread(self.finished, d))
-            if left := done.left:  # the rules stayed, the helper's words: text, never markup
-                self.call_from_thread(
-                    self.notify, f"{task_id} is done, but {left}", severity="warning", markup=False
-                )
-        except Exception as e:
-            self.call_from_thread(self.fail, e)
-        finally:
-            self.call_from_thread(self.busy_with, task_id, "")
-
-    def finished(self, done: actions.Finished) -> None:
-        self.reload()
-        if done.conflicts:
-            files = ", ".join(map(display.name, done.conflicts[:5]))  # the agent's names: text, never markup
-            text = f"{done.task_id}: conflicts in {files}; resolve them in your IDE. Also on {done.branch}."
-            self.notify(text, severity="warning", timeout=15, markup=False)
-            return
-
-        def commit(answer: dict) -> None:
-            if not answer:
-                self.notify("Left uncommitted; commit it in your IDE when you are ready.")
-            else:
-                try:
-                    made = actions.commit_work(
-                        done.source, answer["message"], answer["branch"], answer["create"]
-                    )
-                    on = f" on {answer['branch']}" if answer["branch"] else ""
-                    self.notify(f"Committed{on}: {display.name(made)}", markup=False)
-                except Exception as e:
-                    self.fail(e)
-
-        self.push_screen(CommitWork(done), commit)
-
-    def action_reply(self) -> None:
-        task, st = self.selected()
-
-        def send(comment: str, criteria: list[str] = ()) -> None:
-            if not comment.strip() and not criteria:
-                return
-            try:
-                actions.reply(task, comment, criteria)
-            except Exception as e:
-                self.fail(e)
-            else:
-                added = f" with {len(criteria)} new criteria" if criteria else ""
-                self.go_on(task, f"Sent{added}")
-            self.reload()
-
-        if st.state in (State.CHECKPOINT_FINAL, State.CHECKPOINT_BLOCKED):
-            self.push_screen(ReplyWithCriteria(task.id), lambda a: a and send(a["comment"], a["criteria"]))
-        else:
-            self.push_screen(Reply(task.id), send)
-
-    def go_on(self, task: Task, done: str = "") -> None:
-        """After a decision of yours the task goes on. With nobody working on it (after a reboot,
-        or once you stopped it) that takes a start, and saying "moves on" without one was a lie."""
-        st = task.read_state()
-        starts = actions.needs_start(task)
-        if done and starts:
-            self.notify(f"{done}; starting {task.id}, nobody was working on it.", markup=False)
-        elif done:
-            self.notify(
-                f"{done}; {task.id} is {ui.WORKING.get(st.state, 'waiting for you')} now.", markup=False
-            )
-        if starts:
-            self.start(task.id, resume=True)
-
-    def action_verify_again(self) -> None:
-        task, _ = self.selected()
-        try:
-            actions.verify_again(task)
-        except Exception as e:
-            self.fail(e)
-        else:
-            self.go_on(task, f"Verifying {task.id} again")
-        self.reload()
-
-    def action_approve_risky(self) -> None:
-        task, _ = self.selected()
-
-        def approve(yes: bool) -> None:
-            if not yes:
-                return
-            try:
-                count, review = actions.approve_risky(task, actions.load(task.id)[1])
-                self.notify(
-                    f"Approved {count} change(s)." + (f" Ready for review in {review}" if review else ""),
-                    markup=False,
-                )
-            except Exception as e:
-                self.fail(e)
-            else:
-                self.go_on(task)
-            self.reload()
-
-        self.push_screen(Confirm(f"Approve the risky files of {task.id} as shown?", "Approve"), approve)
 
     def busy_with(self, task_id: str, doing: str) -> None:
         """What a slow step (the demo, starting or stopping the task) is doing, in the task's

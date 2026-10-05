@@ -844,6 +844,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Internal
 
+- The view's decision keys other than `a` (the work brought into your checkout, `r`, `g`, `p`)
+  are in `vivibox/keys_decide.py`, moved out of `tui.py` as they were, which is 694 lines now.
 - The supervisor's plan state and its verify state are in `vivibox/planning.py` and
   `vivibox/verifying.py`, moved out of `supervisor.py` as they were (as `review_round.py`
   holds the review round), which is 540 lines now.

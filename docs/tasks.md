@@ -223,7 +223,9 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   copy had brought it already. The address in that clone command is the one the work's `.gitmodules` names: the
   agent wrote it and vivibox has not checked it, which the refusal says, printing the address
   whole; look at it before you run the command, and clone from where you know the submodule
-  to be if that is elsewhere. An address that is anything but a plain `https://`, `git://` or
+  to be if that is elsewhere. The command is `git -C / -c protocol.file.allow=never clone`:
+  git takes the address for a remote wherever you paste it, never for a file of that name
+  among the work's (`git clone` alone tries its argument as a path first). An address that is anything but a plain `https://`, `git://` or
   `ssh://` URL or `user@host:path` (an option, a transport that runs a program, a folder of
   your machine, a password or a second host in it) is shown as text between `«` and `»` and
   put in no command. Then you accept again. The task stays as it was

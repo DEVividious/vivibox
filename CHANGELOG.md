@@ -58,7 +58,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   there; it is now shown whole as text, between `«` and `»`, with its invisible characters as
   code points, and the command keeps a place for the address you know. The same for a
   submodule that only a submodule's history has, whose `.gitmodules` the agent may have
-  written.
+  written. The command reaches the address as a remote and nothing else, wherever it is
+  pasted (`git -C / -c protocol.file.allow=never clone -- …`): `git clone` by itself takes
+  its argument for a path first, and `https://host/x` is also the path `https:/host/x`, so
+  in the review copy, which holds the work's files, it cloned a file the agent had committed
+  at that path, from no host, and the next accept passed. The place for an address of yours
+  is one quoted word (`'<its remote>'`), which a shell no longer reads as files to open.
 - Accepting work reads no more than 64 MiB of what one git prints while it checks the work's
   submodules (the listing of a submodule's history, of a commit's files, a `.gitmodules`), on
   stdout and stderr together, counted as it comes. A listing is as long as the writer made it:

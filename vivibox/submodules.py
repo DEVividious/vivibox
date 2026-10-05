@@ -73,12 +73,20 @@ AS_KEPT = {"GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1"}
 # machine, no password and no user in a URL but ssh's own (https://host@elsewhere reads as
 # host), no character written as %XX, no space, nothing a shell reads as more than a word.
 # Anything in doubt is no such address: it is shown as text, and put in no command.
+# git clone takes its argument for a path before it takes it for an address, and each of these
+# is also a path (https://host/x is https:/host/x from the folder git runs in): a file of the
+# work at that path, in the review copy or once in your checkout, would be cloned in the
+# address's place, from no host. So the command (CLONE) runs git from /, where the work has no
+# file, and lets it take no file for a repository; either alone is enough. The command with a
+# place for an address of yours runs from / too, and may clone a folder you name in full.
 _USER, _HOST = r"[A-Za-z0-9_][A-Za-z0-9_-]*", r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?"
 _PART, _PORT = r"[A-Za-z0-9._~+][A-Za-z0-9._~+-]*", r"(?::[0-9]{1,5})?"
 ADDRESS = re.compile(
     rf"(?:(?:https|git)://{_HOST}{_PORT}/|ssh://(?:{_USER}@)?{_HOST}{_PORT}/|{_USER}@{_HOST}:/?)"
     rf"{_PART}(?:/{_PART})*/?"
 )
+
+CLONE, CLONE_YOURS = "git -C / -c protocol.file.allow=never clone --", "git -C / clone -- '<its remote>'"
 
 MISSING = "missing"  # you have the submodule, not the commit
 LOOSE = "loose"  # the commit is in your submodule, and nothing keeps it there
@@ -503,9 +511,10 @@ def refusal(
                 lines += [
                     f"{entry} Clone it to {to}, so that {kept}. The address in the command is the one "
                     f"{whose} .gitmodules names: {wrote}, and vivibox has not checked it. Look at it "
-                    "before you run the command, and clone from where you know the submodule to be if "
-                    "that is elsewhere:",
-                    f"git clone -- {shlex.quote(one.url)} {quoted(mine)}",
+                    "before you run the command, which takes it for a remote wherever it is run, never "
+                    "for a file of that name; clone from where you know the submodule to be if that is "
+                    "elsewhere:",
+                    f"{CLONE} {shlex.quote(one.url)} {quoted(mine.absolute())}",
                 ]
                 continue
             told = f"{whose.capitalize()} .gitmodules names no address for it."
@@ -514,7 +523,7 @@ def refusal(
                 told += "vivibox has not checked it and puts it in no command."
             lines += [
                 f"{entry} {told} Clone it to {to} from where you know the submodule to be, so that {kept}:",
-                f"git clone -- <its remote> {quoted(mine)}",
+                f"{CLONE_YOURS} {quoted(mine.absolute())}",
             ]
         elif one.kind == LOOSE:
             lines += [
@@ -537,7 +546,7 @@ def refusal(
                 f"its address, so git cannot check it out. Clone it to {display.name(str(mine))} from where "
                 "you know it to be, then fetch the commit from the submodule's remote, or from the task's "
                 f"clone ({keeps}):",
-                f"git clone -- <its remote> {quoted(mine)}",
+                f"{CLONE_YOURS} {quoted(mine.absolute())}",
                 fetch,
                 from_task,
                 *way_out,

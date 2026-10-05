@@ -241,7 +241,10 @@ address that comes from a `.gitmodules` the agent may have written is never show
 vivibox's own: the line above the command says the agent wrote it and vivibox has not
 checked it, and to look at it first; it is printed whole, never cut; and one that is not a
 plain address of a protocol that only fetches is in no command, but in that sentence, as
-text, between marks it cannot close (`display.quoted`). Where
+text, between marks it cannot close (`display.quoted`). A command that carries such an
+address does the same wherever it is pasted, the review copy among it, where the files are
+the agent's: it names every folder in full and gives git no file to take for the address.
+Where
 vivibox could not check (a history it could not list, submodules too deep to follow, its
 time out, a listing past the 64 MiB it reads of one git), the first line says that, and not
 that a commit is not kept; a history it could not list comes with what you run: the fetch

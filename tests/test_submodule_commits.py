@@ -7,6 +7,7 @@ one, and you, running the commands the refusal names, in your own shell.
 
 import ast
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -127,6 +128,9 @@ def refused(task, project, how=("accept",)) -> str:
     return said.value.whole
 
 
+# The clone of an address from a .gitmodules: from a folder where the work has no file, and with
+# no file taken for a repository, so that git takes the address for a remote and nothing else.
+CLONE = "git -C / -c protocol.file.allow=never clone"
 FROM_TASK = "GIT_NO_LAZY_FETCH=1 git"  # the fetch from the task's clone: nothing fetched lazily there
 # What the check's git is told: fetch nothing lazily, and read each commit as it is kept,
 # whatever a replace ref of yours shows in its place.
@@ -332,7 +336,7 @@ def test_a_submodule_the_work_adds_is_refused_until_you_have_a_copy_of_it(projec
         f"address the work's .gitmodules said «{extra}»: the agent wrote it, and vivibox has not checked "
         f"it and puts it in no command. Clone it to {source / 'extra'} from where you know the submodule "
         "to be, so that you keep the commit:",
-        f"git clone -- <its remote> {source / 'extra'}",
+        f"git -C / clone -- '<its remote>' {source / 'extra'}",
     ]
     as_told(commands(said)[0].replace("<its remote>", str(extra)))
     actions.finish(task, project.demo)
@@ -383,10 +387,122 @@ def test_only_an_address_that_runs_nothing_here_is_put_in_a_command(project):
     at_final(task, project, risky=True)
     said = refused(task, project)
     assert commands(said) == [
-        f"git clone -- {ADDRESSES[3]} {project.source / 'extra'}",
-        f"git clone -- <its remote> {project.source / 'other'}",
+        f"{CLONE} -- {ADDRESSES[3]} {project.source / 'extra'}",
+        f"git -C / clone -- '<its remote>' {project.source / 'other'}",
     ]
     assert said.count("ext::") == 1 and "the work's .gitmodules said «ext::sh -c 'touch MARK'»: " in said
+
+
+# No host is reached by a command pasted in a test: an https address goes to a proxy that is not
+# there, and ssh and git:// to a program that fails. What git says then names the address it
+# went for, which is how a test knows git took it for a remote.
+NO_HOST = {"https_proxy": "http://127.0.0.1:1", "HTTPS_PROXY": "http://127.0.0.1:1", "no_proxy": "",
+           "NO_PROXY": "", "GIT_SSH_COMMAND": "false", "GIT_PROXY_COMMAND": "false"}  # fmt: skip
+
+
+def pasted(command: str, where: Path) -> subprocess.CompletedProcess:
+    """A command of the refusal pasted into your shell in the folder where, with no host to reach."""
+    return subprocess.run(
+        ["sh", "-c", command], cwd=where, env={**os.environ, **NO_HOST}, capture_output=True, text=True
+    )
+
+
+def a_bundle(folder: Path) -> tuple[Path, str]:
+    """A repository of the writer's own packed into one file, and its commit: what git clones
+    from, with no network, when it is handed the file's path."""
+    made = make_repo(folder / "made")
+    git(made, "bundle", "create", "-q", str(folder / "made.bundle"), "HEAD", "main")
+    return folder / "made.bundle", git(made, "rev-parse", "HEAD")
+
+
+def planted(bundle: Path, folder: Path, address: str) -> None:
+    """The bundle in folder at the path that spells address: git clone takes an argument for a
+    path before it takes it for an address, and https://host/x is also the path https:/host/x."""
+    at = folder / (f"{address}.bundle" if address.endswith("/") else address)
+    at.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(bundle, at)
+
+
+def test_the_printed_clone_never_takes_a_file_of_the_work_for_the_address(project, tmp_path):
+    """The writer commits a repository of its own, packed, at the path that spells an address,
+    and adds a submodule with that address. The review copy has the file. You read the
+    refusal there, look at the address, which is the right one, and paste the command: git by
+    itself would clone the file, from no host, and the next accept would pass on what the agent
+    made. The printed command reaches the address as a remote and nothing else: here no host
+    answers, so it fails, your checkout has no such folder, and the accept is still refused."""
+    source, address = project.source, "https://example.com/org/extra.git"
+    task = actions.create("demo", "Goal")
+    bundle, commit = a_bundle(tmp_path)
+    planted(bundle, task.repo, address)
+    added(task, "extra", commit, address)
+    at_final(task, project, risky=True)
+    said = refused(task, project)
+    copy = repo.review_worktree_path(source, task.root)
+    assert (copy / "https:" / "example.com" / "org" / "extra.git").is_file(), "the review copy has the file"
+    control = pasted(f"git clone -- {address} {tmp_path / 'control'}", copy)
+    assert control.returncode == 0 and git(tmp_path / "control", "rev-parse", "HEAD") == commit, (
+        "git by itself takes the file for the address"
+    )
+    done = pasted(commands(said)[0], copy)
+    assert done.returncode != 0 and not (source / "extra").exists(), "the command cloned a file of the work"
+    assert f"unable to access '{address}/'" in done.stderr, "git went for the host"
+    assert refused(task, project) == said
+
+
+WHERE = ["the review copy", "your checkout", "the folder the submodule goes in"]
+
+
+@pytest.mark.parametrize("where", WHERE)
+@pytest.mark.parametrize("address", ADDRESSES)
+def test_a_path_that_spells_the_address_is_never_what_the_clone_command_reaches(
+    project, tmp_path, address, where
+):
+    """Every form of address vivibox puts in a command, with a file at the path that spells it
+    in each folder the command may be pasted in: the review copy, your checkout, the folder
+    the submodule's own goes in. git by itself clones the file there. The printed command does
+    not, whatever folder it is run in: it fails for want of a host, and makes no folder."""
+    source = project.source
+    folder = {WHERE[0]: tmp_path / "review-copy", WHERE[1]: source, WHERE[2]: source / "lib"}[where]
+    bundle, commit = a_bundle(tmp_path)
+    planted(bundle, folder, address)
+    control = pasted(f"git clone -- {shlex.quote(address)} {tmp_path / 'control'}", folder)
+    assert control.returncode == 0, f"no file is taken for {address} here: the case shows nothing"
+    yours = submodules.at(source, soon())
+    one = submodules.Kept("lib/extra", commit, submodules.ADDED, None, yours, "extra", address)
+    said = submodules.refusal("demo-1", source, Path("/task/repo"), [one])
+    done = pasted(commands(said)[0], folder)
+    assert done.returncode != 0 and not (source / "lib" / "extra").exists(), "it cloned the file"
+    assert "not allowed" not in done.stderr, "refused as a file, which is not having gone for the host"
+    assert commands(said) == [
+        f"git -C / -c protocol.file.allow=never clone -- {shlex.quote(address)} {source / 'lib' / 'extra'}"
+    ]
+    # Either half alone holds: from a folder where the work has no file, and with no file taken
+    # for a repository wherever it is run.
+    for half in ("git -C / clone", "git -c protocol.file.allow=never clone"):
+        alone = pasted(f"{half} -- {shlex.quote(address)} {tmp_path / 'alone'}", folder)
+        assert alone.returncode != 0 and not (tmp_path / "alone").exists(), half
+
+
+def test_the_place_for_an_address_you_know_is_no_file_for_a_shell_to_open(project, tmp_path):
+    """Where vivibox puts no address in the command, the command has a place for yours. Pasted
+    as it is, a shell took < and > for files to read and to write: with a file named its in
+    the folder (the review copy holds what the agent made), it wrote an empty file where the
+    submodule goes and ran git clone on a path named remote. The place is one word to a shell,
+    git is asked for a repository of that name and finds none, from a folder where the work has
+    no file; with your address in it, the command clones as before."""
+    source, copy = project.source, tmp_path / "review-copy"
+    bundle, commit = a_bundle(tmp_path)
+    copy.mkdir()
+    (copy / "its").write_text("")
+    shutil.copy(bundle, copy / "remote.bundle")
+    yours = submodules.at(source, soon())
+    one = submodules.Kept("extra", commit, submodules.ADDED, None, yours, "extra", "/a/folder")
+    (command,) = commands(submodules.refusal("demo-1", source, Path("/task/repo"), [one]))
+    done = pasted(command, copy)
+    assert done.returncode != 0 and not (source / "extra").exists() and not (copy / "remote").exists()
+    assert command == f"git -C / clone -- '<its remote>' {source / 'extra'}"
+    assert pasted(command.replace("<its remote>", str(tmp_path / "made")), copy).returncode == 0
+    assert git(source / "extra", "rev-parse", "HEAD") == commit
 
 
 def test_an_address_the_agent_wrote_is_said_to_be_the_agents_and_not_checked(project):
@@ -403,13 +519,15 @@ def test_an_address_the_agent_wrote_is_said_to_be_the_agents_and_not_checked(pro
         f"extra at {commit}: the work adds this submodule, and your checkout has no copy of it. Clone it "
         f"to {source / 'extra'}, so that you keep the commit. The address in the command is the one the "
         "work's .gitmodules names: the agent wrote it, and vivibox has not checked it. Look at it before "
-        "you run the command, and clone from where you know the submodule to be if that is elsewhere:",
-        f"git clone -- https://example.com/org/extra.git {source / 'extra'}",
+        "you run the command, which takes it for a remote wherever it is run, never for a file of that "
+        "name; clone from where you know the submodule to be if that is elsewhere:",
+        f"{CLONE} -- https://example.com/org/extra.git {source / 'extra'}",
         f"home at {commit}: the work adds this submodule, and your checkout has no copy of it. Clone it "
         f"to {source / 'home'}, so that you keep the commit. The address in the command is the one the "
         "work's .gitmodules names: the agent wrote it, and vivibox has not checked it. Look at it before "
-        "you run the command, and clone from where you know the submodule to be if that is elsewhere:",
-        f"git clone -- 'ssh://example.com/~me/home.git' {source / 'home'}",
+        "you run the command, which takes it for a remote wherever it is run, never for a file of that "
+        "name; clone from where you know the submodule to be if that is elsewhere:",
+        f"{CLONE} -- 'ssh://example.com/~me/home.git' {source / 'home'}",
     ]
 
 
@@ -441,7 +559,7 @@ def test_an_address_vivibox_puts_in_no_command_is_shown_whole_as_text(project, w
     start = f"extra at {'0' * 40}: the work adds this submodule, and your checkout has no copy of it. "
     end = "Clone it to /yours/extra from where you know the submodule to be, so that you keep the commit:"
     assert entry.startswith(start) and entry.endswith(" " + end)
-    assert (command, last) == ("git clone -- <its remote> /yours/extra", "Then accept the work again.")
+    assert (command, last) == ("git -C / clone -- '<its remote>' /yours/extra", "Then accept the work again.")
     told = entry.removeprefix(start).removesuffix(" " + end)
     if what == "none":
         assert told == "The work's .gitmodules names no address for it."
@@ -838,7 +956,7 @@ def test_a_submodule_only_the_history_has_is_not_said_to_be_added_by_the_work(pr
         f"it to {lib / 'old-dep'} from where you know the submodule to be, so that you keep the commit; "
         "where the work leaves no submodule there, git shows the folder as one it does not track:"
     ) in said
-    assert commands(said) == [f"git clone -- <its remote> {lib / 'old-dep'}"]
+    assert commands(said) == [f"git -C / clone -- '<its remote>' {lib / 'old-dep'}"]
     as_told(commands(said)[0].replace("<its remote>", str(project.tools)))
     actions.finish(task, project.demo)
     assert not task.root.exists()
@@ -1398,7 +1516,7 @@ def test_a_pointer_no_gitmodules_gives_an_address_is_cloned_not_checked_out(proj
         f"its address, so git cannot check it out. Clone it to {source / 'bare'} from where you know it "
         f"to be, then fetch the commit from the submodule's remote, or from the task's clone ({ref} keeps "
         "it there, and may be deleted once the submodule is on that commit or its remote has it):",
-        f"git clone -- <its remote> {source / 'bare'}",
+        f"git -C / clone -- '<its remote>' {source / 'bare'}",
         f"git -C {source / 'bare'} fetch --no-recurse-submodules",
         f"{FROM_TASK} -C {source / 'bare'} -c protocol.version=2 fetch --no-tags --no-recurse-submodules "
         f"/task/repo/bare {newer}:{ref}",
@@ -1469,7 +1587,7 @@ def test_a_gitmodules_the_writer_wrote_is_read_as_data(project, env, monkeypatch
     said = refused(task, project)
     assert time.monotonic() - began < 10, "the check waited on a file the writer's .gitmodules names"
     assert f"{path} at {commit}: the work adds this submodule" in said
-    assert commands(said) == [f"git clone -- https://example.com/extra.git {mine}"]
+    assert commands(said) == [f"{CLONE} -- https://example.com/extra.git {mine}"]
     assert "yours.example" not in said
 
 

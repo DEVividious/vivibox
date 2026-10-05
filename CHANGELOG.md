@@ -335,6 +335,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `--auto` decides nothing before its check has passed. The command a writer proposes, in a
+  project with none, was written into the project's settings before the verification ran,
+  and so before a clone whose git files the task had changed was refused: it is now written
+  only after a verification has passed with exactly that command, as vivibox read it once,
+  and only if the clone is then still as recorded, without risky changes, and on the commit
+  that was verified. A plan is accepted without you only on a clone that is as recorded;
+  on one that is not, it waits for you with why. What was kept, and what was not and why,
+  is on the task's timeline and in a notification.
 - A yes-or-no keeps its question and its buttons on the screen whatever it quotes. With a tall
   text in it (how the last accepted task was run, which an agent wrote) a terminal of 80 by 24
   showed neither the end of the text, nor "Still right?", nor the buttons, and Enter still

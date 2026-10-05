@@ -49,6 +49,7 @@ def make(task, harness, results=(), risky=()):
     ports = supervisor.Ports(
         run_gate=lambda t: results.pop(0),
         risky_changes=lambda: [Change(p, "changed") for p in risky],
+        clone_refused=lambda: "",  # as recorded; what --auto does on one that is not: test_auto_decisions
         notify=lambda _id, msg, kind="": notes.append(msg),
         sleep=lambda seconds: None,  # a retry's wait, not waited in tests
     )
@@ -1166,11 +1167,15 @@ def test_a_command_with_debug_output_reaches_the_checkpoint_named_as_such(task):
     assert "with debug output on (-X)" in notes[-1] and "narrowed" not in notes[-1]
 
 
-def test_auto_keeps_a_whole_command_without_stopping_but_stops_on_a_narrowed_one(task):
+def test_auto_takes_a_whole_command_to_its_verification_but_stops_on_a_narrowed_one(task):
+    """Without stopping, and with nothing written for the project yet: it keeps the command once
+    the gate has passed with it (test_auto_decisions)."""
     harness = FakeHarness(task, [with_proposal("npm ci && npm test")])
     sup, notes, kept = command_supervisor(task, harness, results=[gate_result()], auto=True)
     sup.step()
-    assert kept == ["npm ci && npm test"] and task.read_state().state is State.VERIFY
+    assert kept == [] and task.read_state().state is State.VERIFY
+    entered = [e["data"] for e in task.events() if e["type"] == "state"][-1]
+    assert (entered["command"], entered["to_keep"]) == ("npm ci && npm test", True)
     other = create_task(task.root.parent / "t2", "demo", "Goal", TEMPLATE)
     sup, notes, kept = command_supervisor(
         other, FakeHarness(other, [with_proposal("pytest -k pet")]), auto=True

@@ -74,7 +74,10 @@ class Planning:
     def _plan_ready(self, st: TaskState, plan: Plan, yours: bool = False) -> None:
         if plan.summary:
             self.task.set_goal(plan.summary)
-        if st.auto_plan and not self.ports.risky_changes():
+        # --auto accepts nothing on a clone the protection check refuses, or could not be asked
+        # about (what the port raises ends the step): the plan then waits for you, with why.
+        held = self._not_by_itself() if st.auto_plan else ""
+        if st.auto_plan and not held:
             # Through the plan checkpoint, so the event log reads the same as when you accept.
             self._go(State.CHECKPOINT_PLAN, "plan ready")
             try:
@@ -83,11 +86,10 @@ class Planning:
             except gate.GateError as e:
                 self.ports.notify(self.task.id, f"plan not accepted automatically ({e}); review it")
             return
-        self._checkpoint(
-            State.CHECKPOINT_PLAN,
-            "your plan is ready for review" if yours else "plan ready for review",
-            kind="plan",
-        )
+        ready = "your plan is ready for review" if yours else "plan ready for review"
+        if held and held != _sup.RISKY_CHANGED:  # risky files have their own words (_checkpoint)
+            ready = f"{ready}, not accepted automatically: {held}"
+        self._checkpoint(State.CHECKPOINT_PLAN, ready, kind="plan")
 
     def _read_draft(self):
         """The draft's text, read once, and the draft as a plan, or what keeps it from being one:

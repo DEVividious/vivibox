@@ -119,7 +119,8 @@ turn would have the agent work around what it asked about instead of waiting for
 
 - `--auto` on `vivibox new` accepts the agent's plan without stopping, for small, well-described
   tasks. It still stops when the plan has no real acceptance criteria, when the agent asks a
-  question, or when risky files changed.
+  question, when risky files changed, or when the task's clone is not as vivibox recorded it
+  (the plan then waits for you, with why).
 - `--draft` only creates the task, to write the plan yourself or check the baseline first with
   `vivibox verify <id>`; then `vivibox start <id>`. A plan you finished (the placeholder criterion
   replaced) goes straight to your review when the task starts, whoever the planner is; one with

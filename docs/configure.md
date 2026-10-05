@@ -178,8 +178,11 @@ When the writer proposes a command, the task stops at **review the command** bef
 verification. `a` opens the command field; Enter keeps it for future tasks in the project.
 `e` changes it and `r` asks the writer for another proposal. A missing proposal leaves the field
 empty for you to fill. Commands selecting only some tests or modules are labelled as narrowed:
-a passing subset can miss regressions elsewhere. `--auto` keeps a whole command without stopping;
-a narrowed or missing command still waits for you.
+a passing subset can miss regressions elsewhere. `--auto` takes a whole command to the
+verification without stopping, and the project keeps it once that verification has passed with
+it: a verification that fails or cannot run, or a clone that changed by the time it has passed,
+leaves the project without a command, and the task's timeline says why. A narrowed or missing
+command still waits for you.
 
 `e` on a project's row changes its verification later. If the command refers to a file missing
 from the commits (an uncommitted wrapper, for example), the task waits with **verification could

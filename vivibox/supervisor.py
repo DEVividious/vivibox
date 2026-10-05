@@ -178,6 +178,13 @@ TRANSIENT = re.compile(
 )
 # How long to wait before each retry of a turn; as many retries as there are waits.
 RETRY_WAITS = (30, 60, 120)
+# What --auto is told of the clone by a caller that wired no check of it (Ports.clone_refused).
+NO_CLONE_CHECK = "nothing here checks the task's clone"
+# Why --auto decided nothing, when the clone is as recorded: yours to approve first.
+RISKY_CHANGED = "risky files changed"
+# Why a task went to its verification with a command --auto took from the writer, which the
+# project keeps only once that verification has passed (the state's event: command, to_keep).
+TO_KEEP_REASON = "the writer's command is verified before the project keeps it"
 # Seconds between looks at a preparation the writer waits for.
 PREPARE_POLL = 15
 
@@ -193,13 +200,21 @@ class Ports:
     verification is kept, and how a wait passes. The command line wires them to the project and
     the pod in cli.make_supervisor; a test passes what it wants to see."""
 
-    run_gate: Callable[[Task], gate.GateResult]
+    # run_gate(task), or run_gate(task, command) for a verification with the command --auto took
+    # from the writer, before the project keeps it: that command, whatever the handoff says by then.
+    run_gate: Callable[..., gate.GateResult]
     risky_changes: Callable[[], list[Change]]
+    # Why vivibox does not take the task's clone as it is now, "" when it is as recorded: the check
+    # the gate starts with (repo.check_protection), which reads files and runs no git. Asked
+    # before --auto decides anything. A caller that wires none gets a refusal, never a pass, and
+    # what it raises is no answer: the decision is not taken.
+    clone_refused: Callable[[], str] = lambda: NO_CLONE_CHECK
     # notify(task_id, message, kind): kind "plan" or "review" lets the caller add notification buttons.
     notify: Callable[..., None] = lambda task_id, message, kind="": notify(task_id, message)
     # Fetches the work into your repository and updates the review copy; returns the copy's path.
     prepare_review: Callable[[], Path | None] = lambda: None
-    # Keeps the command the writer proposed for the project, when --auto takes it without you.
+    # Keeps the command the writer proposed for the project, when --auto takes it without you:
+    # called once the gate has passed the work with it (verifying.Verifying._keep), never before.
     keep_command: Callable[[str], None] = lambda command: None
     # Called once a turn's session is known and recorded, before the turn runs: your view of the
     # agent opens then, not when the turn you wanted to watch is already over.
@@ -433,6 +448,18 @@ class Supervisor(Planning, Verifying, ReviewRound):
         print(f"[{time.strftime('%H:%M:%S')}] → {target}: {reason}", flush=True)
         return st
 
+    def _not_by_itself(self) -> str:
+        """Why --auto decides nothing on the clone as it is now, "" when it may: the clone is not
+        as recorded (the check the gate starts with, which runs no git), or risky files changed
+        (RISKY_CHANGED), which are yours to approve first. The clone is checked before its risky
+        files are read, so that they are read in a clone vivibox takes, and again after, so that
+        the last look before a decision is at the clone as it is then."""
+        if why := self.ports.clone_refused():
+            return why
+        if self.ports.risky_changes():
+            return RISKY_CHANGED
+        return self.ports.clone_refused()
+
     def _checkpoint(self, target: State, reason: str, kind: str = "") -> None:
         # Every checkpoint first checks risky files: you may open the project in IntelliJ at a checkpoint.
         if self.ports.risky_changes():
@@ -510,13 +537,14 @@ class Supervisor(Planning, Verifying, ReviewRound):
 
     def _command_checkpoint(self, st: TaskState) -> None:
         """The command the writer proposed is what the task is about to be verified with: yours to
-        keep for the project, change or send back, before the gate runs. --auto keeps a whole one
-        itself; a missing or narrowed one still waits for you."""
+        keep for the project, change or send back, before the gate runs. --auto takes a whole one
+        to the verification itself, as it read it here, and writes nothing for the project yet:
+        the project keeps it once the gate has passed the work with it (verifying.Verifying._keep).
+        A missing or narrowed one, and any while risky files wait for you, still waits for you."""
         command = proposal.proposed(self.task)
         selection = gate.narrowed_proposal(command)
         if st.auto_plan and command and not selection and not self.ports.risky_changes():
-            self.ports.keep_command(command)
-            accept_command(self.task, command, "command kept automatically")
+            self._go(State.VERIFY, TO_KEEP_REASON, command=command, to_keep=True)
             return
         if not command:
             none = f"it wrote none to /task/handoff/{proposal.PROPOSAL}"

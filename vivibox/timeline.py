@@ -208,6 +208,11 @@ def entries(task: Task) -> list[tuple[str, str]]:
             text = "you: plan brought in"
         elif kind == "not_kept":
             text = f"{data.get('file')} not kept in the history: a link or not a plain file"
+        elif kind == "command_kept":
+            on = data.get("commit", "")[:7]
+            text = f"auto: the project keeps `{data.get('command', '')}`, verified on {on}"
+        elif kind == "command_not_kept":
+            text = f"auto: `{data.get('command', '')}` not kept for the project: {data.get('why', '')}"
         elif kind == "auto_plan":
             text = "auto: the plan is accepted without you" if data.get("enabled") else "auto off"
         else:

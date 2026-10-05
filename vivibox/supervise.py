@@ -155,7 +155,9 @@ def make_supervisor(
 
     # What it asks the clone before the gate runs (the files a change reached) ends it the same way.
     @unanswered.ends_verification(gate.GateResult)
-    def run_gate(t: Task) -> gate.GateResult:
+    def run_gate(t: Task, taken: str = "") -> gate.GateResult:
+        """taken: the command --auto took from the writer for this verification, as the
+        supervisor recorded it; the project keeps it only once this has passed with it."""
         p = now()
         if outside := actions.outside_modules(t, p):
             # Built whole this time, and the timeline says why a round took so long.
@@ -165,13 +167,13 @@ def make_supervisor(
         return gate.run_gate(
             t,
             pod,
-            actions.verify_commands(t, p),
+            actions.verify_commands(t, p, taken),
             p.risky_extra,
             p.java,
             timeout=p.verify_timeout or config.verify_timeout,
             no_build=p.no_build,
-            no_command=actions.missing_command(t, p),
-            narrowed=actions.narrowed_proposal(t, p),
+            no_command=actions.missing_command(t, p, taken),
+            narrowed=actions.narrowed_proposal(t, p, taken),
             tools=p.tools,
         )
 
@@ -195,14 +197,37 @@ def make_supervisor(
             tools=p.tools,
         )
 
+    def clone_refused() -> str:
+        """Why the clone is not as recorded, in the gate's own words; "" when it is. No git
+        runs for it: protection.check reads the clone's files and the task's record."""
+        try:
+            repo.check_protection(task.repo, task.meta)
+        except repo.RepoError as e:
+            return str(e)
+        return ""
+
+    def keep_command(command: str) -> None:
+        """The project's file, written with the command and read again: kept is said only of
+        what a later task will be verified with. The change is --auto's, on the record as such
+        (command_kept), and so not one of yours for now() to record."""
+        nonlocal seen
+        actions.save_verify(now(), [command])
+        kept = load_project(project.name)
+        if kept.verify != [command]:
+            raise ConfigError(
+                f"{project.name}'s file did not take the command; set it under e on the project"
+            )
+        seen = kept
+
     tracker = limits.Tracker(task, pod)  # the pod's limits, read as each step begins and ends
     ports = supervisor.Ports(
         run_gate=run_gate,
         run_whole_gate=run_whole_gate,
         risky_changes=lambda: Approvals(task.meta, task.repo, now().risky_extra).changes(),
+        clone_refused=clone_refused,
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
-        keep_command=lambda command: actions.save_verify(now(), [command]),
+        keep_command=keep_command,
         review_up=lambda: reviewing.up(task, pod, config, now().verify),
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),

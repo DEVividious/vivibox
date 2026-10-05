@@ -27,6 +27,17 @@ on your machine until you have approved it.
   characters in added lines, and that every test file added or changed is named in the agent's
   `red.md`. Tests the work removed are counted for you at review. When a verification fails, the task's details show the lines of the
   build log that say why, and where the whole log is.
+- **`--auto` takes no decision before its check.** A task made with `--auto` has its plan
+  accepted without you only when its clone is as vivibox recorded it (the check every
+  verification starts with, made on the clone's files, with no git) and no risky file changed:
+  the clone is looked at, then the risky files, then the clone once more. The command its
+  writer proposes, in a project that has none, is written into the project's settings only
+  after a verification has passed with exactly that command, as vivibox read it once from the
+  writer's file and recorded it where the pod cannot write, and only if the clone is then still
+  as recorded, has no risky change, and is on the commit that was verified. A clone the check
+  refuses, a verification that fails or cannot run, and a clone that changed by then leave the
+  plan to you and the project's settings as they were. The last look and the write are two
+  steps: a change made between them is not seen before the next verification.
 - **A task's use of your machine is bounded.** Every container of its pod runs with a memory
   limit (swap bounded to the same figure), a process limit and the pod's CPUs, under one cgroup
   slice of the task's that counts what the pod's own Docker runs as well; what the task writes

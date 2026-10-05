@@ -187,10 +187,12 @@ def asked(task: Task, project: Project) -> bool:
     return not project.verify and not project.no_build and not nothing_to_build(task)
 
 
-def verify_commands(task: Task, project: Project) -> list[str]:
+def verify_commands(task: Task, project: Project, taken: str = "") -> list[str]:
     """The project's commands, or the one for the modules the task's plan names while its work stays
     inside them; for a project with none, the one this task's writer proposed. None
-    for a task made with nothing to build, whatever the project builds for its other tasks."""
+    for a task made with nothing to build, whatever the project builds for its other tasks.
+    taken: the proposal as the supervisor read it when it sent the task to this verification
+    (--auto, before the project keeps it): that one, and the handoff file is not read again."""
     if nothing_to_build(task):
         return []
     if modules := scope(task, project)[0]:
@@ -199,23 +201,28 @@ def verify_commands(task: Task, project: Project) -> list[str]:
         return [whole(c) for c in project.verify]
     if project.verify or not asked(task, project):
         return project.verify
-    if not (found := proposed(task)) or narrowed_proposal_in(found):
+    if not (found := taken or proposed(task)) or narrowed_proposal_in(found):
         return []
     return [found]
 
 
-def narrowed_proposal(task: Task, project: Project) -> str:
+def narrowed_proposal(task: Task, project: Project, taken: str = "") -> str:
     """The selection of tests in the command the writer proposed, for the gate to refuse; "" for
-    a whole build, for no proposal, and for a project that has its own command, its choice."""
+    a whole build, for no proposal, and for a project that has its own command, its choice.
+    taken: as for verify_commands."""
     if project.verify or not asked(task, project):
         return ""
-    return narrowed_proposal_in(proposed(task))
+    return narrowed_proposal_in(taken or proposed(task))
 
 
-def missing_command(task: Task, project: Project) -> str:
+def missing_command(task: Task, project: Project, taken: str = "") -> str:
     """Why this task has no command to be verified with when it should: its writer proposed none.
-    "" when it has one, or has nothing to build."""
-    if verify_commands(task, project) or not asked(task, project) or narrowed_proposal(task, project):
+    "" when it has one, or has nothing to build. taken: as for verify_commands."""
+    if (
+        verify_commands(task, project, taken)
+        or not asked(task, project)
+        or narrowed_proposal(task, project, taken)
+    ):
         return ""
     return (
         f"the writer proposed no command in /task/handoff/{PROPOSAL} and {project.name} has "

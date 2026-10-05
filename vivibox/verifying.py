@@ -11,16 +11,44 @@ from .risky import stop_said
 from .states import State
 from .task import TaskState
 
+# What --auto did with the command the writer proposed, on the task's record.
+KEPT, NOT_KEPT = "command_kept", "command_not_kept"
+
+
+def command_to_keep(events: list[dict]) -> str:
+    """The command --auto took from the writer for the verification under way, which the project
+    keeps once the gate has passed with it; "" when there is none. It is the one the task went
+    to its verification with (supervisor._command_checkpoint), as the task's event log has it,
+    which the host alone writes and the pod mounts read-only: never the handoff file again, which
+    the writer's process can change after it was read. It stands through a verification that
+    could not run and your "verify again", and a review given up for the verification; it ends
+    when the project keeps it, and when the writer has a turn, after which it proposes again."""
+    through = {str(State.VERIFY), str(State.CHECKPOINT_BLOCKED), str(State.REVIEW)}
+    for event in reversed(events):
+        data = event["data"]
+        if event["type"] == KEPT:
+            return ""
+        if event["type"] != "state":
+            continue
+        if data.get("to_keep"):
+            return str(data.get("command") or "")
+        if not {data.get("previous"), data.get("current")} <= through:
+            return ""  # a turn of the writer's since, or a decision of yours on the command
+    return ""
+
 
 class Verifying:
     def _verify(self, st: TaskState) -> None:
         self.ports.limits_baseline()
-        result = self.ports.run_gate(self.task)
+        taken = command_to_keep(self.task.events()) if st.auto_plan else ""
+        result = self.ports.run_gate(self.task, taken) if taken else self.ports.run_gate(self.task)
         if self._limits_hit():  # the limit's, not the code's: no round, verified again at the start
             return
         target = gate.next_state(result, st.rounds, self.max_rounds)
         if result.passed:
             self.task.set_verified_commit(result.commit)
+            if taken:
+                self._keep(st, taken, result)
         if target in (State.IMPLEMENT, State.CHECKPOINT_BLOCKED):
             feedback.write_feedback(self.task, result)
         if (could_not := self._could_not_run(result))[0]:
@@ -68,6 +96,51 @@ class Verifying:
         else:
             self._go(target, "verification passed")
             self.ports.notify(self.task.id, self._review_message(result), kind="review")
+
+    def _keep(self, st: TaskState, command: str, result: gate.GateResult) -> None:
+        """--auto: the project keeps the command the writer proposed, now that the gate has passed
+        the work with it, and only while what the gate verified is still what is there
+        (_not_kept). Kept or not, it is on the task's record, and said unless the project has
+        your own command by now; not kept, the task goes on, verified, and the project's file
+        is as it was."""
+        if why := self._not_kept(st, command, result):
+            self.task.event(NOT_KEPT, command=command, why=why)
+            if why != self._own(st):
+                self.ports.notify(
+                    self.task.id,
+                    f"the verification passed with `{command}`, which {st.project} does not keep: {why}; "
+                    "set it under e on the project",
+                )
+            return
+        self.ports.keep_command(command)
+        self.task.event(KEPT, command=command, commit=result.commit)
+        self.ports.notify(
+            self.task.id, f"the verification passed with `{command}`: kept for every task of {st.project}"
+        )
+
+    def _own(self, st: TaskState) -> str:
+        return f"{st.project} has a command of its own now"
+
+    def _not_kept(self, st: TaskState, command: str, result: gate.GateResult) -> str:
+        """Why the project does not keep the command after a verification that passed, "" when
+        it does: the project has a command by now, which is yours; the gate did not run it; the
+        gate found risky changes, or the clone is no longer one --auto decides on
+        (_not_by_itself); the clone is not on the commit the gate verified. Asked in this order,
+        the commit last: nothing is read of the clone between that answer and the write."""
+        if self.current_project:  # the project's file as it is now, not as the step began
+            project = self.current_project()
+            self.project_verify, self.project_no_build = project.verify, project.no_build
+        if self.project_verify or self.project_no_build:
+            return self._own(st)
+        if not any(c.ok and c.command == command for c in result.commands):
+            return "the verification did not run it"
+        if result.risky:
+            return _sup.RISKY_CHANGED
+        if why := self._not_by_itself():
+            return why
+        if not (head := self.ports.head()):
+            return "vivibox could not tell which commit the clone is on"
+        return "" if head == result.commit else "the commits changed since the verification passed"
 
     def _could_not_run(self, result: gate.GateResult) -> tuple[str, str]:
         """Why a verification could not run, whole for the view and briefly for a notification; ""

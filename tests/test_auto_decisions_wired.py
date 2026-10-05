@@ -398,3 +398,17 @@ def test_a_command_you_set_during_the_checks_after_the_gate_stays_yours(project_
     said = [e["data"]["why"] for e in task.events() if e["type"] == "command_not_kept"]
     assert said == ["demo has a command of its own now"]
     assert not [note for note in notes if "kept for every task" in note]
+
+
+def test_a_keep_the_file_did_not_take_is_not_said_to_be_kept(project_file, monkeypatch):
+    """The write reports done and the file does not hold the command (a file of a shape the
+    write does not find its line in): read back, it stops the task, and nothing says kept."""
+    from vivibox.config import ConfigError
+
+    task, sup, pod, notes = supervised(monkeypatch, [plans, works])
+    sup.step()
+    sup.step()
+    monkeypatch.setattr(supervise.actions, "save_verify", lambda *a, **k: True)
+    with pytest.raises(ConfigError, match="did not take the command"):
+        sup.step()
+    assert kept(task) == [] and not [note for note in notes if "kept for every task" in note]

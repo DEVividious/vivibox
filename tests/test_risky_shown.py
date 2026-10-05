@@ -923,3 +923,14 @@ def test_an_approval_from_before_modes_were_recorded_says_nothing_of_them(task):
     assert approvals(task).approved_executable() == {".husky/pre-commit"}
     path.chmod(0o644)
     assert approvals(task).changes() == [Change(".husky/pre-commit", "changed")]
+
+
+def test_only_the_whole_identity_names_a_view(task):
+    """Not its start, and not one that starts the same: the task writes the files, and two
+    states that share a few characters of a digest can be searched for."""
+    shown, before = approvals(task).view().identity, kept(task)
+    other = shown[:-1] + ("0" if shown[-1] != "0" else "1")
+    for near in (shown[:8], shown[:63], other, shown + "0", shown.upper()):
+        with pytest.raises(risky.NotAsShown):
+            approvals(task).approve_changes(near)
+    assert kept(task) == before

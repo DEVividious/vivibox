@@ -385,3 +385,43 @@ def test_the_timeline_says_what_was_kept_and_what_was_not(task):
         f"auto: the project keeps `{COMMAND}`, verified on c0ffee1",
         f"auto: `{COMMAND}` not kept for the project: risky files changed",
     ]
+
+
+# --- cases a review's mutations walked past ----------------------------------------------------------
+
+
+def test_a_command_that_ran_in_a_verification_that_did_not_pass_is_not_kept(task):
+    """The command itself went through and a criterion is not met: the verification did not
+    pass, and nothing is kept on the strength of the command alone."""
+    red = passed()
+    red.missing_criteria = ["health endpoint returns 200"]
+    assert not red.passed and all(c.ok for c in red.commands)
+    world = World([red])
+    sup = writing(task, world)
+    sup.step()
+    sup.step()
+    assert world.kept == [] and events(task, "command_kept") == []
+    assert task.read_state().state is State.IMPLEMENT
+
+
+def test_the_recorded_command_ends_with_a_turn_of_the_writers(task):
+    """Could not run, your reply, a turn in which the writer asks instead of proposing, and g:
+    the command read before that turn is no longer the one the task waits with. The gate is
+    handed none, and nothing is kept."""
+    from vivibox import actions
+
+    def asks(t) -> None:
+        (t.meta / "handoff" / "question.md").write_text("Which registry?\n")
+
+    world = World([could_not_run(task, "Cannot connect to Docker"), passed()])
+    sup = writing(task, world, actions=[with_proposal(COMMAND), asks])
+    sup.step()
+    sup.step()
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    actions.reply(task, "Try again.")
+    sup.step()  # the writer's turn: a question
+    assert task.read_state().state is State.CHECKPOINT_BLOCKED
+    actions.verify_again(task)
+    sup.step()
+    assert world.gated == [COMMAND, ""], "the second verification is handed no command of before the turn"
+    assert world.kept == []

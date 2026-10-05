@@ -263,3 +263,34 @@ def test_a_rounds_key_is_written_only_once_the_container_before_it_is_gone(env, 
     gone = next(i for i, c in enumerate(pod.asked) if c[:3] == ["docker", "rm", "-f"] and pod.review in c)
     made = next(i for i, c in enumerate(pod.asked) if c[:2] == ["docker", "run"] and pod.review in c)
     assert gone < made, "removed, then made anew"
+
+
+@pytest.mark.real_start
+def test_m_between_a_rounds_container_and_its_harness_changes_nothing_of_the_round(env, monkeypatch):
+    """The interleaving, by hand: the round's container is made for A, and before its harness
+    is, you choose B. The role was read once: the round is A's whole, the next one B's."""
+    task, sup, pod = supervised(env, monkeypatch, reviewer=(OC, "anthropic/read"))
+    up = reviewing.up
+
+    def up_and_then_m(*args, **kwargs):
+        out = up(*args, **kwargs)
+        choose(task, "reviewer", "openai/read")
+        return out
+
+    monkeypatch.setattr(reviewing, "up", up_and_then_m)
+    assert round_of(task, sup, pod) == as_one("anthropic", "anthropic/read")
+    monkeypatch.setattr(reviewing, "up", up)
+    assert round_of(task, sup, pod) == as_one("openai", "openai/read")
+
+
+@pytest.mark.real_start
+def test_a_rounds_container_is_made_for_the_role_it_is_handed(env, monkeypatch):
+    """reviewing.up with the role its caller read: the container's configuration and key are
+    that role's, whatever the task's own choice says by then."""
+    from vivibox.config import Role
+
+    task, sup, pod = supervised(env, monkeypatch, reviewer=(OC, "anthropic/read"))
+    reviewing.up(task, pod, load_config(), (), Role(OC, "openai/read"))
+    written = json.loads((pod.review_dir / "harness" / "opencode.json").read_text())
+    assert (sorted(written["provider"]), written["model"]) == (["openai"], "openai/read")
+    assert held(f"{task.id}-review") == ["openai"]

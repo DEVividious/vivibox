@@ -69,18 +69,22 @@ def test_one_approval_reads_no_more_than_the_budget_with_the_copies_it_keeps(tas
     assert (approvals.dir / "files" / "build.gradle").read_bytes() == b"y" * MiB
 
 
+@pytest.mark.parametrize("link", ["by its whole path", "by the way up out of the clone"])
 @pytest.mark.parametrize("swapped_after", ["the hash", "the read that refused it for its size"])
 def test_a_file_swapped_for_a_link_out_while_it_is_shown_is_neither_read_nor_copied(
     task,  # noqa: F811
     outside,  # noqa: F811
     monkeypatch,
     swapped_after,
+    link,
 ):
     """The view hashes a changed risky file, reads it to show it and, past what it shows,
     copies it for you to read. Between any two of these the agent may put a link to a file of
     yours in its place: the read and the copy walk from the clone's root as the hash did, so
     the file outside is never opened, and nothing of it is copied where you were told to
-    read."""
+    read. A link by a whole path is refused whatever the walk starts from; one that climbs out
+    (../../host/secret.txt) only by a walk that starts at the clone: read from the root of the
+    machine instead, it is followed to your file."""
     gradle = past_the_limit_to_show(approved_gradle(task), monkeypatch, b"plugins { id 'evil' }\n")
     secret = outside / "secret.txt"
     approvals = Approvals(task.meta, task.repo)
@@ -88,7 +92,8 @@ def test_a_file_swapped_for_a_link_out_while_it_is_shown_is_neither_read_nor_cop
 
     def swap() -> None:
         gradle.unlink()
-        gradle.symlink_to(secret)
+        gradle.symlink_to(secret if link == "by its whole path" else os.path.relpath(secret, gradle.parent))
+        assert gradle.resolve() == secret.resolve() and gradle.read_text() == secret.read_text()
 
     def hash_then_swap(*args, **kwargs):
         found = real_digest(*args, **kwargs)

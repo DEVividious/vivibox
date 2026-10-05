@@ -236,10 +236,12 @@ def _frame(nesting: int, source: str = "") -> Token:
     return token
 
 
-def source(text: str) -> Token:
+def source(text: str, room: int) -> Token:
     """A piece, or a table, as its source: a code block, the mark of a folded row in it as its
-    code point, as in every block."""
-    return _block("fence", text.replace(MARK, _MARKED) + "\n")
+    code point, as in every block; with the columns it has in a terminal of 80 (room)."""
+    block = _block("fence", text.replace(MARK, _MARKED) + "\n")
+    block.meta = {ROOM_AT_80: room}
+    return block
 
 
 def _demoted(tokens: list[Token]) -> list[Token]:
@@ -272,6 +274,9 @@ def _apart(state: StateCore) -> None:
 # padding (2), its text's (4), a scrollbar (2) and the frame (2). And the fewest columns a block
 # of a piece is drawn in; a table asks for more by its columns, and settles that itself (Table).
 AT_80 = 70
+# On a code block's or a table's token: the columns it has in a terminal of 80 (_narrowest).
+# One of vivibox's own, outside every piece, has no such word and the frame's two columns more.
+ROOM_AT_80 = "room"
 ROOM = 10
 _BLOCKS = ("paragraph_open", "heading_open", "fence", "code_block", "table_open", "hr", RULE)
 
@@ -298,7 +303,10 @@ def _narrowest(tokens: list[Token]) -> int:
         elif token.type in ("blockquote_close", "list_item_close"):
             taken.pop()
         elif token.type in _BLOCKS:
-            least = min(least, AT_80 - sum(taken))
+            room = AT_80 - sum(taken)
+            least = min(least, room)
+            if token.type in ("fence", "code_block", "table_open"):  # what a code block reckons by
+                token.meta = {**(token.meta or {}), ROOM_AT_80: room}
     return least
 
 
@@ -327,7 +335,7 @@ def _piece(text: str, as_source: bool = False) -> list[Token]:
     rules = _rules()
     tokens = [] if as_source else rules.parse(text, {PROSE: True})
     if as_source or not _whole(tokens, rules.options["maxNesting"] - 1):
-        return [source(text)]
+        return [source(text, AT_80)]
     return _demoted(tokens)
 
 

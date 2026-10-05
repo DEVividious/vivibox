@@ -344,6 +344,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A code block is left unfolded by the rows folding would add at its own width. They were
+  reckoned for the 68 columns a block's text has outside what an agent wrote; behind the rule
+  it has 66, and in five numbered lists 6, so a line of 68 characters was never long for the
+  reckoning: a plan with twenty thousand of them was drawn in forty thousand rows (3.5 s to
+  open at 80 columns; 1.2 s now), four thousand in five lists in fifty-six thousand (7.1 s;
+  0.4 s now).
 - `m` says `from its next review` for a reviewer only where that is so: in a flow with a
   reviewer of its own, in a task that started with one. Elsewhere it says `from the next
   start`, and where the writer's model reviews, `m` on the writer says both: `from the next

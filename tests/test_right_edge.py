@@ -1007,3 +1007,60 @@ def test_a_block_made_anew_is_drawn_at_once_as_it_was_and_none_is_narrower_than_
         assert again._width == 3, "a character of two cells, and the column a further row stands in"
 
     run(scenario, size=(80, 60))
+
+
+# --- the threshold, for the width a block has -----------------------------------------------------
+
+LINE_68 = "x" * 68  # as wide as a block's text at 80 columns outside a piece: two cells too wide in one
+
+
+def in_five_lists(lines: int, line: str = LINE_68) -> str:
+    """A code block in five numbered lists, each numbered 123456789: ten columns are left to it,
+    six of them to its text."""
+    out, indent = [], ""
+    for level in range(5):
+        out += [f"{indent}123456789. level {level}", ""]
+        indent += " " * 11
+    return "\n".join([*out, f"{indent}```text", *[indent + line] * lines, f"{indent}```"])
+
+
+@pytest.mark.parametrize(
+    ("written", "lines", "unfolded"),
+    [
+        (display.fenced("\n".join([LINE_68] * 2100), "text"), 2100, True),  # 2,100 rows added at 66
+        (display.fenced("\n".join([LINE_68] * 2000), "text"), 2000, False),  # 2,000: not more
+        (display.fenced("\n".join(["x" * 66] * 5000), "text"), 5000, False),  # fits behind the rule
+        (in_five_lists(300), 300, True),  # 68 cells at 6 columns: 13 rows added a line
+        (in_five_lists(153), 153, False),  # 1,989 rows added
+        (in_five_lists(154), 154, True),  # 2,002
+        ("> " * 25 + "\n" + "\n".join([LINE_68] * 2100), 2101, True),  # a piece drawn as its source
+    ],
+    ids=["behind the rule", "behind the rule, 2000", "behind the rule, fits", "five lists",
+         "five lists, under", "five lists, over", "a piece as its source"],
+)  # fmt: skip
+def test_a_block_is_left_unfolded_by_the_rows_folding_adds_at_its_own_width(
+    env, monkeypatch, written, lines, unfolded
+):
+    """The rows were reckoned for the 68 columns a block's text has outside a piece. Behind the
+    rule it has 66, and in five numbered lists 6: a line of 68 was never long for the reckoning,
+    and twenty thousand of them were forty thousand rows, four thousand in lists fifty-six."""
+    task = new_task()
+    plan_with(task, written)
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        fence = app.text.query("MarkdownFence").last()
+        rows, lines = fence.query_one("#code-content").size.height, fence.code.count("\n") + 1
+        assert rows - lines <= blocks.MOST, f"folding added {rows - lines} rows to {lines} lines"
+        assert bool(fence.unfolded) == unfolded and bool(fence.query("#code-unfolded")) == unfolded
+        assert (rows == lines) == (unfolded or LINE_68 not in written), (
+            "a row a line, or every long line folded"
+        )
+        await pilot.resize_terminal(140, 60)
+        await pilot.pause()
+        assert bool(app.text.query("MarkdownFence").last().query("#code-unfolded")) == unfolded, (
+            "at every width"
+        )
+
+    run(scenario, size=(80, 60))

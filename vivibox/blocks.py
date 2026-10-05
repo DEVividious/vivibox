@@ -36,7 +36,7 @@ from textual.widgets._markdown import (
     MarkdownTableContent,
 )
 
-from .markdown import MARK, PROSE, RULE, parser, pieces, source
+from .markdown import AT_80, MARK, PROSE, ROOM_AT_80, RULE, parser, pieces, source
 
 COLUMN = 4
 # What a cut puts into a code block's text: the end of the row, and the column a further row
@@ -113,7 +113,8 @@ class Table(MarkdownTable):
         narrow = self.room(event.size.width - spare) < self.COLUMN
         if narrow != self._as_source:
             self._as_source = narrow
-            written = source((self._token.meta or {}).get("source", ""))
+            meta = self._token.meta or {}
+            written = source(meta.get("source", ""), meta.get(ROOM_AT_80, AT_80 + 2))
             await self.remove_children()
             shown = Fence(self._markdown, written, written.content.rstrip()) if narrow else None
             await self.mount(shown or Cells(self._headers, self._rows))
@@ -122,7 +123,6 @@ class Table(MarkdownTable):
 TAB = 8
 # The columns a block's text has in a terminal of 80, and the most rows folding may add to a
 # block there before it is left unfolded (unfolded).
-TEXT_AT_80 = 68
 MOST = 2000
 # What is said above a block left unfolded, and where its files are approved: how many lines,
 # of what, and the task whose risky files a terminal prints whole.
@@ -234,15 +234,17 @@ class Code(Label):
         return self.query_ancestor(Fence).copied(selection), "\n"
 
 
-def unfolded(cells: Sequence[int]) -> int:
-    """How many lines of a block are left unfolded, by the cells its lines take: all that are
-    longer than the block's text is in a terminal of 80 columns, when folding them there would
-    add more than MOST rows; else none, and every long line is folded. Reckoned for 80 columns
-    whatever the width is, so a block is the one or the other at every width. Textual lays out
-    and draws every row of a block each time the panel is drawn: twenty thousand lines folded
-    in two stood the view still for seconds."""
-    long = [taken for taken in cells if taken > TEXT_AT_80]
-    added = sum(-(-(taken - TEXT_AT_80) // (TEXT_AT_80 - 1)) for taken in long)
+def unfolded(cells: Sequence[int], width: int = 68) -> int:
+    """How many lines of a block are left unfolded, by the cells its lines take and the width
+    its text has in a terminal of 80 columns: all that are longer than that, when folding them
+    there would add more than MOST rows (a first row of width cells, further ones a cell fewer:
+    _cuts); else none, and every long line is folded. The width is the block's own (Fence: 68
+    cells outside a piece, 66 behind the rule, as few as 6 in lists), and that of 80 columns
+    whatever the terminal's is, so a block is the one or the other at every width. Textual lays
+    out and draws every row of a block each time the panel is drawn: twenty thousand lines
+    folded in two stood the view still for seconds."""
+    long = [taken for taken in cells if taken > width]
+    added = sum(-(-(taken - width) // max(2, width - 1)) for taken in long)
     return len(long) if added > MOST else 0
 
 
@@ -325,9 +327,10 @@ class Fence(MarkdownFence):
         # anything in its text changes, and this one is then drawn once, as it was.
         self._width = _DRAWN_AT.get(hash((code, self.lexer)), 0)
         # How many of its lines are left unfolded: none, or every long one (unfolded).
-        self.unfolded = unfolded(
-            _read(code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark)[2]
-        )
+        # at the width its text has at 80 columns: its room there, less the marks and the padding.
+        room = (token.meta or {}).get(ROOM_AT_80, AT_80 + 2)
+        read = _read(code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark)
+        self.unfolded = unfolded(read[2], max(3, room - 4))
         self.set_class(bool(self.unfolded), "-unfolded")
 
     @property
@@ -494,7 +497,9 @@ class Panel(Markdown):
                     made = list(super()._parse_markdown(piece))
                 except Exception as error:
                     self.notify(COULD_NOT.format(type(error).__name__), severity="warning", markup=False)
-                    made = list(super()._parse_markdown([piece[0], source(piece[0].meta["source"]), token]))
+                    made = list(
+                        super()._parse_markdown([piece[0], source(piece[0].meta["source"], AT_80), token])
+                    )
                 yield from made
                 own, piece = [], []
         yield from super()._parse_markdown(own + piece)

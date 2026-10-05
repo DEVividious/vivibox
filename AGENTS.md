@@ -27,9 +27,10 @@
   commit past it is `X.Y.(Z+1).devN+g<commit>`, and `vivibox --version` names it, so a bug
   report names the commit. A release is the `Unreleased` section given a number and a date, a
   commit, and an annotated tag pushed by the person.
-- Before committing: `uv run pytest -n auto` (in parallel, a tenth of the time), `uv run ruff check .`,
-  `uv run ruff format --check .`.
-  Run `uv run pytest -m docker` only when the change touches the pod.
+- Tests and checks follow the testing policy below. The commands: `uv run pytest -n auto` (the
+  unit suite, in parallel, a tenth of the time), `uv run ruff check .`,
+  `uv run ruff format --check .`, `uv run pytest -m docker` (the live suite: pods on Docker and
+  Sysbox).
 - A change to a prompt that no mechanical test covers gets a behavioural run:
   `uv run pytest -m model tests/behavioural -x`, or `-n auto` for its scenarios in parallel (the
   spending limit is the whole run's either way). It runs agents on real models for money (a
@@ -37,3 +38,42 @@
   for that run; the commit names its date, and the planning notes keep its cost and outcome.
 - The repository is public: nothing from an employer or a private project goes into it.
 - Code, comments, messages and documents are in English.
+
+## Testing policy
+
+Use the smallest test scope that gives meaningful confidence for the change.
+
+Before each commit:
+- run targeted tests for the code changed;
+- run tests of direct consumers/importers when code is moved or interfaces change;
+- run lint/format checks relevant to the changed files;
+- do not run the entire unit or live suite mechanically before every commit.
+
+Before completing an increment/branch:
+- run the full unit suite;
+- run ruff / formatting / static checks;
+- run targeted live tests when the increment changes Docker, host integration, networking,
+  mounts, resources, or another runtime boundary.
+
+After review fixes:
+- run targeted tests for the fix;
+- rerun the full unit suite only when the fix has broad blast radius or the reviewer identifies
+  a concrete reason.
+
+Full live/Docker suite:
+- run at major integration checkpoints, before final merge of a multi-increment stack, and at
+  release gates;
+- do not run it repeatedly for unrelated UI/docs/unit-only changes.
+
+Stress/repetition:
+- use repeated/stress runs only to investigate a concrete nondeterministic failure or when a
+  release criterion explicitly requires them;
+- do not use long probabilistic loops as routine validation.
+
+Concurrency:
+- only one actor should own host-level/live test execution at a time;
+- do not run cleanup commands or competing live suites that can interfere with another test
+  run.
+
+A failing targeted or full test must still be investigated; reduced test scope is not permission
+to ignore failures.

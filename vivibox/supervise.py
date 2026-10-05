@@ -206,6 +206,8 @@ def make_supervisor(
         runs for it: protection.check reads the clone's files and the task's record."""
         try:
             repo.check_protection(task.repo, task.meta)
+        except repo.Blocked as e:
+            return e.logged  # what blocks it, as a fact: its step depends on where the task waits
         except repo.RepoError as e:
             return str(e)
         return ""

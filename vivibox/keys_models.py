@@ -8,16 +8,13 @@ from pathlib import Path
 
 from textual import work
 
-from . import actions, keys, manual, providers
+from . import actions, keys, manual, providers, reviewing
 from .browse import shown_path
 from .config import ConfigError, load_config
 from .dialogs import ChooseModel, ChooseRole
 from .panel import project_repos
 from .providers_ui import ChooseImport, ImportSource
 from .task import Task
-
-# When a reviewer chosen under m reviews: a round under way ends as it began.
-REVIEWS_NEXT = "from its next review"
 
 
 class ModelKeys:
@@ -126,7 +123,6 @@ class ModelKeys:
         if not model and harness != manual.NAME:
             return  # "no model yet" is where the role is, not a model to put it on
         actions.choose_role(task, role, choice, config)
-        # The reviewer's container is made anew for every round, of what reviews then (reviewing.who).
-        when = REVIEWS_NEXT if role == "reviewer" else "from the next start"
+        when = reviewing.applies(task, config, role)  # a round's container is made for what reviews then
         self.notify(f"{role} runs on {actions.choice_label(choice)} {when}.", timeout=6, markup=False)
         self.reload()

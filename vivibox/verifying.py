@@ -13,6 +13,11 @@ from .task import TaskState
 
 # What --auto did with the command the writer proposed, on the task's record.
 KEPT, NOT_KEPT = "command_kept", "command_not_kept"
+# Why a command was not kept that the clone's own refusal does not say: after these, what you
+# do is set the command yourself.
+NOT_RUN, NO_HEAD = "the verification did not run it", "vivibox could not tell which commit the clone is on"
+MOVED = "the commits changed since the verification passed"
+SET_IT = (NOT_RUN, NO_HEAD, MOVED)  # and risky files changed (supervisor.RISKY_CHANGED)
 
 
 def command_to_keep(events: list[dict]) -> str:
@@ -106,11 +111,11 @@ class Verifying:
         if why := self._not_kept(st, command, result):
             self.task.event(NOT_KEPT, command=command, why=why)
             if why != self._own(st):
-                self.ports.notify(
-                    self.task.id,
-                    f"the verification passed with `{command}`, which {st.project} does not keep: {why}; "
-                    "set it under e on the project",
-                )
+                # One step: vivibox's own reasons end in it; the clone's words carry theirs.
+                own = why in SET_IT or why == _sup.RISKY_CHANGED
+                step = "; set it under e on the project" if own else ""
+                said = f"the verification passed with `{command}`, which {st.project} does not keep"
+                self.ports.notify(self.task.id, f"{said}: {why}{step}")
             return
         if self.ports.keep_command(command) is False:  # yours, set since the look above: as it is
             self.task.event(NOT_KEPT, command=command, why=self._own(st))
@@ -135,14 +140,14 @@ class Verifying:
         if self.project_verify or self.project_no_build:
             return self._own(st)
         if not any(c.ok and c.command == command for c in result.commands):
-            return "the verification did not run it"
+            return NOT_RUN
         if result.risky:
             return _sup.RISKY_CHANGED
         if why := self._not_by_itself():
             return why
         if not (head := self.ports.head()):
-            return "vivibox could not tell which commit the clone is on"
-        return "" if head == result.commit else "the commits changed since the verification passed"
+            return NO_HEAD
+        return "" if head == result.commit else MOVED
 
     def _could_not_run(self, result: gate.GateResult) -> tuple[str, str]:
         """Why a verification could not run, whole for the view and briefly for a notification; ""

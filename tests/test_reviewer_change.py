@@ -196,25 +196,49 @@ def test_the_supervisors_reviewer_is_the_rounds_harness_and_nothing_else():
         _ = reviewer.nothing_a_harness_has
 
 
-def test_m_says_when_each_choice_applies(env):
-    """A reviewer's from its next review, whose container is made for it; the rest from the
-    task's next start, as their containers are."""
+def said_by_m(env, flow: str, started_with: dict, then: dict, role: str, model: str) -> str:
+    """What m says of a choice for role, in a task of flow started with those roles in config.toml."""
     from test_tui import run as run_view
 
-    use(env, **ROLES, reviewer=(OC, "anthropic/read"))
+    use(env, flow, **{**ROLES, **started_with})
     task = actions.create("demo", "Goal")
+    actions.record_settings(task, load_project("demo"), load_config())  # as a start records them
+    use(env, flow, **{**ROLES, **then})
+    said: list[str] = []
 
     async def scenario(app, pilot):
         app.reload()
-        app.set_choice(task, "reviewer", (OC, "openai/read"), load_config())
-        app.set_choice(task, "writer", (OC, "openai/write"), load_config())
+        app.set_choice(task, role, (OC, model), load_config())
         await pilot.pause()
-        assert [str(n.message) for n in app._notifications][-2:] == [
-            "reviewer runs on openai/read from its next review.",
-            "writer runs on openai/write from the next start.",
-        ]
+        said.append([str(n.message) for n in app._notifications][-1])
 
     run_view(scenario, notifications=True)
+    return said[0]
+
+
+REVIEWER = {"reviewer": (OC, "anthropic/read")}
+START = "from the next start"
+
+
+@pytest.mark.parametrize(
+    "flow,started_with,then,role,when",
+    [
+        ("planner_writer_reviewer", REVIEWER, REVIEWER, "reviewer", "from its next review"),
+        ("planner_writer_reviewer", REVIEWER, REVIEWER, "writer", START),
+        # The role added to config.toml since the start: this task's rounds are the writer's model's.
+        ("planner_writer_reviewer", {}, REVIEWER, "reviewer", START),
+        ("planner_writer_reviewer", {}, {}, "writer", f"{START}; its model reviews from the next review"),
+        # Flows with no reviewer of their own: the role's model is read at a start, if at all.
+        ("single_agent", REVIEWER, REVIEWER, "reviewer", START),
+        ("supervisor_worker", REVIEWER, REVIEWER, "reviewer", START),
+        ("planner_writer_reviewer", REVIEWER, REVIEWER, "planner", START),
+    ],
+)
+def test_m_says_when_each_choice_applies(env, flow, started_with, then, role, when):
+    """A reviewer's from its next review only where a round's container is made for it: a flow
+    with a reviewer of its own, in a task that started with one. Where the writer's model
+    reviews, m on the writer says both: its conversation at the next start, the review sooner."""
+    assert said_by_m(env, flow, started_with, then, role, "openai/x") == f"{role} runs on openai/x {when}."
 
 
 @pytest.mark.real_start

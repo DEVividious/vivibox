@@ -16,7 +16,20 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import brief, cli_usage, comments, gate, handoff, opencode, providers, reading, repo, roles, secrets
+from . import (
+    brief,
+    cli_usage,
+    comments,
+    gate,
+    handoff,
+    opencode,
+    orchestration,
+    providers,
+    reading,
+    repo,
+    roles,
+    secrets,
+)
 from .config import Config, Role
 from .harness import Harness
 from .pod import Mount, Pod
@@ -257,6 +270,27 @@ def who(task: Task, config: Config) -> Role:
     [roles.reviewer]), on the model the task chose for it (m). Read once for a round, by
     whoever makes the round's container and its harness, so that the two are of one role."""
     return roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
+
+
+# When a choice made under m takes effect, as m says it.
+NEXT_START, NEXT_REVIEW = "from the next start", "from its next review"
+
+
+def applies(task: Task, config: Config, role: str) -> str:
+    """When what m chose for role takes effect in this task, in m's words. A round's container
+    is made for what reviews then (who) only in a flow with a reviewer of its own, and of the
+    reviewer only in a task that started with one in config.toml (what the supervisor read:
+    the start's own record); else the writer's model reviews, and m on the writer reaches the
+    next review before the writer's own conversation, which changes at the next start."""
+    started = [e["data"].get("roles") or {} for e in task.events() if e["type"] == "settings"]
+    if role not in ("reviewer", "writer") or not started:
+        return NEXT_START
+    if not orchestration.mode_of(task, config).separate_reviewer:
+        return NEXT_START
+    with_reviewer = "reviewer" in started[-1]
+    if role == "reviewer":
+        return NEXT_REVIEW if with_reviewer else NEXT_START
+    return NEXT_START if with_reviewer else f"{NEXT_START}; its model reviews from the next review"
 
 
 class Reviewer:

@@ -344,6 +344,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- `m` says `from its next review` for a reviewer only where that is so: in a flow with a
+  reviewer of its own, in a task that started with one. Elsewhere it says `from the next
+  start`, and where the writer's model reviews, `m` on the writer says both: `from the next
+  start; its model reviews from the next review`. The notification of a command `--auto` did
+  not keep ends in one step: `set it under e on the project`, or, where the clone was
+  refused, the refusal's own; a plan not accepted automatically for a blocked clone says
+  what blocks it, without the step of a start.
 - A review round's key is written once the container of the round before is removed. It was
   written first, into the directory that container mounts: one that had outlived its round
   (a supervisor ended in the middle of it) could read the next round's key for a moment.

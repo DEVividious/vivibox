@@ -287,6 +287,8 @@ def test_a_clone_broken_between_the_verification_and_the_decision_keeps_nothing(
     sup.step()
     assert world.kept == []
     assert events(task, "command_not_kept") == [{"command": COMMAND, "why": REFUSED}]
+    said = next(note for note in world.notes if "does not keep" in note)
+    assert said.endswith(f"which demo does not keep: {REFUSED}"), "the clone's own words, and no second step"
 
 
 def test_risky_files_changed_while_the_command_was_verified_keep_nothing(task):

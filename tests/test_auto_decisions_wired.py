@@ -132,9 +132,11 @@ def test_a_clone_broken_while_the_task_is_planned_gets_no_plan_accepted(
     assert not (task.meta / gate.ACCEPTED_PLAN).exists(), "no plan was accepted"
     assert not (task.meta / "handoff" / gate.CRITERIA_FILE).exists()
     assert "not accepted automatically: " in notes[-1]
-    assert (
-        "git files in the task's clone changed" in notes[-1] or "added while the task is planned" in notes[-1]
-    )
+    if broken == "a repository added":  # what is there, with no step of another place (a start)
+        assert "the task's clone is blocked by what was added to it: web/.git was added" in notes[-1]
+        assert "start the task" not in notes[-1]
+    else:
+        assert "git files in the task's clone changed" in notes[-1] and "delete the task" in notes[-1]
     assert project_file.read_bytes() == before
     watched.nothing_ran_in(task.repo)
 

@@ -427,6 +427,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 - An accept interrupted while it brought the work, between git's fetch and the accept reading
   which commit that was, left `refs/vivibox/<id>` on the work. It is put back as it was found
   there too, as after every accept that stops.
+- `vivibox auth import` on a file whose provider or MCP server has a name that cannot be one
+  in vivibox said that name as it came: a line break in it drew a second line at the left edge,
+  reading as vivibox's own. The name is on one line now, its line break shown as a code point.
 - More of what the command line prints quoted text vivibox did not write as it came, control
   characters and all: `vivibox plan import` naming the plan's summary; `vivibox demo` saying
   the agent's question, how an earlier task was run, its commands and the app's output;

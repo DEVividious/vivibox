@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import keys
+from . import display, keys
 from .config import ConfigError, config_dir
 from .secrets import MOUNT
 
@@ -388,7 +388,8 @@ def read_opencode(source: Path, env: dict[str, str] | None = None) -> Reading:
             raise ConfigError(f"{source}: '{kind}' is not a table of names")
         for name, given in section.items():
             if not keys.PROVIDER.match(name) or not isinstance(given, dict):
-                raise ConfigError(f"{source}: {kind} '{name}' cannot be named that way in vivibox")
+                named = display.name(name)  # a key of a file you were given: on one line, as text
+                raise ConfigError(f"{source}: {kind} '{named}' cannot be named that way in vivibox")
             found.append(read(name, given, env, source.parent, yours))
     if not found:
         raise ConfigError(f"{source} defines no providers and no MCP servers")

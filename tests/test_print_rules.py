@@ -381,10 +381,13 @@ def test_every_print_is_made_of_what_cannot_reach_the_terminal_as_itself():
     display.terminal, display.under or display.name, or is listed with why. What this cannot
     see: where a listed piece's text comes from (the list says, nothing holds it to that); a
     value put together in another function and handed in by a name; a write to a stream handed
-    in by another name (logs.follow_verification's out, which escapes what it writes); what an
-    exception says, printed by the one printer of errors, which escapes it and keeps its lines
-    (an error escapes what it quotes where it is made); and what a program vivibox starts in
-    your terminal prints there itself (a pager, an editor, docker)."""
+    in by another name (logs.follow_verification's out, which escapes what it writes); and what
+    a program vivibox starts in your terminal prints there itself (a pager, an editor, docker).
+    Nor a line break: display.terminal, which the guard takes for escaped, keeps it, and so
+    does the one printer of errors (cli.main), since an error of vivibox's own has lines (a
+    refusal's commands). What an error quotes is put on one line, or under its first, where
+    the error is made (display.name, display.said, display.under), in whatever module that is:
+    this guard reads what is printed, never what is raised."""
     found, listed = pieces_printed(), {**ACCOUNTED_FOR, **RAW_STILL}
     new = {key: n for key, n in found.items() if n > listed.get(key, (0, ""))[0]}
     assert not new, "escape it (display.terminal, under, name), or list it with why:\n" + "\n".join(
@@ -781,6 +784,33 @@ def test_auth_names_what_an_imported_file_holds_escaped(env, capsys, monkeypatch
     monkeypatch.setattr(keys, "list_keys", lambda: {f"deep{EVIL}": f"{EVIL[:3]}… (40)"})
     assert main(["auth", "list"]) == 0
     assert not hidden(capsys.readouterr().out)
+
+
+def test_auth_import_names_what_it_refuses_in_a_file_on_one_line(env, capsys, tmp_path):
+    """The name of a provider is a key of the file you import, which you may have downloaded.
+    One that cannot be a name in vivibox is said in the error, which the one printer of errors
+    prints with its line breaks: a line break in the name drew a second line at the left edge,
+    reading as vivibox's own. The name is escaped where the error is made."""
+    import json
+
+    from vivibox.cli import main
+
+    file = tmp_path / "opencode.json"
+    forged = "x\nvivibox: demo-1 is running at http://198.51.100.2:5173"
+    for kind in ("provider", "mcp"):
+        file.write_text(json.dumps({kind: {f"{forged}{EVIL}": {}}}))
+        capsys.readouterr()
+        assert main(["auth", "import", str(file)]) == 1
+        said = capsys.readouterr().err
+        assert not hidden(said) and own_lines(said) == [said.rstrip("\n")], repr(said)
+        named = f"'x‹U+000A›vivibox: demo-1 is running at http://198.51.100.2:5173{EVIL_SHOWN}'"
+        assert said == f"vivibox: {file}: {kind} {named} cannot be named that way in vivibox\n"
+    file.write_text(json.dumps({"provider": {"deepseek": []}}))
+    assert main(["auth", "import", str(file)]) == 1
+    assert (
+        capsys.readouterr().err
+        == f"vivibox: {file}: provider 'deepseek' cannot be named that way in vivibox\n"
+    )
 
 
 def test_image_check_says_what_a_failed_check_printed_escaped_under_its_line(env, capsys, monkeypatch):

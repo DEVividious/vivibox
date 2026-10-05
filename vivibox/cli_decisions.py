@@ -17,7 +17,7 @@ from .task import Task
 def carry_on(task: Task) -> None:
     """Your decision was "go on": with nobody working on the task, that means starting it."""
     if model := actions.carry_on(task):
-        print(f"Started {task.id} ({model}): nobody was working on it.")
+        print(f"Started {task.id} ({display.name(model)}): nobody was working on it.")
 
 
 def cmd_accept(args: argparse.Namespace) -> int:
@@ -35,7 +35,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
         carry_on(task)
     elif st.state is State.CHECKPOINT_COMMAND:
         actions.accept_command(task, project, args.verify or "")
-        kept = load_project(project.name).verify[0]
+        kept = display.name(load_project(project.name).verify[0])
         print(f"{project.name} is verified with `{kept}` from now on; {task.id} is verifying.")
         carry_on(task)
     elif st.state is State.CHECKPOINT_FINAL:
@@ -51,7 +51,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
 
 def report_finished(done: actions.Finished) -> None:
     if done.left:
-        print(f"vivibox: {done.task_id} is done, but {done.left}", file=sys.stderr)
+        print(f"vivibox: {done.task_id} is done, but {display.under(done.left)}", file=sys.stderr)
     if done.conflicts:
         print(f"{done.task_id} is done ({done.cost}), but its work conflicts with your checkout in:")
         print("".join(f"  {display.name(f)}\n" for f in done.conflicts), end="")
@@ -67,7 +67,7 @@ def report_finished(done: actions.Finished) -> None:
 
 def offer_commit(done: actions.Finished) -> None:
     source, message = done.source, done.message
-    shown = "".join(f"  {line}\n" if line else "\n" for line in message.splitlines())
+    shown = "".join(f"  {display.name(line)}\n" if line else "\n" for line in message.splitlines())
     if not sys.stdin.isatty():
         example = f" with this message:\n\n{shown}" if message else ""
         print(f"Commit it when you like, e.g.: git -C {source} commit{example}")
@@ -87,9 +87,9 @@ def offer_commit(done: actions.Finished) -> None:
     branch, create = where_to_commit(done)
     try:
         made = actions.commit_work(source, message, branch, create)
-        print(f"Committed{f' on {branch}' if branch else ''}: {made}")
+        print(f"Committed{f' on {branch}' if branch else ''}: {display.name(made)}")
     except gate.GateError as e:
-        print(f"Not committed: {e}")
+        print(f"Not committed: {display.under(str(e))}")
 
 
 def where_to_commit(done: actions.Finished) -> tuple[str, bool]:
@@ -122,7 +122,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         again = display.terminal(manual.repair_prompt(str(e)))
         print(f"\nSay this in the same chat:\n\n{again}", file=sys.stderr)
         return 1
-    print(f"Plan brought in{f': {summary}' if summary else ''}. Read it, then: vivibox accept {task.id}")
+    said = f": {display.name(summary)}" if summary else ""
+    print(f"Plan brought in{said}. Read it, then: vivibox accept {task.id}")
     return 0
 
 

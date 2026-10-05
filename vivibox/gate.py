@@ -695,8 +695,8 @@ def _build(
                 if code == "timeout":
                     said.append(f"\n[timeout after {timeout:g} s]")
                     out.write(said[-1] + "\n")
-                    ok = False
-                    result.environment = f"`{command}` did not finish in {timeout:g} s (verify_timeout)"
+                    late = f"`{display.name(command)}` did not finish in {timeout:g} s (verify_timeout)"
+                    ok, result.environment = False, late
                 else:
                     ok = code == 0
                     if not ok:

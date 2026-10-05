@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import (
     actions,
+    display,
     gate,
     handoff,
     opencode,
@@ -149,7 +150,8 @@ def ask_agent_how_to_run(task: Task, pod: Pod, reply: str = "") -> tuple[str, st
         except handoff.HandoffError as e:
             raise PodError(str(e)) from e
     if not turn.ok:
-        raise PodError(f"the agent could not work out how to run this: {turn.error or turn.text}")
+        said = display.under(turn.error or turn.text)  # the agent's words: no line of them at the left edge
+        raise PodError(f"the agent could not work out how to run this: {said}")
     text = demo_instruction(task)
     if len(text) > MAX_INSTRUCTION:
         raise PodError(

@@ -344,6 +344,23 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- More of what the command line prints quoted text vivibox did not write as it came, control
+  characters and all: `vivibox plan import` naming the plan's summary; `vivibox demo` saying
+  the agent's question, how an earlier task was run, its commands and the app's output;
+  `vivibox verify` naming a command, a criterion, a commit's problem and a build file;
+  `vivibox accept` naming the command it keeps, the commit's message and subject, why it was
+  not committed and what it left of the task's rules; `vivibox start` naming the model;
+  `vivibox auth import` and `list` naming what a file holds; `vivibox init` and `info` saying
+  what a repository's files name; `vivibox image check` saying what a failed check printed; a
+  command that failed, in the one printer of errors; and why a notification was not sent, in
+  the supervisor's window. Each is escaped now. What takes several lines stands under
+  vivibox's own line and never at the left edge: in `vivibox demo` the agent's question, an
+  earlier task's instruction and the app's output are two columns in, and an agent's words in
+  "could not work out how to run this" four. `vivibox wait --json`, and the prompts `vivibox
+  plan` and `vivibox review --prompt` print, are as they were.
+- The command a verification did not finish in time is named escaped where the reason is
+  made, as a build's line in a reason is: the panel and `vivibox status` draw a reason as it
+  is, where a command could spell an escape of a character it does not have (`‹U+001B›`).
 - An empty value drawn as inline code in the details panel is a span that is closed (it was
   two backticks, which open one), and plain words at the start of a line are drawn without the
   spaces before them, which made them a block of code. Neither was reached by a value today.

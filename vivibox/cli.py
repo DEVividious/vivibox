@@ -66,7 +66,7 @@ def cmd_new(args: argparse.Namespace) -> int:
     )
     print(f"Created {task.id} from {task.read_state().base_commit[:10]}")
     for note in actions.context_notes(task):
-        print(f"Note: {note}")
+        print(f"Note: {display.under(note)}")
     print(f"Plan: {task.plan_path}")
     if args.draft:
         print(f"Edit the plan if you like, then 'vivibox start {task.id}'.")
@@ -101,9 +101,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     )
     print(f"Project {name} for {found.repo}:")
     for note in found.notes:
-        print(f"  - {note}")
+        print(f"  - {display.under(note)}")
     print()
-    print(project_init.render(found))
+    print(display.terminal(project_init.render(found)))
     confirmed = args.yes or (
         sys.stdin.isatty() and input(f"Set up {name}? [Y/n] ").strip().lower() in ("", "y", "yes")
     )
@@ -191,7 +191,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     task, _ = actions.load(args.task)
     resume = any(e["type"] == "started" for e in task.events())
     model = actions.start(args.task, resume=resume)
-    print(f"Started {args.task} ({model}). Watch the agent: vivibox attach {args.task} (Ctrl-q leaves).")
+    shown = display.name(model)
+    print(f"Started {args.task} ({shown}). Watch the agent: vivibox attach {args.task} (Ctrl-q leaves).")
     return 0
 
 
@@ -280,20 +281,20 @@ def cmd_verify(args: argparse.Namespace) -> int:
         timeout=project.verify_timeout or config.verify_timeout, no_build=project.no_build,
         no_command=actions.missing_command(task, project), tools=project.tools,
     )  # fmt: skip
-    for command, source in result.build_files:
+    for command, source in ((display.name(c), display.name(s)) for c, s in result.build_files):
         print(f"NOTE  {source} names `{command}`, and the project runs nothing yet: set verify in its file")
     if said := "; ".join(filter(None, [risky.stop_said(result.risky_stopped, task.id), result.environment])):
-        print(f"ENV   verification could not run: {said}")
+        print(f"ENV   verification could not run: {display.under(said)}")
     if result.build_skipped:
         print(f"SKIP  the build was not run: {result.build_skipped}")
     if result.unchanged:
         print("SAME  nothing committed since the last verification; its result stands")
     for c in result.commands:
-        print(f"{'PASS' if c.ok else 'FAIL'}  {c.command}  ({c.seconds}s)")
+        print(f"{'PASS' if c.ok else 'FAIL'}  {display.name(c.command)}  ({c.seconds}s)")
     for c in result.missing_criteria:
-        print(f"TODO  criterion not ticked: {c}")
+        print(f"TODO  criterion not ticked: {display.name(c)}")
     for p in result.commit_problems:
-        print(f"FAIL  commit {p}")
+        print(f"FAIL  commit {display.under(p)}")
     for h in result.hidden_characters:
         h = display.name(h)
         print(f"FAIL  {h}" if h.endswith(clone_read.NOT_CHECKED) else f"FAIL  invisible character at {h}")
@@ -320,13 +321,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 0
     result = actions.demo(args.task, ask=not args.no_ask, reply=args.reply or "")
     if result.proposed and not args.yes:
-        print(f"The last task you accepted in this project was run like this:\n\n{result.proposed}\n")
+        ran = display.under(result.proposed, 2)
+        print(f"The last task you accepted in this project was run like this:\n\n  {ran}\n")
         print(f"If that still applies: vivibox demo {args.task} --yes")
         return 0
     if result.proposed:
         result = actions.use_instruction(args.task, result.proposed)
     if result.question:
-        print(f"The agent asks:\n\n{result.question}\n")
+        print(f"The agent asks:\n\n  {display.under(result.question, 2)}\n")
         print(f'Answer with: vivibox demo {args.task} --reply "…"')
         return 1
     if not result.commands:
@@ -343,18 +345,19 @@ def cmd_demo(args: argparse.Namespace) -> int:
     }
     print(f"From {where.get(result.source, result.source)}:")
     for command in result.commands:
-        print(f"  {command}")
+        print(f"  {display.name(command)}")
     for url in result.urls:
         print(f"\nListening: {url}")
     for listener in result.unreachable:
         print(f"\nPort {listener.port} is {listener.why_not}.\nStart it on 0.0.0.0 instead.")
+    said = display.under(result.log or "(none)", 2)  # the app's output: under vivibox's line, never beside it
     if result.starting:
         # Still installing or compiling. Calling that a failure sends you debugging a working app.
-        print(f"\nStill starting, nothing listening yet. Its output so far:\n{result.log or '(none)'}")
+        print(f"\nStill starting, nothing listening yet. Its output so far:\n  {said}")
         print(f"Look again with 'vivibox status {args.task}'.")
         return 0
     if not result.listening:
-        print(f"\nIt stopped without listening. Last output:\n{result.log or '(none)'}")
+        print(f"\nIt stopped without listening. Last output:\n  {said}")
         return 1
     return 0
 
@@ -634,7 +637,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"vivibox: {display.terminal(str(e.args[0] if e.args else e))}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as e:
-        print(f"vivibox: command failed ({e.returncode}): {' '.join(e.cmd)}", file=sys.stderr)
+        print(f"vivibox: command failed ({e.returncode}): {display.name(' '.join(e.cmd))}", file=sys.stderr)
         return 1
 
 

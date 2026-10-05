@@ -46,7 +46,8 @@ def cmd_wait(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     found = about.gather(Path(args.path))
-    print(json.dumps(found, indent=2) if args.json else about.describe(found), end="\n" if args.json else "")
+    said = json.dumps(found, indent=2) if args.json else display.terminal(about.describe(found))
+    print(said, end="\n" if args.json else "")
     return 0
 
 

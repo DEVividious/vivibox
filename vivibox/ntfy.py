@@ -15,7 +15,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from . import keys, ui
+from . import display, keys, ui
 from .config import NTFY_LEVELS
 from .states import State
 from .task import TaskState
@@ -46,7 +46,7 @@ def terse(message: str) -> str:
 
 def said(text: str) -> None:
     """A failure to send, in the supervisor window, like every other message there."""
-    print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] {display.under(text)}", flush=True)
 
 
 def in_background(run: Callable[[], None]) -> None:

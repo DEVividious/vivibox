@@ -558,6 +558,25 @@ def test_a_command_that_does_not_finish_in_time_is_a_failure_of_the_environment(
     )
 
 
+def test_a_command_that_did_not_finish_is_named_escaped_where_the_reason_is_made(task):
+    """The reason is drawn as prose by the panel and by status, which leave ‹ and › as they
+    are (what was escaped is not escaped twice): the command in it is escaped where the reason
+    is made, as a build's line in a reason is, so a command cannot spell an escape of a
+    character it does not have."""
+
+    class Late(SlowPod):
+        def gate_stream(self, *cmd, sink, workdir="", timeout=None):
+            return super().gate_stream(*cmd[:-1], "npm test", sink=sink, workdir=workdir, timeout=timeout)
+
+    gate.accept_plan(task)
+    command = "npm run build ‹U+001B› ˂U+202E˃\t--offline"
+    result = gate.run_gate(task, Late(), [command], [], timeout=5)
+    shown = "npm run build ‹U+2039›U+001B‹U+203A› ‹U+02C2›U+202E‹U+02C3›‹U+0009›--offline"
+    assert result.environment == f"`{shown}` did not finish in 5 s (verify_timeout)"
+    plain = gate.run_gate(task, Late(), ["npm run build -- --offline"], [], timeout=5)
+    assert plain.environment == "`npm run build -- --offline` did not finish in 5 s (verify_timeout)"
+
+
 class WatchedPod(FakePod):
     """Reads the log the way w does: while the command runs, not once it is over."""
 

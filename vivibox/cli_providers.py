@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import image, keys, providers
+from . import display, image, keys, providers
 from .providers import is_provider_key
 
 
@@ -23,7 +23,7 @@ def cmd_auth(args: argparse.Namespace) -> int:
     if args.action == "list":
         stored = keys.list_keys()
         for provider, shown in stored.items():
-            print(f"{provider:20} {shown}")
+            print(f"{display.name(provider):20} {display.name(shown)}")
         if not stored:
             print(f"No keys in {keys.store()}. Add one with: vivibox auth set <provider>")
     elif args.action == "set":
@@ -36,19 +36,20 @@ def cmd_auth(args: argparse.Namespace) -> int:
         reading = providers.read_opencode(Path(args.provider or providers.DEFAULT_SOURCE))
         said = {"new": "", "replaces": "  (you have a different one)", "same": "  (same as yours, skipped)"}
         for f in reading.found:
-            print(f"{f.kind:9} {f.name:20} {f.what}, key {f.key}{said[f.status]}")
+            name, what, key = (display.name(text) for text in (f.name, f.what, f.key))
+            print(f"{f.kind:9} {name:20} {what}, key {key}{said[f.status]}")
         if reading.left:
-            print(f"Left in the file, not for vivibox: {', '.join(reading.left)}.")
+            print(f"Left in the file, not for vivibox: {', '.join(map(display.name, reading.left))}.")
         new = [f for f in reading.found if f.status == "new"]
         differ = [f for f in reading.found if f.status == "replaces"]
         chosen = new if new and _yes(f"Import the {len(new)} new? [y/N] ") else []
-        if differ and _yes(f"Overwrite yours with {', '.join(f.name for f in differ)}? [y/N] "):
+        if differ and _yes(f"Overwrite yours with {', '.join(display.name(f.name) for f in differ)}? [y/N] "):
             chosen += differ
         if not chosen:
             print("Nothing imported.")
             return 1
         providers.bring_over(chosen)
-        print(f"Imported {', '.join(f.name for f in chosen)}; press k in vivibox to see them.")
+        print(f"Imported {', '.join(display.name(f.name) for f in chosen)}; press k in vivibox to see them.")
     elif args.action == "rm":
         if not args.provider:
             raise keys.KeyStoreError("which provider? e.g. vivibox auth rm deepseek")

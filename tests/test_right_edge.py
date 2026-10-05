@@ -1064,3 +1064,81 @@ def test_a_block_is_left_unfolded_by_the_rows_folding_adds_at_its_own_width(
         )
 
     run(scenario, size=(80, 60))
+
+
+# --- what is copied, whatever the line holds ------------------------------------------------------
+
+
+def copies(env, monkeypatch, written: str, check) -> None:
+    task = new_task()
+    plan_with(task, display.fenced(written, "text"))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        await check(app, pilot, app.text.query("MarkdownFence").last())
+
+    run(scenario, size=(80, 60))
+
+
+@pytest.mark.parametrize("written", ["漢\t字", "ab漢\t字\tEND", "漢" * 50 + "\tT" + "w" * 60, "é\t☑️\tx"])
+def test_a_line_with_a_tab_after_a_wide_character_is_copied_whole(env, monkeypatch, written):
+    """A tab is as many columns as its stop is cells away, and a wide character is one
+    character in two cells: counted as one, fifty of them before a tab lost the line fifty
+    characters of its end."""
+    from textual.selection import Selection
+
+    async def check(app, pilot, fence):
+        assert fence.query_one("#code-content").get_selection(Selection(None, None))[0] == written
+
+    copies(env, monkeypatch, written, check)
+
+
+def test_whatever_lines_hold_what_is_copied_is_what_was_written(env, monkeypatch):
+    """Wide and combining characters, tabs, a symbol with its selector, long lines and short,
+    in every order: all of it, and any stretch from a line's start to a line's end."""
+    import random
+
+    from textual.geometry import Offset
+    from textual.selection import Selection
+
+    pick = random.Random(20261005)
+    parts = ["a", "bc", "漢", "字漢", "\t", "é", "☑️", " ", "x" * 30, "\t\t", "é", "-"]
+    lines = ["".join(pick.choice(parts) for _ in range(pick.randint(0, 24))).rstrip() for _ in range(40)]
+    written = "\n".join(line or "x" for line in lines)
+
+    async def check(app, pilot, fence):
+        label = fence.query_one("#code-content")
+        assert label.get_selection(Selection(None, None))[0] == written
+        rows = label.content.plain.split("\n")
+        starts = [
+            0,
+            *(
+                at + 1
+                for at, row in enumerate(rows[1:])
+                if not fence.query_one("#code-marks").rows[at + 1].strip()
+            ),
+        ]
+        ends = [*(at - 1 for at in starts[1:]), len(rows) - 1]
+        for (first, last), line in zip(zip(starts, ends, strict=True), written.split("\n"), strict=True):
+            copied = label.get_selection(Selection(Offset(0, first), Offset(len(rows[last]), last)))[0]
+            assert copied == line, (first, last)
+
+    copies(env, monkeypatch, written, check)
+
+
+def test_the_note_above_a_block_left_unfolded_is_not_copied_and_the_arrow_moves_a_screen(env, monkeypatch):
+    from textual.selection import Selection
+
+    async def check(app, pilot, fence):
+        assert fence.query_one("#code-unfolded").get_selection(Selection(None, None)) is None
+        side = fence.query_one("#code-sideways")
+        side.focus()
+        await pilot.press("right")
+        await pilot.pause()
+        assert side.scroll_x == side.size.width - 4, "a screen's width, less the columns to read on from"
+        await pilot.press("right", "left")
+        await pilot.pause()
+        assert side.scroll_x == side.size.width - 4
+
+    copies(env, monkeypatch, "\n".join(["z" * 3500] * 40), check)

@@ -748,14 +748,15 @@ def test_a_piece_whose_widgets_raise_is_drawn_as_its_source_and_the_view_goes_on
     run(scenario, size=(80, 110), notifications=True)
 
 
-def raised_by(widget, error: Exception) -> Exception:
-    """error as a method of widget would raise it: with the widget in its traceback."""
+def raised_by(widget, error: Exception, method: str = "render") -> Exception:
+    """error as a method of widget by that name would raise it: with both in its traceback."""
 
-    def draw(self):
+    def raises(self):
         raise error
 
+    raises.__code__ = raises.__code__.replace(co_name=method)
     try:
-        draw(widget)
+        raises(widget)
     except type(error) as raised:
         return raised
 
@@ -938,3 +939,52 @@ def test_the_values_of_recent_events_are_inline_code(env):
     assert as_own_words(tokens, "EVENT") == [], "the reason is data, in a span of code"
     code = [part.content for t in own for part in t.children or [] if part.type == "code_inline"]
     assert any(span.startswith("EVENT‹U+000A›‹U+000A›#### Review 1") for span in code), code
+
+
+@pytest.mark.parametrize("method", ["action_sideways", "copied", "get_selection", "on_key", "_on_click"])
+def test_an_error_of_a_block_s_key_or_copy_is_vivibox_s_and_is_shown_as_one(env, monkeypatch, method):
+    """The guard is for drawing: building, composing, laying out and rendering a piece's
+    widgets. A key's action, a handler and a copy run in the app's loop, which Textual ends
+    when they raise; taken, the view closed without a traceback, a code or a word."""
+    task = new_task()
+    plan_with(task, display.fenced("\n".join(["z" * 3500] * 40), "text"))  # left unfolded, in a piece
+    opening(monkeypatch)
+    bug = RuntimeError(f"a bug in {method}")
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        side = app.text.query_one("#code-sideways")
+        assert side.query_ancestor("Quote.prose"), "a widget of a piece"
+        raised = raised_by(side, bug, method)
+        assert not app.text.drew(raised)
+        app._handle_exception(raised)
+        assert app._exception is bug, "shown as the error it is"
+        assert not [n for n in app._notifications if "What an agent wrote" in str(n.message)]
+
+    with pytest.raises(RuntimeError):
+        run(scenario, size=(80, 40), notifications=True)
+
+
+def test_the_guard_reads_who_raised_and_in_what_and_holds_what_it_took_out(env, monkeypatch):
+    task = new_task()
+    plan_with(task, "- an item")
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        item = app.text.query("Quote.prose MarkdownBulletList").last()
+
+        def holding(widget):  # a function that merely holds a piece's widget, by a name of the layout's
+            parent = widget
+            raise KeyError(parent is widget)
+
+        with pytest.raises(KeyError) as held:
+            holding(item)
+        assert not app.text.drew(held.value), "no method of a piece's widget, no drawing of one"
+        assert not app.text.drew(raised_by(item, KeyError("an action"), "action_scroll_up"))
+        assert app.text.drew(raised_by(item, KeyError("composing"), "compose"))
+        assert app.text.gives_up(raised_by(item, RuntimeError("first"), "render"))
+        assert app.text.gives_up(raised_by(item, RuntimeError("the same, on its way out"), "render_line"))
+        assert not app.text.gives_up(raised_by(app.text, RuntimeError("the panel's own"), "render"))
+
+    run(scenario, size=(80, 60))

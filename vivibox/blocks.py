@@ -39,6 +39,14 @@ from textual.widgets._markdown import (
 from .markdown import AT_80, MARK, PROSE, ROOM_AT_80, RULE, parser, pieces, source
 
 COLUMN = 4
+# The methods a widget is drawn by, each with the name the widget goes by in it: composing its
+# children, laying them out (Textual's layouts and compositor call the widget they arrange
+# parent or widget), measuring and rendering it, and a block's own answer to a new width.
+_BY_ITSELF = (
+    "compose", "_compose", "_arrange", "render", "_render", "render_line", "render_lines",
+    "_render_content", "get_content_width", "get_content_height", "on_resize", "_on_resize", "draw", "folded",
+)  # fmt: skip
+DRAWING = {**dict.fromkeys(_BY_ITSELF, "self"), "arrange": "parent", "add_widget": "widget"}
 # What a cut puts into a code block's text: the end of the row, and the column a further row
 # stands in.
 GONE_ON = "\n "
@@ -227,6 +235,14 @@ class Marks(Widget):
         return None
 
 
+class Note(Label):
+    """What vivibox says above a block left unfolded. Its own words, not the block's: nothing of
+    it is copied with the block."""
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        return None
+
+
 class Code(Label):
     """The text of a code block. What is copied from it is what was written (Fence.copied)."""
 
@@ -383,9 +399,7 @@ class Fence(MarkdownFence):
         text, marks, _ = self.folded()
         if self.unfolded:
             task = getattr(self.app, "selected_id", lambda: None)() or "<task>"
-            yield Label(
-                NOT_FOLDED.format(self.unfolded, "this block", task), id="code-unfolded", markup=False
-            )
+            yield Note(NOT_FOLDED.format(self.unfolded, "this block", task), id="code-unfolded", markup=False)
             yield Sideways(Code(text, id="code-content", markup=False), id="code-sideways")
         else:
             yield Marks(marks, id="code-marks")
@@ -415,18 +429,28 @@ class Fence(MarkdownFence):
         written = self.code.split("\n")
 
         def wrote(at: int) -> int:
-            """The place in the code as it was written of a place in the text as it was read."""
+            """The place in the code as it was written of a place in the text as it was read: a
+            tab there is the spaces to its stop, as many as the cells before it leave, counted
+            as what expanded it counted them (a wide character and a symbol with its selector
+            are two cells, and one and two characters)."""
             if "\t" not in self.code or len(written) != len(starts):
                 return at
             line = bisect_right(starts, at) - 1
-            column, character = 0, 0
-            for character, char in enumerate(written[line]):  # noqa: B007
-                if column >= at - starts[line]:
-                    break
-                column += TAB - column % TAB if char == "\t" else cell_len(char)
-            else:
-                character = len(written[line])
-            return sum(len(row) + 1 for row in written[:line]) + character
+            want, begins = at - starts[line], sum(len(row) + 1 for row in written[:line])
+            read_to = cells = wrote_to = 0
+            for stretch in written[line].split("\t"):
+                if want <= read_to + len(stretch):
+                    return begins + wrote_to + want - read_to
+                read_to, wrote_to, cells = (
+                    read_to + len(stretch),
+                    wrote_to + len(stretch),
+                    cells + cell_len(stretch),
+                )
+                spaces = TAB - cells % TAB
+                if want < read_to + spaces:
+                    return begins + wrote_to  # within the tab's columns: before the tab
+                read_to, wrote_to, cells = read_to + spaces, wrote_to + 1, cells + spaces
+            return begins + len(written[line])
 
         return self.code[wrote(read(selection.start, 0)) : wrote(read(selection.end, len(expanded.plain)))]
 
@@ -505,22 +529,22 @@ class Panel(Markdown):
         yield from super()._parse_markdown(own + piece)
 
     def drew(self, error: Exception) -> bool:
-        """Whether error was raised while a piece an agent wrote was drawn: by a widget inside a
-        piece's frame, or in the layout of one. Read from the error's own traceback: a call in
-        it is a method of such a widget, or lays one out (Textual's layout names the widget it
-        arranges parent or widget). The widgets taken out for a redraw count while they are on
-        their way out. An error with no such call is none of a piece's: a key's action, what
-        follows a dialog's answer, a dialog's own handler, a worker."""
+        """Whether error was raised while a piece an agent wrote was drawn: its widgets
+        composed, laid out or rendered (made is Panel._parse_markdown's own to catch). Read
+        from the error's traceback: a call in it is one of the methods Textual draws a widget
+        by (DRAWING), on a widget inside a piece's frame, or of the widgets taken out for a
+        redraw while they are on their way out. What a key's action, a handler or a copy raises
+        has no such call, whatever widget it is a method of: that runs in the app's loop, and
+        is an error of vivibox's like any other."""
         at = error.__traceback__
         while at is not None:
-            for name in ("self", "parent", "widget"):
-                node = at.tb_frame.f_locals.get(name)
-                if id(node) in self._gone:
+            node = at.tb_frame.f_locals.get(DRAWING.get(at.tb_frame.f_code.co_name, ""))
+            if id(node) in self._gone:
+                return True
+            while isinstance(node, Widget) and node is not self:
+                if isinstance(node, Quote) and node.has_class(PROSE) and self in node.ancestors:
                     return True
-                while isinstance(node, Widget) and node is not self:
-                    if isinstance(node, Quote) and node.has_class(PROSE) and self in node.ancestors:
-                        return True
-                    node = node.parent
+                node = node.parent
             at = at.tb_next
         return False
 

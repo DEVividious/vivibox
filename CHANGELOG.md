@@ -344,6 +344,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- What is copied from a line of a code block with a tab after a wide character is the whole
+  line: `漢⇥字` was copied as `漢⇥`, and fifty wide characters before a tab lost the line
+  fifty characters of its end. The note above a block left unfolded is not copied with it.
+- An error in a key's action, a handler or a copy of a code block in what an agent wrote is
+  shown as the error it is. It was taken for an error of drawing the agent's text, and since
+  those run in the view's own loop the view closed with no traceback, code or word. Only an
+  error raised while such a widget is composed, laid out or rendered is taken.
 - A code block is left unfolded by the rows folding would add at its own width. They were
   reckoned for the 68 columns a block's text has outside what an agent wrote; behind the rule
   it has 66, and in five numbered lists 6, so a line of 68 characters was never long for the

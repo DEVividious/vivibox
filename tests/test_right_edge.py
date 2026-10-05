@@ -138,7 +138,8 @@ TABS = "\tx" * 25 + "TABS-TAIL"
 @pytest.mark.parametrize("width", WIDTHS)
 def test_a_folded_line_counts_wide_and_combining_characters_and_tabs(env, monkeypatch, width):
     task = new_task()
-    plan_with(task, display.fenced("\n".join([WIDE, COMBINING, TABS, "short"]), "text"))
+    few = "漢" * 70 + "FEW"  # fewer characters than the block has columns, and more cells
+    plan_with(task, display.fenced("\n".join([WIDE, COMBINING, TABS, "short", few]), "text"))
     opening(monkeypatch)
 
     async def scenario(app, pilot):
@@ -151,7 +152,10 @@ def test_a_folded_line_counts_wide_and_combining_characters_and_tabs(env, monkey
             assert tail in drawn, tail
         wide, *others = lines_of(app, fence)
         assert squeezed(wide) == WIDE, "whole; a row may end a cell short of the edge"
-        assert others == [COMBINING, TABS.expandtabs(8), "short"]
+        assert others[:3] == [COMBINING, TABS.expandtabs(8), "short"]
+        assert [squeezed(line) for line in others[3:]] == [few]
+        marked = [text for gutter, text in code_rows(app, fence) if gutter.strip() == MARK]
+        assert any("FEW" in text for text in marked), "its last row is marked as going on"
         room = fence.size.width - 4
         assert all(cell_len(text) <= room for _, text in code_rows(app, fence)), "no row is past the edge"
         assert fence.max_scroll_x == 0

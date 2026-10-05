@@ -376,6 +376,28 @@ def test_the_suite_pins_twenty_cpus_for_the_figures_it_asserts():
     assert len(os.sched_getaffinity(0)) == 20 and os.sched_getaffinity.__name__ == "<lambda>"
 
 
+def test_the_pin_is_left_off_for_a_test_on_this_machine_s_docker(monkeypatch):
+    """The fixture's other branch, which only a live test takes: for a test marked docker, or
+    model, the count stays the machine's. Called here as pytest calls it, on a stand-in for
+    such a test, so the branch is held without a live run."""
+    import os
+    from types import SimpleNamespace
+
+    import conftest
+
+    def test(*marks: str) -> SimpleNamespace:
+        return SimpleNamespace(node=SimpleNamespace(get_closest_marker=lambda name: name in marks or None))
+
+    pin = conftest.twenty_cpus.__wrapped__
+    with monkeypatch.context() as own:
+        own.setattr(os, "sched_getaffinity", lambda pid: {0, 1, 2}, raising=False)  # the machine's, say
+        for marks in (("docker",), ("model", "real_start")):
+            pin(test(*marks), own)
+            assert len(os.sched_getaffinity(0)) == 3, marks
+        pin(test("real_start"), own)
+        assert len(os.sched_getaffinity(0)) == 20, "pinned for every other test"
+
+
 @pytest.mark.docker
 def test_a_live_test_sees_the_machines_own_cpus():
     """A pod of a live test is made from this machine's limits: the count must be the real one,

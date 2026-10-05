@@ -485,14 +485,27 @@ def test_a_pod_of_an_earlier_vivibox_still_up_is_said_too(earlier):
     assert "still running" in panel.detail(earlier, st, 3, False, up)
 
 
+# Fields this vivibox knows, as a layout it does not know may keep them: each of another kind
+# than this one writes.
+OF_ANOTHER_KIND = {
+    "goal": ["Add", "health", "endpoint"],
+    "iteration": "three",
+    "paused": "yes",
+    "updated": 1759622400,
+    "sessions": "ses_1",
+    "models": ["m"],
+    "problem": {"what": "agent turn failed"},
+    "auto_plan": 1,
+}
 # What a layout this vivibox does not know may have changed in the state: a state of its own,
-# fields gone, fields added. Read as far as it goes; shown, never written.
+# fields gone, fields added, fields of another kind. Read as far as it goes; shown, never written.
 CHANGES = {
     "an unknown state": lambda data: data.update(state="some-new-state"),
     "missing fields": lambda data: [
         data.pop(k) for k in ("project", "goal", "state", "iteration", "paused", "created", "updated")
     ],
     "extra fields": lambda data: data.update(added_later={"kept": [1, 2]}, sessions_by_turn=[["a"]]),
+    "fields of another kind": lambda data: data.update(OF_ANOTHER_KIND),
 }
 
 
@@ -522,6 +535,29 @@ def test_a_state_this_vivibox_cannot_read_whole_is_shown_and_not_crashed_on(
         assert snapshot(task) == before
     else:
         assert main(["delete", "demo-1", "--yes"]) == 0 and not task.root.exists()
+
+
+@pytest.mark.parametrize("which", ["earlier", "newer", "unreadable"])
+def test_a_field_of_another_kind_in_a_state_of_another_layout_is_not_taken(env, which):
+    """A task of another layout is shown from what its state has of the fields this vivibox
+    knows, of the kinds it knows them by: a goal that is a list, a count that is a word or a
+    time that is a number is left out, and the field is what a task without it has. Taken as
+    written, each would be drawn, counted and compared as what it is not."""
+    task = implementing("Add health endpoint")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    created = data["created"]
+    data["task_schema_version"] = {"earlier": 1, "newer": task_module.TASK_SCHEMA_VERSION + 1}.get(which, 0)
+    data.update(OF_ANOTHER_KIND)
+    path.write_text(json.dumps(data))
+    st = task.read_state()
+    assert (st.goal, st.iteration, st.paused, st.problem, st.auto_plan) == ("", 0, False, "", False)
+    assert (st.sessions, st.models) == ({}, {})
+    assert st.created == created, "a field of the kind this vivibox writes is taken as it is"
+    assert task_module._iso(st.updated), "a time the view can count from, not the number"
+    assert (st.id, st.project) == ("demo-1", "demo")
+    shown = ui.view(task, st, False, 3)
+    assert shown.status and panel.detail(task, st, 3, running=False)
 
 
 def test_the_view_shows_a_newer_task_with_a_state_it_does_not_know(env, monkeypatch):

@@ -122,6 +122,31 @@ class FakeDocker:
         return [c for c in self.calls if c[: len(prefix)] == list(prefix)]
 
 
+def test_the_addresses_of_many_pods_are_asked_for_in_one_question_within_the_time_given():
+    """The list asks Docker where every pod answers, and gives it a few seconds: a daemon that
+    does not answer must not hold the view. The time reaches the runner, whose error at its
+    end comes up as it is; without one, a runner that takes none is called as before."""
+    from vivibox.pod import addresses
+
+    asked = []
+
+    def answers(cmd, timeout=None):
+        asked.append((list(cmd), timeout))
+        return subprocess.CompletedProcess(cmd, 0, "/a-dind 198.51.100.2\n/b-dind \n", "")
+
+    def never(cmd, timeout=None):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    assert addresses(["a-dind", "b-dind"], answers, timeout=3) == {"a-dind": "198.51.100.2"}
+    [(cmd, timeout)] = asked
+    assert cmd[:2] == ["docker", "inspect"] and cmd[-2:] == ["a-dind", "b-dind"] and timeout == 3
+    with pytest.raises(subprocess.TimeoutExpired) as late:
+        addresses(["a-dind"], never, timeout=3)
+    assert late.value.timeout == 3
+    assert addresses(["a-dind"], lambda cmd: answers(cmd)) == {"a-dind": "198.51.100.2"}
+    assert addresses([], never, timeout=3) == {}, "no pod, no question"
+
+
 def allocation(w: str, r: str, p: str) -> str:
     """A task's allocation file as vivibox writes it: every role's range."""
     return json.dumps(

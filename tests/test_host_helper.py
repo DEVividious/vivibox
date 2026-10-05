@@ -762,12 +762,12 @@ def test_attach_of_a_mounted_disk_does_nothing_and_says_so(tasks, capsys):
     assert "already attached" in capsys.readouterr().out
 
 
-def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(tasks):
+def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(tasks, monkeypatch):
     img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
     (tasks / "shop-1" / "disk.img").write_bytes(b"")
     host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
     (tasks / "shop-1" / "disk").mkdir()
-    unmounted = unmounting(host)
+    unmounted = unmounting(monkeypatch, host)
     code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
     assert code == 0
     [(target, flags)] = unmounted
@@ -779,8 +779,9 @@ def test_detach_unmounts_and_frees_the_loop_device_but_never_deletes_the_image(t
     assert (tasks / "shop-1" / "disk.img").exists(), "the caller deletes it, after a detach that worked"
 
 
-def unmounting(host, works=True):
-    """Steps.umount2 replaced: records the call, and the fake forgets the mount when it works."""
+def unmounting(monkeypatch, host, works=True):
+    """Steps.umount2 replaced for the test that asks, by its own monkeypatch, which puts the
+    real one back: records the call, and the fake forgets the mount when it works."""
     calls = []
 
     def umount2(self, target, flags):
@@ -788,21 +789,34 @@ def unmounting(host, works=True):
         if works:
             host.mounted.clear()
 
-    helper.Steps.umount2 = umount2
+    monkeypatch.setattr(helper.Steps, "umount2", umount2)
     return calls
 
 
+THE_KERNELS = helper.Steps.umount2
+
+
+def test_a_stand_in_for_umount2_is_gone_when_its_test_is(tasks):
+    """unmounting replaces the helper's syscall for one test. Left in place it would answer the
+    next test's detach, and the test of the real one (below) would be a test of the stand-in."""
+    host = Disks()
+    with pytest.MonkeyPatch.context() as one_test:
+        unmounting(one_test, host)
+        assert helper.Steps.umount2 is not THE_KERNELS
+    assert helper.Steps.umount2 is THE_KERNELS
+
+
 @pytest.fixture(autouse=True)
-def real_umount2(monkeypatch):
-    monkeypatch.setattr(helper.Steps, "umount2", helper.Steps.umount2)
+def the_kernels_umount2_when_a_test_begins():
+    assert helper.Steps.umount2 is THE_KERNELS, "a test before this one left its stand-in"
 
 
-def test_a_detach_that_leaves_the_mount_is_refused_with_the_reason(tasks, capsys):
+def test_a_detach_that_leaves_the_mount_is_refused_with_the_reason(tasks, capsys, monkeypatch):
     img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
     (tasks / "shop-1" / "disk.img").write_bytes(b"")
     (tasks / "shop-1" / "disk").mkdir()
     host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
-    unmounting(host, works=False)
+    unmounting(monkeypatch, host, works=False)
     code, _ = call("detach-disk", "shop-1", json.dumps({"dir": str(tasks / "shop-1")}), host=host)
     assert code == 1 and host.privileged() == [], "the loop device stays with a mount still there"
     assert "still mounted" in capsys.readouterr().err
@@ -815,12 +829,12 @@ def test_the_real_umount2_is_the_kernels_with_nofollow(tasks):
         helper.Steps(None, False).umount2(b"/proc/self/fd/9999/disk", helper.UMOUNT_NOFOLLOW)
 
 
-def test_the_dry_run_of_a_detach_says_the_syscall(tasks, capsys):
+def test_the_dry_run_of_a_detach_says_the_syscall(tasks, capsys, monkeypatch):
     img, mnt = str(tasks / "shop-1" / "disk.img"), str(tasks / "shop-1" / "disk")
     (tasks / "shop-1" / "disk.img").write_bytes(b"")
     (tasks / "shop-1" / "disk").mkdir()
     host = Disks(mounted={mnt}, loops={img: "/dev/loop3"})
-    unmounted = unmounting(host)
+    unmounted = unmounting(monkeypatch, host)
     code = helper.main(["--dry-run", "detach-disk", "shop-1", disk_only(tasks)], run=host, euid=1000)
     assert code == 0 and unmounted == [] and host.privileged() == []
     out = capsys.readouterr().out
@@ -958,7 +972,9 @@ def mounted_image(tasks, host=None):
 
 
 @pytest.mark.parametrize("op", ["attach-disk", "detach-disk", "grow-disk"])
-def test_a_mount_point_that_is_a_link_is_refused_before_anything_runs(tasks, tmp_path, op, capsys):
+def test_a_mount_point_that_is_a_link_is_refused_before_anything_runs(
+    tasks, tmp_path, op, capsys, monkeypatch
+):
     """A link at <dir>/disk to /etc, by the person's own uid: the mount would land in /etc and the
     chown would hand it to the person. Refused before a question is even asked."""
     elsewhere = tmp_path / "elsewhere"
@@ -969,7 +985,7 @@ def test_a_mount_point_that_is_a_link_is_refused_before_anything_runs(tasks, tmp
     with open(tasks / "shop-1" / "disk.img", "wb") as f:
         f.truncate(2**30)
     given = disk(tasks=tasks, size="40g") if op != "detach-disk" else disk_only(tasks)
-    unmounted = unmounting(host)
+    unmounted = unmounting(monkeypatch, host)
     code, _ = call(op, "shop-1", given, host=host)
     assert code == 1 and host.calls == [] and unmounted == [], op
     assert "symbolic link" in capsys.readouterr().err

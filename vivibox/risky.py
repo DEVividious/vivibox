@@ -157,6 +157,38 @@ class Unapprovable(Exception):
     """Risky files no approval can take, with why and what fixes it."""
 
 
+class NotAsShown(Unapprovable):
+    """The risky files, or the approval they are compared with, are not what you were shown:
+    nothing of them is approved until you have looked again."""
+
+
+# What NotAsShown says; whoever asked adds how the files are looked at again there.
+NOT_AS_SHOWN = "the risky files changed since they were shown, so nothing was approved"
+
+
+def identity(approved: dict[str, str], now: dict[str, str], modes: dict[str, str]) -> str:
+    """What a view of the risky files shows, as one digest: the approval its diffs are made
+    against (each approved path and its digest) and the files as the view's scan found them (each
+    path with the digest scan gave it, which says what it is, a file's content, a link's target
+    and what it leads to, a special file's kind, and with a plain file's permission bits), in
+    the order of their paths, whatever order they were found in. The same definition as the
+    approval's own record, which is that scan: an approval takes the files only while its scan
+    and the approval before it give this digest again. Whole, never a prefix: the task writes
+    the files, and two states that share a short prefix can be searched for."""
+    stated = [sorted(approved.items()), sorted((path, d, modes.get(path, "")) for path, d in now.items())]
+    return hashlib.sha256(json.dumps(stated).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class Shown:
+    """A view of the risky files: each change with its diff, and the identity an approval of
+    exactly that carries; "" when a change could not be shown whole or cannot be approved, which
+    no approval covers."""
+
+    diffs: list[str]
+    identity: str
+
+
 def _digest(repo: Path, path: Path, budget: clone_read.Budget | None = None) -> str:
     """A plain file's content. A link's target and, while it stays in the repository, what it
     points to: a link to another file there changes when that file does. A link out of it, by its
@@ -384,12 +416,21 @@ class Approvals:
         self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
         return current
 
-    def approve_changes(self) -> list[Change]:
+    def _found(self, budget: clone_read.Budget) -> tuple[dict[str, str], str]:
+        """One scan of the clone, and the identity of what it found against the last approval."""
+        now = scan(self.repo, self.extra, budget)
+        modes = {path: clone_read.mode(self.repo, self.repo / path) for path in now}
+        return now, identity(self.approved(), now, modes)
+
+    def approve_changes(self, shown: str) -> list[Change]:
         """p: the changes since the last approval and their approval, from one scan in one budget,
         so what is counted is what is approved, and a file it could not check is not. Nor is a
-        change it could not have shown you: p shows each, in this pass, as the view does."""
+        change it could not have shown you: p shows each, in this pass, as the view does. And
+        only what you were shown: shown is the identity of the view you looked at
+        (Shown.identity), and while this pass's scan and the approval before it do not give that
+        identity again, NotAsShown, with nothing taken; none ("") is never one."""
         budget = clone_read.Budget()
-        now = scan(self.repo, self.extra, budget)
+        now, found = self._found(budget)
         changes = self.changes(now)
         if self.record.exists():
             refused = list(self.unapprovable(now).values())
@@ -398,6 +439,8 @@ class Approvals:
             ]
             if refused:
                 raise Unapprovable("; ".join(refused))
+        if not shown or found != shown:
+            raise NotAsShown(NOT_AS_SHOWN)
         self.approve(now, budget)
         return changes
 
@@ -412,11 +455,19 @@ class Approvals:
         whose = base.problem or (YOURS if self._heavy(base) else WRITERS)
         return self.changes(now), dict.fromkeys(unread, whose)
 
-    def diffs(self) -> list[str]:
-        """A view: every change and its diff from one scan, all of it read in one budget."""
+    def view(self) -> Shown:
+        """A view: every change and its diff from one scan, all of it read in one budget, and
+        the identity of what that scan found, for the approval of exactly this (approve_changes);
+        no identity while a change was not shown whole, or is one no approval takes."""
         budget = clone_read.Budget()
-        now = scan(self.repo, self.extra, budget)
-        return [self._show(change, now, budget)[0] for change in self.changes(now)]
+        now, found = self._found(budget)
+        shown = [self._show(change, now, budget) for change in self.changes(now)]
+        # Before the first approval nothing is held to being shown: it is your repository's own.
+        whole = not self.record.exists() or (all(seen for _, seen in shown) and not self.unapprovable(now))
+        return Shown([said for said, _ in shown], found if whole else "")
+
+    def diffs(self) -> list[str]:
+        return self.view().diffs
 
     def changes(self, now: dict[str, str] | None = None) -> list[Change]:
         """Since the last approval, by now: a scan's of this pass, or a scan of its own."""

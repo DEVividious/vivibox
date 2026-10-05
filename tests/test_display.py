@@ -8,6 +8,7 @@ import shlex
 import unicodedata
 
 import pytest
+from conftest import shown_risky
 from markdown_it import MarkdownIt
 from test_clone_read import past_the_limit_to_show
 
@@ -148,7 +149,7 @@ def test_a_change_shown_escaped_is_approved_as_its_bytes(env, capsys):
     task = new(env)
     (task.repo / "build.gradle").write_text(EVIL)
     at_approval(task)
-    assert main(["approve-risky", task.id]) == 0
+    assert main(["approve-risky", task.id, shown_risky(task.id)]) == 0
     approved = json.loads((task.meta / "risky" / "approved.json").read_text())
     assert approved["build.gradle"] == hashlib.sha256(EVIL.encode()).hexdigest()
     assert task.read_state().state is State.CHECKPOINT_FINAL
@@ -336,7 +337,7 @@ def test_a_change_with_nothing_to_show_is_named_and_not_taken_as_seen(env):
     said = approvals.diff(Change("pom.xml", "changed"))
     assert said.startswith("pom.xml: changed") and "not shown" in said, said
     with pytest.raises(Exception, match="pom.xml"):
-        approvals.approve_changes()
+        approvals.approve_changes(approvals.view().identity)
 
 
 def test_an_empty_risky_file_added_is_named_and_approvable(env):
@@ -344,7 +345,7 @@ def test_an_empty_risky_file_added_is_named_and_approvable(env):
     (task.repo / "conftest.py").write_text("")
     approvals = Approvals(task.meta, task.repo)
     assert approvals.diff(Change("conftest.py", "added")).startswith("conftest.py: added")
-    assert [c.path for c in approvals.approve_changes()] == ["conftest.py"]
+    assert [c.path for c in approvals.approve_changes(approvals.view().identity)] == ["conftest.py"]
 
 
 def test_every_diff_is_headed_by_the_file_and_its_change(env):

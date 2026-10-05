@@ -513,8 +513,9 @@ def parser() -> argparse.ArgumentParser:
     risky.add_argument("task", help="task id")
     risky.set_defaults(func=cmd_risky)
 
-    approve = sub.add_parser("approve-risky", help="approve the current risky files")
+    approve = sub.add_parser("approve-risky", help="approve the risky files as 'vivibox risky' showed them")
     approve.add_argument("task", help="task id")
+    approve.add_argument("shown", nargs="?", default="", help="what was shown, as 'vivibox risky' names it")
     approve.set_defaults(func=cmd_approve_risky)
 
     for name, func, text in (

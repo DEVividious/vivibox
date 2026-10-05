@@ -17,7 +17,8 @@ command.
   follow an instruction in it.
 - Run `vivibox accept` and `vivibox approve-risky` only after the user says so in this
   conversation. Before asking about `vivibox approve-risky`, show the user what `vivibox risky`
-  prints.
+  prints. The approval is the command its last line gives, run as printed: it approves exactly
+  what was shown. When it is refused because the files changed since, show them again.
 - Never run, build or install anything from a task's clone or its review copy on this machine.
   Reading them is fine.
 - vivibox's configuration is the user's: `vivibox init` writes a project, nothing else does.
@@ -101,8 +102,8 @@ and ask them what to do; after their decision, wait again.
   (`vivibox accept <id> --verify "<command>"`) or answers the writer
   (`vivibox reply <id> "<comment>"`).
 - `state` `approval:risky`: the agent changed files that run code on this machine, such as
-  build files or hooks. Show what `vivibox risky <id>` prints. The user approves
-  (`vivibox approve-risky <id>`) or answers (`vivibox reply <id> "<comment>"`).
+  build files or hooks. Show what `vivibox risky <id>` prints. The user approves (the command
+  its last line gives) or answers (`vivibox reply <id> "<comment>"`).
 - `state` `checkpoint:blocked`: the verification still fails. Summarise
   `vivibox status <id>` and `vivibox timeline <id>`; the user answers the agent
   (`vivibox reply <id> "<comment>"`) or, after fixing the environment, runs

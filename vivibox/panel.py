@@ -489,10 +489,25 @@ def watchable(task: Task, st: TaskState, running: bool) -> bool:
     return bool(actions.watchable_session(task, st))
 
 
+@dataclass
+class Shows:
+    """What one drawing of the panel showed that a decision of yours is bound to: the identity
+    of the risky files as it showed them (risky.Shown.identity), "" when it could not show them
+    whole, None when it showed none."""
+
+    risky: str | None = None
+
+
 def detail(
-    task: Task, st: TaskState, max_iterations: int, running: bool = True, pod: PodView | None = None
+    task: Task,
+    st: TaskState,
+    max_iterations: int,
+    running: bool = True,
+    pod: PodView | None = None,
+    shows: Shows | None = None,
 ) -> str:
-    """What you need to decide on this task, as markdown."""
+    """What you need to decide on this task, as markdown. shows: filled with what this drawing
+    shows that a decision is bound to, for the caller that puts it on the screen."""
     seen = ui.view(task, st, running, max_iterations)
     if layout(st) != CURRENT:  # of a task this vivibox does not run, nothing is read but its state
         up = (pod if pod is not None else pod_view(st.id)).address
@@ -608,9 +623,12 @@ def detail(
         ]
     elif st.state is State.APPROVAL_RISKY:
         try:
-            diffs = actions.risky_diffs(task, actions.load(st.id)[1])
-        except Exception as e:
-            diffs = [str(e)]
+            view = actions.risky_view(task, actions.load(st.id)[1])
+            diffs, identity = view.diffs, view.identity
+        except Exception as e:  # shown, and nothing an approval could be of
+            diffs, identity = [str(e)], ""
+        if shows is not None:
+            shows.risky = identity
         body = [
             "**Risky files changed.** They run code on your machine when your IDE imports the project.",
             "",

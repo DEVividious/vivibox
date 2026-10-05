@@ -335,6 +335,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An approval of risky files is of exactly what you were shown. `p` approved whatever the clone
+  held when you answered its question, so a file the task's process changed after you read it
+  was approved unseen, and so was one changed while the panel still showed the old diff. The
+  view of the files now has an identity, and the approval carries it: `p` that of the details
+  panel as you opened it, `vivibox approve-risky <id> <identity>` that of what `vivibox risky`
+  printed, which ends with the whole command. Files that are no longer those are refused,
+  with nothing approved: `the risky files changed since they were shown`, and the panel draws
+  them as they are. With the details closed `p` approves nothing and says to open them;
+  `vivibox approve-risky <id>` alone approves nothing and says to run `vivibox risky <id>`.
 - A verification command kept for a project is written into the project's file as one string,
   whatever it holds. A command with a quote or a backslash in it broke the file, and one with
   `\n` written out added lines to it: a writer's proposal, kept by `--auto` without you, could

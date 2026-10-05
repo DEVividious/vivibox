@@ -2,6 +2,7 @@ import os
 import shlex
 
 import pytest
+from conftest import shown_risky
 
 from vivibox import prompts
 from vivibox.cli import main
@@ -92,7 +93,7 @@ def test_risky_review_and_approval_move_the_task_on(env, capsys):
 
     for state in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.APPROVAL_RISKY):
         task.transition(state)
-    assert main(["approve-risky", "demo-1"]) == 0
+    assert main(["approve-risky", "demo-1", shown_risky("demo-1")]) == 0
     assert task.read_state().state is State.CHECKPOINT_FINAL
     assert main(["risky", "demo-1"]) == 0
     assert "No changes" in capsys.readouterr().out
@@ -127,7 +128,7 @@ def test_accept_and_reply_follow_the_checkpoints(env, capsys):
     task.transition(State.CHECKPOINT_FINAL)
     (task.repo / "pom.xml").write_text("<project/>")
     assert main(["accept", "demo-1"]) == 1, "unapproved risky files block done"
-    assert main(["approve-risky", "demo-1"]) == 0
+    assert main(["approve-risky", "demo-1", shown_risky("demo-1")]) == 0
     assert main(["accept", "demo-1"]) == 0
     assert not task.root.exists(), "accepting the work removes the task"
     assert "is done" in capsys.readouterr().out
@@ -409,7 +410,7 @@ def test_review_worktree_follows_the_task_and_is_removed_with_it(env, capsys):
     agent_commit(task, "one.txt")
     (task.repo / ".idea").mkdir()
     agent_commit(task, ".idea/vcs.xml")
-    assert main(["approve-risky", "demo-1"]) == 0
+    assert main(["approve-risky", "demo-1", shown_risky("demo-1")]) == 0
     assert main(["review", "demo-1"]) == 0
     copy = review_worktree_path(source, task.root)
     # The test repository is called "repo", like the agent's clone, so the copy gets another name.

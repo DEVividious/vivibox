@@ -29,7 +29,7 @@ them all:
 | `c` / `C` | with a manual planner: copy the planning prompt for a chat in your browser, or for a CLI |
 | `f` | the work as a diff, in git's pager, before you accept it |
 | `o` | open the review copy in your editor: the project's, else `config.toml`'s, else the one the repository's own folders point at (`.idea`, `.vscode`) among those found here, else the first found; `?` says which, `k` or the project's row changes it |
-| `p` | approve changes to risky files |
+| `p` | approve the changes to risky files as the details (`d`) show them; refused when they changed since |
 | `g` | a task blocked on a failed verification, or on a question the agent asked about it: run the verification again without the agent, once you have fixed what was outside the code (a token expired, Docker, a service) |
 | `l` | read, in your pager: the task's timeline (what happened, one line each: what the task started with and what `m` or `e` changed since, states and why, turns with their cost and time, verifications with what failed, your decisions), a role's conversation (`planner.log`, `writer.log`, `reviewer.log`: each turn with its prompt in short, what the agent said, the tools it called with their arguments cut short, what the turn cost and how long it took; kept after the pod is gone), a verification log (newest first, each with what ran and how it went; a log ends with a summary naming the first trouble line, and the pager opens at its end), or the supervisor's log as diagnostics; on a finished task, what its archive kept of these and its reviews; with one entry it opens at once; while the verification runs its log is the cursor's and followed as it is written (Ctrl-C stops following). `vivibox timeline <id>` prints the timeline |
 | `w` | watch or talk to the agent: the planner while it plans, the writer from implementation on, and once both have a conversation, the one you pick; while the verification runs, its log as it is written, and the agents' conversations a choice away; when it ends, the window says so and where the logs stay (`l`); Ctrl-q brings you back (Esc in the agent's window interrupts the agent). The window exists only while you look: it opens on `w` and closes when you leave, so nothing renders for nobody in between |
@@ -106,7 +106,7 @@ output.
 | `vivibox accept <id>` | accept the plan (edit `.task/plan.md` first if you like), the writer's verification command (`--verify "…"` keeps yours instead), or the finished work |
 | `vivibox reply <id> "comment"` | reject, ask for changes, or answer the agent's question |
 | `vivibox reply <id> "comment" --criterion "…"` | send finished or stuck work back with a new acceptance criterion (repeat for more): it joins the accepted plan, and the gate holds the work to it like the rest |
-| `vivibox risky <id>` / `vivibox approve-risky <id>` | review and approve changes to files that run code on your host |
+| `vivibox risky <id>` / `vivibox approve-risky <id> <shown>` | review changes to files that run code on your host, then approve exactly what was shown, with the command `vivibox risky` ends with |
 | `vivibox verify-again <id>` | a blocked task: run the verification once more, without the agent |
 
 When a verification fails on something outside the code (no Docker, no network, a credential, a

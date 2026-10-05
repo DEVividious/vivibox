@@ -390,7 +390,7 @@ def test_an_error_quoting_a_name_is_text_on_the_command_line(env, capsys, monkey
         def fail(*args, error=error, **how):
             raise error
 
-        monkeypatch.setattr(actions, "risky_diffs", fail)
+        monkeypatch.setattr(actions, "risky_view", fail)
         capsys.readouterr()
         assert main(["risky", task.id]) == 1
         said = capsys.readouterr().err

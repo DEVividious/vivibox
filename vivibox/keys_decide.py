@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from textual import work
 
-from . import actions, display, ui
+from . import actions, display, risky, ui
 from .dialogs import CommitWork, Reply, ReplyWithCriteria
 from .states import State
 from .task import Task
@@ -98,20 +98,35 @@ class DecideKeys:
         self.reload()
 
     def action_approve_risky(self) -> None:
+        """p approves the risky files as the panel showed them: the identity of that drawing goes
+        with the approval, taken here, before the question, and files that are no longer those
+        are refused whole. The panel then draws them as they are, for you to read again."""
         task, _ = self.selected()
+        shown = self.risky_shown.get(task.id)
+        if shown is None:
+            said = f"The risky files of {task.id} are not shown: open the details (d), read them, then p."
+            self.notify(said, severity="error", timeout=10, markup=False)
+            return
 
         def approve(yes: bool) -> None:
             if not yes:
                 return
             try:
-                count, review = actions.approve_risky(task, actions.load(task.id)[1])
+                count, review = actions.approve_risky(task, actions.load(task.id)[1], shown)
                 self.notify(
                     f"Approved {count} change(s)." + (f" Ready for review in {review}" if review else ""),
                     markup=False,
                 )
+            except risky.NotAsShown as e:
+                # Drawn again now, as they are: that drawing is what the next p approves.
+                self.risky_shown.pop(task.id, None)
+                self.show_detail()
+                again = "the details show them as they are now: read them again, then p"
+                self.fail(risky.NotAsShown(f"{e}; {again}"))
             except Exception as e:
                 self.fail(e)
             else:
+                self.risky_shown.pop(task.id, None)
                 self.go_on(task)
             self.reload()
 

@@ -78,6 +78,7 @@ from .decisions import (  # noqa: F401
     reply,
     risky_diffs,
     risky_target,
+    risky_view,
     save_verify,
     verify_again,
 )

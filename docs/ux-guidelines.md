@@ -93,6 +93,14 @@ approval, stopping just the pod keeps the decision in Waiting for you, its label
   start and stop, `v` for run app and stop app).
 - Decisions: `a` accept, `r` reply, `p` approve, `g` verify again (a blocked task, without the
   agent). `l` opens the newest log in the pager, `f` the work as a diff in git's.
+- `p` approves the risky files as the details panel showed them, and its question stays one
+  step. With the panel closed it approves nothing and says to open it (`d`). The identity of
+  the drawing you opened goes with the key (`risky.Shown`, `panel.Shows`); a drawing a refresh
+  made since does not replace it. Files that are no longer what was drawn are refused whole,
+  the refusal says they changed since they were shown and to read them again, and the panel is
+  drawn again as they are. `vivibox risky` ends with the command that approves what it
+  printed; `vivibox approve-risky` without it, or after a change, approves nothing and says to
+  look again.
 - `v` runs the app only while nobody works in the pod: once the work is back with you, or in a
   box. The view and `vivibox demo` ask the same function (`actions.demo_allowed`).
 - Dialogs: Esc cancels, Enter submits a one-line field, Ctrl+S submits a multi-line one, arrows

@@ -46,6 +46,7 @@ from .panel import (
     SPIN_SECONDS,
     TASK_ACTIONS,
     PodView,
+    Shows,
     after_window,
     criteria,
     detail,
@@ -143,6 +144,8 @@ class Vivibox(
         self.config = load_config()
         self.executor = LeavingExecutor()
         self.shown = ""
+        # The risky files' identity as the panel first drew them, by task (panel.Shows): what p approves.
+        self.risky_shown: dict[str, str] = {}
         # What the table was last drawn from; a refresh that matches it does no work.
         self.drawn: tuple = ()
         self.pairs: list[tuple[Task, TaskState]] = []
@@ -400,9 +403,10 @@ class Vivibox(
     def show_detail(self) -> None:
         if self.panel.has_class("hidden"):
             return
-        pick = self.selected()
+        pick, shows = self.selected(), Shows()
         if pick:
-            text = detail(*pick, self.config.max_rounds, self.agent_running(pick[1].id), self.pod)
+            running = self.agent_running(pick[1].id)
+            text = detail(*pick, self.config.max_rounds, running, self.pod, shows)
         elif entry := self.finished_entry(self.selected_id()):
             text = finished_detail(entry)
         elif self.on_project_row():
@@ -414,6 +418,12 @@ class Vivibox(
         if text != self.shown:  # redrawing resets the scroll position
             self.shown = text
             self.text.update(display.terminal(text))  # nothing the agent wrote reaches the terminal as is
+        if pick and shows.risky is None:
+            self.risky_shown.pop(pick[1].id, None)
+        elif pick:
+            # p approves what was first drawn here, never what a later drawing replaced it with
+            # while you read: that one is on the screen, and p says once that it changed.
+            self.risky_shown.setdefault(pick[1].id, shows.risky)
 
     def action_toggle_done(self) -> None:
         self.show_done = not self.show_done
@@ -431,6 +441,8 @@ class Vivibox(
     def action_details(self) -> None:
         """The list is what you look at; the plan, the diff or the agent's question on request."""
         self.panel.set_class(not self.panel.has_class("hidden"), "hidden")
+        if pick := self.selected():  # opened by you: what is drawn now is what you look at
+            self.risky_shown.pop(pick[1].id, None)
         self.show_detail()
 
     @on(DataTable.RowSelected)

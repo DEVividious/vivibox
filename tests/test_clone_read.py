@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import as_verified, make_repo
+from conftest import as_verified, make_repo, shown_risky
 from test_gate import FakePod, git
 
 from vivibox import clone_read, gate, init, pod_network, repo, reviewing, risky, supervisor
@@ -580,7 +580,7 @@ def test_the_cli_says_why_a_risky_link_cannot_be_approved(task, monkeypatch, cap
 
     handoff_link(task)
     monkeypatch.setattr(actions, "load", lambda _id: (task, SimpleNamespace(risky_extra=[])))
-    assert cli.main(["approve-risky", task.id]) == 1
+    assert cli.main(["approve-risky", task.id, shown_risky(task.id)]) == 1
     assert "build.gradle is a link that leads out of the repository" in capsys.readouterr().err
 
 
@@ -1290,9 +1290,10 @@ def test_p_after_a_view_with_files_not_checked_approves_none_of_them(task, monke
     ] * 2
     assert all("scan budget exceeded" in d for d in diffs)
     before = Approvals(task.meta, task.repo).approved()
+    shown = actions.risky_view(task, project).identity
     hashed = hashed_per_file(monkeypatch, task.repo)
     with pytest.raises(risky.Unapprovable, match="scan budget exceeded"):
-        actions.approve_risky(task, project)
+        actions.approve_risky(task, project, shown)
     assert Approvals(task.meta, task.repo).approved() == before
     assert hashed == dict.fromkeys(names, 1), "one scan: what p counts is what it approves"
 
@@ -1523,7 +1524,14 @@ def test_a_change_vivibox_can_show_you_is_approvable(task, size, monkeypatch):
 
     monkeypatch.setattr(clone_read, "CHECK_LIMIT", clone_read.CHUNK)  # kept fast: written whole
     changed_risky(task, "build.gradle", size)
-    assert actions.approve_risky(task, SimpleNamespace(risky_extra=[]))[0] == 1
+    assert (
+        actions.approve_risky(
+            task,
+            SimpleNamespace(risky_extra=[]),
+            actions.risky_view(task, SimpleNamespace(risky_extra=[])).identity,
+        )[0]
+        == 1
+    )
 
 
 def test_a_change_vivibox_cannot_show_you_is_refused_at_p(task, monkeypatch):
@@ -1537,7 +1545,11 @@ def test_a_change_vivibox_cannot_show_you_is_refused_at_p(task, monkeypatch):
     assert "so the task's change to it cannot be approved: reply, and the writer" in said
     before = Approvals(task.meta, task.repo).approved()
     with pytest.raises(risky.Unapprovable) as refused:
-        actions.approve_risky(task, SimpleNamespace(risky_extra=[]))
+        actions.approve_risky(
+            task,
+            SimpleNamespace(risky_extra=[]),
+            actions.risky_view(task, SimpleNamespace(risky_extra=[])).identity,
+        )
     assert "build.gradle" in str(refused.value) and "could not copy it for you to read" in str(refused.value)
     assert Approvals(task.meta, task.repo).approved() == before
 
@@ -1550,7 +1562,11 @@ def test_a_small_change_not_shown_for_the_budget_is_refused_at_p_too(task, monke
     assert said.startswith(f"{names[0]}: added: not shown: scan budget exceeded")
     assert "so the task's change to it cannot be approved: reply, and the writer restores it as it" in said
     with pytest.raises(risky.Unapprovable, match=f"{names[0]}: added: not shown"):
-        actions.approve_risky(task, SimpleNamespace(risky_extra=[]))
+        actions.approve_risky(
+            task,
+            SimpleNamespace(risky_extra=[]),
+            actions.risky_view(task, SimpleNamespace(risky_extra=[])).identity,
+        )
 
 
 def test_your_unchanged_file_past_the_limits_is_not_held_to_being_shown(env, monkeypatch):
@@ -1565,7 +1581,14 @@ def test_your_unchanged_file_past_the_limits_is_not_held_to_being_shown(env, mon
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
     Approvals(t.meta, t.repo).approve()
     (t.repo / "pom.xml").write_text("<project/>\n")
-    assert actions.approve_risky(t, SimpleNamespace(risky_extra=[]))[0] == 1
+    assert (
+        actions.approve_risky(
+            t,
+            SimpleNamespace(risky_extra=[]),
+            actions.risky_view(t, SimpleNamespace(risky_extra=[])).identity,
+        )[0]
+        == 1
+    )
 
 
 # --- review round 9: what you approve is what vivibox showed you -----------------------------------
@@ -1592,7 +1615,7 @@ def test_a_risky_link_to_a_large_file_in_the_repository_is_held_like_that_file(t
     assert "could not copy it for you to read: scan budget exceeded" in said
     before = Approvals(task.meta, task.repo).approved()
     with pytest.raises(risky.Unapprovable, match="build.gradle"):
-        actions.approve_risky(task, P)
+        actions.approve_risky(task, P, actions.risky_view(task, P).identity)
     assert Approvals(task.meta, task.repo).approved() == before
 
 
@@ -1606,7 +1629,7 @@ def test_a_risky_link_to_a_small_file_in_the_repository_shows_what_it_points_to(
     gradle.symlink_to("data/real.txt")
     said = actions.risky_diffs(task, P)[0]
     assert "symlink to data/real.txt" in said and "+plugins { id 'java' }" in said
-    assert actions.approve_risky(task, P)[0] == 1
+    assert actions.approve_risky(task, P, actions.risky_view(task, P).identity)[0] == 1
 
 
 @pytest.mark.parametrize("swap", ["a FIFO", "a link", "binary", "another large file"])
@@ -1635,9 +1658,10 @@ def test_a_file_swapped_after_p_hashed_it_is_not_approved_unseen(task, monkeypat
         return now
 
     before = Approvals(task.meta, task.repo).approved()
+    shown = actions.risky_view(task, P).identity  # the view you looked at, before the swap
     monkeypatch.setattr(risky, "scan", scan_then_swap)
     with pytest.raises(risky.Unapprovable, match="build.gradle"):
-        actions.approve_risky(task, P)
+        actions.approve_risky(task, P, shown)
     monkeypatch.setattr(risky, "scan", real_scan)
     gradle.unlink()
     hidden.rename(gradle)  # back as it was
@@ -1654,7 +1678,7 @@ def test_the_first_approval_takes_your_repository_as_it_is(tmp_path, monkeypatch
     t.set_base_commit(repo.prepare(source, t.repo, t.id, t.meta))
     names = five_of_a_mib(t.repo, monkeypatch)
     approvals = Approvals(t.meta, t.repo)
-    assert approvals.approve_changes() == [Change(n, "added") for n in names]
+    assert approvals.approve_changes(approvals.view().identity) == [Change(n, "added") for n in names]
     assert sorted(approvals.approved()) == names
 
 
@@ -1685,7 +1709,7 @@ def refused_at_p(task) -> str:
 
     before = Approvals(task.meta, task.repo).approved()
     with pytest.raises(risky.Unapprovable) as refused:
-        actions.approve_risky(task, P)
+        actions.approve_risky(task, P, actions.risky_view(task, P).identity)
     assert Approvals(task.meta, task.repo).approved() == before
     return str(refused.value)
 
@@ -1731,7 +1755,7 @@ def test_your_unchanged_binary_file_is_no_change_to_approve(env):
     Approvals(t.meta, t.repo).approve()
     (t.repo / "pom.xml").write_text("<project/>\n")
     assert all("gradle-wrapper.jar" not in said for said in actions.risky_diffs(t, P))
-    assert actions.approve_risky(t, P)[0] == 1
+    assert actions.approve_risky(t, P, actions.risky_view(t, P).identity)[0] == 1
     assert Approvals(t.meta, t.repo).changes() == []
 
 
@@ -1742,7 +1766,7 @@ def test_a_text_change_is_shown_and_approvable_as_before(task, kind):
     made(task, "build.gradle", b"plugins { id 'java' }\n// caf\xc3\xa9\n" + CURL, kind)
     said = actions.risky_diffs(task, P)[0]
     assert "+// café\n" in said and f"+{CURL.decode()}" in said
-    assert actions.approve_risky(task, P)[0] == 1
+    assert actions.approve_risky(task, P, actions.risky_view(task, P).identity)[0] == 1
 
 
 def test_text_that_replaces_a_binary_approval_is_shown_whole_and_approvable(task):
@@ -1754,7 +1778,7 @@ def test_text_that_replaces_a_binary_approval_is_shown_whole_and_approvable(task
     said = actions.risky_diffs(task, P)[0]
     assert said.startswith("build.gradle: changed: what was approved before is not text (binary)")
     assert "+plugins { id 'java' }\n" in said and f"+{CURL.decode()}" in said
-    assert actions.approve_risky(task, P)[0] == 1
+    assert actions.approve_risky(task, P, actions.risky_view(task, P).identity)[0] == 1
 
 
 def test_a_binary_file_removed_is_approvable(task):
@@ -1765,7 +1789,7 @@ def test_a_binary_file_removed_is_approvable(task):
     jar.unlink()
     said = actions.risky_diffs(task, P)[0]
     assert said == f"{jar.relative_to(task.repo)}: removed (what was approved before is not text: binary)\n"
-    assert actions.approve_risky(task, P)[0] == 1
+    assert actions.approve_risky(task, P, actions.risky_view(task, P).identity)[0] == 1
 
 
 def large(path: Path, tail: bytes) -> Path:
@@ -1806,7 +1830,7 @@ def test_a_large_copy_of_text_is_read_whole_and_approvable(task, monkeypatch):
     said = actions.risky_diffs(task, P)[0]
     assert "read its copy as text" in said
     assert Approvals(task.meta, task.repo).copy_for_you("build.gradle").read_bytes() == path.read_bytes()
-    assert actions.approve_risky(task, P)[0] == 1
+    assert actions.approve_risky(task, P, actions.risky_view(task, P).identity)[0] == 1
 
 
 def test_a_large_copy_cut_off_in_a_character_is_refused_and_deleted(task, monkeypatch):

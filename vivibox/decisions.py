@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import actions, comments, feedback, gate, handoff, manual, prompts, repo, supervisor
 from .config import Project, config_dir
-from .risky import Approvals
+from .risky import Approvals, Shown
 from .states import State
 from .task import Task
 
@@ -166,15 +166,23 @@ def risky_target(task: Task) -> State:
     return State.CHECKPOINT_PLAN if entered["previous"] == State.PLAN else State.CHECKPOINT_FINAL
 
 
+def risky_view(task: Task, project: Project) -> Shown:
+    """The changes to the risky files as they are now, each with its diff, and the identity an
+    approval of exactly this view carries (risky.Shown)."""
+    return Approvals(task.meta, task.repo, project.risky_extra).view()
+
+
 def risky_diffs(task: Task, project: Project) -> list[str]:
-    return Approvals(task.meta, task.repo, project.risky_extra).diffs()
+    return risky_view(task, project).diffs
 
 
-def approve_risky(task: Task, project: Project) -> tuple[int, Path | None]:
-    """Approves the risky files as they are now. Returns how many changed, and the review copy when
-    the approval was all the finished work was waiting for."""
-    changes = Approvals(task.meta, task.repo, project.risky_extra).approve_changes()
-    task.event("risky_approved", paths=[c.path for c in changes])
+def approve_risky(task: Task, project: Project, shown: str) -> tuple[int, Path | None]:
+    """Approves the risky files as you were shown them: shown is the identity of the view you
+    looked at (risky_view), and files that are not that view's by now are refused whole
+    (risky.NotAsShown), with nothing approved and the task where it was. Returns how many
+    changed, and the review copy when the approval was all the finished work was waiting for."""
+    changes = Approvals(task.meta, task.repo, project.risky_extra).approve_changes(shown)
+    task.event("risky_approved", paths=[c.path for c in changes], shown=shown)
     if task.read_state().state is State.APPROVAL_RISKY:
         target = risky_target(task)
         task.transition(target)

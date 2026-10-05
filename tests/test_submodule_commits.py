@@ -98,7 +98,7 @@ def at_final(task, project, risky: bool = False, reviewed: bool = True) -> None:
     for state in (State.IMPLEMENT, State.VERIFY, State.CHECKPOINT_FINAL):
         task.transition(state)
     if risky:
-        actions.approve_risky(task, project.demo)
+        actions.approve_risky(task, project.demo, actions.risky_view(task, project.demo).identity)
     if reviewed:
         actions.prepare_review(task, project.demo)
 

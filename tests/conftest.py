@@ -51,6 +51,14 @@ def make_repo(path: Path) -> Path:
     return path
 
 
+def shown_risky(task_id: str) -> str:
+    """What `vivibox risky` shows of the task now, as its last line names it: the identity an
+    approval of exactly that carries ("" while something cannot be shown or approved)."""
+    from vivibox import actions
+
+    return actions.risky_view(*actions.load(task_id)).identity
+
+
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A config dir with one project 'demo' backed by an empty git repo."""

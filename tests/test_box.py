@@ -137,7 +137,9 @@ def test_closing_a_box_with_a_risky_change_waits_for_your_approval(env):
     (task.repo / "pom.xml").write_text("<project/>\n")
     assert actions.close_box(task, load_project("demo")) is None
     assert task.read_state().state is State.APPROVAL_RISKY
-    count, review = actions.approve_risky(task, load_project("demo"))
+    count, review = actions.approve_risky(
+        task, load_project("demo"), actions.risky_view(task, load_project("demo")).identity
+    )
     assert count == 1 and review is not None and task.read_state().state is State.CHECKPOINT_FINAL
 
 

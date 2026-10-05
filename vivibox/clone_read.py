@@ -247,6 +247,20 @@ def is_file(root: Path, path: Path | str) -> bool:
     return True
 
 
+def mode(root: Path, path: Path | str) -> str:
+    """The permission bits of the plain file at path, reached as read_bytes reaches it, as octal
+    text: whether it can be run is part of what it is. "" where there is no plain file to have
+    any (a link out of the repository, a special file, a folder, nothing), which is never opened."""
+    try:
+        fd = _reach(root, path)
+    except OSError:
+        return ""
+    try:
+        return f"{stat.S_IMODE(os.fstat(fd).st_mode):04o}"
+    finally:
+        os.close(fd)
+
+
 def link(root: Path, path: Path | str) -> str | None:
     """The target of the link path is, as git stores it; None when path is not a link."""
     try:

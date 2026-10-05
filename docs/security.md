@@ -265,6 +265,23 @@ The check of the task's clone guards the git vivibox runs, at the moment it runs
 yourself in the clone, or an IDE you open on it, is not checked: open the review copy instead, which
 holds only what was committed.
 
+An approval of risky files is of the state you were shown. A view of them (`vivibox risky`,
+the details panel) has an identity: a SHA-256, whole, over the record of the last approval and
+over every risky file as that view's scan found it: its path, what it is (a file, a link and
+where it leads, a special file), its content's digest, and a plain file's permission bits,
+all read as vivibox reads the clone, following no link out of it. `p` carries the identity of
+the drawing of the panel you opened, which no later refresh replaces, and `vivibox
+approve-risky <id> <identity>` the one `vivibox risky` printed; the command line approves
+nothing it printed itself in the same run, which nobody would have read. The approval scans
+again, and when the clone or the record of the last approval no longer gives that identity it
+approves nothing and says they changed since they were shown. A view in which a file could not
+be shown whole (not text, past the size or the total vivibox reads, a special file where a
+file was approved, a link that leads out of the repository) has no identity, and the approval
+refuses such a file whatever identity it is given. What is recorded as approved is that
+scan's digests: a file changed after it is a risky change again at the next check. Not
+covered: the permission bits are in the identity and not in the record, so a mode changed
+after an approval is not found again; and nothing tells whether you read what was drawn.
+
 A checkout that is a partial clone (`git clone --filter=…`) is not supported as a project: a
 task's clone would lack the objects your checkout lacks, and the git vivibox runs in your
 checkout is not handed how you reach its promisor remote.

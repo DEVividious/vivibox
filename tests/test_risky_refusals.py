@@ -38,9 +38,10 @@ def swapped(task, monkeypatch, swap: str) -> str:  # noqa: F811
             os.mkfifo(gradle) if swap == "a FIFO" else gradle.symlink_to("/etc/hostname")
         return now
 
+    shown = actions.risky_view(task, P).identity  # the view you looked at, before the swap
     monkeypatch.setattr(risky, "scan", scan_then_swap)
     with pytest.raises(risky.Unapprovable) as refused:
-        actions.approve_risky(task, P)
+        actions.approve_risky(task, P, shown)
     return str(refused.value)
 
 
@@ -184,7 +185,7 @@ def known(tmp_path) -> None:
 def test_in_a_box_a_link_out_is_not_the_writers_to_remove(a_box):
     (a_box.repo / "build.gradle").symlink_to("/etc/hostname")
     with pytest.raises(risky.Unapprovable) as refused:
-        Approvals(a_box.meta, a_box.repo).approve_changes()
+        Approvals(a_box.meta, a_box.repo).approve_changes(Approvals(a_box.meta, a_box.repo).view().identity)
     said = str(refused.value)
     assert "reply" not in said and "the writer" not in said
     assert said.endswith(
@@ -196,7 +197,7 @@ def test_in_a_box_a_link_out_is_not_the_writers_to_remove(a_box):
 def test_in_a_box_a_change_vivibox_cannot_show_is_not_the_writers_to_undo(a_box):
     (a_box.repo / "build.gradle").write_bytes(b"\xff\xfe\x00 not text\n")
     with pytest.raises(risky.Unapprovable) as refused:
-        Approvals(a_box.meta, a_box.repo).approve_changes()
+        Approvals(a_box.meta, a_box.repo).approve_changes(Approvals(a_box.meta, a_box.repo).view().identity)
     said = str(refused.value)
     assert "reply" not in said and "the writer" not in said
     assert "cannot be approved: whoever works in this box, which has no writer, removes it" in said
@@ -205,7 +206,7 @@ def test_in_a_box_a_change_vivibox_cannot_show_is_not_the_writers_to_undo(a_box)
 def test_in_a_box_files_past_the_budget_are_not_the_writers_to_restore(a_box, monkeypatch):
     five_of_a_mib(a_box.repo, monkeypatch)
     with pytest.raises(risky.Unapprovable) as refused:
-        Approvals(a_box.meta, a_box.repo).approve_changes()
+        Approvals(a_box.meta, a_box.repo).approve_changes(Approvals(a_box.meta, a_box.repo).view().identity)
     said = str(refused.value)
     assert "reply" not in said and "the writer" not in said
     assert "whoever works in this box, which has no writer, restores the large risky files" in said
@@ -217,7 +218,7 @@ def test_a_task_with_a_writer_is_told_as_before(task, tmp_path):  # noqa: F811
     with pytest.raises(
         risky.Unapprovable, match="cannot be approved: reply, and the writer removes the link"
     ):
-        Approvals(task.meta, task.repo).approve_changes()
+        Approvals(task.meta, task.repo).approve_changes(Approvals(task.meta, task.repo).view().identity)
 
 
 # --- what git said of your repository ----------------------------------------------------------------

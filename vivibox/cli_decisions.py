@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import actions, answers, display, gate, manual, submodules, ui
+from . import actions, answers, display, gate, manual, risky, submodules, ui
 from .config import load_project
 from .plan import PlanError
 from .states import State
@@ -144,19 +144,41 @@ def cmd_verify_again(args: argparse.Namespace) -> int:
 
 
 def cmd_risky(args: argparse.Namespace) -> int:
+    """The changes, and the command that approves exactly them: it carries the identity of what
+    was printed here (risky.Shown), so approve-risky takes nothing this did not show."""
     task, project = actions.load(args.task)
-    diffs = actions.risky_diffs(task, project)
-    if not diffs:
+    view = actions.risky_view(task, project)
+    approve = f"'vivibox approve-risky {task.id} {view.identity}'"
+    if not view.diffs:
         print("No changes to risky files since your last approval.")
+        if task.read_state().state is State.APPROVAL_RISKY:
+            print(f"The task still waits for your approval: {approve} moves it on.")
         return 0
-    print("\n".join(diffs))
-    print(f"Approve with 'vivibox approve-risky {task.id}', or reject with a comment for the agent.")
+    print("\n".join(view.diffs))
+    if view.identity:
+        print(f"Approve these as shown with {approve}, or reject with a comment for the agent.")
+    else:
+        print(
+            "Nothing is approved while a file above is not shown whole or cannot be approved; each says why."
+        )
     return 0
 
 
 def cmd_approve_risky(args: argparse.Namespace) -> int:
+    """Approves what vivibox risky printed, named by the identity its last line gave: files that
+    are no longer those are refused, with nothing approved. It prints and approves nothing by
+    itself: what one command printed and approved at once, nobody would have read first."""
     task, project = actions.load(args.task)
-    count, review = actions.approve_risky(task, project)
+    again = f"'vivibox risky {task.id}', read what it shows, then run the command it ends with"
+    try:
+        count, review = actions.approve_risky(task, project, args.shown)
+    except risky.NotAsShown as e:
+        if args.shown:
+            raise risky.NotAsShown(f"{e}: run {again}") from None
+        raise risky.NotAsShown(
+            "approve-risky approves the risky files as vivibox risky showed them, and was told of "
+            f"none: run {again}"
+        ) from None
     print(f"Approved {count} change(s) to risky files.")
     if review:
         print(f"Ready for your review in {review}")

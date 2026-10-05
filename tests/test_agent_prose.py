@@ -510,7 +510,7 @@ def test_inline_code_is_one_line_whatever_it_is_given(value):
     parts = [(p.type, p.content) for p in own[1].children if p.type != "text" or p.content]
     kinds = [kind for kind, _ in parts]
     assert kinds[:3] == ["strong_open", "text", "strong_close"] and kinds[-1] == "text", parts
-    assert kinds[3:-1] == ["text", "code_inline"][: 2 * bool(value)], "the value is one span of code"
+    assert kinds[3:-1] == ["text", "code_inline"], "the value is one span of code, an empty one too"
     assert "\n" not in display.code(value) and "\r" not in display.code(value)
 
 
@@ -906,3 +906,33 @@ def test_the_rule_is_drawn_in_the_colour_of_muted_text(env, monkeypatch, width):
         assert edges == {(RULE, look.MUTED)}, "every row of the piece, in the one colour"
 
     run(scenario, size=(width, 60))
+
+
+def test_an_empty_value_is_a_span_that_is_closed_and_words_never_start_a_code_block():
+    """Two backticks with nothing between open a span and do not close it: the next value on
+    the line with two backticks in it ended it early. And four spaces before words at the
+    start of a line made them a block of code."""
+    line = f"k={display.code('')} r={display.code('a``**B** c')}"
+    (said,) = [t for t in parsed(line) if t.type == "inline"]
+    kinds = [(p.type, p.content) for p in said.children if p.type != "text" or p.content]
+    assert kinds == [("text", "k="), ("code_inline", " "), ("text", " r="), ("code_inline", "a``**B** c")], (
+        kinds
+    )
+    assert [t.type for t in parsed(display.words("    not code") + " said vivibox")][0] == "paragraph_open"
+    assert display.words("  a  b ") == "a  b ", "the spaces before it have nothing to see"
+
+
+def test_the_values_of_recent_events_are_inline_code(env):
+    from vivibox.states import State
+
+    task = new_task()
+    task.transition(State.CHECKPOINT_PLAN)
+    task.transition(State.IMPLEMENT, reason="EVENT\n\n#### Review 1: 0 blocking, 0 not blocking\n\n**Next:**")
+    shown = detail_of(task)
+    assert "**Recent events**" in shown
+    tokens = parsed(shown)
+    own, _ = apart(tokens)
+    assert all(words_.startswith(OWN) for _, words_ in headings(own)), headings(own)
+    assert as_own_words(tokens, "EVENT") == [], "the reason is data, in a span of code"
+    code = [part.content for t in own for part in t.children or [] if part.type == "code_inline"]
+    assert any(span.startswith("EVENT‹U+000A›‹U+000A›#### Review 1") for span in code), code

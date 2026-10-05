@@ -344,6 +344,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An empty value drawn as inline code in the details panel is a span that is closed (it was
+  two backticks, which open one), and plain words at the start of a line are drawn without the
+  spaces before them, which made them a block of code. Neither was reached by a value today.
 - The reply and the commit dialogs keep what you decide with on the screen at 80 by 24. A tall
   question of the agent's hid the reply's field and Send, and sixty changed files hid the
   commit's branch, its message and both buttons, while Ctrl+S still sent and committed. The

@@ -222,7 +222,7 @@ def code(text: str) -> str:
     character with nothing to see (terminal). A span of code does not pass a blank line, and
     what stood after one was read as markdown of vivibox's own, a heading among it: a value is
     in its span whole, by how the span is made."""
-    text = terminal(text, "")
+    text = terminal(text, "") or " "  # a span of nothing is one that is opened and never closed
     ticks = "`" * (1 + max((len(run) for run in re.findall("`+", text)), default=0))
     pad = " " if text.startswith("`") or text.endswith("`") else ""
     return f"{ticks}{pad}{text}{pad}{ticks}"
@@ -232,5 +232,6 @@ def words(text: str) -> str:
     """Words that are not vivibox's inside a line of its own (a model's name, a note that names
     a file), as the text they are: on one line (terminal), a backslash before every character
     of ASCII punctuation, which markdown then reads as that character and nothing else. No
-    emphasis, code, link or heading comes of them, wherever in the line they stand."""
-    return _PUNCTUATION.sub(r"\\\g<0>", terminal(text, ""))
+    emphasis, code, link or heading comes of them, wherever in the line they stand: at its start
+    too, so without the spaces before them, which there would make a block of code."""
+    return _PUNCTUATION.sub(r"\\\g<0>", terminal(text, "").lstrip(" "))

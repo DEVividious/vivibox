@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from textual import work
 
-from . import actions, display, risky, ui
+from . import actions, blocks, display, risky, ui
 from .dialogs import CommitWork, Reply, ReplyWithCriteria
 from .states import State
 from .task import Task
@@ -130,4 +130,8 @@ class DecideKeys:
                 self.go_on(task)
             self.reload()
 
-        self.push_screen(Confirm(f"Approve the risky files of {task.id} as shown?", "Approve"), approve)
+        # Said in the one question: a block too large to fold shows the start of its long lines.
+        unfolded = sum(block.unfolded for block in self.text.query(blocks.Fence))
+        about = blocks.NOT_FOLDED.format(unfolded, "what is shown", task.id) if unfolded else ""
+        asked = f"Approve the risky files of {task.id} as shown?"
+        self.push_screen(Confirm(asked, "Approve", about=about), approve)

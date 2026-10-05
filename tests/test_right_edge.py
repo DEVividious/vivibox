@@ -761,3 +761,125 @@ def test_a_confirmation_keeps_its_question_and_its_buttons_on_the_screen_at_80_b
         assert answers == [False]
 
     run(scenario, size=(80, 24))
+
+
+# --- a block too large to fold --------------------------------------------------------------------
+
+BIG = 2100  # lines of 140: each adds two rows at 80 columns, 4200 in all
+
+
+def big(lines: int = BIG, tail: str = TAIL) -> str:
+    """A file of long lines, the last with the tail a fold would bring on to the screen."""
+    return "\n".join(["x = " + "y" * 136] * (lines - 1) + ["plugins { id 'java' }" + " " * 200 + tail])
+
+
+@pytest.mark.parametrize(
+    ("lines", "length", "unfolded"),
+    [
+        (3000, 20, 0),
+        (1000, 100, 0),
+        (2000, 135, 0),
+        (2001, 135, 2001),
+        (20000, 100, 20000),
+        (1, 1_000_000, 1),
+    ],
+)
+def test_a_block_is_folded_until_folding_adds_more_than_two_thousand_rows(lines, length, unfolded):
+    """Reckoned for the width a block's text has in a terminal of 80 columns, whatever the
+    width is: an ordinary file is folded (three thousand lines with twenty long ones, a
+    lockfile of a thousand), and what is left unfolded is so at every width."""
+    code = "\n".join(
+        ["l" * (300 if at < 20 else 20) if length == 20 else "l" * length for at in range(lines)]
+    )
+    assert blocks.unfolded(blocks._read(code, "text", False, True)[2]) == unfolded
+
+
+@pytest.mark.parametrize("width", [80, 140])
+def test_a_block_too_large_to_fold_says_so_and_is_read_whole_by_scrolling(env, monkeypatch, width):
+    """Folding twenty thousand long lines stood the view still for seconds each time the panel
+    was drawn. Such a block keeps a row a line and scrolls sideways; that the end of a line is
+    then off the screen is said above it, in vivibox's own line, with how to read it."""
+    from textual.selection import Selection
+
+    task = new_task()
+    risky(task, big())
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        note = fence.query_one("#code-unfolded")
+        said = " ".join(str(note.render()).split())
+        assert f"{BIG} lines of this block are longer than the panel and are not folded" in said, said
+        assert "Tab" in said and "End" in said and f"vivibox risky {task.id}" in said, said
+        assert note.region.y < fence.query_one("#code-content").region.y, "above the block"
+        assert said in " ".join(" ".join(rows_of(app, note)).split()), (
+            "all of it on the screen, at this width"
+        )
+        code = fence.query_one("#code-content")
+        assert code.content_region.height == fence.code.count("\n") + 1, "a row a line, no more"
+        assert not fence.query("#code-marks") and RISKY_TAIL not in screen_text(app)
+        side = fence.query_one("#code-sideways")
+        assert side.show_horizontal_scrollbar and side.styles.scrollbar_size_horizontal == 1
+        for _ in range(4):  # the keyboard reaches it
+            if app.focused is side:
+                break
+            await pilot.press("tab")
+        assert app.focused is side
+        app.query_one("#detail").scroll_end(animate=False)
+        await pilot.press("end")
+        await pilot.pause()
+        assert side.scroll_x == side.max_scroll_x > 0 and RISKY_TAIL in screen_text(app), "the line's end"
+        assert code.get_selection(Selection(None, None))[0] == fence.code, (
+            "copied as written, scrolled or not"
+        )
+        await pilot.press("home")
+        await pilot.pause()
+        assert side.scroll_x == 0
+        for other in (140, 80, 100):
+            await pilot.resize_terminal(other, 60)
+            await pilot.pause()
+            assert fence.query("#code-unfolded") and not fence.query("#code-marks"), other
+            assert code.content_region.height == fence.code.count("\n") + 1
+
+    run(scenario, size=(width, 60))
+
+
+RISKY_TAIL = "RISKY-TAIL"
+
+
+def test_a_block_just_under_the_threshold_is_folded_and_has_no_note(env, monkeypatch):
+    task = new_task()
+    risky(task, big(900))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        (fence,) = app.text.query("MarkdownFence")
+        assert not fence.query("#code-unfolded") and not fence.query("#code-sideways")
+        assert "".join(fence.query_one("#code-marks").rows).count(MARK) > 1800
+
+    run(scenario, size=(80, 60))
+
+
+@pytest.mark.parametrize("lines", [BIG, 5])
+def test_approving_risky_files_says_when_what_is_shown_is_not_folded(env, monkeypatch, lines):
+    """ "As shown" is true of a block that scrolls sideways only if you are told that it does:
+    said in the same question, with no step added."""
+    task = new_task()
+    risky(task, big(lines))
+    opening(monkeypatch)
+
+    async def scenario(app, pilot):
+        await show(app, pilot)
+        await pilot.press("p")
+        await pilot.pause()
+        asked = " ".join(" ".join(str(label.render()) for label in app.screen.query("Label")).split())
+        assert f"Approve the risky files of {task.id} as shown?" in asked and "Approve" in screen_text(app)
+        told = f"{lines} lines of what is shown are longer than the panel and are not folded"
+        assert (told in asked) == (lines == BIG), asked
+        if lines == BIG:
+            assert "Tab" in asked and f"vivibox risky {task.id}" in asked
+        assert app.focused.id == "yes", "one question, one answer"
+
+    run(scenario, size=(100, 40))

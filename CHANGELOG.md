@@ -47,6 +47,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- A code block too large to fold is not folded: where folding its long lines would add more
+  than 2,000 rows (reckoned for a terminal of 80 columns, so at every width alike), it keeps
+  a row a line and scrolls sideways, its scrollbar always shown. Above it vivibox says how
+  many lines are not folded and how to read them whole (Tab to the block, then → or End; or
+  `vivibox risky <id>` in a terminal), and the question that approves risky files says the
+  same when a file shown is such a block. Folding twenty thousand long lines stood the view
+  still for seconds each time the panel was drawn (6.5 s to open at 80 columns; 1.3 s now).
+  An ordinary file is folded as before: three thousand lines with twenty long ones, a
+  lockfile of a thousand.
 - The clone command a refused accept prints for a submodule the work adds says whose its
   address is: the one the work's `.gitmodules` names, written by the agent and not checked by
   vivibox, to look at before running the command, with where to clone from if the submodule

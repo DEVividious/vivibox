@@ -6,7 +6,7 @@ that is a grid only where it has room, and what keeps an error of theirs from en
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from itertools import accumulate
@@ -16,6 +16,8 @@ from rich.cells import cell_len, chop_cells
 from rich.segment import Segment
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import ScrollableContainer
 from textual.content import Content, Span
 from textual.css.query import NoMatches
 from textual.geometry import Offset, Size
@@ -118,6 +120,17 @@ class Table(MarkdownTable):
 
 
 TAB = 8
+# The columns a block's text has in a terminal of 80, and the most rows folding may add to a
+# block there before it is left unfolded (unfolded).
+TEXT_AT_80 = 68
+MOST = 2000
+# What is said above a block left unfolded, and where its files are approved: how many lines,
+# of what, and the task whose risky files a terminal prints whole.
+NOT_FOLDED = (
+    "{} lines of {} are longer than the panel and are not folded: it is too large to fold. Their ends "
+    "are off the screen until you scroll sideways (Tab to the block, then → or End), or read a risky "
+    "file whole in a terminal: vivibox risky {}"
+)
 # The longest line a code block is drawn with before its width is known (Fence.folded).
 LIKELY = 60
 # The width each of the last few code blocks was drawn at, by its text.
@@ -218,7 +231,36 @@ class Code(Label):
     """The text of a code block. What is copied from it is what was written (Fence.copied)."""
 
     def get_selection(self, selection: Selection) -> tuple[str, str] | None:
-        return self.parent.copied(selection), "\n"
+        return self.query_ancestor(Fence).copied(selection), "\n"
+
+
+def unfolded(cells: Sequence[int]) -> int:
+    """How many lines of a block are left unfolded, by the cells its lines take: all that are
+    longer than the block's text is in a terminal of 80 columns, when folding them there would
+    add more than MOST rows; else none, and every long line is folded. Reckoned for 80 columns
+    whatever the width is, so a block is the one or the other at every width. Textual lays out
+    and draws every row of a block each time the panel is drawn: twenty thousand lines folded
+    in two stood the view still for seconds."""
+    long = [taken for taken in cells if taken > TEXT_AT_80]
+    added = sum(-(-(taken - TEXT_AT_80) // (TEXT_AT_80 - 1)) for taken in long)
+    return len(long) if added > MOST else 0
+
+
+class Sideways(ScrollableContainer):
+    """What a block too large to fold is read in: a row a line, scrolled sideways, its
+    scrollbar always shown. Tab reaches it; the arrows move a screen's width, Home and End to
+    a line's start and to the end of the longest."""
+
+    BINDINGS = [
+        Binding("right", "sideways(1)", "Right", show=False),
+        Binding("left", "sideways(-1)", "Left", show=False),
+        Binding("end", "sideways(0, True)", "End", show=False),
+        Binding("home", "sideways(0)", "Start", show=False),
+    ]
+
+    def action_sideways(self, pages: int, end: bool = False) -> None:
+        to = self.max_scroll_x if end else (self.scroll_x + pages * max(1, self.size.width - 4)) * abs(pages)
+        self.scroll_to(x=to, animate=False)
 
 
 class Fence(MarkdownFence):
@@ -256,6 +298,25 @@ class Fence(MarkdownFence):
     Fence:ansi > #code-content {
         padding: 1 0;
     }
+    Fence.-unfolded {
+        layout: vertical;
+        & > #code-unfolded {
+            width: 1fr;
+            height: auto;
+            padding: 1 2 0 2;
+            text-style: bold;
+        }
+        & > #code-sideways {
+            height: auto;
+            overflow: scroll hidden;
+            scrollbar-size-horizontal: 1;
+            & > #code-content {
+                width: auto;
+                padding: 1 2;
+                text-overflow: clip;
+            }
+        }
+    }
     """
 
     def __init__(self, markdown: Markdown, token: Token, code: str) -> None:
@@ -263,6 +324,11 @@ class Fence(MarkdownFence):
         # The width the same text was last drawn at: the panel makes every block anew when
         # anything in its text changes, and this one is then drawn once, as it was.
         self._width = _DRAWN_AT.get(hash((code, self.lexer)), 0)
+        # How many of its lines are left unfolded: none, or every long one (unfolded).
+        self.unfolded = unfolded(
+            _read(code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark)[2]
+        )
+        self.set_class(bool(self.unfolded), "-unfolded")
 
     @property
     def allow_horizontal_scroll(self) -> bool:
@@ -278,6 +344,8 @@ class Fence(MarkdownFence):
         nothing yet, when one is: Textual would cut every row of it for a width it does not
         have, and all of it would be drawn a second time."""
         how = (self.code, self.lexer, self.app.native_ansi_color, self.app.current_theme.dark)
+        if self.unfolded:
+            return _read(*how)[0], "", ()
         if self._width:
             return _folded(*how, self._width)
         content, _, cells = _read(*how)
@@ -310,8 +378,15 @@ class Fence(MarkdownFence):
 
     def compose(self) -> ComposeResult:
         text, marks, _ = self.folded()
-        yield Marks(marks, id="code-marks")
-        yield Code(text, id="code-content", expand=True, markup=False)
+        if self.unfolded:
+            task = getattr(self.app, "selected_id", lambda: None)() or "<task>"
+            yield Label(
+                NOT_FOLDED.format(self.unfolded, "this block", task), id="code-unfolded", markup=False
+            )
+            yield Sideways(Code(text, id="code-content", markup=False), id="code-sideways")
+        else:
+            yield Marks(marks, id="code-marks")
+            yield Code(text, id="code-content", expand=True, markup=False)
 
     def copied(self, selection: Selection) -> str:
         """What a selection of the rows as drawn holds of the block as it was written: from the

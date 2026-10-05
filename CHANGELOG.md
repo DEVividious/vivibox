@@ -344,6 +344,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A review round is not started while Docker does not remove the container of the round
+  before: the new round's key was written all the same into the directory that container
+  mounts. The task stops with what Docker said and what to do.
 - A proposed command's file that is not text (bytes that are no UTF-8) no longer ends
   `vivibox status` or the view with an error. Nothing of it is run or kept: the task comes to
   `review the command` with no command and the reason, and at a checkpoint it reached earlier

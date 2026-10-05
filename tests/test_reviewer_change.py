@@ -294,3 +294,48 @@ def test_a_rounds_container_is_made_for_the_role_it_is_handed(env, monkeypatch):
     written = json.loads((pod.review_dir / "harness" / "opencode.json").read_text())
     assert (sorted(written["provider"]), written["model"]) == (["openai"], "openai/read")
     assert held(f"{task.id}-review") == ["openai"]
+
+
+def docker_that(pod, said: str, code: int = 1):
+    """The pod's Docker, answering the removal of the review container with said and code."""
+    run = pod.runner
+
+    def runner(command, **how):
+        if list(command[:3]) == ["docker", "rm", "-f"] and pod.review in command:
+            pod.asked.append(list(command))
+            return subprocess.CompletedProcess(command, code, "", said)
+        return run(command, **how)
+
+    pod.runner = runner
+
+
+@pytest.mark.real_start
+def test_a_round_is_not_started_while_the_container_before_it_cannot_be_removed(env, monkeypatch):
+    """Docker refuses to remove the container of the round before, which mounts the directory
+    the next round's key would be written to: no key is written and no container made; the
+    error is the task's, with what Docker said and what to do."""
+    task, sup, pod = supervised(env, monkeypatch, reviewer=(OC, "anthropic/read"))
+    round_of(task, sup, pod)
+    harness = sup.reviewer.harness
+    choose(task, "reviewer", "openai/read")
+    docker_that(pod, "Error response from daemon: cannot remove container: device or resource busy")
+    del pod.asked[:]
+    with pytest.raises(pods.PodError) as refused:
+        sup.ports.review_up()
+    assert str(refused.value) == (
+        f"the review could not start: the container of the round before ({pod.review}) could not be "
+        "removed, so no key of the next round is written where it reads: Error response from daemon: "
+        f"cannot remove container: device or resource busy; stop the task (vivibox stop {task.id}), "
+        f"then start it (vivibox start {task.id})"
+    )
+    assert held(f"{task.id}-review") == ["anthropic"], "the next round's key is not written"
+    assert not [c for c in pod.asked if c[:2] == ["docker", "run"]], "and no container is made"
+    assert sup.reviewer.harness is harness
+
+
+@pytest.mark.real_start
+def test_a_container_that_is_not_there_is_no_reason_to_stop_a_round(env, monkeypatch):
+    """Docker says so with an error on some versions: there is nothing to remove, and the round starts."""
+    task, sup, pod = supervised(env, monkeypatch, reviewer=(OC, "anthropic/read"))
+    docker_that(pod, f"Error response from daemon: No such container: {pod.review}")
+    assert round_of(task, sup, pod) == as_one("anthropic", "anthropic/read")

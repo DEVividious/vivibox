@@ -65,7 +65,8 @@ on your machine until you have approved it.
   model. A reviewer you put on another provider gets, from its next round, a container with
   the new provider's key and without the old one's; the round under way ends as it began,
   with the key and the model it was made with. The container of the round before is removed before the
-  new round's key is written into the directory it mounted. A round whose container cannot be
+  new round's key is written into the directory it mounted, and a container Docker does not
+  remove stops the round before any key is written. A round whose container cannot be
   made (no key for the provider) is not started.
 
 ## How the pod is built

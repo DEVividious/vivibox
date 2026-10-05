@@ -576,10 +576,19 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     def review_fresh(self) -> None:
         """An empty review directory with the places of the reviewer's view of the commits and of
         its harness's working directory in it, before the caller makes both there and puts the
-        reviewer's files beside them; the container from the last round, if any, goes first."""
+        reviewer's files beside them; the container from the last round, if any, goes first.
+        One Docker does not remove stops the round here, before its key is written into the
+        directory that container mounts; none to remove is no failure, whatever Docker says of it."""
         if self.review_dir is None:
             raise PodError("the pod has no review directory")
-        self.review_down()
+        gone = self.review_down()
+        said = display.said(gone.stderr or gone.stdout) if gone is not None else ""
+        if gone is not None and gone.returncode != 0 and "No such container" not in said:
+            raise PodError(
+                f"the review could not start: the container of the round before ({self.review}) could "
+                f"not be removed, so no key of the next round is written where it reads: {said}; stop "
+                f"the task (vivibox stop {self.task_id}), then start it (vivibox start {self.task_id})"
+            )
         shutil.rmtree(self.review_dir, ignore_errors=True)
         (self.review_dir / "src").mkdir(parents=True)
         self.review_work.mkdir()
@@ -613,8 +622,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
                 )
         self._run(*self.review_command(mounts, env))
 
-    def review_down(self) -> None:
-        self._run("docker", "rm", "-f", self.review, check=False)
+    def review_down(self) -> subprocess.CompletedProcess:
+        return self._run("docker", "rm", "-f", self.review, check=False)
 
     def review_side(self) -> ContainerSide:
         """The review container as a harness talks to it."""

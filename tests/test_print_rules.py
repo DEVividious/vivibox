@@ -386,8 +386,11 @@ def test_every_print_is_made_of_what_cannot_reach_the_terminal_as_itself():
     JSON, nor a value vivibox knows (OWN), is a failure until the piece goes through
     display.terminal, display.under or display.name, or is listed with why. What this cannot
     see: where a listed piece's text comes from (the list says, nothing holds it to that); a
-    value put together in another function and handed in by a name; what a program vivibox
-    starts in your terminal prints there itself (a pager, an editor, docker)."""
+    value put together in another function and handed in by a name; a write to a stream handed
+    in by another name (logs.follow_verification's out, which escapes what it writes); what an
+    exception says, printed by the one printer of errors, which escapes it and keeps its lines
+    (an error escapes what it quotes where it is made); and what a program vivibox starts in
+    your terminal prints there itself (a pager, an editor, docker)."""
     found, listed = pieces_printed(), {**ACCOUNTED_FOR, **RAW_STILL}
     new = {key: n for key, n in found.items() if n > listed.get(key, (0, ""))[0]}
     assert not new, "escape it (display.terminal, under, name), or list it with why:\n" + "\n".join(

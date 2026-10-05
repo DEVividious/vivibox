@@ -226,8 +226,15 @@ def test_many_pointers_with_long_names_are_asked_of_git_a_handful_at_a_time(with
     """Six hundred folders listed as submodules, with names of four thousand characters: in one
     command line they are more than a command line holds, and git was not run at all
     (Argument list too long). git is asked of them a handful at a time, and each is answered
-    as before: the base's own, whichever handful it is in, is left alone, and the rest are said."""
+    as before: the base's own, whichever handful it is in, is left alone, and the rest are said.
+    The base has two here, both asked of in the first handful of many: lib, which .gitmodules
+    names too, and one that nothing names, which only git's answer for that handful leaves alone."""
     task = with_a_submodule
+    commit = git(task.repo, "rev-parse", "HEAD")
+    git(task.repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},a-pointer-of-the-base")
+    git(task.repo, "commit", "-q", "-m", "A pointer nothing names")
+    (task.repo / "a-pointer-of-the-base").mkdir()
+    task.set_base_commit(git(task.repo, "rev-parse", "HEAD"))
     not_checked_out(task)
     names = [f"{n:03}" + "x" * 3997 for n in range(600)]
     handed = long_pointers(monkeypatch, names)
@@ -235,12 +242,12 @@ def test_many_pointers_with_long_names_are_asked_of_git_a_handful_at_a_time(with
     assert max(handed) < 100_000, "git was handed every pointer's path in one command line"
     assert said == [SAID.format(name) for name in names], "lib is the base's; the others are the work's"
     assert len(handed) > 2 and sum(handed) > 600 * 4000, "each was asked of git"
-    assert r._handfuls(["a" * 20_000, "b" * 12_000, "c", "d" * 40_000, "e"]) == [
+    assert r._handfuls(["a" * 20_000, "b" * 12_000, "c", "d" * 40_000, "e", "f"]) == [
         ["a" * 20_000, "b" * 12_000],
         ["c"],
         ["d" * 40_000],
-        ["e"],
-    ]
+        ["e", "f"],
+    ], "a handful is counted from its own first path"
 
 
 def test_a_pointer_at_a_path_longer_than_a_command_line_stops_the_verification_with_why(task, monkeypatch):

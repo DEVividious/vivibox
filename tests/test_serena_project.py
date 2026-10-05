@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from conftest import make_repo
-from test_control import binds
+from test_control import binds, variables
 from test_control import docker as docker  # noqa: F401  (the fixture: a machine and a recording Docker)
 from test_control import starting as starting  # noqa: F401  (the fixture: a start on stand-ins)
 from test_pod import flag
@@ -63,13 +63,15 @@ def where_the_agent_has_the_clone(task) -> tuple[str, str]:
 
 
 @pytest.mark.real_start
-@pytest.mark.parametrize("flow", ["single_agent", "supervisor_worker", "planner_writer_reviewer", "a box"])
+@pytest.mark.parametrize(
+    "flow", ["single_agent", "planner_executor", "supervisor_worker", "planner_writer_reviewer", "a box"]
+)
 def test_serena_is_started_on_the_clone_where_the_writers_container_has_it(starting, flow):  # noqa: F811
     """Serena was told the project is in /task/repo, a folder no container has: the writer's
     mounts the clone at the path it has on your machine and works there. It started with no
     project, and its tools answered that none is active. What every start writes for the
-    writer (a task's with one agent, a task's with a planner, a box's) names the folder the
-    container mounts and works in."""
+    writer (a task's in every flow, with one agent or with a planner, and a box's) names the
+    folder the container mounts and works in."""
     providers.set_serena_mode("on")
     task = started(flow)
     written = json.loads((task.meta / "harness" / "opencode.json").read_text())
@@ -82,7 +84,7 @@ def test_the_mount_and_serenas_project_are_one_value(starting, monkeypatch):  # 
     """One place says where the clone is in the agent's container (podspec.agent_repo), and the
     mount, the working directory and Serena's project are all made from it: said elsewhere,
     they move together, and none of them keeps a path of its own."""
-    monkeypatch.setattr(podspec, "agent_repo", lambda repo: f"/elsewhere{repo}", raising=False)
+    monkeypatch.setattr(podspec, "agent_repo", lambda repo: f"/elsewhere{repo}")
     providers.set_serena_mode("on")
     task = started("single_agent")
     written = json.loads((task.meta / "harness" / "opencode.json").read_text())
@@ -308,3 +310,19 @@ def test_serenas_home_is_in_the_writers_home_on_the_tasks_disk_and_outside_the_c
     clone = Path(project_of(written))
     assert not Path(home).is_relative_to(clone) and not clone.is_relative_to(home)
     assert home != "/config/.serena", "not the home of a Serena you start there yourself"
+
+
+@pytest.mark.real_start
+@pytest.mark.parametrize("flow", ["single_agent", "supervisor_worker", "a box"])
+def test_serenas_variables_are_its_entrys_and_none_is_the_containers(starting, flow):  # noqa: F811
+    """What Serena is started with is in its entry of the configuration, which opencode hands
+    to that one process: the agent's container is given none of it, so nothing else that runs
+    there (a build, a Serena you start yourself) gets Serena's home or its setting. A guard:
+    it held before, and a variable moved to the container's flags fails it."""
+    providers.set_serena_mode("on")
+    task = started(flow)
+    written = json.loads((task.meta / "harness" / "opencode.json").read_text())
+    entrys = set(written["mcp"]["serena"]["environment"])
+    assert entrys == {"SERENA_USAGE_REPORTING", "SERENA_HOME"}
+    given = {variable.split("=", 1)[0] for variable in variables(actions.task_pod(task.id).agent_command())}
+    assert given and not given & entrys and not [name for name in given if "SERENA" in name.upper()]

@@ -349,10 +349,18 @@ def docker_env(pod: Pod) -> list[str]:
     return [arg for k, v in fixed.items() if k not in pod.passed_env for arg in ("-e", f"{k}={v}")]
 
 
+def agent_repo(repo) -> str:
+    """Where the agent's container has the task's clone: at the path the clone has on the host.
+    The one place that says so, for the container's mount of the clone and its working
+    directory (agent_command) and for what is told there where the project is (vivibox's own
+    Serena, providers.task_mcp)."""
+    return str(repo)
+
+
 def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
     mounts = [
         Mount(pod.volumes["socket"], SOCKET_DIR),
-        Mount(str(pod.repo), str(pod.repo)),
+        Mount(str(pod.repo), agent_repo(pod.repo)),
         Mount(pod.volumes["config"], "/config"),
         *(Mount(f"vivibox-cache-{name}", path) for name, path in CACHES.items()),
         Mount(pod.volumes["installed"], INSTALLED),
@@ -373,7 +381,7 @@ def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
         *(arg for k, v in pod.agent_env.items() for arg in ("-e", f"{k}={v}")),
         *(arg for name in pod.passed_env for arg in ("-e", name)),
         *(arg for m in mounts for arg in ("-v", m.arg())),
-        "-w", str(pod.repo),
+        "-w", agent_repo(pod.repo),
         pod.image, "sleep", "infinity",
     ]  # fmt: skip
 

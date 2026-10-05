@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import display, keys
+from . import display, keys, podspec
 from .config import ConfigError, config_dir
 from .secrets import MOUNT
 
@@ -80,10 +80,11 @@ def definition(provider: str) -> dict:
 
 
 # MCP servers vivibox brings itself, installed in the agent image: off until you turn one on.
+# Serena's command is without its project, which a task's own names (serena_on).
 BUILTIN_MCP = {
     "serena": {
         "type": "local",
-        "command": ["serena", "start-mcp-server", "--context", "ide", "--project", "/task/repo",
+        "command": ["serena", "start-mcp-server", "--context", "ide",
                     "--enable-web-dashboard", "false", "--open-web-dashboard", "false"],
     },
 }  # fmt: skip
@@ -175,8 +176,20 @@ def task_mcp(repo: Path | None = None, builtin: bool = True) -> dict[str, dict]:
     nothing of it (Serena's language servers work on the project by themselves)."""
     found = {name: entry for name, entry in load_mcp().items() if enabled(MCP, name)}
     if builtin and serena_for(repo)[0]:
-        found[SERENA] = copy.deepcopy(BUILTIN_MCP[SERENA])
+        found[SERENA] = serena_on(repo)
     return found
+
+
+def serena_on(repo: Path | None) -> dict:
+    """vivibox's own Serena as the agent's container starts it: on the project in the folder
+    that container has the task's clone in, which is the one it mounts and works in
+    (podspec.agent_repo; a folder the container does not have leaves Serena running with no
+    project, its tools answering that none is active). Without a clone, on no project."""
+    entry = copy.deepcopy(BUILTIN_MCP[SERENA])
+    if repo is not None:
+        after_context = entry["command"].index("--context") + 2
+        entry["command"][after_context:after_context] = ["--project", podspec.agent_repo(repo)]
+    return entry
 
 
 def is_mcp_secret(name: str) -> bool:

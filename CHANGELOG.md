@@ -346,6 +346,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- Serena, the MCP server that comes with vivibox, works on the task's repository. It was
+  started on `/task/repo`, a folder the writer's container does not have (the clone is mounted
+  there at the path it has on your machine), so it ran with no project and its tools answered
+  that none is active. It is now started on the folder that container mounts the clone at and
+  works in, for a task and for a box alike.
 - The notification of a command `--auto` did not keep because the task's clone is blocked says
   what to do: `reply, and the writer takes it out`.
 - The history of finished tasks written by an earlier vivibox is read whatever a goal in it

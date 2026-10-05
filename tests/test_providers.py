@@ -238,7 +238,7 @@ def test_serena_on_auto_comes_to_a_big_repository_and_not_to_a_small_one(env, tm
     assert providers.serena_for(small) == (False, "off, 20 source files (fewer than 100)")
     assert providers.serena_for(big) == (True, "on, 100+ source files")
     serena = opencode.config("deepseek/deepseek-v4-flash", repo=big)["mcp"]["serena"]
-    assert serena["command"][:2] == ["serena", "start-mcp-server"] and "/task/repo" in serena["command"]
+    assert serena["command"][:2] == ["serena", "start-mcp-server"] and str(big) in serena["command"]
     assert "mcp" not in opencode.config("deepseek/deepseek-v4-flash", repo=small)
 
 

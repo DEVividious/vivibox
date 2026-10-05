@@ -18,7 +18,9 @@ command.
 - Run `vivibox accept` and `vivibox approve-risky` only after the user says so in this
   conversation. Before asking about `vivibox approve-risky`, show the user what `vivibox risky`
   prints. The approval is the command its last line gives, run as printed: it approves exactly
-  what was shown. When it is refused because the files changed since, show them again.
+  what was shown. Take it from that output, never from a new run of `vivibox risky`, which may
+  show other files than the user saw. When it is refused because the files changed since, show
+  them again.
 - Never run, build or install anything from a task's clone or its review copy on this machine.
   Reading them is fine.
 - vivibox's configuration is the user's: `vivibox init` writes a project, nothing else does.

@@ -47,6 +47,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Changed
 
+- The skill for an agent's CLI says where an approval of risky files comes from: the command
+  at the end of the `vivibox risky` output the user was shown, never a new run's.
 - A code block too large to fold is not folded: where folding its long lines would add more
   than 2,000 rows (reckoned for a terminal of 80 columns, so at every width alike), it keeps
   a row a line and scrolls sideways, its scrollbar always shown. Above it vivibox says how
@@ -344,6 +346,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The notification of a command `--auto` did not keep because the task's clone is blocked says
+  what to do: `reply, and the writer takes it out`.
 - The history of finished tasks written by an earlier vivibox is read whatever a goal in it
   holds: an entry with a line separator (U+2028, U+2029, U+0085) in it kept the whole history
   from loading.

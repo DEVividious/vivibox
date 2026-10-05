@@ -425,3 +425,17 @@ def test_the_recorded_command_ends_with_a_turn_of_the_writers(task):
     sup.step()
     assert world.gated == [COMMAND, ""], "the second verification is handed no command of before the turn"
     assert world.kept == []
+
+
+def test_a_command_not_kept_for_a_blocked_clone_says_the_step_that_takes_it_out(task):
+    """What blocks the clone is said as a fact by the check; here the task goes on to you, and
+    what takes the addition out is your reply."""
+    blocked = "the task's clone is blocked by what was added to it: web/.git was added, a repository"
+    world = World([passed()])
+    sup = writing(task, world)
+    sup.step()
+    world.during["run_gate"] = lambda: setattr(world, "refused", blocked)
+    sup.step()
+    assert world.kept == []
+    said = next(note for note in world.notes if "does not keep" in note)
+    assert said.endswith(f"which demo does not keep: {blocked}; reply, and the writer takes it out"), said

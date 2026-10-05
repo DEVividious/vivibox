@@ -45,6 +45,10 @@ class RepoError(Exception):
     pass
 
 
+# How Blocked.logged begins: the fact, to which whoever says it adds the step of where the task is.
+BLOCKED_BY = "the task's clone is blocked by what was added to it"
+
+
 class Blocked(RepoError):
     """The task added to its clone what git on the host goes into (protection.Added): no git
     runs there until it is gone, which is the task's to see to; found: those additions."""
@@ -64,7 +68,7 @@ class Blocked(RepoError):
     def logged(self) -> str:
         """For the verification's log, which you read under l and the writer in its handoff:
         what blocks the clone, as a fact, and neither reader's step."""
-        return f"the task's clone is blocked by what was added to it: {named_changes(self.found)}"
+        return f"{BLOCKED_BY}: {named_changes(self.found)}"
 
 
 class BlockedBy(str):

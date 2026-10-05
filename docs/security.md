@@ -291,8 +291,10 @@ identity are one scan's, set together and cleared together (the details closed, 
 the task no longer waiting for the approval), and with none on the screen `p` approves
 nothing. A refresh you did not ask for does not replace what you are reading: the drawing
 stays, a line above it says the files changed, and only your own key draws them anew. The
-identity is bound when the text is handed to the panel, which paints it in the same turn of
-its loop; a key pressed in between is yours, on a drawing you asked for. And `vivibox
+identity is bound when the text is handed to the panel, before the panel has painted it: until
+its next frame the screen still shows the drawing before. Keys typed ahead in that moment (a
+second `p` and Enter right after a refusal, say) act on the new drawing; they are your own
+keys, on a drawing only your key can ask for, and nothing tells whether you read it. And `vivibox
 approve-risky <id> <identity>` the one `vivibox risky` printed; the command line approves
 nothing it printed itself in the same run, which nobody would have read. The approval scans
 again, and when the clone or the record of the last approval no longer gives that identity it

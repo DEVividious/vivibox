@@ -4,7 +4,7 @@ Mixed into supervisor.Supervisor, which it reaches for the rest of the task."""
 
 from __future__ import annotations
 
-from . import feedback, gate, ui
+from . import feedback, gate, repo, ui
 from . import supervisor as _sup
 from .prompts import FEEDBACK_PROMPT
 from .risky import stop_said
@@ -114,6 +114,8 @@ class Verifying:
                 # One step: vivibox's own reasons end in it; the clone's words carry theirs.
                 own = why in SET_IT or why == _sup.RISKY_CHANGED
                 step = "; set it under e on the project" if own else ""
+                if why.startswith(repo.BLOCKED_BY):  # a fact with no step of its own: the task goes on to you
+                    step = "; reply, and the writer takes it out"
                 said = f"the verification passed with `{command}`, which {st.project} does not keep"
                 self.ports.notify(self.task.id, f"{said}: {why}{step}")
             return

@@ -175,8 +175,23 @@ def terminal(text: str, keep: str = "\n\t") -> str:
 def under(text: str, by: int = 4) -> str:
     """Text of an agent's or a tool's inside a line of vivibox's own (why a task stopped, what a
     plan lacks): escaped as terminal escapes it, a tab too, and each of its lines after the first
-    indented by so many columns, so none starts at the left edge, where vivibox's own lines do."""
-    return terminal(text, "\n").replace("\n", "\n" + " " * by)
+    indented by so many columns, so none starts at the left edge, where vivibox's own lines do.
+    A line that is that far in already stays where it is: a tool's words in a reason stand
+    under their first line as they come (said), and are not put under it twice."""
+    first, *rest = terminal(text, "\n").split("\n")
+    return "\n".join(
+        [first, *(line if by and line.startswith(" " * by) else " " * by + line for line in rest)]
+    )
+
+
+def block(text: str, by: int = 2) -> str:
+    """What a program printed or an agent wrote in lines of its own (an app's output, an
+    instruction, a question), put under a line of vivibox's: escaped as terminal escapes it,
+    and every line after the first indented by so many columns, alike, so the lines keep their
+    places beside each other and none starts at the left edge. Its tabs stay: there a tab is a
+    column's edge (a stack trace's frames begin with one), and it moves what follows to the
+    right alone, to the next stop, so an indented line is off the left edge with one too."""
+    return terminal(text).replace("\n", "\n" + " " * by)
 
 
 def own_folder() -> Path:

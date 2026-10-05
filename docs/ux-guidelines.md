@@ -290,7 +290,11 @@ Every error has three parts, in this order:
    lines, each after the first indented under it (`display.said`), so a name the tool quotes
    cannot draw a line that reads as vivibox's own; `vivibox status <id>` indents them under `Why`.
    A line of a build's output, which the task's own code prints, is said to be the build's,
-   between marks it cannot close (`display.quoted`: `the build said «…»`).
+   between marks it cannot close (`display.quoted`: `the build said «…»`). On the command line
+   a reason after words of vivibox's has its later lines four columns in, once
+   (`display.under`); what a program printed or an agent wrote in lines of its own (an app's
+   output and an agent's question in `vivibox demo`, a failed check's output) stands under
+   vivibox's line with every line indented alike and its tabs kept (`display.block`).
 3. What to do: a key or a command.
 
 An error belongs to its task. It is written to the task (`Task.set_paused(True, problem=…)`,

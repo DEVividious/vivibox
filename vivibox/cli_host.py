@@ -51,7 +51,7 @@ def cmd_image_check(args: argparse.Namespace) -> int:
         print(f"{'PASS' if ok else 'FAIL'}  {check.name}")
         if not ok:
             failed += 1
-            print("      " + display.under(out, 6))
+            print("      " + display.block(out, 6))
     print(f"\n{ref}: {failed} failed" if failed else f"\n{ref}: all checks passed")
     return 1 if failed else 0
 

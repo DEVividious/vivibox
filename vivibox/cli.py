@@ -321,14 +321,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 0
     result = actions.demo(args.task, ask=not args.no_ask, reply=args.reply or "")
     if result.proposed and not args.yes:
-        ran = display.under(result.proposed, 2)
+        ran = display.block(result.proposed)
         print(f"The last task you accepted in this project was run like this:\n\n  {ran}\n")
         print(f"If that still applies: vivibox demo {args.task} --yes")
         return 0
     if result.proposed:
         result = actions.use_instruction(args.task, result.proposed)
     if result.question:
-        print(f"The agent asks:\n\n  {display.under(result.question, 2)}\n")
+        print(f"The agent asks:\n\n  {display.block(result.question)}\n")
         print(f'Answer with: vivibox demo {args.task} --reply "…"')
         return 1
     if not result.commands:
@@ -350,7 +350,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print(f"\nListening: {url}")
     for listener in result.unreachable:
         print(f"\nPort {listener.port} is {listener.why_not}.\nStart it on 0.0.0.0 instead.")
-    said = display.under(result.log or "(none)", 2)  # the app's output: under vivibox's line, never beside it
+    said = display.block(result.log or "(none)")  # the app's output: under vivibox's line, never beside it
     if result.starting:
         # Still installing or compiling. Calling that a failure sends you debugging a working app.
         print(f"\nStill starting, nothing listening yet. Its output so far:\n  {said}")

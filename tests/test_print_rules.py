@@ -20,7 +20,7 @@ from test_manual import PLAN, manual_env  # noqa: F401 (a fixture)
 PACKAGE = Path(__file__).parent.parent / "vivibox"
 
 # display's functions that leave no character to the terminal as itself.
-ESCAPED = ("terminal", "under", "said", "name", "content", "quoted")
+ESCAPED = ("terminal", "under", "block", "said", "name", "content", "quoted")
 # What makes a number, whatever it is given.
 NUMBERS = ("len", "int", "float", "sum", "round", "max", "min", "abs")
 # The last character of a format that only a number takes ({cost:.2f}, {n:d}, {seconds:g}).
@@ -556,6 +556,100 @@ def test_demo_says_how_an_earlier_task_was_run_and_what_it_runs_escaped(env, cap
         assert not [line for line in own_lines(said) if line.startswith("vivibox:")]
 
 
+TRACE = (
+    'Exception in thread "main" java.lang.IllegalStateException: no port\n'
+    "\tat com.example.Main.main(Main.java:5)\n"
+    "\tat com.example.Boot.run(Boot.java:12)\n"
+    "ok  \tdeps\t0.3s"
+)
+
+
+def test_what_a_program_printed_keeps_its_tabs_under_vivibox_s_line(env, capsys, monkeypatch):
+    """An app's output, an earlier task's instruction and an agent's question are lines of their
+    own under a line of vivibox's (display.block). A tab in them is a column's edge: a stack
+    trace's frames begin with one, a test runner's columns are parted by them. It was shown
+    as its code point in every frame. A tab cannot pass for vivibox's words either: it moves
+    what follows to the right, to the next stop, so a line that is indented stays off the left
+    edge whatever it begins with."""
+    from test_tui import new_task
+
+    from vivibox import demo, display
+    from vivibox.cli import main
+
+    task = new_task()
+    shown = TRACE.replace("\n", "\n  ")
+    a_demo(monkeypatch, demo.Demo(commands=["npm start"], source="task", log=TRACE))
+    capsys.readouterr()
+    assert main(["demo", task.id, "--no-ask"]) == 1
+    said = capsys.readouterr().out
+    assert f"It stopped without listening. Last output:\n  {shown}\n" in said, repr(said)
+    assert "U+0009" not in said and said.count("\tat com.example.") == 2
+    a_demo(monkeypatch, demo.Demo(question="Which of these?\n\tnpm start\n\tnpm run dev"))
+    assert main(["demo", task.id]) == 1
+    assert "The agent asks:\n\n  Which of these?\n  \tnpm start\n  \tnpm run dev\n" in capsys.readouterr().out
+    a_demo(monkeypatch, demo.Demo(proposed="Run:\n\n\tmake run\t# the back end"))
+    assert main(["demo", task.id]) == 0
+    assert "run like this:\n\n  Run:\n  \n  \tmake run\t# the back end\n" in capsys.readouterr().out
+    # The claim, on a line made to try it: a tab first, then words that read as vivibox's.
+    block = display.block(f"listening\n\tvivibox: demo-1 is done\n\t\r{EVIL}", 2)
+    assert block == f"listening\n  \tvivibox: demo-1 is done\n  \t‹U+000D›{EVIL_SHOWN}"
+    assert own_lines(block) == ["listening"] and all(
+        line.expandtabs(8).startswith("  ") for line in block.splitlines()[1:]
+    ), "as a terminal draws it: every later line begins with the two columns, and the tab adds to them"
+    assert display.block("a\n  b\nc", 6) == "a\n        b\n      c", (
+        "every line alike: the lines keep their places"
+    )
+
+
+def test_a_tool_s_words_in_a_reason_stand_under_it_once(env, capsys, monkeypatch):
+    """What git or Docker said is put under its first line where the error is made
+    (display.said: four columns). A reason printed after a word of vivibox's goes through
+    display.under, which put it four more in: eight, for the second line of git's words in
+    `vivibox verify` and in "Not committed". A line that is that far in already stays there."""
+    from test_tui import new_task
+
+    from vivibox import actions, cli_decisions, display, gate, ui
+
+    said = display.said(
+        "fatal: unable to access 'https://example.com/lib.git/'\nfatal: clone of 'lib' failed"
+    )
+    assert said.splitlines()[1] == "    fatal: clone of 'lib' failed"
+    assert (
+        display.under(f"the submodules could not be fetched: {said}").splitlines()[1] == said.splitlines()[1]
+    )
+    assert display.under("a\nb\n    c\n  d") == "a\n    b\n    c\n      d", (
+        "what is not that far in is put there"
+    )
+    assert (
+        display.under(f"could not start: {said}", 6).splitlines()[1]
+        == "          fatal: clone of 'lib' failed"
+    )
+    task = new_task()
+    result = gate.GateResult(task.meta / "log" / "verify-1.log")
+    result.environment = f"the project's submodules could not be fetched: {said}"
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: type("P", (), {"up": lambda self: None})())
+    monkeypatch.setattr(gate, "run_gate", lambda *a, **k: result)
+    from vivibox.cli import main
+
+    capsys.readouterr()
+    assert main(["verify", task.id]) == 1
+    assert "lib.git/'\n    fatal: clone of 'lib' failed\n" in capsys.readouterr().out
+
+    def refuses(*a):
+        raise gate.GateError(f"the commit failed; the changes stay staged: {said}")
+
+    done = actions.Finished("demo-1", Path("/src"), ui.Spend(), "Add it")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    monkeypatch.setattr(cli_decisions, "where_to_commit", lambda done: ("", False))
+    monkeypatch.setattr(actions, "commit_work", refuses)
+    cli_decisions.offer_commit(done)
+    assert capsys.readouterr().out.endswith(
+        "Not committed: the commit failed; the changes stay staged: fatal: unable to access "
+        "'https://example.com/lib.git/'\n    fatal: clone of 'lib' failed\n"
+    )
+
+
 def test_an_agent_s_words_in_why_a_demo_could_not_be_worked_out_draw_no_line_of_vivibox_s(env, monkeypatch):
     """The error is printed by the one printer of errors, which keeps an error's own lines where
     they are (a refusal's commands are lines of their own): the agent's words in it are put
@@ -695,11 +789,12 @@ def test_image_check_says_what_a_failed_check_printed_escaped_under_its_line(env
 
     check = image.Check("java", "java -version", "openjdk")
     monkeypatch.setattr(image, "exists", lambda ref, runner=None: True)
-    monkeypatch.setattr(image, "run_checks", lambda ref: [(check, False, f"not found{FORGED}\tx")])
+    monkeypatch.setattr(image, "run_checks", lambda ref: [(check, False, f"not found{FORGED}\n\tsee\tPATH")])
     assert main(["image", "check"]) == 1
     said = capsys.readouterr().out
-    assert not hidden(said) and "\t" not in said, repr(said)
+    assert not hidden(said), repr(said)
     assert f"FAIL  java\n      not found{EVIL_SHOWN}\n      vivibox: demo-1 is running" in said
+    assert "\n      \tsee\tPATH\n" in said, "what the check printed keeps its tabs"
 
 
 def test_init_and_info_say_what_a_repository_s_files_name_escaped(env, capsys, monkeypatch):

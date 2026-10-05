@@ -439,8 +439,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the supervisor's window. Each is escaped now. What takes several lines stands under
   vivibox's own line and never at the left edge: in `vivibox demo` the agent's question, an
   earlier task's instruction and the app's output are two columns in, and an agent's words in
-  "could not work out how to run this" four. `vivibox wait --json`, and the prompts `vivibox
-  plan` and `vivibox review --prompt` print, are as they were.
+  "could not work out how to run this" four. Those three, and what a failed check printed in
+  `vivibox image check`, keep their tabs: a stack trace's frames begin with one, and a tab
+  moves what follows to the right alone. What git or Docker said in a reason stands under its
+  first line once, four columns in, in `vivibox verify`, in "Not committed" and in `vivibox
+  wait`, where a reason printed after words of vivibox's was put four further in.
+  `vivibox wait --json`, and the prompts `vivibox plan` and `vivibox review --prompt` print,
+  are as they were.
 - The command a verification did not finish in time is named escaped where the reason is
   made, as a build's line in a reason is: the panel and `vivibox status` draw a reason as it
   is, where a command could spell an escape of a character it does not have (`‹U+001B›`).

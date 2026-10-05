@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -500,7 +499,7 @@ class Approvals:
         shutil.rmtree(files, ignore_errors=True)
         if fresh.exists():
             fresh.rename(files)
-        shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
+        shutil.rmtree(self.dir / "view", ignore_errors=True)  # an earlier vivibox's copies to read
         self.dir.mkdir(parents=True, exist_ok=True)
         runs = self._running(current) if runs is None else runs  # with now: that pass's own
         for path, kept in ((self.runs, sorted(runs)), (self.record, current)):
@@ -596,10 +595,11 @@ class Approvals:
         self, change: Change, now: dict[str, str] | None = None, budget: clone_read.Budget | None = None
     ) -> tuple[str, bool]:
         """change's diff, and whether you could read what it is: a new or changed file, or what a
-        link inside the repository points to, is shown, or copied for you whole, as text, and what
-        was shown or copied is what the digest an approval records says; one that could not be, for
-        its size, the budget or not being text (clone_read.Text), or that changed meanwhile, is no
-        approval's. What was approved before need not be text: the new content is shown whole."""
+        link inside the repository points to, is shown whole, as text, and what was shown is what
+        the digest an approval records says; one that could not be, for its size (past
+        clone_read.CHECK_LIMIT, with nothing put in its place to read), the budget or not being
+        text (clone_read.Text), or that changed meanwhile, is no approval's. What was approved
+        before need not be text: the new content is shown whole."""
         budget = clone_read.Budget() if budget is None else budget
         old = self.dir / "files" / change.path
         new = self.repo / change.path
@@ -607,8 +607,6 @@ class Approvals:
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         digest = "" if now is None else now.get(change.path, "")
-        with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
-            self.copy_for_you(change.path).unlink(missing_ok=True)
         with contextlib.suppress(OSError):  # gone since: the rest says so
             digest = _digest(self.repo, new, budget) if now is None else digest
             if why := self.unapprovable({change.path: digest}):
@@ -631,8 +629,15 @@ class Approvals:
                     f"{linked}{head}: not shown: {self._unseen(change.path, display.name(str(e)))}\n",
                     False,
                 )
-            view, seen = self._view(change.path, budget, want)
-            return f"{linked}{head}: {e.kind}, too large to show here; {view}\n", seen
+            # Past what vivibox shows of one file: not drawn, so no approval's. Nothing else is
+            # put in its place for you to read: a copy would follow the clone, not this view.
+            base, who = baseline.of_task(self.dir.parent), git_repo.undoes(self.dir.parent)
+            how = f"{who} makes it smaller, or {_undo(change.path, base)}{_unknown(base)}"
+            large = f"it is {e.kind}, and vivibox shows no file that large"
+            return (
+                f"{linked}{head}: not shown: {large}, so the task's change to it cannot be approved: {how}\n",
+                False,
+            )
         except OSError:  # gone, or a folder
             if want is not None:
                 return f"{linked}{head}: not shown: {self._unseen(change.path, changed)}\n", False
@@ -694,44 +699,6 @@ class Approvals:
     def _not_text(self, path: str, e: clone_read.NotText) -> str:
         """Why the task's change to path, not text, cannot be approved, and what you can do."""
         return f"{self._unseen(path, f'it is {e}')}; {YOURSELF}"
-
-    def copy_for_you(self, path: str) -> Path:
-        """Where _view copies a risky file of path: the task's metadata, which no container writes,
-        by a name of vivibox's own, so the command to read it holds nothing the agent named."""
-        digest = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()
-        return self.dir / "view" / f"{digest}.txt"  # whole: no two paths share a copy
-
-    def _view(
-        self, path: str, budget: clone_read.Budget | None = None, want: str | None = None
-    ) -> tuple[str, bool]:
-        """Where to read a risky file too large for the panel, before you approve it: a copy in the
-        task's metadata, where no link of the agent's can be, read as text, and only text (it is
-        deleted when it turns out not to be, and the change is not seen). Opened in your IDE, a
-        build file is imported, which is what approving it is there for. The copy's name is
-        vivibox's (copy_for_you), and less runs no LESSOPEN unpacker (-L)."""
-        view = self.copy_for_you(path)
-        said = "vivibox checks whether it changes, not what it says"
-        try:
-            view.parent.mkdir(parents=True, exist_ok=True)
-            copied = clone_read.copy(
-                self.repo, self.repo / path, view, clone_read.HASH_LIMIT, budget, follow=True, text=True
-            )
-            if want is not None and copied != want:  # not what an approval would take
-                raise OSError("it changed while vivibox copied it")
-        except clone_read.NotText as e:  # the copy is gone already
-            return f"{said}, and could not copy it for you to read: {self._not_text(path, e)}", False
-        except OSError as e:
-            with contextlib.suppress(OSError):
-                view.unlink(missing_ok=True)
-            over = getattr(e, "kind", "") == clone_read.OVER_BUDGET
-            why = self._unseen(path) if over else self._unseen(path, display.name(str(e)))
-            return (
-                f"{said}, and could not copy it for you to read: {e.kind + ', as ' if over else ''}{why}",
-                False,
-            )
-        # -+R -+r: no escape sequence of the copy's reaches the terminal, whatever your LESS says.
-        command = shlex.join(["less", "-L", "-+R", "-+r", str(view)])
-        return f"{said}: read its copy as text, not in your IDE ({command}), before you approve", True
 
 
 def scan_one(path: Path) -> str | None:

@@ -4,13 +4,11 @@ itself and never read as markdown or markup; what is hashed and approved stays t
 
 import hashlib
 import json
-import shlex
 import unicodedata
 
 import pytest
 from conftest import shown_risky
 from markdown_it import MarkdownIt
-from test_clone_read import past_the_limit_to_show
 
 from vivibox import actions, display, gate, panel, repo, timeline
 from vivibox.cli import main
@@ -153,37 +151,6 @@ def test_a_change_shown_escaped_is_approved_as_its_bytes(env, capsys):
     approved = json.loads((task.meta / "risky" / "approved.json").read_text())
     assert approved["build.gradle"] == hashlib.sha256(EVIL.encode()).hexdigest()
     assert task.read_state().state is State.CHECKPOINT_FINAL
-
-
-def test_a_name_with_esc_and_cr_draws_no_command(env, capsys, monkeypatch):
-    task = new(env)
-    past_the_limit_to_show(task.repo / FORGED, monkeypatch, b"plugins { id 'java' }\n")
-    approvals = Approvals(task.meta, task.repo)
-    diffs = "".join(actions.risky_diffs(task, actions.load(task.id)[1]))
-    capsys.readouterr()
-    assert main(["risky", task.id]) == 0
-    cli = capsys.readouterr().out
-    at_approval(task)
-    for said in (diffs, cli, risky_section(task)):
-        assert not hidden(said), repr(said)
-        assert "a‹U+001B›[2K‹U+000D›Read it first" in said
-        assert not [line for line in said.splitlines() if line.lstrip("`").startswith("Read it first")]
-    command = shlex.join(["less", "-L", "-+R", "-+r", str(approvals.copy_for_you(FORGED))])
-    assert f"({command})" in diffs
-
-
-def test_the_command_to_read_a_large_risky_file_holds_nothing_the_agent_named(env, monkeypatch):
-    task = new(env)
-    past_the_limit_to_show(task.repo / FORGED, monkeypatch)
-    approvals = Approvals(task.meta, task.repo)
-    said = approvals.diff(Change(FORGED, "added"))
-    view = approvals.copy_for_you(FORGED)
-    command = said[said.index("(less") + 1 : said.rindex("), before you approve")]
-    assert command == shlex.join(["less", "-L", "-+R", "-+r", str(view)])
-    assert view.is_file() and not view.is_symlink()
-    assert view.parent == task.meta / "risky" / "view"
-    assert not {part for part in FORGED.split("/")} & set(view.relative_to(task.meta).parts)
-    assert "x.gradle" not in str(view) and "curl" not in str(view)
 
 
 def test_markup_and_markdown_in_a_name_and_in_content_are_shown_as_they_are(env):
@@ -352,16 +319,6 @@ def test_every_diff_is_headed_by_the_file_and_its_change(env):
     task = new(env)
     (task.repo / "pom.xml").write_text("<project/>\n")
     assert actions.risky_diffs(task, actions.load(task.id)[1])[0].startswith("pom.xml: added\n--- approved/")
-
-
-def test_the_copy_to_read_is_named_by_the_whole_digest_of_its_path(env, monkeypatch):
-    """No two paths share a copy: a prefix of 64 bits is a birthday attack away from showing one
-    file's content under another's name."""
-    task = new(env)
-    approvals = Approvals(task.meta, task.repo)
-    for path in ("buildSrc/a.gradle", FORGED):
-        name = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest() + ".txt"
-        assert approvals.copy_for_you(path).name == name
 
 
 def test_build_output_and_names_in_the_panel_are_never_markdown(env):

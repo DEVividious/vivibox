@@ -934,3 +934,74 @@ def test_only_the_whole_identity_names_a_view(task):
         with pytest.raises(risky.NotAsShown):
             approvals(task).approve_changes(near)
     assert kept(task) == before
+
+
+# --- a file past what the panel shows of one file ----------------------------------------------------
+
+PAST = (
+    "it is larger than 0 MiB, and vivibox shows no file that large, so the task's change to it "
+    "cannot be approved"
+)
+
+
+def test_a_file_at_the_limit_is_shown_and_one_byte_past_it_is_covered_by_no_approval(task, monkeypatch):
+    """Both sides of what vivibox shows of one file (64 MiB; here the size of the file itself)."""
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", len(POM))
+    view = approvals(task).view()
+    assert view.identity and "+<project/>" in view.diffs[0], "at the limit: shown whole"
+    (task.repo / "pom.xml").write_text(POM + " ")
+    view = approvals(task).view()
+    assert view.identity == "" and PAST in view.diffs[0], view.diffs[0]
+    assert "cannot be approved: reply, and the writer makes it smaller, or " in view.diffs[0]
+    assert "read its copy" not in view.diffs[0] and "less " not in view.diffs[0]
+    assert not (task.meta / "risky" / "view").exists(), "no copy is made to stand for the file"
+    now = risky.scan(task.repo)
+    worked_out = risky.identity(approvals(task).approved(), now, {})
+    before = kept(task)
+    for shown in ("", worked_out):
+        with pytest.raises(risky.Unapprovable, match="shows no file that large"):
+            approvals(task).approve_changes(shown)
+    assert kept(task) == before
+
+
+def test_vivibox_risky_offers_no_approval_of_a_file_too_large_to_show(env, capsys, monkeypatch):
+    t, record = at_approval(env)
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", 8)
+    before = record.read_bytes()
+    capsys.readouterr()
+    assert main(["risky", t.id]) == 0
+    printed = capsys.readouterr().out
+    assert "pom.xml: added: not shown: it is larger than 0 MiB" in printed
+    assert "approve-risky" not in printed and "Nothing is approved while a file above" in printed
+    assert main(["approve-risky", t.id, "0" * 64]) == 1
+    assert "shows no file that large" in capsys.readouterr().err and record.read_bytes() == before
+
+
+def test_nothing_you_are_told_to_read_follows_the_clone_while_the_view_stays(env, monkeypatch):
+    """The reviewer's case: a file past the limit was not drawn, and the copy the view told you
+    to read was written again from the clone by every refresh. There is no such copy now: the
+    file is covered by no approval, on E, on B and on E again."""
+    t, record = at_approval(env)
+    monkeypatch.setattr(clone_read, "CHECK_LIMIT", 8)  # stands for the panel's 64 MiB
+    evil = "<project>" + "<evil/>" * 4 + "</project>\n"
+    fine = "<project>" + "<fine/>" * 4 + "</project>\n"
+    before = record.read_bytes()
+
+    async def scenario(app, pilot):
+        (t.repo / "pom.xml").write_text(evil)
+        app.reload()
+        await pilot.press("d")
+        await pilot.pause()
+        for content in (fine, evil):
+            assert "shows no file that large" in app.shown and "less " not in app.shown
+            assert not (t.meta / "risky" / "view").exists()
+            (t.repo / "pom.xml").write_text(content)
+            app.show_detail()  # a refresh nobody asked for
+            await pilot.pause()
+        await pilot.press("p")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert record.read_bytes() == before and t.read_state().state is State.APPROVAL_RISKY
+        assert "shows no file that large" in said_in(app)[-1]
+
+    run_view(scenario, notifications=True)

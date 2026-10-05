@@ -344,6 +344,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A risky file larger than vivibox shows of one file (64 MiB) is covered by no approval. It was
+  not drawn, and the view said to read a copy of it before approving; every refresh wrote that
+  copy again from the clone, so what you read there could be another state than the one `p`
+  approved. No copy is made now: the view says the file is too large to show and that the
+  change cannot be approved, with the reply that has the writer make it smaller or take it
+  out, and `vivibox risky` ends with no approval command while it is there.
 - The question that approves risky files says "not folded" only of the risky files, and of how
   many of them. It said so whenever any block of the panel was left unfolded: a block of the
   plan put it on an approval whose every file was folded and whole. The note above a block

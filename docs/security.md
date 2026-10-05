@@ -297,8 +297,10 @@ nothing it printed itself in the same run, which nobody would have read. The app
 again, and when the clone or the record of the last approval no longer gives that identity it
 approves nothing and says they changed since they were shown. A view in which a file could not
 be shown whole has no identity, `vivibox risky` then ends with no command, and the approval
-refuses such a file whatever identity it is given: one that is not text, one past the size or
-the total vivibox reads, one it cannot open, a special file (a named pipe, a socket, a device),
+refuses such a file whatever identity it is given: one that is not text, one larger than
+vivibox shows of one file (64 MiB: it is not drawn, and nothing is put in its place for you
+to read, since a copy made for reading would follow the clone and not the view you look at),
+one past the total vivibox reads in a pass, one it cannot open, a special file (a named pipe, a socket, a device),
 a link that leads out of the repository, and a link to a folder, to nothing or to a special
 file, of which nothing can be shown or checked. Each is said as what it is, with the reply
 that has the writer take it out. A link your repository already had at the task's base, to the

@@ -78,11 +78,11 @@ def test_a_file_swapped_for_a_link_out_while_it_is_shown_is_neither_read_nor_cop
     swapped_after,
     link,
 ):
-    """The view hashes a changed risky file, reads it to show it and, past what it shows,
-    copies it for you to read. Between any two of these the agent may put a link to a file of
-    yours in its place: the read and the copy walk from the clone's root as the hash did, so
-    the file outside is never opened, and nothing of it is copied where you were told to
-    read. A link by a whole path is refused whatever the walk starts from; one that climbs out
+    """The view hashes a changed risky file and reads it to show it; one past what it shows is
+    refused and read no further. Between the two the agent may put a link to a file of yours
+    in its place: the read walks from the clone's root as the hash did, so the file outside
+    is never opened, and nothing of it is copied anywhere. A link by a whole path is refused
+    whatever the walk starts from; one that climbs out
     (../../host/secret.txt) only by a walk that starts at the clone: read from the root of the
     machine instead, it is followed to your file."""
     gradle = past_the_limit_to_show(approved_gradle(task), monkeypatch, b"plugins { id 'evil' }\n")
@@ -120,8 +120,9 @@ def test_a_file_swapped_for_a_link_out_while_it_is_shown_is_neither_read_nor_cop
     said = approvals.diff(Change("build.gradle", "changed"))
     assert gradle.is_symlink(), "the swap happened"
     assert opened == [], "the file outside the clone is not opened"
-    assert "build.gradle is a link that leads out of the repository" in said
     assert "the task's change to it cannot be approved" in said
-    assert not approvals.copy_for_you("build.gradle").exists()
-    if swapped_after != "the hash":
-        assert "could not copy it for you to read" in said
+    assert not (approvals.dir / "view").exists(), "and nothing is copied anywhere for you to read"
+    if swapped_after == "the hash":
+        assert "build.gradle is a link that leads out of the repository" in said
+    else:  # refused for its size: nothing reads what stands there afterwards
+        assert "shows no file that large" in said

@@ -550,7 +550,8 @@ class Supervisor(Planning, Verifying, ReviewRound):
             return
         if not command:
             none = f"it wrote none to /task/handoff/{proposal.PROPOSAL}"
-            why = handoff.refused(self.task.meta / "handoff", proposal.PROPOSAL) or none
+            refused = handoff.refused(self.task.meta / "handoff", proposal.PROPOSAL)
+            why = refused or proposal.not_text(self.task) or none
             reason = f"no command came from the writer: {why}; type one, or send it back"
         elif selection:
             reason = (

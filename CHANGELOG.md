@@ -344,6 +344,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A proposed command's file that is not text (bytes that are no UTF-8) no longer ends
+  `vivibox status` or the view with an error. Nothing of it is run or kept: the task comes to
+  `review the command` with no command and the reason, and at a checkpoint it reached earlier
+  status and the panel show what the file holds now as codes, beside the command that is
+  kept.
 - A link your repository had at the task's base is tolerated by its target's name only while
   it leads to no file vivibox shows, as when the task began. One that led to a file the work
   then removed was shown as `changed, symlink to …` and approved, and a named pipe put at its

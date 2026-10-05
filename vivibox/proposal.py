@@ -28,11 +28,30 @@ def proposed(task: Task) -> str:
     """The command the writer wrote, its first line, without what a model puts around it in a
     Markdown file: a heading, a fenced block and its language, a comment in it, a list marker, a
     sentence around a command in backticks, the prompt sign; "" for none, and for a link or a
-    special file in its place, which is never read: its first line would run in the gate."""
+    special file in its place, which is never read: its first line would run in the gate. ""
+    too for a file that is no text (bytes that are no UTF-8): nothing of it is run or kept."""
     try:
-        text = handoff.read_text(task.meta / "handoff" / PROPOSAL)
+        return _command(handoff.read_text(task.meta / "handoff" / PROPOSAL))
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def named(task: Task) -> str:
+    """What the writer's file names now, to be shown and never run: read as proposed reads it,
+    with bytes that are no UTF-8 as their codes (\\xff), as the agent's question is read."""
+    try:
+        return _command(handoff.read_text(task.meta / "handoff" / PROPOSAL, errors="backslashreplace"))
     except OSError:
         return ""
+
+
+def not_text(task: Task) -> str:
+    """Why no command came of a file the writer did write, when it is no text; "" otherwise."""
+    said = f"what it wrote to /task/handoff/{PROPOSAL} is not text (bytes that are no UTF-8)"
+    return said if named(task) and not proposed(task) else ""
+
+
+def _command(text: str) -> str:
     for line in text.splitlines():
         command = line.strip()
         if not command or command.startswith("#") or FENCE.match(command):
@@ -75,7 +94,7 @@ def shown(task: Task) -> str:
 def moved(task: Task) -> str:
     """The command the writer's file names now, when it is not the one the task waits with: to
     be said, and never kept. "" while they are the same, or nothing is on record."""
-    recorded, now = at_checkpoint(task), proposed(task)
+    recorded, now = at_checkpoint(task), named(task)
     return now if recorded is not None and now != recorded else ""
 
 

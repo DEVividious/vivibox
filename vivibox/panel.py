@@ -199,6 +199,7 @@ def command_to_review(task: Task) -> list[str]:
     if not command:
         why = (
             refused(task.meta / "handoff", proposal.PROPOSAL)
+            or proposal.not_text(task)
             or f"it wrote none to `/task/handoff/{proposal.PROPOSAL}`"
         )
         return [

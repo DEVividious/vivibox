@@ -52,6 +52,9 @@ ModalScreen { align: center middle; background: $background 60%; }
    screen at most, and scrolling past that, so the buttons under them are never off the screen. */
 .dialog > .asked { height: auto; max-height: 28vh; }
 .dialog > .asked.about { margin-bottom: 1; }
+/* The files of a commit, over a form that needs its rows: a smaller share. */
+.dialog > .asked.short { max-height: 18vh; }
+.asked > .files { margin: 0; }
 .note, .files { color: $text-muted; }
 .files, .spaced { margin: 1 0 0 0; }
 .problem { color: $error; margin-top: 1; }

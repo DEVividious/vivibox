@@ -344,6 +344,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The reply and the commit dialogs keep what you decide with on the screen at 80 by 24. A tall
+  question of the agent's hid the reply's field and Send, and sixty changed files hid the
+  commit's branch, its message and both buttons, while Ctrl+S still sent and committed. The
+  question and the list of files scroll inside the dialog.
 - An error of vivibox's own is shown as one again. What keeps an agent's text from ending the
   view when it cannot be drawn took every error raised while the panel held such text: a bug
   in a key's action closed the view with no traceback and no return code, and one in what

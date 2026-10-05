@@ -77,6 +77,7 @@ NOTHING_TO_SEND = "Write a comment first, or leave with Cancel."
 
 class Reply(Dialog):
     hint_keys = (("ctrl+s", "send"), look.ESC_CANCELS)
+    AUTO_FOCUS = "TextArea"  # where you type: the question above it scrolls, and takes focus too
 
     def __init__(self, task_id: str, prompt: str = ""):
         super().__init__()
@@ -86,9 +87,8 @@ class Reply(Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(
-                f"{display.terminal(self.prompt)}:", classes="wrap", markup=False
-            )  # the agent's question
+            with VerticalScroll(classes="asked"):  # the agent's question: as tall as it likes
+                yield Label(f"{display.terminal(self.prompt)}:", classes="wrap", markup=False)
             yield EdgeTextArea(id="comment")
             with Horizontal(classes="buttons"):
                 yield Button("Send", variant="primary", id="send")
@@ -514,9 +514,13 @@ class CommitWork(Dialog):
                 markup=False,
             )
             # git's names of the agent's files: text, never markup ([/b] in one), no escape sequence.
-            yield Label(
-                display.terminal(self.done.status.rstrip()) or "(no changes)", classes="files", markup=False
-            )
+            # However many: they scroll, and the form under them stays on the screen.
+            with VerticalScroll(classes="asked short spaced"):
+                yield Label(
+                    display.terminal(self.done.status.rstrip()) or "(no changes)",
+                    classes="files",
+                    markup=False,
+                )
             # A row apart from the files above it: the form starts here.
             with Horizontal(classes="row spaced"):
                 yield Label("Branch", classes="key")

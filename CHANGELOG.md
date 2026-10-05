@@ -357,7 +357,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `project.yml`, its caches, its memories) is in the task's home in the pod (`/config/serena`),
   never in the clone: no `.serena/` appears there, and one your repository commits is left as
   it is and is not read by vivibox's Serena, which would write your `project.yml` again in its
-  own shape.
+  own shape. With a project to work on, Serena fetches the language server for the project's
+  language when it starts, through the pod's network (Python's through `uv`, into the shared
+  `uv` cache).
 - The notification of a command `--auto` did not keep because the task's clone is blocked says
   what to do: `reply, and the writer takes it out`.
 - The history of finished tasks written by an earlier vivibox is read whatever a goal in it

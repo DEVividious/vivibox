@@ -30,8 +30,10 @@ server of every start. What Serena keeps of a project (its `project.yml`, its ca
 memories) is in the task's own home in the pod, under `/config/serena` on the task's disk, and
 goes with the task: it writes nothing into the clone. A `.serena/` your repository commits is
 left as it is and is not read by vivibox's Serena, which would write your `project.yml` again in
-its own shape. Its language servers are not in the image; Serena downloads one for a
-language when it first needs it, through the pod's network.
+its own shape. Its language servers are not in the image: when Serena starts on a project it
+fetches the one for the project's language through the pod's network, before any of its tools
+is asked for. Python's (Pyright) is run through `uv` and kept in the shared `uv` cache; one
+Serena downloads itself is kept in its home, on the task's disk.
 The planner in a container of its own gets the MCP servers you brought and not Serena: its
 language servers would work on the writer's commits beside the planner's key and conversation.
 

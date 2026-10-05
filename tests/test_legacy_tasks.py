@@ -628,6 +628,61 @@ def test_the_tests_reach_no_docker():
     assert Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).read_text() == "inspect vivibox-demo-1-dind\n"
 
 
+def test_a_docker_that_is_not_the_stand_in_is_not_started(tmp_path, no_real_docker):
+    """The stand-ins for docker and sudo are found by PATH. A docker named by its whole path, or
+    looked up on a PATH of the caller's own (an env= without PATH is looked up in the system's
+    folders, where this machine's is), would be the real one: it is not started, and the test
+    that asked for it fails. Shown on programs of the test's own, so nothing real runs even
+    where this fails."""
+    import os
+    import shutil
+
+    import conftest
+
+    stand_ins, elsewhere, ran = (
+        Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).parent,
+        tmp_path / "bin",
+        tmp_path / "ran",
+    )
+    elsewhere.mkdir()
+    for name in ("docker", "sudo"):
+        (elsewhere / name).write_text(f"#!/bin/sh\necho {name} >> {ran}\n")
+        (elsewhere / name).chmod(0o755)
+    own_path = {"PATH": f"{elsewhere}{os.pathsep}{stand_ins}"}
+    for args, env in (
+        ([str(elsewhere / "docker"), "ps"], None),
+        (["docker", "ps"], own_path),
+        (["sudo", "-n", "true"], own_path),
+        ([elsewhere / "sudo", "-n", "true"], {}),
+    ):
+        real = str(elsewhere / Path(args[0]).name)
+        assert conftest.past_the_stand_ins(stand_ins, args, None, env) == real
+        with pytest.raises(AssertionError, match="is not the tests' stand-in"):
+            subprocess.run(args, env=env, capture_output=True)
+        with pytest.raises(AssertionError, match="is not the tests' stand-in"):
+            subprocess.Popen(["anything"], executable=real, env=env)
+    assert not ran.exists(), "neither was started"
+    assert len(no_real_docker) == 8 and set(no_real_docker) == {
+        str(elsewhere / n) for n in ("docker", "sudo")
+    }
+    no_real_docker.clear()  # each would fail this test when it ends, as it fails any other
+    # An env= without PATH: the system's folders, where the stand-ins are not.
+    systems = shutil.which("docker", path=os.defpath)
+    assert conftest.past_the_stand_ins(stand_ins, ["docker", "ps"], None, {}) == (systems or "")
+    # What is let through: the stand-in however it is named, and every other program.
+    for args, env in (
+        (["docker", "ps"], None),
+        (["docker", "ps"], {**os.environ}),
+        ([str(stand_ins / "docker"), "ps"], {}),
+        (["git", "--version"], {}),
+        ("docker ps", None),  # a string for a shell is no program's name: the guard on shell=True is another
+    ):
+        assert conftest.past_the_stand_ins(stand_ins, args, None, env) == "", args
+    assert subprocess.run(["docker", "ps"], capture_output=True, text=True).stderr.startswith(
+        "the tests reach"
+    )
+
+
 def test_a_test_on_real_models_gets_the_real_machine_and_is_no_live_test():
     """tests/behavioural runs agents in real pods: conftest leaves it this machine's Docker, as
     it does a test marked docker. It is selected by -m model alone: marked docker as well, a run
@@ -637,9 +692,13 @@ def test_a_test_on_real_models_gets_the_real_machine_and_is_no_live_test():
 
     import conftest
 
-    assert conftest.real_machine(SimpleNamespace(keywords={"model": True, "real_start": True}))
-    assert conftest.real_machine(SimpleNamespace(keywords={"docker": True}))
-    assert not conftest.real_machine(SimpleNamespace(keywords={"real_start": True}))
+    def test(*marks: str) -> SimpleNamespace:
+        """A test as a fixture is handed it, carrying these marks."""
+        return SimpleNamespace(node=SimpleNamespace(get_closest_marker=lambda name: name in marks or None))
+
+    assert conftest.real_machine(test("model", "real_start"))
+    assert conftest.real_machine(test("docker"))
+    assert not conftest.real_machine(test("real_start"))
     bench = (Path(__file__).parent / "behavioural" / "test_prompts.py").read_text()
     marks = next(
         ast.unparse(node.value)
@@ -825,3 +884,27 @@ def test_a_state_file_gone_under_a_task_that_is_being_read_is_unreadable_not_an_
     assert task_module.layout(st) == "unreadable" and (st.id, st.project) == ("demo-1", "demo")
     assert task_module._iso(st.created) and st.created == st.updated, "a time to sort it by, with its zone"
     assert ui.view(task, st, False, 3).status == "state unreadable"
+
+
+@pytest.mark.parametrize("word", ["docker", "model", "real_start", "real_hostd", "real_notify"])
+def test_a_parameter_called_as_a_mark_is_no_mark_and_the_test_gets_no_real_machine(request, word):
+    """A test's keywords hold more than its marks: a parameter's id, the folders on the way to
+    its file, an attribute of its function. Read there, a test with a parameter called docker
+    was handed this machine's Docker, sudo and home, and one called real_start the real start
+    of a task. The marks are read as marks (conftest.marked)."""
+    import os
+    import shutil
+
+    import conftest
+
+    from vivibox import actions, ntfy, supervisor
+    from vivibox.egress import hostd
+
+    assert word in request.keywords, "what the fixtures used to ask"
+    assert not conftest.marked(request, word) and not conftest.real_machine(request)
+    stand_ins = Path(os.environ["VIVIBOX_TEST_DOCKER_LOG"]).parent
+    assert [Path(shutil.which(name)).parent for name in ("docker", "sudo")] == [stand_ins, stand_ins]
+    assert os.environ["HOME"] == str(conftest.HOME), "the suite's home, never yours"
+    assert actions.start("demo-1") == "m" and actions.started == ["demo-1"], "the stand-in for a start"
+    assert hostd.ensure("192.0.2.1") is None, "no forwarder is started"
+    assert supervisor.notify.__name__ == "in_the_window_only" and ntfy.post("u", {}, b"") is None

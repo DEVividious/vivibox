@@ -1,5 +1,6 @@
 import contextlib
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -96,11 +97,19 @@ def own_temporary_folder(monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(TEMPORARY))
 
 
+def marked(request, name: str) -> bool:
+    """Whether the test carries the mark: its own, its class's or its module's. Never whether the
+    word is among its keywords: a parameter's id, a folder on the way to the test's file and an
+    attribute of its function are keywords too, and a test with a parameter called docker would
+    be handed this machine's Docker."""
+    return request.node.get_closest_marker(name) is not None
+
+
 def real_machine(request) -> bool:
     """Whether the test runs pods on this machine's Docker: one marked docker, and one marked
     model, which runs agents in real pods (tests/behavioural) and is selected by -m model alone,
     never by -m docker, so that no run of the live suites spends money."""
-    return "docker" in request.keywords or "model" in request.keywords
+    return marked(request, "docker") or marked(request, "model")
 
 
 # The folders a shell may name apart from HOME: git reads its global settings in
@@ -146,7 +155,7 @@ def no_real_start(request, monkeypatch):
     thing."""
     from vivibox import actions, probe
 
-    if "real_start" in request.keywords:
+    if marked(request, "real_start"):
         return
     started: list[str] = []
     monkeypatch.setattr(actions, "started", started, raising=False)
@@ -157,7 +166,7 @@ def no_real_start(request, monkeypatch):
     monkeypatch.setattr(probe, "docker_running", lambda: True)
     # Nor a DNS forwarder to ask about, but for a test that has one of its own to ask (real_hostd,
     # docker): to that one the header says what it would say to a person.
-    if "real_hostd" not in request.keywords and not real_machine(request):
+    if not marked(request, "real_hostd") and not real_machine(request):
         monkeypatch.setattr(probe, "forwarder_problem", lambda config: "")
     # vivibox new asks for the agent image before it creates a task; nor is there an image.
     from vivibox import image
@@ -188,7 +197,7 @@ def no_real_hostd(request, monkeypatch, tmp_path_factory):
     from vivibox import pod_network
 
     monkeypatch.setattr(pod_network, "SYS_NET", tmp_path_factory.mktemp("sys-class-net"))
-    if "real_hostd" in request.keywords:
+    if marked(request, "real_hostd"):
         return
     from vivibox.egress import hostd
 
@@ -236,12 +245,27 @@ def review_made(pod) -> None:
         (folder / ".git").mkdir()
 
 
+def past_the_stand_ins(folder: Path, args, executable, env) -> str:
+    """What a process about to be started would run in place of the stand-in for docker or sudo
+    in folder, or "": the stand-ins are found by PATH, so a docker named by its whole path
+    (/usr/bin/docker), or looked up on a PATH of the caller's own that does not lead to them
+    (an env= without PATH is looked up in the system's folders), is this machine's."""
+    program = os.fsdecode(executable or (args if isinstance(args, str | bytes | os.PathLike) else args[0]))
+    name = os.path.basename(program)
+    if name not in ("docker", "sudo"):
+        return ""
+    found = shutil.which(program, path=os.pathsep.join(os.get_exec_path(env)))
+    return "" if found in (None, str(folder / name)) else found
+
+
 @pytest.fixture(autouse=True)
 def no_real_docker(request, monkeypatch, tmp_path_factory):
     """No test but one marked docker reaches the machine's Docker, nor sudo: a docker first on PATH answers
     every call as a daemon with nothing in it would, and a test that asked it to change something
     fails, so a stand-in that stops intercepting (a pod built another way) is caught. A task's pod
-    (actions.Pod) answers the same way without asking, as a test's own stand-in may still do."""
+    (actions.Pod) answers the same way without asking, as a test's own stand-in may still do.
+    A docker or a sudo that would be found past the stand-ins is not started at all
+    (past_the_stand_ins), and the test fails."""
     if real_machine(request):
         yield
         return
@@ -268,11 +292,23 @@ def no_real_docker(request, monkeypatch, tmp_path_factory):
     log = folder / "calls.log"
     monkeypatch.setenv("VIVIBOX_TEST_DOCKER_LOG", str(log))
     monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ.get('PATH', '')}")
-    yield
+    strayed: list[str] = []
+    start = subprocess.Popen._execute_child  # what every subprocess call starts its process with
+
+    def start_unless_it_strays(self, args, executable, preexec_fn, close_fds, pass_fds, cwd, env, *rest):
+        if real := past_the_stand_ins(folder, args, executable, env):
+            strayed.append(real)
+            raise AssertionError(f"{real} is not the tests' stand-in (tests/conftest.py: no_real_docker)")
+        return start(self, args, executable, preexec_fn, close_fds, pass_fds, cwd, env, *rest)
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", start_unless_it_strays)
+    yield strayed  # to the test of this guard itself, which empties it
     calls = log.read_text().splitlines() if log.exists() else []
     changing = [c for c in calls if not any(tuple(c.split()[: len(r)]) == r for r in READ_ONLY_DOCKER)]
     if changing:
         pytest.fail(f"asked Docker to change something: {changing[:5]}; fake it, or mark the test docker")
+    if strayed:
+        pytest.fail(f"would have run {strayed[:5]}, not the stand-in on PATH; mark the test docker")
 
 
 @pytest.fixture(autouse=True)
@@ -286,7 +322,7 @@ def no_real_notifications(request, monkeypatch):
     from vivibox import ntfy, supervisor
 
     quiet = SimpleNamespace(desktop=[], ntfy=[])
-    if "real_notify" in request.keywords:
+    if marked(request, "real_notify"):
         return quiet
     real = supervisor.notify
 

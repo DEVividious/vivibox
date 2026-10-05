@@ -283,9 +283,13 @@ approve-risky <id> <identity>` the one `vivibox risky` printed; the command line
 nothing it printed itself in the same run, which nobody would have read. The approval scans
 again, and when the clone or the record of the last approval no longer gives that identity it
 approves nothing and says they changed since they were shown. A view in which a file could not
-be shown whole (not text, past the size or the total vivibox reads, a special file where a
-file was approved, a link that leads out of the repository) has no identity, and the approval
-refuses such a file whatever identity it is given. What is recorded as approved is that
+be shown whole has no identity, `vivibox risky` then ends with no command, and the approval
+refuses such a file whatever identity it is given: one that is not text, one past the size or
+the total vivibox reads, one it cannot open, a special file (a named pipe, a socket, a device),
+a link that leads out of the repository, and a link to a folder, to nothing or to a special
+file, of which nothing can be shown or checked. Each is said as what it is, with the reply
+that has the writer take it out. A link your repository already had at the task's base, to the
+same target, is not the work's change: it stays recorded by its target alone, never followed. What is recorded as approved is that
 scan's digests, and the copy kept of each file, which the next view's diff is drawn against,
 is the bytes its digest is of: the copy is made beside the ones kept before and says what it
 wrote, and when that is not the scan's digest (the file was another for that moment) nothing

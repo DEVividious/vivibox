@@ -344,6 +344,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- No approval of risky files covers a file vivibox cannot show whole. A named pipe, a socket or
+  a device the work put under a risky name was shown as what it is and approved; so was a link
+  to a folder (`.idea -> stuff`), by its target's name, with nothing of the folder shown or
+  checked. Each is now said as what it is, with the reply that has the writer remove it or
+  make it a plain file; `vivibox risky` ends with no approval command while one is there, and
+  none passes. A link your repository had at the task's base stays as it was. A risky file
+  that cannot be opened is said the same way, and no longer ends the view with an error.
 - The copy of an approved risky file that the next diff is drawn against is the bytes that were
   approved. It was read from the clone once more after the file was shown and hashed: a file
   swapped for that moment left a copy nobody had seen, and a later diff against it hid the

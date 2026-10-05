@@ -91,6 +91,8 @@ def matches(path: str, pattern: str) -> bool:
 # repository (by the targets on the way out), a file past clone_read.HASH_LIMIT, and one past what
 # the scan had left of its budget (clone_read.Budget).
 OUT_LINK, TOO_LARGE, UNCHECKED = "symlink out of the repository:", "too large to check:", "not checked: "
+# And of what is no file to show: a special file (by its kind), and one vivibox could not open.
+SPECIAL, UNREADABLE, LINK = "not a plain file: ", "not readable: ", "symlink:"
 
 
 # Whose the files are that a verification's risky check had no budget left for (Approvals.verified,
@@ -208,13 +210,35 @@ def _digest(repo: Path, path: Path, budget: clone_read.Budget | None = None) -> 
         if e.kind == clone_read.too_large(clone_read.HASH_LIMIT):
             return TOO_LARGE + e.kind
         if target is None:
-            return f"not a plain file: {e.kind}"
+            return f"{SPECIAL}{e.kind}"
         content = ""  # a link to a FIFO, or round a loop: its target alone
-    except OSError:
-        if target is None:
-            raise
+    except OSError as e:
+        if target is None:  # no permission, or gone since it was listed: never the scan's end
+            return f"{UNREADABLE}{e.strerror or type(e).__name__}"
         content = ""  # a link to a folder, or to nothing
-    return content if target is None else f"symlink:{target}" + (f":{content}" if content else "")
+    return content if target is None else f"{LINK}{target}" + (f":{content}" if content else "")
+
+
+def _unshown(digest: str) -> bool:
+    """Whether digest is of something vivibox cannot show you whole, or cannot check: what no
+    approval covers when the work brought it (_cannot)."""
+    bare = digest.startswith(LINK) and _content(digest) is None  # by its target alone
+    return bare or digest.startswith((OUT_LINK, TOO_LARGE, UNCHECKED, SPECIAL, UNREADABLE))
+
+
+def _leads_to(repo: Path, path: Path) -> str:
+    """What a link that is recorded by its target alone leads to, in words."""
+    try:
+        clone_read.read_bytes(repo, path, 0)
+    except IsADirectoryError:
+        return "a folder"
+    except FileNotFoundError:
+        return "nothing"
+    except clone_read.Refused as e:
+        return e.kind
+    except OSError:
+        return "what vivibox cannot read"
+    return "a file"
 
 
 def _spent(who: str) -> str:
@@ -249,7 +273,7 @@ def _undo(path: str, base: baseline.Baseline) -> str:
 
 def _cannot(
     path: str, digest: str, base: baseline.Baseline, task_id: str, heavy: bool = False,
-    who: str = git_repo.WRITER,
+    who: str = git_repo.WRITER, leads: str = "",
 ) -> str:  # fmt: skip
     """Why no approval takes path as it is, or "": a file too large to verify, or a link out of the
     repository that your repository did not have, with that target, at the task's base commit. A
@@ -281,6 +305,28 @@ def _cannot(
         return (
             f"{name} is {digest.removeprefix(TOO_LARGE)}, too large for vivibox to verify safely, so the "
             f"task's change to it cannot be approved: {who} {_undo(path, base)}{unknown}"
+        )
+    if digest.startswith(SPECIAL):
+        return (
+            f"{name} is {digest.removeprefix(SPECIAL)}, and vivibox does not read it, so it cannot be "
+            f"approved: {who} removes it or makes it a plain file{unknown}"
+        )
+    if digest.startswith(UNREADABLE):
+        return (
+            f"{name} cannot be read ({digest.removeprefix(UNREADABLE)}), so it cannot be approved: {who} "
+            f"makes it a file vivibox can read, or removes it{unknown}"
+        )
+    # A link recorded by its target alone (to a folder, to nothing, to a special file): what it
+    # leads to is neither shown nor checked, now or later. One your repository had, to the same
+    # target, is not the work's change, and stays recorded as it was.
+    if digest.startswith(LINK) and _content(digest) is None:
+        target = digest.removeprefix(LINK)
+        if base.links.get(path) == target:
+            return ""
+        return (
+            f"{name} is a link to {leads or 'no file'} ({display.name(target)}): vivibox can show "
+            f"nothing of what it leads to, so it cannot be approved: {who} removes the link or makes "
+            f"it a file in the repository{unknown}"
         )
     if digest.startswith(OUT_LINK) and digest != OUT_LINK + base.links.get(path, "\0"):
         return (
@@ -380,11 +426,17 @@ class Approvals:
     def unapprovable(self, now: dict[str, str]) -> dict[str, str]:
         """The risky files of now that no approval takes, each with why, against your repository
         at the task's base commit (baseline), read only when there is something to ask it."""
-        if not any(d.startswith((OUT_LINK, TOO_LARGE, UNCHECKED)) for d in now.values()):
+        if not any(_unshown(d) for d in now.values()):
             return {}
         base, task_id = baseline.of_task(self.dir.parent), self.dir.parent.parent.name
         heavy, who = self._heavy(base), git_repo.undoes(self.dir.parent)
-        return {p: why for p, d in now.items() if (why := _cannot(p, d, base, task_id, heavy, who))}
+        found = {}
+        for path, digest in now.items():
+            bare = digest.startswith(LINK) and _content(digest) is None
+            leads = _leads_to(self.repo, self.repo / path) if bare else ""
+            if why := _cannot(path, digest, base, task_id, heavy, who, leads):
+                found[path] = why
+        return found
 
     def _heavy(self, base: baseline.Baseline) -> bool:
         """Whether your risky files at the start, as last approved, were past the budget together,
@@ -410,7 +462,7 @@ class Approvals:
         shutil.rmtree(fresh, ignore_errors=True)
         for rel, digest in current.items():
             if digest != NESTED_GIT and not digest.startswith(
-                ("symlink", "not a plain file", TOO_LARGE, UNCHECKED)
+                (LINK, OUT_LINK, SPECIAL, UNREADABLE, TOO_LARGE, UNCHECKED)
             ):
                 (fresh / rel).parent.mkdir(parents=True, exist_ok=True)
                 # Where the agent reads (/task): never a file of yours, swapped in since the scan.
@@ -521,16 +573,16 @@ class Approvals:
         if NESTED_GIT in (self.approved().get(change.path), scan_one(new)):
             return f"{head} ({NESTED_GIT}; IntelliJ would offer to add it as a VCS root)\n", True
         digest = "" if now is None else now.get(change.path, "")
+        with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
+            self.copy_for_you(change.path).unlink(missing_ok=True)
         with contextlib.suppress(OSError):  # gone since: the rest says so
             digest = _digest(self.repo, new, budget) if now is None else digest
             if why := self.unapprovable({change.path: digest}):
                 return f"{head}: {why[change.path]}\n", True  # refused for that already
         want, target = _content(digest), clone_read.link(self.repo, new)
         linked = f"{head}, symlink to {display.name(target)}\n" if target is not None else ""
-        if target is not None and want is None:  # by its target alone: nothing of it is read
+        if target is not None and want is None:  # your repository's own, by its target alone
             return linked, True
-        with contextlib.suppress(OSError):  # a copy for you is of the file as it is now, or none
-            self.copy_for_you(change.path).unlink(missing_ok=True)
         changed = "it changed while vivibox read it"
         try:  # through a link only while it stays inside the repository
             raw = clone_read.read_bytes(self.repo, new, clone_read.CHECK_LIMIT, budget)

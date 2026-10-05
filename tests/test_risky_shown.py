@@ -103,7 +103,8 @@ def test_any_change_to_what_was_shown_changes_the_identity(task, move):
     before = approvals(task).view().identity
     MOVES[move](task)
     after = approvals(task).view().identity
-    assert before and after and before != after
+    assert before and before != after
+    assert after or move == "a file replaced by a named pipe", "a pipe is shown by no view at all"
 
 
 def test_the_order_the_files_were_found_in_does_not_change_the_identity():
@@ -178,9 +179,15 @@ def test_an_approval_of_what_is_no_longer_shown_is_refused_whole(task, move):
     shown = approvals(task).view().identity
     MOVES[move](task)
     before = kept(task)
-    with pytest.raises(risky.NotAsShown) as refused:
+    with pytest.raises(risky.Unapprovable) as refused:
         actions.approve_risky(task, type("P", (), {"risky_extra": []}), shown)
-    assert str(refused.value) == "the risky files changed since they were shown, so nothing was approved"
+    if move == "a file replaced by a named pipe":  # which no approval takes, shown or not
+        assert "pom.xml is a FIFO, and vivibox does not read it, so it cannot be approved" in str(
+            refused.value
+        )
+    else:
+        assert type(refused.value) is risky.NotAsShown
+        assert str(refused.value) == "the risky files changed since they were shown, so nothing was approved"
     assert kept(task) == before, "the record and its copies are as they were"
     assert task.read_state().state is State.APPROVAL_RISKY
     assert not [e for e in task.events() if e["type"] == "risky_approved"]
@@ -534,3 +541,112 @@ def test_a_kept_copy_that_is_not_what_was_approved_is_never_the_side_a_diff_is_d
     said = "\n".join(view.diffs)
     assert "+<evil/>" in said and "+<!-- a comment -->" in said, "whole: every line of it is new to you"
     assert "is not what was approved" in said
+
+
+# --- what cannot be shown whole is covered by no approval ----------------------------------------------
+
+
+def a_pipe(t) -> None:
+    os.mkfifo(t.repo / "build.gradle.kts")
+
+
+def a_link_to_a_folder(t) -> None:
+    (t.repo / "stuff").mkdir()
+    (t.repo / "stuff" / "workspace.xml").write_text("<project/>\n")
+    (t.repo / ".idea").symlink_to("stuff")
+
+
+def a_link_to_nothing(t) -> None:
+    (t.repo / "gradle.properties").symlink_to("not-there-yet")
+
+
+def a_link_to_a_pipe(t) -> None:
+    os.mkfifo(t.repo / "data" / "pipe")
+    (t.repo / "gradle.properties").symlink_to("data/pipe")
+
+
+def a_file_nobody_reads(t) -> None:
+    (t.repo / "settings.gradle").write_text("include 'x'\n")
+    (t.repo / "settings.gradle").chmod(0)
+
+
+WRITER = "so it cannot be approved: reply, and the writer removes"
+NOTHING = "vivibox can show nothing of what it leads to"
+UNSHOWN = {
+    "a named pipe": (a_pipe, f"build.gradle.kts is a FIFO, and vivibox does not read it, {WRITER} it or "),
+    "a link to a folder": (
+        a_link_to_a_folder,
+        f".idea is a link to a folder (stuff): {NOTHING}, {WRITER} the",
+    ),
+    "a link to nothing": (
+        a_link_to_nothing,
+        f"is a link to nothing (not-there-yet): {NOTHING}, {WRITER} the",
+    ),
+    "a link to a named pipe": (a_link_to_a_pipe, f"is a link to a FIFO (data/pipe): {NOTHING}, {WRITER} the"),
+    "a file that cannot be read": (
+        a_file_nobody_reads,
+        "settings.gradle cannot be read (Permission denied), ",
+    ),
+}
+
+
+@pytest.mark.parametrize("what", list(UNSHOWN))
+def test_a_file_vivibox_cannot_show_whole_is_covered_by_no_approval(task, what):
+    """Added by the work: said as what it is, with the step that works, given no identity by
+    the view, refused by the approval whatever identity it is handed, and found again by the
+    verification's own check for as long as it is there."""
+    if what == "a file that cannot be read" and os.geteuid() == 0:
+        pytest.skip("root reads every file")
+    make, said = UNSHOWN[what]
+    make(task)
+    view = approvals(task).view()
+    assert view.identity == "", "no approval can name this view"
+    assert said in "\n".join(view.diffs), "\n".join(view.diffs)
+    now = risky.scan(task.repo)
+    modes = {path: clone_read.mode(task.repo, task.repo / path) for path in now}
+    before = kept(task)
+    for shown in ("", risky.identity(approvals(task).approved(), now, modes)):
+        with pytest.raises(risky.Unapprovable) as refused:
+            approvals(task).approve_changes(shown)
+        assert said in str(refused.value) and not isinstance(refused.value, risky.NotAsShown)
+    assert kept(task) == before
+    assert approvals(task).verified()[0], "a change, at every check"
+
+
+def test_vivibox_risky_offers_no_approval_of_a_named_pipe(env, capsys):
+    t, record = at_approval(env)
+    os.mkfifo(t.repo / "build.gradle")
+    before = record.read_bytes()
+    capsys.readouterr()
+    assert main(["risky", t.id]) == 0
+    printed = capsys.readouterr().out
+    assert (
+        "build.gradle: added: build.gradle is a FIFO, and vivibox does not read it, so it cannot" in printed
+    )
+    assert "approve-risky" not in printed and "Nothing is approved while a file above" in printed
+    assert main(["approve-risky", t.id, "0" * 64]) == 1
+    assert "build.gradle is a FIFO" in capsys.readouterr().err and record.read_bytes() == before
+
+
+def test_a_link_to_a_folder_your_repository_already_had_is_not_the_works_change(env):
+    """The base's own: recorded by the first approval by its target, as before, and no change
+    at any check. Named another folder by the work, it is the work's, and no approval takes it."""
+    import subprocess
+
+    source = env / "repo"
+    (source / "stuff").mkdir()
+    (source / "stuff" / "workspace.xml").write_text("<project/>\n")
+    (source / ".idea").symlink_to("stuff")
+    for args in (("add", "-A"), ("commit", "-q", "-m", "Share the IDE's folder")):
+        subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+    assert main(["new", "demo", "Goal", "--draft"]) == 0
+    t = find_task(load_config().tasks_dir, "demo-1")
+    assert approvals(t).changes() == [] and approvals(t).view().identity
+    (t.repo / "other").mkdir()
+    (t.repo / ".idea").unlink()
+    (t.repo / ".idea").symlink_to("other")
+    view = approvals(t).view()
+    assert (
+        view.identity == ""
+        and ".idea is a link to a folder (other): vivibox can show nothing" in view.diffs[0]
+    )

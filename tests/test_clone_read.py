@@ -392,17 +392,19 @@ def test_a_risky_file_replaced_by_a_special_one_is_a_change(task, monkeypatch, k
 
 
 def test_approving_does_not_wait_on_a_special_file_or_copy_one_through_a_link(task, outside):
+    """A special file is no approval's (it is never read, so never shown): refused at once."""
     os.mkfifo(task.repo / "Makefile")
     (task.repo / "build").mkdir()
     (task.repo / "build" / "pom.xml").write_text("<project/>\n")
     (task.repo / "pom.xml").symlink_to("build/pom.xml")  # a link out cannot be approved at all
     approvals = Approvals(task.meta, task.repo)
-    approved = in_time(approvals.approve)
-    assert not isinstance(approved, BaseException), approved
-    assert set(approved) >= {"Makefile", "pom.xml"}
+    refused = in_time(approvals.approve)
+    assert isinstance(refused, risky.Unapprovable), refused
+    assert "Makefile is a FIFO, and vivibox does not read it, so it cannot be approved" in str(refused)
     kept = task.meta / "risky" / "files"
     assert not (kept / "Makefile").exists() and not (kept / "pom.xml").exists()
-    assert in_time(approvals.changes) == [], "approved as they are"
+    found = in_time(approvals.changes)
+    assert [c.path for c in found] == ["Makefile", "build/pom.xml", "pom.xml"], "said, never waited on"
 
 
 def test_a_risky_link_out_of_the_clone_is_its_target_alone(task, outside):

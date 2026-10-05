@@ -1,5 +1,6 @@
 import contextlib
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -37,6 +38,20 @@ def global_git_config(monkeypatch: pytest.MonkeyPatch, home: Path, text: str) ->
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
     return home / ".gitconfig"
+
+
+def git_with(monkeypatch: pytest.MonkeyPatch, folder: Path, **variables: str) -> None:
+    """From here on in the test, the git first on PATH is the one found there now with these
+    variables set, for the test's own git and the git vivibox runs alike. For what vivibox's
+    git is never handed from the environment (repo.git_environment takes every GIT_* out):
+    GIT_CONFIG_NOSYSTEM, in a test that must hold on a machine whose /etc/gitconfig says
+    otherwise."""
+    real = shutil.which("git")
+    folder.mkdir(parents=True, exist_ok=True)
+    exports = "".join(f"export {name}={shlex.quote(value)}\n" for name, value in variables.items())
+    (folder / "git").write_text(f'#!/bin/sh\n{exports}exec {shlex.quote(real)} "$@"\n')
+    (folder / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
 
 
 def make_repo(path: Path) -> Path:

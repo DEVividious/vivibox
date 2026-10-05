@@ -19,7 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import GIT_CONFIG, HOME, IDENTITY, global_git_config, make_repo, suites_own
+from conftest import GIT_CONFIG, HOME, IDENTITY, git_with, global_git_config, make_repo, suites_own
 
 from vivibox import about, baseline, context, keys_work, reading, repo, version
 
@@ -621,11 +621,13 @@ def test_how_you_reach_your_remotes_is_asked_for_by_name_and_never_for_the_tasks
 
 @pytest.fixture
 def unnamed(tmp_path, monkeypatch) -> Path:
-    """A repository with no identity of its own, on a machine whose ~/.gitconfig has none."""
+    """A repository with no identity of its own, on a machine whose ~/.gitconfig has none, and
+    whose system-wide settings are not read: this machine's /etc/gitconfig may name one."""
     source = make_repo(tmp_path / "source")
     for key in ("user.name", "user.email"):
         git(source, "config", "--unset", key)
     global_git_config(monkeypatch, tmp_path / "home", "")
+    git_with(monkeypatch, tmp_path / "git-of-no-machine", GIT_CONFIG_NOSYSTEM="1")
     return source
 
 

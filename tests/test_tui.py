@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import global_git_config, make_repo
+from conftest import git_with, global_git_config, make_repo
 from rich.text import Text
 from textual.coordinate import Coordinate
 from textual.widgets import Checkbox, Input, Label, OptionList, Select, SelectionList, TextArea
@@ -4943,11 +4943,39 @@ def test_the_header_says_when_the_dns_forwarder_is_down(env, monkeypatch):
     run(scenario)
 
 
+def no_identity_but_the_repository_s(monkeypatch, env) -> None:
+    """Your global git configuration is empty, and the machine's own (/etc/gitconfig) is not
+    read: an identity is what the repository's settings say, and nothing else. Without the
+    second, a test of a missing identity met the machine's on a machine that names one there
+    (an image built for a team, a shared build host)."""
+    global_git_config(monkeypatch, env / "home", "")
+    git_with(monkeypatch, env / "git-of-no-machine", GIT_CONFIG_NOSYSTEM="1")
+
+
+def test_a_test_of_a_missing_identity_does_not_meet_this_machine_s(env, monkeypatch):
+    """On a machine whose system-wide git settings name an identity (stood in for here: a git
+    that reads a system file of the test's), vivibox finds that identity when your settings and
+    the repository's have none, as git does. The tests of a missing identity are run with no
+    system-wide settings at all."""
+    from vivibox import repo
+
+    system = env / "etc-gitconfig"
+    system.write_text("[user]\n\tname = Machine User\n\temail = machine@example.com\n")
+    git_with(monkeypatch, env / "git-of-a-machine", GIT_CONFIG_SYSTEM=str(system))
+    global_git_config(monkeypatch, env / "home", "")
+    for key in ("name", "email"):
+        subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
+    assert repo.identity(env / "repo") == repo.Identity("Machine User", "machine@example.com")
+    no_identity_but_the_repository_s(monkeypatch, env)
+    with pytest.raises(repo.RepoError, match="Git identity is missing"):
+        repo.identity(env / "repo")
+
+
 @pytest.mark.parametrize("missing", ["name", "email", "both"])
 def test_n_without_git_identity_stays_on_list_and_explains_commands(env, monkeypatch, missing):
     from ux import screen_text
 
-    global_git_config(monkeypatch, env / "home", "")
+    no_identity_but_the_repository_s(monkeypatch, env)
     for key in ("name", "email") if missing == "both" else (missing,):
         subprocess.run(["git", "config", "--unset", f"user.{key}"], cwd=env / "repo", check=True)
 
@@ -4970,7 +4998,7 @@ def test_n_says_when_your_identity_is_in_a_file_only_your_shell_names(env, monke
     given it. The toast says so, and its commands write the file vivibox's git reads."""
     from ux import screen_text
 
-    global_git_config(monkeypatch, env / "home", "")
+    no_identity_but_the_repository_s(monkeypatch, env)
     named = env / "elsewhere.gitconfig"
     named.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(named))
@@ -5015,7 +5043,7 @@ def test_new_task_rechecks_identity_if_it_disappears_while_form_is_open(env, mon
         await pilot.press("n")
         await pilot.pause()
         assert isinstance(app.screen, newtask.NewTask)
-        global_git_config(monkeypatch, env / "home", "")
+        no_identity_but_the_repository_s(monkeypatch, env)
         subprocess.run(["git", "config", "--unset", "user.email"], cwd=env / "repo", check=True)
         app.screen.query_one("#goal", TextArea).load_text("Do something")
         await pilot.press("ctrl+s")

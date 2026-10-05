@@ -285,8 +285,11 @@ def stand_ins(folder: Path) -> Path:
 
 # Stand-ins for the whole run, behind each test's own: for what is started when no test's PATH
 # holds (a thread of the view that outlives its test asks Docker where a pod answers). They write
-# nothing down and fail no test: there is none to fail by then.
-LATE = stand_ins(Path(tempfile.mkdtemp(prefix="vivibox-tests-late-")))
+# nothing down and fail no test: there is none to fail by then. In the suite's home, which is
+# there as long as anything the run started may be.
+LATE = HOME / "stand-ins"
+LATE.mkdir()
+stand_ins(LATE)
 
 
 def stand_ins_for_the_run(items) -> bool:

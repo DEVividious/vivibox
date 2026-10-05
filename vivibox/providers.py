@@ -79,17 +79,34 @@ def definition(provider: str) -> dict:
     return found
 
 
+# Where vivibox's own Serena keeps what is its own in the agent's container: its configuration,
+# its logs, and its folder for the project (project.yml, caches, memories). In the container's
+# home, on the task's disk, and apart from the home of a Serena you start there yourself
+# (~/.serena). Never in the clone: Serena writes its folder for a project at every start (a
+# project.yml of another shape than its own is written whole again), and in the clone that is a
+# change to a file your repository may track.
+SERENA_HOME = "/config/serena"
+# What starts it, by sh, the same for every task: it names no path (the home is the entry's
+# variable, the project's folder an argument of Serena's own). Serena 1.7.0 takes the folder its
+# configuration names for a project only when that folder is there, and the project's own
+# .serena otherwise; so the folder is made and the configuration written before Serena is, and
+# where either cannot be, Serena is not started.
+SERENA_START = (
+    ': "${SERENA_HOME:?}" && mkdir -p "$SERENA_HOME/project"'
+    ' && printf \'projects: []\\nproject_serena_folder_location: "%s/project"\\n\' "$SERENA_HOME"'
+    ' > "$SERENA_HOME/serena_config.yml" && exec "$0" "$@"'
+)
 # MCP servers vivibox brings itself, installed in the agent image: off until you turn one on.
 # Serena's command is without its project, which a task's own names (serena_on). Its
 # environment: Serena as installed (1.7.0) asks its makers' server at every start, with its
 # version, the system and how it was started, unless this variable is "false"; a server
-# vivibox starts itself reports nothing. A value, not a secret: nothing is mounted for it.
+# vivibox starts itself reports nothing. Values, not secrets: nothing is mounted for them.
 BUILTIN_MCP = {
     "serena": {
         "type": "local",
-        "command": ["serena", "start-mcp-server", "--context", "ide",
+        "command": ["sh", "-c", SERENA_START, "serena", "start-mcp-server", "--context", "ide",
                     "--enable-web-dashboard", "false", "--open-web-dashboard", "false"],
-        "environment": {"SERENA_USAGE_REPORTING": "false"},
+        "environment": {"SERENA_USAGE_REPORTING": "false", "SERENA_HOME": SERENA_HOME},
     },
 }  # fmt: skip
 

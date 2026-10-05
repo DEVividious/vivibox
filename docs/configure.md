@@ -26,7 +26,11 @@ a task gets it when its repository has 100 or more source files in a language Se
 finding symbols beats reading files; below that it would only add a language server's start and its
 tools' descriptions to every turn. The task's panel says whether it got Serena, and why.
 vivibox starts it with `SERENA_USAGE_REPORTING=false`: as installed, Serena tells its makers'
-server of every start. Its language servers are not in the image; Serena downloads one for a
+server of every start. What Serena keeps of a project (its `project.yml`, its caches, its
+memories) is in the task's own home in the pod, under `/config/serena` on the task's disk, and
+goes with the task: it writes nothing into the clone. A `.serena/` your repository commits is
+left as it is and is not read by vivibox's Serena, which would write your `project.yml` again in
+its own shape. Its language servers are not in the image; Serena downloads one for a
 language when it first needs it, through the pod's network.
 The planner in a container of its own gets the MCP servers you brought and not Serena: its
 language servers would work on the writer's commits beside the planner's key and conversation.

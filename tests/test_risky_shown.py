@@ -222,11 +222,11 @@ def test_an_approval_of_what_was_shown_approves_exactly_that_and_the_gate_takes_
     assert approvals(task).verified()[0] == [Change("pom.xml", "changed")], "and anything after it, again"
 
 
-def test_a_file_changed_as_the_approval_is_written_is_a_change_again(task, monkeypatch):
+def test_a_file_changed_as_the_approval_is_written_approves_nothing(task, monkeypatch):
     """The race inside the approval, by hand: the approval has looked, and matched what you were
-    shown; before its record is written the task's process edits the file. What is recorded is
-    what you were shown, so the file as it is now waits for you again."""
-    shown = approvals(task).view().identity
+    shown; before its copies and its record are made the task's process edits the file. The copy
+    is then not the bytes that were hashed, so nothing is recorded: the file waits for you."""
+    shown, before = approvals(task).view().identity, kept(task)
     record = Approvals.approve
 
     def edited_first(self, *args, **kwargs):
@@ -234,11 +234,11 @@ def test_a_file_changed_as_the_approval_is_written_is_a_change_again(task, monke
         return record(self, *args, **kwargs)
 
     monkeypatch.setattr(Approvals, "approve", edited_first)
-    approvals(task).approve_changes(shown)
+    with pytest.raises(risky.NotAsShown):
+        approvals(task).approve_changes(shown)
     monkeypatch.undo()
-    recorded = approvals(task).approved()["pom.xml"]
-    assert recorded == __import__("hashlib").sha256(POM.encode()).hexdigest(), "what you were shown"
-    assert approvals(task).changes() == [Change("pom.xml", "changed")]
+    assert kept(task) == before
+    assert approvals(task).changes() == [Change("pom.xml", "added")]
 
 
 def test_a_file_changed_between_the_approvals_scan_and_its_showing_approves_nothing(task, monkeypatch):
@@ -487,3 +487,50 @@ def test_a_task_waiting_with_nothing_left_to_approve_is_moved_on_by_the_same_com
     assert last.startswith("The task still waits for your approval: 'vivibox approve-risky demo-1 ")
     assert main(last.split("'")[1].split()[1:]) == 0
     assert t.read_state().state is State.CHECKPOINT_BLOCKED
+
+
+# --- the copy a later diff is drawn against ----------------------------------------------------------
+
+HOSTILE = "<project>\n<evil/>\n" + "".join(f"<dep n='{i}'/>\n" for i in range(8)) + "</project>\n"
+
+
+def swapped_around(task, monkeypatch, what: str = "/files") -> None:
+    """The interleaving, by hand: as the approval copies pom.xml for later diffs, the file is
+    another, and it is the shown one again before anything scans the clone."""
+    copy = clone_read.copy
+
+    def swapped_around_the_copy(root, path, target, *a, **k):
+        if str(path).endswith("pom.xml") and what in str(target):
+            (task.repo / "pom.xml").write_text(HOSTILE)  # after the pass hashed and showed it
+            try:
+                return copy(root, path, target, *a, **k)
+            finally:
+                (task.repo / "pom.xml").write_text(POM)  # and back
+        return copy(root, path, target, *a, **k)
+
+    monkeypatch.setattr(clone_read, "copy", swapped_around_the_copy)
+
+
+def test_a_file_swapped_as_the_approval_copies_it_is_approved_by_no_part(task, monkeypatch):
+    """What is kept as approved is the bytes that were hashed for what you confirmed, or nothing
+    is approved: never a copy of content no view showed, for the next diff to be drawn against."""
+    shown, before = approvals(task).view().identity, kept(task)
+    swapped_around(task, monkeypatch)
+    with pytest.raises(risky.NotAsShown):
+        approvals(task).approve_changes(shown)
+    monkeypatch.undo()
+    assert kept(task) == before, "the record and every copy kept before are as they were"
+    assert "evil" not in "".join(text.decode() for _, text in kept(task))
+    assert approvals(task).changes() == [Change("pom.xml", "added")], "still yours to approve"
+
+
+def test_a_kept_copy_that_is_not_what_was_approved_is_never_the_side_a_diff_is_drawn_against(task):
+    """A copy from before this was held (or changed since by anything): the record says what was
+    approved, the copy is not it, so the new content is shown whole, the hidden line with it."""
+    approvals(task).approve_changes(approvals(task).view().identity)
+    (task.meta / "risky" / "files" / "pom.xml").write_text(HOSTILE)
+    (task.repo / "pom.xml").write_text(HOSTILE + "<!-- a comment -->\n")
+    view = approvals(task).view()
+    said = "\n".join(view.diffs)
+    assert "+<evil/>" in said and "+<!-- a comment -->" in said, "whole: every line of it is new to you"
+    assert "is not what was approved" in said

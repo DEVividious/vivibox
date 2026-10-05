@@ -162,6 +162,8 @@ class NotAsShown(Unapprovable):
     nothing of them is approved until you have looked again."""
 
 
+# A copy kept for diffs that the record's digest is not of (from before copies were held to it).
+NOT_THE_COPY = "vivibox's copy of what was approved is not what was approved"
 # What NotAsShown says; whoever asked adds how the files are looked at again there.
 NOT_AS_SHOWN = "the risky files changed since they were shown, so nothing was approved"
 
@@ -400,20 +402,33 @@ class Approvals:
         first = not self.record.exists()
         if not first and (refused := self.unapprovable(current)):
             raise Unapprovable("; ".join(refused.values()))
-        files = self.dir / "files"
-        if files.exists():
-            shutil.rmtree(files)
-        shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
+        # The copies later diffs are drawn against, made beside the ones kept and put in their
+        # place whole: each is the bytes the record's digest is of (the copy says what it wrote),
+        # or the approval takes nothing. A file that is another by the time it is copied was
+        # not what you were shown, whatever it is again afterwards.
+        files, fresh = self.dir / "files", self.dir / "files.new"
+        shutil.rmtree(fresh, ignore_errors=True)
         for rel, digest in current.items():
             if digest != NESTED_GIT and not digest.startswith(
                 ("symlink", "not a plain file", TOO_LARGE, UNCHECKED)
             ):
-                (files / rel).parent.mkdir(parents=True, exist_ok=True)
+                (fresh / rel).parent.mkdir(parents=True, exist_ok=True)
                 # Where the agent reads (/task): never a file of yours, swapped in since the scan.
                 with contextlib.suppress(clone_read.Refused):
-                    clone_read.copy(self.repo, self.repo / rel, files / rel, budget=budget)
+                    if clone_read.copy(self.repo, self.repo / rel, fresh / rel, budget=budget) == digest:
+                        continue
+                    if not first:
+                        shutil.rmtree(fresh, ignore_errors=True)
+                        raise NotAsShown(NOT_AS_SHOWN)
+                    (fresh / rel).unlink()  # your own repository, changed as the task was made: no copy
+        shutil.rmtree(files, ignore_errors=True)
+        if fresh.exists():
+            fresh.rename(files)
+        shutil.rmtree(self.dir / "view", ignore_errors=True)  # read for this approval, and done
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.record.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
+        temporary = self.record.with_name(self.record.name + ".new")
+        temporary.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
+        temporary.replace(self.record)  # whole, or as it was
         return current
 
     def _found(self, budget: clone_read.Budget) -> tuple[dict[str, str], str]:
@@ -544,7 +559,11 @@ class Approvals:
             return f"{linked}{head}: not shown: {self._not_text(change.path, e)}\n", False
         note = ""
         try:
-            a = display.lines(clone_read.as_text(old.read_bytes())) if old.exists() else []
+            before = old.read_bytes() if old.exists() else None
+            # The copy is the approved side only while it is what the record says was approved.
+            if before is not None and hashlib.sha256(before).hexdigest() != self.approved().get(change.path):
+                before, note = None, f"{head}: {NOT_THE_COPY}, so the new content is shown whole\n"
+            a = display.lines(clone_read.as_text(before)) if before is not None else []
         except clone_read.NotText as e:
             if change.kind == "removed":
                 return f"{linked}{head} (what was approved before is not text: {e.why})\n", True

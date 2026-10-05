@@ -286,7 +286,14 @@ approves nothing and says they changed since they were shown. A view in which a 
 be shown whole (not text, past the size or the total vivibox reads, a special file where a
 file was approved, a link that leads out of the repository) has no identity, and the approval
 refuses such a file whatever identity it is given. What is recorded as approved is that
-scan's digests: a file changed after it is a risky change again at the next check. Not
+scan's digests, and the copy kept of each file, which the next view's diff is drawn against,
+is the bytes its digest is of: the copy is made beside the ones kept before and says what it
+wrote, and when that is not the scan's digest (the file was another for that moment) nothing
+is approved and nothing kept before is replaced. A kept copy that is not what the record says
+is never the side a diff is drawn against: the file is shown whole instead. Nothing reads the
+clone again as the approved content: the verification compares a new scan's digests with the
+record, and the review copy is made of the commits, not of these copies. A file changed
+after an approval is a risky change again at the next check. Not
 covered: the permission bits are in the identity and not in the record, so a mode changed
 after an approval is not found again; and nothing tells whether you read what was drawn.
 

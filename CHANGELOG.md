@@ -344,6 +344,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- The copy of an approved risky file that the next diff is drawn against is the bytes that were
+  approved. It was read from the clone once more after the file was shown and hashed: a file
+  swapped for that moment left a copy nobody had seen, and a later diff against it hid the
+  swapped content as already approved. A copy that is not what was hashed now approves
+  nothing, and a kept copy that is not what the record says is not diffed against: the file
+  is shown whole.
 - A task's event log stays readable whatever a file's name holds. A risky file named with a
   line separator (U+2028, U+2029, U+0085) split the record of its approval in two, and the
   task could not be read again; a name of bytes that are no UTF-8 failed the write. A record

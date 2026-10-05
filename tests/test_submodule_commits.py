@@ -605,6 +605,123 @@ def test_a_refused_accept_takes_back_the_ref_it_brought_and_no_other(project):
     assert git(source, "for-each-ref") == reviewed, "a ref that was there before the attempt stays"
 
 
+def ref_of_the_work(task, source: Path) -> str:
+    """Where refs/vivibox/<id> is in your repository: its line of git for-each-ref, "" for none."""
+    return git(source, "for-each-ref", f"refs/vivibox/{task.id}")
+
+
+def test_a_ref_that_was_there_at_another_commit_is_put_back_where_it_was(project):
+    """You looked at work in progress (vivibox review), which left refs/vivibox/<id> on that
+    commit and the review copy showing it; the writer went on. Accepting brings the last
+    commit under the ref, and is refused: the ref is back on the commit the review copy
+    shows, not left on one the copy does not."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    first = committed(task, "Work in progress")
+    actions.prepare_review(task, project.demo)
+    (task.repo / "more.txt").write_text("more\n")
+    committed(task, "The rest")
+    at_final(task, project, reviewed=False)
+    before = git(source, "for-each-ref")
+    assert f"{first} commit\trefs/vivibox/{task.id}" in before
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert git(source, "for-each-ref") == before, "the ref was left on a commit the review copy does not show"
+
+
+@pytest.mark.parametrize("stopped", ["refused for staged changes of yours", "interrupted"])
+def test_an_accept_that_stops_for_anything_takes_back_the_ref_it_brought(project, monkeypatch, stopped):
+    """Not only the submodule check stops an accept after it brought the work: your staged
+    changes do, and so does Ctrl-C. Whatever stops it before the work is accepted, the ref it
+    brought goes, and the task is as it was."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    (task.repo / "calc.py").write_text("x = 1\n")
+    at_final(task, project, reviewed=False)
+    before = git(source, "for-each-ref")
+    if stopped == "interrupted":
+
+        def interrupted(*args, **how):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(submodules, "check", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            actions.finish(task, project.demo)
+    else:
+        (source / "yours.txt").write_text("staged\n")
+        git(source, "add", "yours.txt")
+        with pytest.raises(gate.GateError, match="has staged changes"):
+            actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source) == "", "the accept left the ref it brought"
+    assert git(source, "for-each-ref") == before and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_a_review_copy_opened_while_an_accept_checks_keeps_its_ref(project, monkeypatch):
+    """Nothing holds the task while an accept checks it, for up to a minute: the view may open
+    the review copy meanwhile, which brings the work under the same ref and shows it. The
+    accept, refused, found no ref when it began; the ref is the review copy's now, and stays:
+    the panel's list of changed files and its diff read it."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    at_final(task, project, reviewed=False)
+    check = submodules.check
+
+    def meanwhile(*args, **how):
+        actions.prepare_review(task, project.demo)  # the view's o, in another process
+        return check(*args, **how)
+
+    monkeypatch.setattr(submodules, "check", meanwhile)
+    assert ref_of_the_work(task, source) == ""
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source), "the ref was taken from under the review copy"
+    assert "lib" in actions.changed_files(task, project.demo)
+
+
+def test_a_ref_something_else_moved_meanwhile_is_not_the_accepts_to_put_back(project, monkeypatch):
+    """The accept undoes what it did to the ref and nothing else: where the ref is no longer
+    on the commit this accept brought, something else put it there, and it is left."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    at_final(task, project, reviewed=False)
+    check, elsewhere = submodules.check, git(source, "rev-parse", "HEAD")
+
+    def meanwhile(*args, **how):
+        git(source, "update-ref", f"refs/vivibox/{task.id}", elsewhere)
+        return check(*args, **how)
+
+    monkeypatch.setattr(submodules, "check", meanwhile)
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source) == f"{elsewhere} commit\trefs/vivibox/{task.id}"
+
+
+def test_a_ref_git_could_not_put_back_is_said_with_what_removes_it(project, monkeypatch, capsys):
+    """git refuses to change the ref (your repository's refs are locked, say): it stays where
+    the accept put it, and the refusal says so, where it is, and what sets it right."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    at_final(task, project, reviewed=False)
+    work, real = git(task.repo, "rev-parse", "HEAD"), repo.git
+
+    def no_update(*args, **how):
+        if args[0] == "update-ref":
+            return subprocess.CompletedProcess(args, 1, "", "fatal: cannot lock ref")
+        return real(*args, **how)
+
+    monkeypatch.setattr(repo, "git", no_update)
+    assert main(["accept", task.id]) == 1
+    said = capsys.readouterr().err.splitlines()
+    assert said[-2] == "Then accept the work again." and said[-1] == (
+        f"refs/vivibox/{task.id} in {source} stays on {work}, where this accept brought the work: git could "
+        f"not put it back. vivibox review {task.id} takes it for the review copy, and it goes with the task."
+    )
+
+
 def test_a_submodule_of_a_submodule_is_checked_once_you_keep_the_commit_above_it(project):
     """The writer commits in lib/deep, then in lib, then moves lib. Your lib lacks its commit:
     refused for lib. Once you keep that one, its own pointer is read in your lib: refused for

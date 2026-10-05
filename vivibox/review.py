@@ -258,56 +258,59 @@ def finish(
     on_ready: Callable[[Finished], None] | None = None,
 ) -> Finished:
     """Accepted work lands in your checkout as uncommitted changes, or with branch_only as a branch.
-    Everything else of the task goes. Committing is a separate step: commit_work."""
+    Everything else of the task goes. Committing is a separate step: commit_work. An accept that
+    stops before that, for whatever reason, puts the ref it brought the work under back as it
+    found it (_put_back)."""
     copy = repo.review_worktree_path(project.repo, task.root)
     if copy.exists() and (changed := repo.local_changes(copy)):
         raise gate.GateError(
             f"{copy} has changes you made ({', '.join(changed[:3])}); ask the agent with a reply "
             "or discard them"
         )
-    ref = ("rev-parse", "--verify", "--quiet", repo.review_ref(task.id))
-    there = repo.git(*ref, cwd=project.repo, check=False).returncode == 0  # before this attempt
+    found = _ref_at(project.repo, task.id)  # where this attempt finds the work's ref: "" for nowhere
     commit = fetch_work(task, project)
-    st = task.read_state()
-    # Before anything of the accepting is done: the task goes with it, and its clone may hold the
-    # only copy of a submodule commit the work keeps. A branch keeps every commit of the work,
-    # and one is made of work that conflicts, which it can only where your branch has moved.
-    moved = repo.git("rev-parse", "HEAD", cwd=project.repo).stdout.strip() != st.base_commit
     try:
+        st = task.read_state()
+        # Before anything of the accepting is done: the task goes with it, and its clone may hold
+        # the only copy of a submodule commit the work keeps. A branch keeps every commit of the
+        # work, and one is made of work that conflicts, which it can only where your branch has moved.
+        moved = repo.git("rev-parse", "HEAD", cwd=project.repo).stdout.strip() != st.base_commit
         submodules.check(
             task.id, project.repo, task.repo, st.base_commit, commit, history=branch_only or moved
         )
-    except submodules.Unkept:
-        # Refused: your refs are as they were. The ref this attempt brought the work under goes;
-        # one that was there before it (the review copy's) stays, as it stays for the task.
-        if not there:
-            repo.drop_review_ref(project.repo, task.id)
-        raise
-    cli_usage.count(task, "conversation")
-    spent = ui.cost(task)
-    criteria = accepted_criteria(task)
-    # A box's "Work in the box" is not a message for your history: that one is yours to write.
-    message = "" if st.box else prepare_message(task, project.repo, commit)
-    done = Finished(task.id, project.repo, spent, message)
-    done.criteria = criteria
-    done.created = st.created
-    # How it was run, for the project's next task; a link's file is no record of that.
-    with contextlib.suppress(PodError):
-        done.demo = actions.demo_instruction(task)
-    done.project = project.name
-    if branch_only:
-        done.branch = repo.create_branch(project.repo, task.id, commit)
-    else:
-        done.conflicts = apply_work(project.repo, task.id, commit, st.base_commit)
-        if done.conflicts:
-            done.branch = repo.branch_name(task.id)
+        cli_usage.count(task, "conversation")
+        spent = ui.cost(task)
+        criteria = accepted_criteria(task)
+        # A box's "Work in the box" is not a message for your history: that one is yours to write.
+        message = "" if st.box else prepare_message(task, project.repo, commit)
+        done = Finished(task.id, project.repo, spent, message)
+        done.criteria = criteria
+        done.created = st.created
+        # How it was run, for the project's next task; a link's file is no record of that.
+        with contextlib.suppress(PodError):
+            done.demo = actions.demo_instruction(task)
+        done.project = project.name
+        if branch_only:
+            done.branch = repo.create_branch(project.repo, task.id, commit)
         else:
-            done.status = repo.git("status", "--short", "--untracked-files=no", cwd=project.repo).stdout
-            # A task from before the branch was kept, or whose branch is gone since, offers the
-            # checkout's.
-            kept = st.base_branch and repo.branch_exists(project.repo, st.base_branch)
-            done.start_branch = st.base_branch if kept else repo.start_branch(project.repo)
-            done.new_branch = new_branch(project.repo, task_kind(task), st.goal, task.id)
+            done.conflicts = apply_work(project.repo, task.id, commit, st.base_commit)
+            if done.conflicts:
+                done.branch = repo.branch_name(task.id)
+            else:
+                done.status = repo.git("status", "--short", "--untracked-files=no", cwd=project.repo).stdout
+                # A task from before the branch was kept, or whose branch is gone since, offers the
+                # checkout's.
+                kept = st.base_branch and repo.branch_exists(project.repo, st.base_branch)
+                done.start_branch = st.base_branch if kept else repo.start_branch(project.repo)
+                done.new_branch = new_branch(project.repo, task_kind(task), st.goal, task.id)
+    except BaseException as stopped:
+        # Not accepted, whatever stopped it (a refusal, an error, Ctrl-C): the ref is put back.
+        if left := _put_back(task, project.repo, found, commit):
+            if isinstance(stopped, submodules.Unkept):
+                stopped.whole += f"\n{left}"
+            elif stopped.args and isinstance(stopped.args[0], str):
+                stopped.args = (f"{stopped.args[0]}\n{left}", *stopped.args[1:])
+        raise
     task.transition(State.DONE, reason="accepted")
     remember(done, project, commit)
     try:
@@ -321,6 +324,38 @@ def finish(
             done.left = e.left
             note(task.id, "rules_left", problem=e.left)
     return done
+
+
+def _ref_at(source: Path, task_id: str) -> str:
+    """The commit refs/vivibox/<id> is on in your repository; "" where there is no such ref."""
+    asked = repo.git("rev-parse", "--verify", "--quiet", repo.review_ref(task_id), cwd=source, check=False)
+    return asked.stdout.strip() if asked.returncode == 0 else ""
+
+
+def _put_back(task: Task, source: Path, found: str, commit: str) -> str:
+    """After an accept that stopped before the work was accepted: refs/vivibox/<id> as the
+    attempt found it (found: the commit it was on, "" for no ref), where bringing the work
+    (commit) changed it. The accept undoes its own change and no other: git changes the ref
+    only from the commit this attempt left it on, so one that something else moved since
+    stays. And it stays where the task's review copy shows that commit now (made or brought
+    up to date while the accept ran: nothing holds the task meanwhile): the ref is the copy's
+    then, read by the panel's diff, and goes with the task. Returns what to say where git
+    could not put it back, else ""."""
+    ref, shown = repo.review_ref(task.id), []
+    if repo.review_worktree_path(source, task.root).exists():
+        try:  # the commit of each time the copy was made or brought up to date, the last one last
+            shown = [e["data"].get("commit") for e in task.events() if e.get("type") == "review"]
+        except (OSError, ValueError, KeyError, AttributeError):
+            return ""  # what the copy shows cannot be told: the ref is left to it
+    if found == commit or shown[-1:] == [commit]:
+        return ""
+    change = ("update-ref", ref, found, commit) if found else ("update-ref", "-d", ref, commit)
+    if repo.git(*change, cwd=source, check=False).returncode == 0 or _ref_at(source, task.id) != commit:
+        return ""
+    return (
+        f"{ref} in {source} stays on {commit}, where this accept brought the work: git could not put it "
+        f"back. vivibox review {task.id} takes it for the review copy, and it goes with the task."
+    )
 
 
 def note(task_id: str, type_: str, **data) -> None:

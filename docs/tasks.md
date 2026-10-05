@@ -218,9 +218,11 @@ Alt+0), with a diff for each file. Your checkout and your branches stay as they 
   the commit, and the commands that keep it: a fetch in your submodule from its remote, or
   from the task's clone, which puts the commit under `refs/vivibox/<id>/…` there; a submodule
   you have not checked out is checked out first, and one the work adds is cloned into your
-  checkout. A refusal leaves your repository's refs as they were: the work, which accepting
-  brings under `refs/vivibox/<id>` before it checks it, stays there only where the review
-  copy had brought it already. The address in that clone command is the one the work's `.gitmodules` names: the
+  checkout. Accepting brings the work under `refs/vivibox/<id>` in your repository before it
+  checks it; an accept that stops before the work is accepted (a refusal, an error, Ctrl-C)
+  puts that ref back as it found it, removed where there was none and on the commit it was
+  on where the review copy had brought it. It stays where the review copy shows that commit
+  by then, and goes with the task. git's `FETCH_HEAD` is as the fetch left it. The address in that clone command is the one the work's `.gitmodules` names: the
   agent wrote it and vivibox has not checked it, which the refusal says, printing the address
   whole; look at it before you run the command, and clone from where you know the submodule
   to be if that is elsewhere. The command is `git -C / -c protocol.file.allow=never clone`:

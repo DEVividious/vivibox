@@ -638,11 +638,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   system's words and `vivibox verify` ended in a traceback. git is asked of them a handful at
   a time, and each is answered as before. A single path longer than a command line holds
   stops the verification with that reason.
-- A refused accept leaves your repository's refs as they were: accepting brings the work
-  under `refs/vivibox/<id>` before it checks its submodules, and where no review copy had
-  brought it there already, a refusal left that ref behind. It now takes back the ref it
-  brought, and never one that was there before, another task's, or the refs you made in your
-  submodules with the refusal's commands.
+- An accept that stops before the work is accepted (refused for its submodules or for your
+  staged changes, failed, or interrupted) puts `refs/vivibox/<id>` back as it found it:
+  accepting brings the work under that ref before it checks anything, and the ref was left
+  there, or left on a commit the review copy did not show. It is removed where there was
+  none, and put back on the commit it was on where there was one. The accept undoes its own
+  change only: a ref something else moved meanwhile stays, and so does one the review copy
+  shows the same commit of by then (opened or brought up to date while the accept ran), which
+  the panel's diff reads; that one goes with the task. Never touched: another task's ref, and
+  the refs you made in your submodules with the refusal's commands. `FETCH_HEAD`, which git
+  writes on every fetch, is left as the fetch left it. Where git cannot put the ref back, the
+  refusal says where it stays.
 - Accepting work reads a submodule's commits as git keeps them, not as a replace ref of yours
   shows them (`GIT_NO_REPLACE_OBJECTS=1` for the check's git): a commit of a submodule's
   history that moves a pointer was not seen where `git replace` showed another in its place,

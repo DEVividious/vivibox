@@ -262,7 +262,10 @@ that a commit is not kept; a history it could not list comes with what you run: 
 that brings the commit your submodule lacks, or the git that says why; a listing past the
 limit says the limit, what was being read, and the reply that sends the work back, or, where
 the listing is of your own project as the task found it, which no work changes, that no task
-of the project can be accepted while it is that large, and no step that does nothing. A
+of the project can be accepted while it is that large, and no step that does nothing; where
+it is of a submodule of yours as the task found it, which is read only for work that moves
+that submodule, that work that moves it cannot be accepted, that work that leaves it where
+it was is not held up, and the reply that asks for such work. A
 refusal that stopped at the limit never ends "Then accept the work again.", which would end
 there again, and its short form names the limit beside the commits you do not keep. Where
 one refusal has both, a commit that is not kept and a submodule vivibox could not check, the

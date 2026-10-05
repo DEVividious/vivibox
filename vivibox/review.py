@@ -268,8 +268,9 @@ def finish(
             "or discard them"
         )
     found = _ref_at(project.repo, task.id)  # where this attempt finds the work's ref: "" for nowhere
-    commit = fetch_work(task, project)
+    commit = ""  # the work's, once it is brought: git moves the ref before the accept knows to where
     try:
+        commit = fetch_work(task, project)
         st = task.read_state()
         # Before anything of the accepting is done: the task goes with it, and its clone may hold
         # the only copy of a submodule commit the work keeps. A branch keeps every commit of the
@@ -305,7 +306,9 @@ def finish(
                 done.new_branch = new_branch(project.repo, task_kind(task), st.goal, task.id)
     except BaseException as stopped:
         # Not accepted, whatever stopped it (a refusal, an error, Ctrl-C): the ref is put back.
-        if left := _put_back(task, project.repo, found, commit):
+        # Stopped while the work was being brought, it is put back from where git left it.
+        brought = commit or _ref_at(project.repo, task.id)
+        if brought and (left := _put_back(task, project.repo, found, brought)):
             if isinstance(stopped, submodules.Unkept):
                 stopped.whole += f"\n{left}"
             elif stopped.args and isinstance(stopped.args[0], str):

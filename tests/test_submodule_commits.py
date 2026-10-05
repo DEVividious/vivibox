@@ -701,6 +701,99 @@ def test_a_ref_something_else_moved_meanwhile_is_not_the_accepts_to_put_back(pro
     assert ref_of_the_work(task, source) == f"{elsewhere} commit\trefs/vivibox/{task.id}"
 
 
+@pytest.mark.parametrize("what", ["deleted", "moved"])
+def test_a_ref_found_on_a_commit_and_changed_meanwhile_is_left_and_nothing_is_said(
+    project, monkeypatch, what
+):
+    """The ref was on a commit before the attempt (the review copy's), and something else
+    deleted or moved it while the accept checked. Putting it back is asked of git only from
+    the commit this attempt left it on: git refuses, the ref stays as that something left it,
+    and nothing is said of a ref that is no longer where this accept put it."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    committed(task, "Work in progress")
+    actions.prepare_review(task, project.demo)
+    (task.repo / "more.txt").write_text("more\n")
+    committed(task, "The rest")
+    at_final(task, project, reviewed=False)
+    check, elsewhere, ref = submodules.check, git(source, "rev-parse", "HEAD"), f"refs/vivibox/{task.id}"
+
+    def meanwhile(*args, **how):
+        git(source, "update-ref", "-d", ref) if what == "deleted" else git(
+            source, "update-ref", ref, elsewhere
+        )
+        return check(*args, **how)
+
+    monkeypatch.setattr(submodules, "check", meanwhile)
+    with pytest.raises(submodules.Unkept) as said:
+        actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source) == ("" if what == "deleted" else f"{elsewhere} commit\t{ref}")
+    assert "could not put it back" not in said.value.whole
+
+
+def test_the_ref_stays_only_where_the_review_copy_shows_that_commit_now(project):
+    """The review copy showed the work at one commit, then at a later one, which it shows now;
+    the writer then took the later commit back, and the accept brings the earlier one again. It
+    is a commit the copy showed once and does not show now: the ref goes back to what the copy
+    shows, the last time it was made or brought up to date, and not any time."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    written_in(task.repo / "lib")
+    earlier = committed(task, "Work in progress")
+    actions.prepare_review(task, project.demo)
+    (task.repo / "more.txt").write_text("more\n")
+    later = committed(task, "The rest")
+    actions.prepare_review(task, project.demo)
+    assert ref_of_the_work(task, source) == f"{later} commit\trefs/vivibox/{task.id}"
+    git(task.repo, "reset", "-q", "--hard", earlier)
+    at_final(task, project, reviewed=False)
+    shown = [e["data"]["commit"] for e in task.events() if e["type"] == "review"]
+    assert shown == [earlier, later]
+    with pytest.raises(submodules.Unkept):
+        actions.finish(task, project.demo)
+    assert ref_of_the_work(task, source) == f"{later} commit\trefs/vivibox/{task.id}", "what the copy shows"
+
+
+def test_an_accept_interrupted_while_it_brings_the_work_takes_back_the_ref_too(project, monkeypatch):
+    """Ctrl-C between git's fetch, which puts the work under the ref, and the accept knowing
+    which commit that is: the ref is put back as it was found, as after any accept that stops."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    (task.repo / "calc.py").write_text("x = 1\n")
+    at_final(task, project, reviewed=False)
+    before, real, brought = git(source, "for-each-ref"), repo.git, []
+
+    def interrupted_after_the_fetch(*args, **how):
+        if args[:2] == ("rev-parse", f"refs/vivibox/{task.id}"):  # fetch_to, reading what it brought
+            brought.append(ref_of_the_work(task, source))
+            raise KeyboardInterrupt
+        return real(*args, **how)
+
+    monkeypatch.setattr(repo, "git", interrupted_after_the_fetch)
+    with pytest.raises(KeyboardInterrupt):
+        actions.finish(task, project.demo)
+    assert brought and brought[0], "the fetch had put the work under the ref"
+    assert ref_of_the_work(task, source) == "", "the accept left the ref it brought"
+    assert git(source, "for-each-ref") == before and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_an_accept_refused_before_it_brings_the_work_changes_no_ref(project, monkeypatch):
+    """Refused where it would bring the work (risky files not approved), the accept has changed
+    nothing: the ref the review copy left is where it was."""
+    source = project.source
+    task = actions.create("demo", "Goal")
+    (task.repo / "calc.py").write_text("x = 1\n")
+    at_final(task, project)
+    before = git(source, "for-each-ref")
+    assert ref_of_the_work(task, source)
+    (task.repo / "build.gradle").write_text("plugins {}\n")
+    committed(task, "Add a build file")
+    with pytest.raises(gate.GateError, match="risky files changed"):
+        actions.finish(task, project.demo)
+    assert git(source, "for-each-ref") == before
+
+
 def test_a_ref_git_could_not_put_back_is_said_with_what_removes_it(project, monkeypatch, capsys):
     """git refuses to change the ref (your repository's refs are locked, say): it stays where
     the accept put it, and the refusal says so, where it is, and what sets it right."""
@@ -1777,8 +1870,9 @@ def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
 
     What to do is to send the work back for less to list, where the listing is of what the work
     brings. Where it is of your own project as the task found it (its files at the commit the
-    task started from, a submodule's at the commit it stood on), no work changes it and no
-    reply helps: the refusal says that, and names no step that does nothing."""
+    task started from), no work changes it and no reply helps: the refusal says that, and names
+    no step that does nothing. Where it is of a submodule of yours at the commit it stood on,
+    it is read only for work that moves that submodule: the reply that works is said."""
     assert submodules.LIMIT == 64 * 2**20
     lib = project.source / "lib"
     task = actions.create("demo", "Goal")
@@ -1812,19 +1906,66 @@ def test_what_git_prints_past_the_limit_is_not_read_and_the_work_is_refused(
         "Nothing of an answer cut short is used, so there may be more. Send the work back with a reply "
         f'(vivibox reply {task.id} "…") for work that leaves git less to list there.'
     )
-    if word in ("your project", "lib"):
+    if word == "your project":
         step = (
             "Those files are your own, and the list of them is that large, so no work of a task of this "
             "project can be accepted while it is: a reply to the agent does not change it. The task is as "
             f"it was, with its work in its clone, {task.repo}."
         )
+    if word == "lib":  # read only for work that moves lib: work that leaves it there is not held up
+        step = OWN_SUBMODULE.format(id=task.id)
     assert said.value.whole.splitlines() == [f"{task.id} was not accepted: {NOT_KNOWN}", f"{stopped}. {step}"]
-    assert "vivibox reply" not in step or word not in ("your project", "lib"), "a step that does nothing"
+    assert "vivibox reply" not in step or word != "your project", "a step that does nothing"
     assert str(said.value) == (
         f"{task.id} was not accepted: {stopped}, and accepting deletes the task. In a terminal, "
         f"vivibox accept {task.id} says more."
     )
     assert everything(task, project) == before and task.read_state().state is State.CHECKPOINT_FINAL
+
+
+# What a refusal says where the listing past the limit is of a submodule's own files, as the
+# task found it: for lib.
+OWN_SUBMODULE = (
+    "Those files are your own, in your submodule lib as the task found it, and the list of them is "
+    "that large, so no work that moves lib can be accepted while it is; work that leaves lib where it "
+    'was is not held up by it. Send the work back with a reply (vivibox reply {id} "…") for work that '
+    "leaves lib where it was."
+)
+
+
+def test_a_submodule_of_yours_past_the_limit_refuses_only_work_that_moves_it(project, monkeypatch, stand_in):
+    """The listing of a submodule's own files, at the commit it stood on when the task started,
+    is read only for work that moves the submodule. Past the limit, work that moves lib is
+    refused, and work that leaves lib where it was (and changes a file, and moves another
+    submodule) is accepted: the refusal says so, and its step is the reply that asks for such
+    work. It said that no work of a task of the project could be accepted and that a reply
+    changed nothing, which is true of the project's own files alone."""
+    lib = project.source / "lib"
+    stood = git(lib, "rev-parse", "HEAD")
+    moves = actions.create("demo", "Moves lib")
+    kept_from(moves.repo / "lib", lib, written_in(moves.repo / "lib"))
+    at_final(moves, project)
+    leaves = actions.create("demo", "Leaves lib")
+    (leaves.repo / "notes.txt").write_text("a file, and tools moved\n")
+    kept_from(leaves.repo / "tools", project.source / "tools", written_in(leaves.repo / "tools"))
+    at_final(leaves, project)
+    monkeypatch.setattr(submodules, "LIMIT", 16 * BLOCK)
+    monkeypatch.setattr(submodules, "SECONDS", 20)
+    git_ = stand_in(project.source.parent / "stand-in", stood, PRINTS_ON % (BLOCKS, ""), LISTING)
+    said = {}
+    with monkeypatch.context() as patched:
+        patched.setenv("PATH", f"{git_.path}:{os.environ['PATH']}")
+        for task in (moves, leaves):
+            base, work = task.read_state().base_commit, git(task.repo, "rev-parse", "HEAD")
+            try:
+                within(lambda: submodules.check(task.id, project.source, task.repo, base, work, history=True))  # noqa: B023
+                said[task.id] = "accepted"
+            except submodules.Unkept as e:
+                said[task.id] = e.whole.splitlines()[1]
+    assert said[leaves.id] == "accepted", "work that leaves lib where it was reads no listing of it"
+    assert said[moves.id].endswith(f"as it was when the task started). {OWN_SUBMODULE.format(id=moves.id)}")
+    assert "no work of a task of this project" not in said[moves.id]
+    assert "a reply to the agent does not change it" not in said[moves.id]
 
 
 def test_a_commit_not_kept_and_the_limit_in_one_refusal_do_not_end_in_accept_again(
@@ -1901,6 +2042,12 @@ def test_a_refusal_at_the_limit_with_a_commit_not_kept_says_each_ones_step_and_n
         said[4]
         == f"{stopped}{step} The commands above keep those commits, and this work is still not accepted."
     )
+    if own:  # the same refusal, where what was past the limit is a submodule's own files
+        inside = submodules.refusal(
+            "demo-1", Path("/yours"), Path("/task/repo"), [tools], "", OVER, own, "lib"
+        )
+        still = " The commands above keep those commits, and this work is still not accepted."
+        assert inside.splitlines()[4] == f"{stopped}{OWN_SUBMODULE.format(id='demo-1')}{still}"
     assert submodules.briefly("demo-1", [tools], "", OVER) == (
         "demo-1 was not accepted: its work keeps submodule commits you do not keep (tools), and the check "
         f"stopped at a safety limit: {OVER}, and accepting deletes the task. In a terminal, vivibox accept "

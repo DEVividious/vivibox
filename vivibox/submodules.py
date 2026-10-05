@@ -120,7 +120,11 @@ class Over(Exception):
 
 class Own(Over):
     """The same, of a listing of what is yours as the task found it (your project's files at
-    the commit it started from, a submodule's at the commit it stood on): no work changes it."""
+    the commit it started from, a submodule's at the commit it stood on): no work changes it.
+    inside: the submodule it is of, as text; "" for your project's own, which every work of a
+    task is checked against, where a submodule's is read only for work that moves it."""
+
+    inside = ""
 
 
 @dataclass(frozen=True)
@@ -326,8 +330,12 @@ def look(
     try:
         was = (yours.gitlinks(before) if before else None) or {}
     except Over:
-        whose = display.name(prefix.rstrip("/")) or "your project"
-        raise Own(f"listing the files of {whose} at {before}, as it was when the task started") from None
+        inside = display.name(prefix.rstrip("/"))
+        own = Own(
+            f"listing the files of {inside or 'your project'} at {before}, as it was when the task started"
+        )
+        own.inside = inside
+        raise own from None
     names = yours.modules(before) if before and was else {}
     for n, after in enumerate([*afters, *past]):
         via = (prefix.rstrip("/"), after) if n >= len(afters) else via
@@ -380,7 +388,7 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
     history: the accepting keeps every commit of the work (a branch), not its last tree alone,
     so each of them is looked at. Nothing is changed, here or in the task. clone: the task's,
     named in what to do, never read."""
-    found, late, over, own = Found(), "", "", False
+    found, late, over, own, inside = Found(), "", "", False, ""
     try:
         yours = at(source, time.monotonic() + SECONDS)
         if yours is None:
@@ -400,9 +408,9 @@ def check(task_id: str, source: Path, clone: Path, base: str, commit: str, histo
         late += f" ({reading})" if str(reading) else ""
     except Over as reading:
         over = f"git printed more than {LIMIT // 2**20} MiB" + (f" ({reading})" if str(reading) else "")
-        own = isinstance(reading, Own)
+        own, inside = isinstance(reading, Own), getattr(reading, "inside", "")
     if found.unkept or late or over:
-        said = refusal(task_id, source, clone, found.unkept, late, over, own)
+        said = refusal(task_id, source, clone, found.unkept, late, over, own, inside)
         raise Unkept(briefly(task_id, found.unkept, late, over), said)
 
 
@@ -444,13 +452,14 @@ def briefly(task_id: str, found: list[Kept], late: str = "", over: str = "") -> 
 
 def refusal(
     task_id: str, source: Path, clone: Path, found: list[Kept], late: str = "", over: str = "",
-    own: bool = False,
+    own: bool = False, inside: str = "",
 ) -> str:  # fmt: skip
     """What was refused, why, and what to do, for each commit: commands whole, to paste, with
     the folders they are run in and read from named in full. The first LISTED in full. The
     first line says a commit is not kept only where vivibox found one that is not. late, over:
     what stopped the check before its end (its time, what it reads of one git), as check says
-    it; own: what was past the limit is a listing of your own project as the task found it."""
+    it; own: what was past the limit is a listing of what is yours as the task found it;
+    inside: the submodule it is of, "" for your project's own files."""
     known = "its work keeps a submodule commit that no repository of yours keeps. The task's clone may "
     known += "hold the only copy, and accepting deletes the task."
     unknown = "vivibox could not check that you keep every submodule commit its work keeps. The task's "
@@ -601,6 +610,13 @@ def refusal(
                 "Those files are your own, and the list of them is that large, so no work of a task of "
                 "this project can be accepted while it is: a reply to the agent does not change it. The "
                 f"task is as it was, with its work in its clone, {display.name(str(clone))}."
+            )
+        if own and inside:  # read only for work that moves the submodule: the reply is a step that works
+            step = (
+                f"Those files are your own, in your submodule {inside} as the task found it, and the list "
+                f"of them is that large, so no work that moves {inside} can be accepted while it is; work "
+                f"that leaves {inside} where it was is not held up by it. Send the work back with a reply "
+                f'(vivibox reply {task_id} "…") for work that leaves {inside} where it was.'
             )
         still = " The commands above keep those commits, and this work is still not accepted." if does else ""
         lines.append(f"{AT_LIMIT}{over}. {step}{still}")

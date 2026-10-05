@@ -344,6 +344,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- An accept refused because the list of a submodule's own files, as the task found it, is past
+  the 64 MiB vivibox reads of one git said that no work of a task of the project could be
+  accepted and that a reply to the agent changed nothing. That is true of your project's own
+  files alone: a submodule's are read only for work that moves it. The refusal now says that
+  work that moves that submodule cannot be accepted, that work that leaves it where it was is
+  not held up, and the reply that asks for such work.
+- An accept interrupted while it brought the work, between git's fetch and the accept reading
+  which commit that was, left `refs/vivibox/<id>` on the work. It is put back as it was found
+  there too, as after every accept that stops.
 - More of what the command line prints quoted text vivibox did not write as it came, control
   characters and all: `vivibox plan import` naming the plan's summary; `vivibox demo` saying
   the agent's question, how an earlier task was run, its commands and the app's output;

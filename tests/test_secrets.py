@@ -335,6 +335,32 @@ def test_every_mode_puts_each_roles_key_where_the_role_runs(
 
 
 @pytest.mark.real_start
+def test_a_reviewer_moved_to_another_provider_leaves_no_old_key_at_its_next_round(env, monkeypatch):
+    """m on the reviewer while the task runs: the round under way keeps the key it was made
+    with, and the next round's container holds the new provider's key and not the old one's.
+    The writer's container is not the reviewer's: nothing of it changes."""
+    from vivibox import actions
+    from vivibox.config import load_config
+
+    use(
+        env,
+        planner=("opencode", "deepseek/plan"),
+        writer=("opencode", "deepseek/write"),
+        reviewer=("opencode", "anthropic/read"),
+    )
+    actions.create("demo", "Goal")
+    start(env, monkeypatch)
+    review(env, monkeypatch)
+    assert held("demo-1-review") == ["anthropic"]
+    task, _ = actions.load("demo-1")
+    actions.choose_role(task, "reviewer", ("opencode", "openai/read"), load_config())
+    assert held("demo-1-review") == ["anthropic"], "the round under way: as it was made"
+    review(env, monkeypatch)
+    assert held("demo-1-review") == ["openai"], "the next round: the new provider's key alone"
+    assert held("demo-1") == ["deepseek"] and agent_providers("demo-1") == ["deepseek"]
+
+
+@pytest.mark.real_start
 def test_a_reviewer_without_a_model_still_stops_the_start(env, monkeypatch):
     """Its key no longer goes to the pod, but a task whose reviewer cannot run is said at the start,
     not after the whole plan and work, when the review round finds no model."""

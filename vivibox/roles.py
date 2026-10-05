@@ -314,12 +314,14 @@ def models_offered(config: Config | None = None, harness: str = "") -> list[str]
     return seen
 
 
-def harness_for(role_name: str, pod: Pod, task: Task | None = None) -> object:
+def harness_for(role_name: str, pod: Pod, task: Task | None = None, role: Role | None = None) -> object:
     """The tool a role talks through, bound to the container the role's agent runs in: the
     writer's to the agent's container, the reviewer's to the side its caller gives (the review
     container), the planner's to its control container wherever the task has one. Its server
-    there has the usual port: another network namespace than the writer's."""
-    role = role_of(task, role_name)
+    there has the usual port: another network namespace than the writer's. role: what it runs
+    on, when the caller has read that already and made the container for it (a review's round);
+    else as the task runs the role now."""
+    role = role or role_of(task, role_name)
     if role.harness == manual.NAME:
         return manual.Manual()
     side = container_of(role_name, pod, task)

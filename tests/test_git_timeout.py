@@ -457,7 +457,7 @@ def by_modules(env, monkeypatch, **settings):
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     t = find_task(supervise.load_config().tasks_dir, "demo-1")
     (t.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
     monkeypatch.setattr(repo, "CLONE_TIMEOUT", LIMIT, raising=False)
     built = []
     monkeypatch.setattr(gate, "run_gate", lambda *a, **k: built.append(a))

@@ -92,7 +92,7 @@ def test_the_supervisor_asks_the_pod_whether_the_projects_preparation_still_runs
     from vivibox.config import Project
 
     task = create_task(tmp_path, "demo", "Add health endpoint", TEMPLATE)
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
 
     class Pod:
         running = True
@@ -122,7 +122,7 @@ def test_what_you_change_under_e_reaches_a_running_task_without_a_restart(env, m
 
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
     ran = []
     missing = []
     monkeypatch.setattr(
@@ -172,7 +172,7 @@ def test_the_writer_is_told_the_projects_own_verification_limit(env, monkeypatch
     from vivibox import actions
     from vivibox.config import load_project
 
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
 
     class Pod:
         def review_side(self):
@@ -202,7 +202,7 @@ def test_the_agents_window_opens_on_w_and_not_at_every_turn(env, monkeypatch):
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
     task.set_session("writer", "ses_1")
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
     opened = []
     monkeypatch.setattr(supervise.actions, "agent_view", lambda t, command: opened.append(command))
 
@@ -237,7 +237,7 @@ def test_work_past_the_planned_modules_is_verified_whole_and_the_timeline_says_w
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
     (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
     ran = []
     monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands))
 
@@ -283,7 +283,7 @@ def test_the_whole_build_before_review_runs_only_when_asked_and_only_by_module(e
     assert main(["new", "demo", "Goal", "--draft"]) == 0
     task = find_task(supervise.load_config().tasks_dir, "demo-1")
     (task.meta / gate.ACCEPTED_PLAN).write_text('+++\nmodules = ["core"]\n+++\n')
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: object())
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: object())
     ran = []
     monkeypatch.setattr(gate, "run_gate", lambda t, pod, commands, *a, **k: ran.append(commands) or "result")
 

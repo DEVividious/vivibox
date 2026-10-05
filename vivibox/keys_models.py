@@ -16,6 +16,9 @@ from .panel import project_repos
 from .providers_ui import ChooseImport, ImportSource
 from .task import Task
 
+# When a reviewer chosen under m reviews: a round under way ends as it began.
+REVIEWS_NEXT = "from its next review"
+
 
 class ModelKeys:
     def import_opencode(self, done) -> None:
@@ -123,7 +126,7 @@ class ModelKeys:
         if not model and harness != manual.NAME:
             return  # "no model yet" is where the role is, not a model to put it on
         actions.choose_role(task, role, choice, config)
-        self.notify(
-            f"{role} runs on {actions.choice_label(choice)} from the next start.", timeout=6, markup=False
-        )
+        # The reviewer's container is made anew for every round, of what reviews then (reviewing.who).
+        when = REVIEWS_NEXT if role == "reviewer" else "from the next start"
+        self.notify(f"{role} runs on {actions.choice_label(choice)} {when}.", timeout=6, markup=False)
         self.reload()

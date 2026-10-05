@@ -166,7 +166,9 @@ def supervised(task, monkeypatch):
     """The command line's supervisor of the task, the writer a stand-in that records its turns
     and the planner the real reader (control.Reader, with the real control.refresh) around one."""
     turns = {"writer": FakeHarness(task), "planner": FakeHarness(task)}
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: turns[role])
+    # The reviewer's too, where the writer's model reviews: the stand-in every OpenCode is here.
+    stand_in = lambda role, side, task, *of: turns.get(role, turns["writer"])  # noqa: E731
+    monkeypatch.setattr(supervise.actions, "harness_for", stand_in)
     monkeypatch.setattr(opencode, "OpenCode", lambda *a, **k: turns["writer"])
     config = load_config()
     sup = supervise.make_supervisor(task, load_project("demo"), actions.task_pod(task.id), config)

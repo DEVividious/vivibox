@@ -335,6 +335,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Fixed
 
+- A reviewer changed with `m` while its task runs reviews its next round whole on the new
+  choice. The next round's container already had the new provider's configuration and key,
+  but the reviewer's harness went on asking for the model the task had started with: the old
+  model on the same provider, or a model of a provider the container no longer had, which
+  failed the turn. A round's container and its harness are now made of one role, read once
+  when the round starts; a change made while a round runs is the next round's, and `m` says
+  `from its next review` for a reviewer. The same where the writer's model reviews.
 - An approval of risky files is of exactly what you were shown. `p` approved whatever the clone
   held when you answered its question, so a file the task's process changed after you read it
   was approved unseen, and so was one changed while the panel still showed the old diff. The

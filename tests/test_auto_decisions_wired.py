@@ -77,7 +77,7 @@ def supervised(monkeypatch, turns):
     agent that plans and writes (turns: what each of its turns does), a pod whose gate passes."""
     task = actions.create("demo", "Add divide", auto=True, orchestration="single_agent")
     harness = FakeHarness(task, turns)
-    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task: harness)
+    monkeypatch.setattr(supervise.actions, "harness_for", lambda role, side, task, *of: harness)
     monkeypatch.setattr(opencode, "OpenCode", lambda *a, **k: harness)
     pod = Pod()
     sup = supervise.make_supervisor(task, load_project("demo"), pod, load_config())

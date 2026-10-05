@@ -101,6 +101,8 @@ approval, stopping just the pod keeps the decision in Waiting for you, its label
   drawn again as they are. `vivibox risky` ends with the command that approves what it
   printed; `vivibox approve-risky` without it, or after a change, approves nothing and says to
   look again.
+- `m` says when its choice applies: a reviewer's `from its next review`, whose container is
+  made for each round; the other roles' `from the next start`.
 - `v` runs the app only while nobody works in the pod: once the work is back with you, or in a
   box. The view and `vivibox demo` ask the same function (`actions.demo_allowed`).
 - Dialogs: Esc cancels, Enter submits a one-line field, Ctrl+S submits a multi-line one, arrows

@@ -671,3 +671,112 @@ def test_a_review_completes_through_the_products_own_path(tmp_path, monkeypatch)
         actions.remove(task, project)
     assert not task.root.exists()
     assert not secrets.runtime_dir(reviewing.secrets_id(task.id)).exists()
+
+
+@pytest.mark.real_start
+def test_a_reviewer_changed_with_m_reviews_its_next_round_on_the_new_provider(tmp_path, monkeypatch):
+    """Two rounds through the supervisor's own wiring (its review_up, its reviewer), on a real
+    pod. The first with reviewer A; then m puts the reviewer on B, a model of another provider;
+    the second round's container holds B's key and not A's, in the mount and in what its
+    opencode.json configures, and the request the provider receives names B's model. Both
+    providers are the stand-in under two names, each with a key of the test's own: nothing is
+    paid, and the keys are told apart by what they hold."""
+    from vivibox import actions, keys, providers, supervise
+
+    if not TASKS_ROOT.is_dir():
+        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
+    image.build()
+    machine = load_config()  # this machine's pool and address, before the test's own files
+    name = f"rev{check_id('m').split('-')[0][1:]}"
+    source = tmp_path / "source"
+    source.mkdir()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.name", "T"),
+        ("config", "user.email", "t@e.c"),
+    ):
+        sh("git", *args, cwd=source)
+    (source / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    sh("git", "add", ".", cwd=source)
+    sh("git", "commit", "-q", "-m", "Base", cwd=source)
+    a, b = ("mocka", "model-a"), ("mockb", "model-b")
+    cfg = tmp_path / "config"
+    (cfg / "projects").mkdir(parents=True)
+    (cfg / "config.toml").write_text(
+        f'tasks_dir = "{TASKS_ROOT}"\nagent_orchestration_mode = "planner_writer_reviewer"\n'
+        f'[roles.planner]\nharness = "opencode"\nmodel = "{MOCK_MODEL}"\n'
+        f'[roles.writer]\nharness = "opencode"\nmodel = "{MOCK_MODEL}"\n'
+        f'[roles.reviewer]\nharness = "opencode"\nmodel = "{a[0]}/{a[1]}"\n'
+        f'[network]\npool = "{machine.network_pool}"\nhost_address = "{machine.host_address}"\n'
+    )
+    (cfg / "projects" / f"{name}.toml").write_text(f'repo = "{source}"\nverify = ["true"]\n')
+    monkeypatch.setenv("VIVIBOX_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    assert not keys.list_keys(), "a key store of the test's own, empty"
+    mock = dict(mock_provider.opencode_config(MOCK_PORT)["provider"][mock_provider.PROVIDER])
+    providers._save(
+        providers.path(),
+        {
+            mock_provider.PROVIDER: {**mock, providers.KEYLESS: True},  # the planner's and the writer's
+            **{p: {**mock, "name": p, "models": {m: {"name": m}}} for p, m in (a, b)},
+        },
+    )
+    for provider, _ in (a, b):
+        keys.set_key(provider, f"key-of-{provider}")
+    monkeypatch.setattr(actions, "available_models", lambda refresh=False: {})
+    task = actions.create(name, "Add sub")
+    _, project = actions.load(task.id)
+    runtime = secrets.runtime_dir(reviewing.secrets_id(task.id))
+    pod = None
+
+    def a_round(this: tuple[str, str], that: tuple[str, str]) -> None:
+        """One round as the supervisor starts it, and one turn of its reviewer in it: all of it
+        this reviewer's, nothing of that one's."""
+        (provider, model), (other, others_model) = this, that
+        sup.ports.review_up()
+        side = sup.reviewer.pod
+        assert side.agent == pod.review and sup.reviewer.model == f"{provider}/{model}"
+        mounted = side.exec("ls", secrets.MOUNT).stdout.split()
+        assert sorted(mounted) == sorted([provider, secrets.PASSWORD]), "this round's key, and no other"
+        assert side.exec("cat", f"{secrets.MOUNT}/{provider}").stdout == f"key-of-{provider}"
+        assert side.exec("cat", f"{secrets.MOUNT}/{other}", check=False).returncode != 0
+        assert sorted(p.name for p in runtime.iterdir()) == sorted([provider, secrets.PASSWORD])
+        assert f"{runtime}:{secrets.MOUNT}:ro" in json.loads(inspect(pod, "{{json .HostConfig.Binds}}"))
+        written = json.loads((pod.review_dir / "harness" / "opencode.json").read_text())
+        assert list(written["provider"]) == [provider] and written["model"] == f"{provider}/{model}"
+        assert other not in json.dumps(written), "nothing of the other provider is configured"
+        turn(sup.reviewer, f"Round on {model}: say you are done.")
+        models = {request.get("model") for request in asked(side)}
+        assert model in models and others_model not in models, "the model the provider was asked for"
+
+    try:
+        actions.start(task.id, supervise=False)
+        pod = actions.task_pod(task.id)
+        (task.repo / "calc.py").write_text(
+            "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
+        )
+        task.set_verified_commit(commit_all(task, "Add sub"))
+        (task.meta / "mock").mkdir()
+        shutil.copy(mock_provider.__file__, task.meta / "mock" / "mock_provider.py")
+        config = load_config()
+        sup = supervise.make_supervisor(task, project, pod, config)
+        a_round(a, b)
+        first = inspect(pod, "{{.Id}}")
+        # m, while the first round's container is still up: nothing of that round changes.
+        actions.choose_role(task, "reviewer", (opencode.NAME, f"{b[0]}/{b[1]}"), config)
+        assert sup.reviewer.model == f"{a[0]}/{a[1]}", "the round under way keeps its model"
+        assert sup.reviewer.pod.exec("ls", secrets.MOUNT).stdout.split().count(a[0]) == 1
+        assert inspect(pod, "{{.Id}}") == first
+        sup.ports.review_down()
+        a_round(b, a)
+        assert inspect(pod, "{{.Id}}") != first, "a container of its own for the round"
+        held = [p.name for p in secrets.runtime_dir(task.id).iterdir()]
+        assert a[0] not in held and b[0] not in held, "the writer's container has neither reviewer's key"
+    finally:
+        if pod is not None:
+            pod.review_down()
+        actions.remove(task, project)
+    assert not task.root.exists()
+    assert not runtime.exists()

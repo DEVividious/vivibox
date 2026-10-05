@@ -12,11 +12,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import brief, cli_usage, comments, gate, handoff, opencode, providers, reading, repo, roles, secrets
-from .config import Config
+from .config import Config, Role
+from .harness import Harness
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
 from .prompts import CLI_REVIEW_LEFT_OUT, CLI_REVIEW_NOT_WRITTEN, CLI_REVIEW_REPLY
@@ -249,17 +251,45 @@ def view(task: Task, pod: Pod) -> None:
         raise repo.RepoError(f"the review could not start: {e}") from None
 
 
-def up(task: Task, pod: Pod, config: Config, verify: list[str] | tuple = ()) -> Path:
+def who(task: Task, config: Config) -> Role:
+    """What reviews in the review container, as the task runs it now: the reviewer where
+    config.toml names one, else the writer's model (planner_writer_reviewer without
+    [roles.reviewer]), on the model the task chose for it (m). Read once for a round, by
+    whoever makes the round's container and its harness, so that the two are of one role."""
+    return roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
+
+
+class Reviewer:
+    """The reviewer's harness as the supervisor holds it for the whole task: the round's own
+    behind it, made anew with each round's container (begin), from the role that container was
+    made for. A turn so asks for the model whose provider's configuration and key its container
+    holds; what you choose under m while a round runs is the next round's, whole: its container,
+    its key and its model together. Everything else is the round's harness's own."""
+
+    def __init__(self, make: Callable[[Role], Harness], role: Role):
+        self.make, self.role, self.harness = make, role, make(role)
+
+    def begin(self, role: Role) -> None:
+        """A round's container was made for role: its turns are that role's."""
+        self.role, self.harness = role, self.make(role)
+
+    def __getattr__(self, name):
+        return getattr(self.harness, name)
+
+
+def up(
+    task: Task, pod: Pod, config: Config, verify: list[str] | tuple = (), role: Role | None = None
+) -> Path:
     """The reviewer's container, ready for a turn: a working directory and a view of the commits
     that the host makes for the round, the reviewer's own key and harness files, the task's
     files to read, and the directory its review goes to, returned. verify: the project's
     verification commands, a fact its brief names. The view stands on the
     commit the verification passed; a task that records none is not reviewed.
     The container starts only once both are made: a view that cannot be made stops the review
-    with the reason, and the reviewer is never started in the writer's tree instead."""
-    # The reviewer's model where config.toml names one, else the writer's (planner_writer_reviewer
-    # without [roles.reviewer]).
-    role = roles.role_of(task, "reviewer" if "reviewer" in config.roles else "writer", config)
+    with the reason, and the reviewer is never started in the writer's tree instead.
+    role: what reviews this round (who), when the caller read it for the round's harness too;
+    the container's configuration and its secrets are that role's provider's and no other's."""
+    role = role or who(task, config)
     # A reader's configuration: no language server, no Serena of vivibox's (opencode.READER).
     settings = opencode.config(role.model, (), task.repo, reader=True)
     # Exactly what its opencode.json reads: its provider's key and its MCP servers' secrets.

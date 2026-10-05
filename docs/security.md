@@ -51,7 +51,15 @@ on your machine until you have approved it.
   provider key and enabled MCP secrets, the planner's control container the planner's, the
   review container the reviewer's. A Single agent task has the planner's and the writer's in the
   agent's container. A provider two roles use is in both their containers. These files are
-  readable by the agents that use them.
+  readable by the agents that use them. The review container is made anew for every round, of
+  one role read once when the round starts: the reviewer as the task has it then (`m`), or the
+  writer's model where `config.toml` names no reviewer and the flow has one read. Its
+  configuration names that role's provider alone, its secrets are that provider's key and the
+  secrets of the MCP servers you brought, and its harness asks that provider for that role's
+  model. A reviewer you put on another provider gets, from its next round, a container with
+  the new provider's key and without the old one's; the round under way ends as it began,
+  with the key and the model it was made with. A round whose container cannot be made (no key
+  for the provider) is not started.
 
 ## How the pod is built
 

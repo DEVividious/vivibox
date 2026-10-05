@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from pathlib import Path
 
 from . import (
     actions,
@@ -129,11 +130,14 @@ def make_supervisor(
             )
     reviewer = None
     if mode.separate_reviewer:
-        if "reviewer" in config.roles:
-            reviewer = actions.harness_for("reviewer", pod.review_side(), task)
-        else:  # the writer's model reads, in the review container, as the mode asks for a reviewer
-            model = actions.role_of(task, "writer", config).model
-            reviewer = opencode.OpenCode(pod.review_side(), model, port=opencode.REVIEW_PORT)
+        # In the review container, made anew for every round with the key and the configuration
+        # of what reviews then: the reviewer's model, or the writer's where config.toml names no
+        # reviewer (reviewing.who). The round's harness is made with its container, from the one
+        # role read for both (review_up below); until the first round, as the task has it now.
+        side = pod.review_side()
+        reviewer = reviewing.Reviewer(
+            lambda role: actions.harness_for("reviewer", side, task, role), reviewing.who(task, config)
+        )
 
     seen = project
 
@@ -219,6 +223,15 @@ def make_supervisor(
             )
         seen = kept
 
+    def review_up() -> Path:
+        """A round's container and its harness, of one role, read once: what you chose under m
+        by now. The container first: one that cannot be made leaves the harness as it was, and
+        no turn is run."""
+        role = reviewing.who(task, config)
+        out = reviewing.up(task, pod, config, now().verify, role)
+        reviewer.begin(role)
+        return out
+
     tracker = limits.Tracker(task, pod)  # the pod's limits, read as each step begins and ends
     ports = supervisor.Ports(
         run_gate=run_gate,
@@ -228,7 +241,7 @@ def make_supervisor(
         notify=notifier(task, project, current or (lambda: config)),
         prepare_review=lambda: actions.prepare_review(task, now()),
         keep_command=keep_command,
-        review_up=lambda: reviewing.up(task, pod, config, now().verify),
+        review_up=review_up,
         review_down=pod.review_down,
         preparing=lambda: prepare.waiting(task, now(), pod),
         head=lambda: repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip(),

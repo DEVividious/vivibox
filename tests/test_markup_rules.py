@@ -9,13 +9,15 @@ Every place a string becomes what a widget draws is looked at here, by its shape
 Option, a Selection, a Select's options and its words while nothing is chosen, a list of options
 as it is made and as it is filled later, a table's headings and cells, an update of a widget,
 from_markup, a tooltip, a border's title, a button's label; each by its first argument or by the
-name it takes it by. What it is given is
+name it takes it by, and each also where it is a class of vivibox's own made of one (the panel's
+Code is a Label), under whatever name it was imported. What it is given is
 a plain string, or says markup=False, or is made by something that cannot be markup (escape, Text,
 Content), or is listed below as markup vivibox wrote, with why, the values in it escaped. An entry
 names the function it is in and is counted: a second call of the same words elsewhere is not
 covered by it."""
 
 import ast
+import functools
 import os
 from collections import Counter
 from pathlib import Path
@@ -353,12 +355,58 @@ def _returned(tree: ast.AST) -> dict[str, ast.AST]:
     }
 
 
+# The classes a string is drawn by where one is made: a widget's, an option's, a list's of them.
+MADE_WITH_TEXT = (*WIDGETS, "Select", "OptionList", "SelectionList")
+
+
+@functools.cache
+def tree_of(source: str) -> ast.Module:
+    """A source as a tree, read once however often the guard looks at it; nothing changes it."""
+    return ast.parse(source)
+
+
+def kinds_of(sources: dict[str, str]) -> dict[str, dict[str, str]]:
+    """For each module of a package (by name, with its source), the names it may call such a
+    class by, each with the class of MADE_WITH_TEXT it is: the class itself, a class of the
+    package whose bases lead to it through any number of the package's own (class Code(Label);
+    class Loud(Said) over class Said(Static)), and either under the name an import gave it
+    (from textual.widgets import Label as L; from .blocks import Code as Block). A class is
+    known by its bare name wherever it is defined: two of one name are taken for one."""
+    trees = {module: tree_of(source) for module, source in sources.items()}
+    renamed = {
+        module: {
+            alias.asname: alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.asname
+        }
+        for module, tree in trees.items()
+    }
+    classes = [
+        (m, node) for m, tree in trees.items() for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+    ]
+    kinds, grew = {name: name for name in MADE_WITH_TEXT}, True
+    while grew:  # until no class is added: a class may stand above its base in the walk
+        grew = False
+        for module, node in classes:
+            bases = [renamed[module].get(_name(base), _name(base)) for base in node.bases]
+            if node.name not in kinds and (base := next((b for b in bases if b in kinds), "")):
+                kinds[node.name], grew = kinds[base], True
+    return {
+        module: {**kinds, **{name: kinds[real] for name, real in renamed[module].items() if real in kinds}}
+        for module in sources
+    }
+
+
 class Sinks(ast.NodeVisitor):
     """(function, line, what, the text as written, markup off) for every place of a module that
-    hands a widget what it draws."""
+    hands a widget what it draws. kinds: what the module's names for classes are (kinds_of)."""
 
-    def __init__(self, tree: ast.AST, view: bool):
+    def __init__(self, tree: ast.AST, view: bool, kinds: dict[str, str] | None = None):
         self.scope: list[str] = []
+        self.classes: list[str] = []  # the classes the walk is inside, the innermost last
+        self.kinds = kinds or {name: name for name in MADE_WITH_TEXT}
         self.found: list[tuple[str, int, str, ast.AST, bool]] = []
         self.view, self.off_ids = view, _ids(tree)
         self.names: dict[str, str] = {}  # a variable of the function, and the id it was queried by
@@ -368,15 +416,37 @@ class Sinks(ast.NodeVisitor):
 
     def _scoped(self, node) -> None:
         self.scope.append(node.name)
+        self.classes += [node.name] if isinstance(node, ast.ClassDef) else []
         kept, self.names, self.lists = (self.names, self.lists), {}, {}
         self.generic_visit(node)
         self.scope.pop()
+        self.classes = self.classes[: -1 if isinstance(node, ast.ClassDef) else None]
         self.names, self.lists = kept
 
     visit_ClassDef = visit_FunctionDef = visit_AsyncFunctionDef = _scoped
 
     def add(self, node, what: str, text, off: bool = False) -> None:
-        self.found.append((".".join(self.scope), node.lineno, what, text, off))
+        # An Option or a Selection of the package's own, handed to a list: looked at where it is made.
+        made = isinstance(text, ast.Call) and self.kinds.get(_name(text.func)) in WIDGETS
+        self.found.append((".".join(self.scope), node.lineno, what, text, off or made))
+
+    def made(self, call: ast.Call) -> str:
+        """The class of MADE_WITH_TEXT a call makes one of, or "": called by a name of the
+        module's for it, by a method of it that makes one (Button.success), or, inside a class
+        that is one, by what the class hands on to it (super().__init__(…))."""
+        func, name = call.func, _name(call.func)
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id in self.kinds
+        ):
+            return self.kinds[func.value.id]  # Button.success(…): a Button by another door
+        handed_on = (
+            name == "__init__" and isinstance(func, ast.Attribute) and isinstance(func.value, ast.Call)
+        )
+        if handed_on and _name(func.value.func) == "super" and self.classes:
+            return self.kinds.get(self.classes[-1], "")
+        return self.kinds.get(name, "")
 
     def listed(self, node):
         """A list handed over by a variable of the function, or made by a function of the
@@ -408,9 +478,7 @@ class Sinks(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        what, func = _name(node.func), node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in WIDGETS:
-            what = func.value.id  # Button.success(…): a Button by another door
+        func, what = node.func, self.made(node) or _name(node.func)
         # A notification handed on to be made later: call_from_thread(self.notify, text),
         # call_later, a partial.
         handed = next((i for i, arg in enumerate(node.args) if _textual_notify(arg)), None)
@@ -451,13 +519,19 @@ def of_the_view(name: str, source: str) -> bool:
     return "textual" in source or "query_one" in source or name.startswith("keys_")
 
 
+def modules() -> dict[str, str]:
+    """Every module of the package, in whatever folder of it, by its path there: its source."""
+    return {str(path.relative_to(PACKAGE)): path.read_text() for path in sorted(PACKAGE.rglob("*.py"))}
+
+
 def messages():
     """(module, function, line, what, the text as written, markup off) for every sink."""
-    for path in sorted(PACKAGE.glob("*.py")):
-        source = path.read_text()
-        view = of_the_view(path.name, source)
-        for found in Sinks(ast.parse(source), view).found:
-            yield (path.name, *found)
+    sources = modules()
+    kinds = kinds_of(sources)
+    for module, source in sources.items():
+        view = of_the_view(Path(module).name, source)
+        for found in Sinks(tree_of(source), view, kinds[module]).found:
+            yield (module, *found)
 
 
 def offends(text, off: bool) -> bool:
@@ -509,11 +583,61 @@ def test_the_helpers_taken_for_plain_are():
     assert {name for name in OBJECTS} == {"hints", "branch_label", "mode_option"}, "each held above"
 
 
-def flagged(source: str, module: str = "dialogs.py") -> list[str]:
+def flagged(source: str, module: str = "dialogs.py", beside: dict[str, str] | None = None) -> list[str]:
     """What the guard holds against a source, were it a module of that name: each text handed
-    to something that draws it, neither plain nor with markup off, as written."""
-    found = Sinks(ast.parse(source), view=of_the_view(module, f"import textual\n{source}")).found
+    to something that draws it, neither plain nor with markup off, as written. beside: the
+    other modules of its package, by name."""
+    kinds = kinds_of({module: source, **(beside or {})})[module]
+    found = Sinks(ast.parse(source), of_the_view(module, f"import textual\n{source}"), kinds).found
     return [ast.unparse(text) for _, _, _, text, off in found if offends(text, off)]
+
+
+def test_a_class_of_the_package_made_of_a_widget_is_looked_at_as_that_widget():
+    """The guard knew a widget by the name it is called by, and the view has widgets of its
+    own made of Textual's: the text of the panel's code block is a Code, which is a Label, and
+    Code(text) with markup=False taken off drew an agent's lines as markup with the guard
+    green. A class whose bases lead to a widget the guard knows, through any number of the
+    package's own classes and by whatever name it is imported, is that widget."""
+    block = (
+        "class Code(Label):\n    def get_selection(self, selection):\n        return None\n"
+        "class Fence:\n    def compose(self):\n"
+        "        yield Sideways(Code(text, id='code-content'{off}), id='code-sideways')\n"
+    )
+    assert flagged(block.format(off="")) == ["text"], "the panel's own shape, its markup left on"
+    assert flagged(block.format(off=", markup=False")) == []
+    assert flagged("class Note(Label): ...\ndef compose(self):\n    yield Note(x, id='note')") == ["x"]
+    two = "class Said(Static): ...\nclass Loud(Said): ...\nclass Louder(Loud): ...\n"
+    assert flagged(two + "Louder(x)") == ["x"] and flagged(two + "Louder(escape(x))") == []
+    titles = "from textual.widgets import Label\nclass Title(Label): ..."
+    assert flagged("from .titles import Title as T\nT(x)", "dialogs.py", {"titles.py": titles}) == ["x"]
+    assert flagged("from . import titles\ntitles.Title(x)", "dialogs.py", {"titles.py": titles}) == ["x"]
+    assert flagged("from textual.widgets import Label as L\nL(x)") == ["x"]
+    assert flagged("from textual.widgets import Button as B\nclass Go(B): ...\nGo(label=x)") == ["x"]
+    # What a class of its own hands its widget when it is made, and a list of options of its own.
+    own = (
+        "class Help(Label):\n    def __init__(self, said, **how):\n        super().__init__({given}, **how)\n"
+    )
+    assert flagged(own.format(given="said")) == ["said"] and flagged(own.format(given="''")) == []
+    offers = "class Offers(OptionList): ...\n"
+    assert (
+        flagged(offers + "Offers(*[x for x in rows])") == ["x"] and flagged(offers + "Offers(id='a')") == []
+    )
+    assert flagged("class Pick(Select): ...\nPick([(x, 1)])") == ["x"]
+    assert flagged("class Row(Option): ...\noptions.add_option(Row(x))") == ["x"], (
+        "looked at where it is made"
+    )
+    # No widget: a class of another kind, and one that only shares a name's ending.
+    assert flagged("class Labelled(Thing): ...\nLabelled(x)") == []
+    # The package's own, as they are today: each is found for what it is.
+    kinds = kinds_of(modules())
+    assert {
+        name: kinds["blocks.py"].get(name) for name in ("Code", "Note", "ContextHelp", "Suggestions")
+    } == {
+        "Code": "Label",
+        "Note": "Label",
+        "ContextHelp": "Label",
+        "Suggestions": "OptionList",
+    }
 
 
 def test_the_guard_sees_every_shape_a_string_is_drawn_through():

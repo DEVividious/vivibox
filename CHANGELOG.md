@@ -8,6 +8,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+**Upgrading from 0.1.0.** Tasks created by 0.1.0 are not run by this version: the task's layout
+changed (a disk image, a control container, a recorded flow), and such a task is shown as from an
+earlier vivibox, with `vivibox delete <id>` as its only command — delete it and create it again.
+Run `host/setup.sh` again: it installs the root helper this version talks to (an older helper
+stops every start by name), moves the pods' rules to your machine, and installs the vivibox skill
+anew. The agent image is rebuilt on the first start. `pyproject.toml` changed (Textual 8,
+`markdown-it-py`, `pygments`, `rich` named): run `uv tool install --force --editable .` for a
+checkout installed before. Git must know `GIT_NO_LAZY_FETCH` (2.45, or the patched releases named
+in [docs/install.md](docs/install.md)).
+
 ### Added
 
 - Every container of a task's pod runs with limits of its own, under one cgroup slice of the

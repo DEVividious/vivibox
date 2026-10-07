@@ -6,7 +6,7 @@ line, the configuration files and what `host/setup.sh` changes on your machine m
 between minor versions. The version itself comes from git: a tag `vX.Y.Z` names a release, and
 every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` prints.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-07
 
 **Upgrading from 0.1.0.** Tasks created by 0.1.0 are not run by this version: the task's layout
 changed (a disk image, a control container, a recorded flow), and such a task is shown as from an

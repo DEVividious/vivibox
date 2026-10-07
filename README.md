@@ -64,6 +64,17 @@ with a fresh conversation each review. Supervisor ⇄ Worker reuses the planning
 review every round, including when you plan in your CLI. Both send blocking notes back for
 correction and verification. [Flow details](docs/tasks.md#orchestration-modes).
 
+## What it protects, and what it does not
+
+vivibox runs agents in Sysbox containers on your machine, not in virtual machines. What it
+enforces: the agent cannot reach your host, your LAN or other tasks; nothing it writes runs on
+your host until you approved it; the planner and the reviewer each run in a container and a
+network of their own that the writer cannot reach, and load nothing the writer committed; what
+you approve is exactly what you were shown. What it does not: the internet is open to the pod,
+every key an agent uses is in that agent's container, an MCP server you configured is trusted,
+and an agent can be misled by what the repository says. The table of claims, the test behind
+each, and the known limits are in [security.md](docs/security.md).
+
 ## Quick start
 
 **Alpha · Linux only.** Setup targets Ubuntu on x86-64. Have Git,

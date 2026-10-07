@@ -36,6 +36,12 @@ is asked for. Python's (Pyright) is run through `uv` and kept in the shared `uv`
 Serena downloads itself is kept in its home, on the task's disk.
 The planner in a container of its own gets the MCP servers you brought and not Serena: its
 language servers would work on the writer's commits beside the planner's key and conversation.
+An MCP server explicitly configured by the user is a trusted integration. Vivibox v0.2.0 does
+not claim to sandbox a malicious MCP server from the planner: what vivibox isolates the planner
+from is the writer and the repository's content; a server you configured runs in the planner's
+container with the secrets you gave it and sees what the planner sees. Give the planner only
+servers you would run in your own shell. The planner has no code intelligence of vivibox's in
+this release.
 
 `k` in the view opens the settings, one row each, Enter on a row changes it and the file keeps its
 comments: *Providers & MCP* first, then what each role runs on by default, the editor `o` opens

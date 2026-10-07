@@ -69,6 +69,28 @@ on your machine until you have approved it.
   remove stops the round before any key is written. A round whose container cannot be
   made (no key for the provider) is not started.
 
+## What is enforced, and what holds it
+
+Each line names what vivibox enforces, the mechanism, a test that fails when the claim breaks
+(unit tests run on every change; `-m docker` tests on real pods), and what the claim does not
+cover. A claim with no test is not in this table.
+
+| vivibox enforces | by | held by | not covered |
+|---|---|---|---|
+| The host writes nothing through a link in `handoff/`, reads no FIFO, device or other special file there or in the clone, and does not block on one; what a link reaches outside the clone is not read | host code: `O_NOFOLLOW`, a guarded reader for the clone | `test_handoff.py::test_a_link_is_not_written_through`, `::test_a_fifo_is_refused_without_waiting_for_a_reader`; `test_clone_read.py::test_a_link_that_leads_out_of_the_clone_is_refused`, `::test_a_special_file_is_refused_without_being_opened` | git or an IDE you run in the clone yourself |
+| Git the host runs in the clone is bounded in time; past the limit the operation ends with a reason, never as "clean", and no git is left running; it runs without the `GIT_*` of your shell | host code: a timeout on every call, one environment builder | `test_git_timeout.py::test_a_fifo_where_git_reads_ends_the_verification_in_time_and_not_green`, `::test_no_git_process_is_left_after_a_timeout`; `test_git_environment.py::test_git_on_the_host_gets_what_vivibox_sets_for_it_and_nothing_else_of_gits` | programs other than git that vivibox starts for you (a pager, an editor) |
+| A clone whose `.git` files the task changed (`commondir`, alternates, hooks, a nested repository, a worktree) gets no git of the host's; a nested repository or worktree blocks the task until it is out | host code: `check_protection` before every host git, from files alone | `test_blocked_clone.py::test_a_repository_the_task_tracks_blocks_it_until_it_is_out`; `test_blocked_start.py::test_the_gate_the_views_and_the_reply_run_no_git_in_a_clone_with_both_additions`; `test_control.py::test_git_in_the_planners_copy_runs_nothing_the_writer_planted` | the engine's own git boundary (a later phase) |
+| Each agent's container holds the keys of its role alone: the writer none of the reviewer's or the planner's; a reviewer or planner moved to another provider gets a container without the old key | host: a secrets directory per container, tmpfs, read-only | `test_secrets.py::test_the_writer_has_no_key_of_the_reviewer_and_the_reviewer_none_of_the_writer`, `::test_every_mode_puts_each_roles_key_where_the_role_runs`, `::test_a_reviewer_moved_to_another_provider_leaves_no_old_key_at_its_next_round` | a key is in the container of the agent that uses it, readable by it; a provider two roles share is in both; keys outside the pod (a gateway, a later phase) |
+| The writer cannot write your replies (`comments.md`) | host: a read-only mount over the file in every container that mounts `handoff/` | `test_pod.py::test_the_agent_reads_your_replies_from_a_read_only_mount_over_its_folder`; `test_control.py::test_every_container_that_mounts_the_handoff_mounts_your_replies_over_it` | the rest of `handoff/`, which the writer and the planner both write |
+| The planner and the reviewer each run in a container and a network of their own, with a conversation store, server, password and secrets the writer's container does not mount and cannot reach; their harness works in a host-made directory and reads a host-made read-only copy of the commits; it loads no configuration, plugin, hook or MCP server the writer committed | host: a container and a bridge per agent, nft between them, host-made `/work` and copy, a reader's configuration written by vivibox | `test_control.py::test_the_control_container_is_a_readers_with_a_home_and_a_network_of_its_own`, `::test_no_container_but_the_planners_mounts_anything_of_the_planners`; `test_control.py::test_the_planners_harness_never_works_in_the_copy_of_the_writers_commits`; `test_control_live.py::test_harness_configuration_the_writer_committed_runs_nothing_for_the_planner`, `::test_the_planners_server_and_password_are_out_of_the_writers_reach`; `test_control.py::test_a_review_reads_the_commit_that_was_verified_not_the_branch_as_it_is_now`; `test_serena_project.py::test_a_readers_configuration_has_no_serena_whatever_its_mode` | `handoff/` shared with the writer until a checkpoint; a model misled by what the repository says; an MCP server you configured (below) |
+| From the pod: your host, your LAN, every private range, other tasks, IPv6 and UDP other than DNS are refused; the networks W, R and P refuse one another; every DNS query goes through the host's forwarder; the rules are loaded before a workload starts and a workload does not start without them; root in the pod cannot remove them | host: nft on the task's bridges, through the root helper, applied by every path that starts a container | `test_netns_live.py::test_the_host_and_the_lan_are_refused_at_once`, `::test_root_in_the_pod_cannot_remove_the_rules`, `::test_dns_fails_while_the_forwarder_is_down_and_the_header_says_why`; `test_pod.py::test_up_applies_the_hosts_rules_before_the_first_container_starts`, `::test_a_helper_that_refuses_before_the_gate_or_the_review_starts_no_container`; `test_pod.py::test_your_hosts_services_are_the_writers_only` | the internet is open (`test_netns_live.py::test_the_internet_is_open`): no allow-list of names or addresses; DNS is not confidential and DNS over HTTPS is not stopped; a pod container you start by hand after a reboot |
+| Every container of a task runs with a memory limit (swap bounded to it), a process limit and the pod's CPUs under the task's slice; what the task writes outside its clone is on a disk image of its own size | host: cgroup flags on every container, an XFS image attached by the root helper | `test_limits.py::test_an_oom_kill_is_attributed_to_the_container_whose_scope_saw_it`; `test_pod.py::test_up_attaches_the_tasks_disk_after_the_host_and_before_any_container`, `::test_a_disk_that_cannot_be_attached_stops_the_pod_before_any_container` | I/O and bandwidth; the sum of all pods against the machine (the slice itself is not limited yet) |
+| The verification runs nothing from the shared caches and writes nothing into them: its caches are fresh directories of its own, the shared ones read-only, mise's shims off its `PATH` | host: read-only mounts, the gate's own cache directories and `PATH` | `test_pod.py::test_the_gate_reads_the_shared_caches_and_writes_only_its_own`, `::test_the_gates_caches_are_made_fresh_and_the_shared_ones_are_left_alone`, `::test_gate_container_sees_only_committed_work` | a project JDK the agent's mise installed into the shared cache, run by the gate through `JAVA_HOME` (accepted, one trust level); the cost of a cold Gradle home |
+| Accepting work is refused while a submodule commit it keeps — in the work, in a submodule's history, nested — is kept by no repository of yours; the check reads only your repositories, within a time limit and 64 MiB of output per git | host code: `submodules.check` before anything is accepted, a bounded reader | `test_submodule_commits.py::test_the_history_of_a_commit_the_history_points_at_is_checked_too`, `::test_submodules_more_than_eight_deep_are_refused_not_accepted`; `test_counted.py::test_an_answer_of_the_limit_is_whole_and_a_byte_more_is_none` | vivibox copies no commit for you; the address in a printed `git clone` is the work's `.gitmodules`', not checked |
+| `p` approves only the risky files on the screen, as shown, and nothing when none is; a file that cannot be shown whole (special, too large, a link to a folder or to nothing) is covered by no approval; a command the writer proposes is kept for the project only after the gate passed with it, and by hand only the command that was shown | host code: one scan for the drawing and the identity, a re-scan at the approval, the command recorded by the host at the checkpoint | `test_risky_shown.py::test_an_approval_of_what_is_no_longer_shown_is_refused_whole`, `::test_a_file_that_could_not_be_shown_is_covered_by_no_identity`; `test_auto_decisions.py::test_a_plan_is_not_accepted_by_itself_on_a_clone_the_check_refuses`; `test_auto_decisions.py::test_the_command_is_kept_only_after_the_gate_has_passed_with_it`; `test_command_shown.py::test_a_plain_accept_keeps_the_command_that_was_shown_never_the_files` | whether you read what was drawn; keys typed ahead within one frame; permission bits other than the executable one; the `--auto` window named below |
+| Text an agent wrote is shown as text: no link opens, no markup is read, its prose stands behind a rule, control and invisible characters are shown as code points, and no line of a code block lies past the right edge without a note | the view's own Markdown parser and escaping, structural tests over every sink | `test_untrusted_text.py::test_a_link_an_agent_wrote_is_text_with_its_address_in_full`; `test_agent_prose.py::test_no_heading_comes_from_what_an_agent_wrote`; `test_right_edge.py::test_a_long_line_of_a_risky_file_is_on_the_screen_whole`; `test_markup_rules.py::test_no_message_vivibox_did_not_write_is_read_as_markup` | a terminal narrower than 80 columns; what you approve is the file's bytes, not the drawing |
+| vivibox's built-in Serena runs for the writer alone, on the writer's clone in the writer's container, keeps its files in the writer's home and changes nothing git tracks; the planner and the reviewer get neither it nor a language server | host-written configurations per role | `test_serena_project.py::test_a_start_of_serena_changes_nothing_git_tracks_and_leaves_nothing_git_would_take`, `::test_serena_is_started_with_no_report_of_its_use`, `::test_a_readers_configuration_has_no_serena_whatever_its_mode`; `test_serena_live.py::test_the_project_is_active_and_a_search_of_it_is_answered` | an MCP server you configured yourself (a trusted integration, below); code intelligence for the planner (none in this release) |
+
 ## How the pod is built
 
 Each task gets a pod: an unprivileged agent container and a Docker daemon in a sidecar that runs
@@ -271,7 +293,50 @@ prints (a few objects of the agent's make a listing of gigabytes): past it git i
 the processes of its session (what it started that did not leave it), and the accepting
 refused.
 
-## Limits of the boundary
+## Limits of the boundary: what vivibox does not guarantee
+
+In one place, what the table above leaves out and what is accepted as a known limit of this
+release:
+
+- **Containers, not virtual machines.** Pods share the host's kernel under Sysbox. A kernel
+  flaw reachable from a container is reachable from a pod.
+- **The internet is open.** No allow-list of names or addresses; the DNS forwarder applies no
+  policy, DNS is not confidential, and DNS over HTTPS is HTTPS to the rules. A task can send
+  what it reads to anywhere on the internet.
+- **Keys are in the pod.** Every provider key enabled for an agent is in that agent's container,
+  readable by that agent; so are the secrets of the MCP servers you gave it. A provider two
+  roles share is in both containers. Nothing stands between an agent and its key.
+- **`handoff/` is shared.** The writer and the planner both write it; the writer can replace the
+  planner's draft or question before vivibox reads it. The draft comes to you to read.
+- **An agent reads the repository as data, by its brief, not by enforcement.** The planner and
+  the reviewer can be misled by what a file says; what is enforced is where their harness works
+  and what it is configured with.
+- **An MCP server you configured is trusted.** See the next paragraph of this section.
+- **The gate verifies commits while the writer keeps running.** A process the writer left
+  running can change the clone between the gate's steps; the gate reads commits, not the
+  working tree, and the protection check guards only the git vivibox runs, at the moment it
+  runs it. Git or an IDE you run in the clone yourself is not checked.
+- **The `--auto` window.** The last look at the clone and the write of a kept command are two
+  steps; a change between them is seen at the next verification, not before.
+- **Approvals are of what was drawn, not of what you read.** Keys typed ahead within one frame
+  act on the new drawing; permission bits other than the executable one are not looked at.
+- **Resources.** I/O and bandwidth are not limited; the sum of all pods against the machine is a
+  budget, not a limit of the slice.
+- **Shared toolchains.** A project JDK the agent's mise installed into the shared cache is the
+  one the gate runs, for every task that pins it (one trust level).
+- **A reboot.** The rules and `vivibox0` do not survive one; a pod container you start by hand
+  with `docker start` afterwards runs without them until the task's next `vivibox start`.
+- **No code intelligence for the planner.** In this release the planner has no language server
+  and no Serena of vivibox's: on a large repository it reads files and searches with its
+  harness's own tools.
+
+An MCP server explicitly configured by the user is a trusted integration. Vivibox v0.2.0 does
+not claim to sandbox a malicious MCP server from the planner. What vivibox enforces is the
+isolation of the planner and the reviewer from the writer and from the repository's content;
+what it trusts is a server you deliberately configured: it runs in the container of each agent
+you gave it to, with the secrets you named for it, sees what that agent sees, and its answers
+reach the agent's conversation as a tool's do. Give the planner only servers you would run in
+your own shell.
 
 Sysbox containers share the host kernel; they are not virtual machines. The host's rules block
 host and private-network access except explicitly allowed services, but public internet access

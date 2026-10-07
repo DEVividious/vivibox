@@ -113,6 +113,12 @@ is already done, then go on with this:
 
 """
 
+# The planner's, in its own container: it has no clone to ask git about, only its handoff files.
+RESUME_READING_PREFIX = """You were interrupted. Check the files in /task/handoff/ for what is already
+done, then go on with this:
+
+"""
+
 # Before the first implementing turn of a project that is prepared (Project.prepare): what ran, so
 # the writer builds on it instead of building everything again, and where to look when it failed.
 PREPARED_PREFIX = """Before this turn the orchestrator ran {commands} once in the repository, so what it
@@ -160,7 +166,9 @@ def resume_prompt(state: State) -> str:
     """After a stop or a crash: the state's own prompt again, behind a word about the interruption.
     A session that survived would go on from a bare "continue"; one that was lost would not know
     what the state asks for."""
-    return RESUME_PREFIX + {State.PLAN: PLAN_PROMPT, State.IMPLEMENT: IMPLEMENT_PROMPT}[state]
+    if state == State.PLAN:
+        return RESUME_READING_PREFIX + PLAN_PROMPT
+    return RESUME_PREFIX + IMPLEMENT_PROMPT
 
 
 # In a mode where the writer reviews its own work (W+R): after every turn of the writer's, before

@@ -57,6 +57,9 @@ in [docs/install.md](docs/install.md)).
 
 ### Changed
 
+- A planner interrupted in its own container is told to check its handoff files, not `git
+  status`, which has no clone to answer for there; its role files say "explore the
+  project", as its brief does, since its working directory is a repository of its own.
 - The skill for an agent's CLI says where an approval of risky files comes from: the command
   at the end of the `vivibox risky` output the user was shown, never a new run's.
 - A code block too large to fold is not folded: where folding its long lines would add more

@@ -85,16 +85,17 @@ class Outcome:
 
 
 def ensure(task, pod, commit: str, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = None) -> Outcome:
-    """commit, and its parent, in the planner's copy of the commits (pod.control_src), or why
-    not. A commit id and nothing else, refused before any git runs; one the copy has is there
-    with no fetch. Else the copy is made deeper along the task's branch, depth commits a step,
-    from the task's clone (repo.guard first, as for every git of the host's that reads it), on
-    this machine, until the commit is there or the clone has no more; then, the same way along
-    your base branch, from the remote recorded when the task was made (remote), by your own means
-    of reaching it (repo.TO_YOUR_REMOTES), and only for a task that starts from your own work
-    (repo.yours, in your checkout at source: the project's, when not given). STEPS steps in all,
-    each within repo.CLONE_TIMEOUT from the clone, and the whole within repo.COPY_TIMEOUT. A
-    request that does not end with the commit there leaves the copy as deep as it was."""
+    """commit, and its parent (a root of the repository has none), in the planner's copy of
+    the commits (pod.control_src), or why not. A commit id and nothing else, refused before
+    any git runs; one the copy has is there with no fetch. Else the copy is made deeper along
+    the task's branch, depth commits a step, from the task's clone (repo.guard first, as for
+    every git of the host's that reads it), on this machine, until the commit is there or the
+    clone has no more; then, the same way along your base branch, from the remote recorded
+    when the task was made (remote), by your own means of reaching it (repo.TO_YOUR_REMOTES),
+    and only for a task that starts from your own work (repo.yours, in your checkout at
+    source: the project's, when not given). STEPS steps in all, each within
+    repo.CLONE_TIMEOUT from the clone, and the whole within repo.COPY_TIMEOUT. A request that
+    does not end with the commit there leaves the copy as deep as it was."""
     if not COMMIT_ID.fullmatch(commit):
         return Outcome(commit, NOT_AN_ID)
     walk = _Walk(Path(pod.control_src), depth)
@@ -153,12 +154,19 @@ class _Walk:
             return None
 
     def has(self, commit: str) -> bool:
-        """The commit and its parent are objects of the copy: git show there is its change."""
+        """The commit is an object of the copy and git show there is its change: its parent is
+        there too, or it is a root of the repository, whose change is against the empty tree.
+        A root is told from a boundary of the copy, whose parents were cut away, by the copy's
+        .git/shallow, which lists each boundary and never a root."""
         own = reading.own_git(self.view)
-        return all(
-            repo.git("cat-file", "-e", name, cwd=self.view, check=False, env=own).returncode == 0
-            for name in (f"{commit}^{{commit}}", f"{commit}^")
-        )
+        ask = lambda *args: repo.git(*args, cwd=self.view, check=False, env=own)  # noqa: E731
+        found = ask("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+        if found.returncode != 0:
+            return False
+        if ask("cat-file", "-e", f"{commit}^").returncode == 0:
+            return True
+        cut = (self._boundary() or b"").decode("ascii", "replace").split()
+        return found.stdout.strip() not in cut
 
     def along(self, commit: str, source: str, ref: str, check=None, from_remote: bool = False) -> str:
         """Steps from source along ref until the commit is there (AVAILABLE), until source has

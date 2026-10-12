@@ -776,3 +776,29 @@ def test_every_fetch_of_a_request_has_its_input_closed_its_output_counted_and_a_
         assert how["stdin"] is subprocess.DEVNULL and how["limit"] == history.LIMIT
         assert 0 < how["timeout"] <= repo.CLONE_TIMEOUT and how["to_remotes"] is False
         assert args[-2:] == [str(planned.task.repo), f"refs/heads/{BRANCH}"] and "--deepen=5" in args
+
+
+# --- round 1 --------------------------------------------------------------------------------------
+
+
+def test_the_first_commit_of_the_repository_is_available_with_its_change(made):
+    """A real root, not a boundary of the copy: its change is against the empty tree."""
+    planned, ids = made
+    found = planned.ensure(ids[0])
+    assert found.said == "available" and found.available
+    shown = git(planned.view, "show", "--format=%H", ids[0])
+    assert shown.startswith(ids[0]) and "+demo" in shown
+    assert ids[0] not in shallow(planned.view)
+
+
+def test_a_boundary_of_the_copy_is_no_root_and_is_made_deeper(made, monkeypatch):
+    """The copy's oldest commit has its parents cut away (.git/shallow lists it): it is not
+    taken for a root, so it needs a step, and with none left it is not found."""
+    planned, ids = made
+    boundary = ids[-5]
+    assert boundary in shallow(planned.view)
+    monkeypatch.setattr(history, "STEPS", 0)
+    assert planned.ensure(boundary).said == "not found within 0 commits before the base on its branch"
+    monkeypatch.setattr(history, "STEPS", 20)
+    found = planned.ensure(boundary)
+    assert found.available and found.steps == 1

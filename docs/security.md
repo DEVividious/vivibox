@@ -204,7 +204,8 @@ ref, range, option or address, refused before any git runs), five a request, thr
 planning or a review, the fourth refused with "ask the person". For each id vivibox fetches
 `history_depth` more commits at a time along the task's branch from the clone, once it is as
 recorded, with none of your git configuration and nothing fetched lazily, until the commit and
-its parent are there or the clone has no more; then, when your checkout is shallow, along your
+its parent are there (a root commit has none; a commit the copy's boundary cut is not taken for
+one) or the clone has no more; then, when your checkout is shallow, along your
 base branch from the remote it tracked when the task was made (recorded then from your
 checkout, never read from the clone or the request), by your own way of reaching it
 (`GIT_SSH_COMMAND`, `GIT_ASKPASS`, your credential helper), the same path as the submodules of a

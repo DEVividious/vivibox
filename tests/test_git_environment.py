@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import GIT_CONFIG, HOME, IDENTITY, git_with, global_git_config, make_repo, suites_own
 
-from vivibox import about, baseline, context, keys_work, reading, repo, version
+from vivibox import about, baseline, context, history, keys_work, reading, repo, version
 
 REAL_GIT = shutil.which("git")
 BRANCH = repo.branch_name("demo-1")
@@ -371,6 +371,16 @@ def test_the_base_of_a_task_is_read_in_your_repository(site, monkeypatch, case):
     assert found.problem == ""
     assert found.links == {"link": "README.md"}
     assert found.sizes == {"README.md": 5, "src/calc.py": 6}
+
+
+@every_variable
+def test_the_remote_a_task_records_is_read_in_your_repository(site, monkeypatch, case):
+    """history.remote, when the task is made: your branch's remote, never another repository's."""
+    git(site.mine, "remote", "add", "origin", "https://example.com/mine.git")
+    git(site.other, "remote", "add", "origin", "https://example.com/other.git")
+    with carried(site, monkeypatch, case):
+        found = history.remote(site.mine, "main")
+    assert found == "https://example.com/mine.git"
 
 
 @every_variable

@@ -11,7 +11,7 @@ from conftest import make_repo
 from test_control import commit
 from test_control import docker as docker  # noqa: F401  (the fixture: a machine and a recording Docker)
 
-from vivibox import actions, reading, repo, reviewing, supervise
+from vivibox import actions, history, reading, repo, reviewing, supervise
 from vivibox.config import config_dir, load_config
 
 BRANCH = repo.branch_name("demo-1")
@@ -128,3 +128,47 @@ def test_both_readers_views_are_made_as_deep_as_config_toml_says(docker):  # noq
     assert counted(pod.control_src) == 2
     reviewing.up(task, pod, load_config())
     assert counted(Path(pod.review_src)) == 2
+
+
+# --- the remote your base branch tracks, recorded when the task is made ---------------------------
+
+
+def test_the_remote_recorded_is_the_one_your_base_branch_tracks(mine):
+    git(mine, "remote", "add", "origin", "https://example.com/origin.git")
+    git(mine, "remote", "add", "upstream", "https://example.com/upstream.git")
+    git(mine, "config", "branch.main.remote", "upstream")
+    assert history.remote(mine, "main") == "https://example.com/upstream.git"
+
+
+@pytest.mark.parametrize("branch", ["main", ""], ids=["tracking nothing", "no branch"])
+def test_without_a_remote_of_its_own_the_base_branch_has_origins(mine, branch):
+    git(mine, "remote", "add", "origin", "https://example.com/origin.git")
+    git(mine, "remote", "add", "upstream", "https://example.com/upstream.git")
+    assert history.remote(mine, branch) == "https://example.com/origin.git"
+
+
+def test_a_repository_without_remotes_records_none(mine):
+    git(mine, "config", "branch.main.remote", "gone")
+    assert history.remote(mine, "main") == ""
+
+
+def test_a_task_records_the_remote_its_base_branch_tracks_when_it_is_made(env):
+    git(env / "repo", "remote", "add", "origin", "https://example.com/demo.git")
+    task = actions.create("demo", "Add divide")
+    st = task.read_state()
+    assert st.history_remote == "https://example.com/demo.git" and st.base_branch == "main"
+
+
+def test_a_task_made_before_the_remote_was_recorded_is_run_as_one_without(env):
+    """A state.json of this layout without history_remote (0.2.0's release candidate)."""
+    import json
+
+    from vivibox.task import CURRENT, layout
+
+    task = actions.create("demo", "Add divide")
+    path = task.meta / "state.json"
+    data = json.loads(path.read_text())
+    data.pop("history_remote", None)
+    path.write_text(json.dumps(data))
+    st = task.read_state()
+    assert layout(st) == CURRENT and st.history_remote == ""

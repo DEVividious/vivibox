@@ -66,6 +66,11 @@ class TaskState:
     # The local branch the task started on, which accepted work can be committed on; "" when it
     # started on a detached HEAD or a remote branch.
     base_branch: str = ""
+    # The address of the remote the base branch tracks in your checkout, else origin's, else ""
+    # (history.remote): where the host alone fetches older commits of that branch for the
+    # planner's copy (history.ensure), read from your repository when the task was made, never
+    # from the task's clone. A task without it (0.2.0's release candidate) has none.
+    history_remote: str = ""
     # One conversation per role. A planner and a writer on the same harness would otherwise share
     # one, and a reviewer would review its own writing; a session of one harness handed to another
     # starts an error, not a conversation.
@@ -263,9 +268,10 @@ class Task:
         self._write_state(st)
         self.event("goal", goal=goal)
 
-    def set_base_commit(self, commit: str, branch: str = "") -> None:
+    def set_base_commit(self, commit: str, branch: str = "", remote: str = "") -> None:
+        """remote: what history.remote read of your checkout for branch."""
         st = self.read_state()
-        st.base_commit, st.base_branch = commit, branch
+        st.base_commit, st.base_branch, st.history_remote = commit, branch, remote
         self._write_state(st)
         self.event("repo", base_commit=commit)
 

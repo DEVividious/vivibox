@@ -101,6 +101,7 @@ from .demo import (  # noqa: F401
     use_instruction,
     write_instruction,
 )
+from .history import remote as tracked_remote
 from .orchestration import has_control, mode_of
 from .orchestration import problem as orchestration_problem
 from .plan import KINDS
@@ -398,7 +399,7 @@ def create(
         shutil.rmtree(task.root, ignore_errors=True)
         raise
     branch = repo.start_branch(project.repo, base_ref)
-    task.set_base_commit(base, branch)
+    task.set_base_commit(base, branch, tracked_remote(project.repo, branch))
     task.event("base", ref=base_ref or "HEAD", commit=base, **({"branch": branch} if branch else {}))
     if found.notes:  # what the agent sees differs from what you have: said once, kept with the task
         task.event("context", notes=found.notes)

@@ -1163,7 +1163,8 @@ in [docs/install.md](docs/install.md)).
 - `history.ensure` makes the planner's copy of the commits deeper for one commit id: hexadecimal
   and nothing else, refused before any git runs; then `history_depth` commits a step along the
   task's branch from the task's clone, checked first as every git of the host's in it, and,
-  once the clone has no more, along your base branch from the recorded remote, your way of
+  once the clone has no more and only when your checkout is shallow (asked of your checkout,
+  never of the clone), along your base branch from the recorded remote, your way of
   reaching it handed to that fetch only when the task starts from your own work; 20 steps in
   all, a minute a step from the clone and ten minutes in all, the copy as deep as it was when
   the commit does not come.

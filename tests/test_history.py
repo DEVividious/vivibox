@@ -981,3 +981,16 @@ def test_a_recorded_remote_is_never_taken_for_an_option(behind, tmp_path):
     planned.task._write_state(st)
     found = planned.ensure(ids[10])
     assert not found.available and not mark.exists()
+
+
+def test_a_shallow_file_the_writer_left_in_a_whole_clone_reaches_no_remote(behind, tmp_path, monkeypatch):
+    """Whether your remote is asked is a fact of your checkout, not of the clone the writer
+    writes: a .git/shallow planted there makes no fetch go to your remote."""
+    bare, ids = behind
+    yours = OverSsh(bare, tmp_path, whole=True)
+    planned = Planned(yours.checkout, tmp_path / "tasks")
+    (planned.task.repo / ".git" / "shallow").write_text(f"{ids[20]}\n")
+    yours.reach(monkeypatch)
+    found = planned.ensure("0123456789abcdef0123456789abcdef01234567")
+    assert found.said == "not found within 100 commits before the base on its branch"
+    assert yours.handed() == [] and not yours.asked.exists()

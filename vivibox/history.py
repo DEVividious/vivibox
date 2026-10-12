@@ -133,22 +133,25 @@ def _deepened(task, walk: _Walk, commit: str, source: Path | None) -> str:
         return why if why == AVAILABLE else NOT_FETCHED.format(source=CLONE, why=why)
     if walk.steps >= STEPS:
         return NOT_FOUND.format(commits=STEPS * walk.depth)
-    # The clone of a whole checkout holds the base branch's whole history as of the base: what
-    # it lacks is on no history of that branch, and no remote is asked for it.
-    try:
-        shallow = repo.in_clone(task.repo, "rev-parse", "--is-shallow-repository").stdout.strip()
-    except repo.RepoError as e:
-        return NOT_FETCHED.format(source=CLONE, why=_one_line(str(e)))
-    if shallow != "true":
-        return NOT_FOUND.format(commits=STEPS * walk.depth)
+    # Your checkout, whole, holds the base branch's whole history as of the base, and so does
+    # its clone: what the clone lacks is on no history of that branch, and no remote is asked
+    # for it. Asked of your checkout, never of the clone, whose .git the writer writes.
     st = task.read_state()
-    if not st.history_remote:
-        return NO_REMOTE
-    where = shown(st.history_remote)
+    where = shown(st.history_remote) if st.history_remote else "your checkout"
     try:
         yours = source or load_project(st.project).repo
     except ConfigError as e:
         return NOT_FETCHED.format(source=where, why=_one_line(str(e)))
+    try:
+        shallow = repo.git("rev-parse", "--is-shallow-repository", cwd=yours, check=False)
+    except repo.RepoError as e:  # the checkout moved or deleted
+        return NOT_FETCHED.format(source=where, why=_one_line(str(e)))
+    if shallow.returncode != 0:
+        return NOT_FETCHED.format(source=where, why=_one_line(display.said(shallow.stderr)))
+    if shallow.stdout.strip() != "true":
+        return NOT_FOUND.format(commits=STEPS * walk.depth)
+    if not st.history_remote:
+        return NO_REMOTE
     if not repo.yours(yours, st.base_commit):
         return NOT_FETCHED.format(source=where, why="the task does not start from your own work")
     if not st.base_branch:

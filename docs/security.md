@@ -199,8 +199,9 @@ That copy, and the reviewer's of each round, holds the last `history_depth` comm
 task's branch (100, set in `config.toml`), not the whole history; a refresh takes the new
 commits and keeps it as deep as it is. Either copy always holds the task's base, which the
 review's `git diff <base>..HEAD` needs: when the work is longer than that, the host makes the
-copy deeper from the clone alone, with the bounds below, and refuses it, with the step, when
-the base is more than 20 × `history_depth` commits back. The task's clone keeps the whole
+copy deeper from the clone alone, with the bounds below and within the ten minutes the copy's
+first fetch started, and refuses it, with the step, when the base is more than 20 ×
+`history_depth` commits back, or when the branch no longer holds it. The task's clone keeps the whole
 history of your checkout.
 Only the host makes the planner's copy deeper, and only for a commit the planner names by its id
 in `/task/handoff/history-request.md` at the end of its turn: hexadecimal and nothing else (no

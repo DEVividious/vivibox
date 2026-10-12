@@ -129,6 +129,7 @@ def view(
     # one the new commits alone: a refresh keeps the view as deep as it is, the host's deepening
     # of the planner's among it (history.ensure), and a view made whole before stays whole.
     made = repo.git("rev-parse", "--verify", "--quiet", "HEAD^{commit}", cwd=src, check=False, env=own)
+    until = time.monotonic() + repo.COPY_TIMEOUT  # the fetch and the deepening to the base, together
     deep = () if made.returncode == 0 else (f"--depth={depth}",)
     try:
         repo.in_clone(
@@ -142,7 +143,7 @@ def view(
     except repo.GitTimeout as e:
         raise repo.GitTimeout(f"{whose} copy of the work could not be brought up to date: {e}") from None
     if base and HEX.fullmatch(base):
-        _to_base(clone, branch, src, base, depth, own)
+        _to_base(clone, branch, src, base, depth, own, until)
     if commit:
         if not HEX.fullmatch(commit):
             raise repo.RepoError(f"not a commit to read the work at: {commit[:60]!r}")
@@ -162,11 +163,17 @@ def view(
     repo.git("clean", "-ffdxq", cwd=src, env=own)
 
 
-def _to_base(clone: Path, branch: str, src: Path, base: str, depth: int, own: dict[str, str]) -> None:
+_LATE = "no answer before the copy's time ran out"
+
+
+def _to_base(
+    clone: Path, branch: str, src: Path, base: str, depth: int, own: dict[str, str], until: float
+) -> None:
     """The copy at src made deeper until it holds the task's base, which a review's `git diff
     <base>..HEAD` needs and a writer's commits past history_depth would leave out: from the
     clone alone, depth commits a step, the clone checked before each (repo.guard), each step
-    within repo.CLONE_TIMEOUT and all within repo.COPY_TIMEOUT, STEPS steps at most. Past them,
+    within repo.CLONE_TIMEOUT and all by until, the copy's deadline (repo.COPY_TIMEOUT from its
+    first fetch, which shares it), STEPS steps at most. Past them,
     or on a step that fails, the copy is refused, as deep as it was; and so is a branch that no
     longer holds the base at all (reset below it), for that reason."""
     has = lambda: repo.git("cat-file", "-e", f"{base}^{{commit}}", cwd=src, check=False, env=own)  # noqa: E731
@@ -175,20 +182,23 @@ def _to_base(clone: Path, branch: str, src: Path, base: str, depth: int, own: di
     # A branch the writer reset below its base holds it at no depth: said as it is, with the
     # step that works, and no fetch spent on it. Asked of the clone as every git of the host's
     # asks it (repo.in_clone: checked first, within its time).
+    if (left := until - time.monotonic()) <= 0:
+        raise repo.RepoError(f"the copy could not be made deep enough to hold the base {base[:7]}: {_LATE}")
     held = repo.in_clone(
-        clone, "merge-base", "--is-ancestor", base, f"refs/heads/{branch}", check=False, env=HOST_GIT
-    )
+        clone, "merge-base", "--is-ancestor", base, f"refs/heads/{branch}", check=False, env=HOST_GIT,
+        timeout=min(repo.CLONE_TIMEOUT, left),
+    )  # fmt: skip
     if held.returncode != 0:
         raise repo.RepoError(
             f"the task's branch no longer holds its base {base[:7]}: its commits were reset below it; "
             "reply, and the writer puts the branch back on its base, or delete the task"
         )
-    before, until = boundary(src), time.monotonic() + repo.COPY_TIMEOUT
+    before = boundary(src)
     try:
         for _ in range(STEPS):
             repo.guard(clone)
             step, left = boundary(src), until - time.monotonic()
-            why = f"no answer within {repo.COPY_TIMEOUT:g} s" if left <= 0 else deepen(
+            why = _LATE if left <= 0 else deepen(
                 src, str(clone), f"refs/heads/{branch}", depth, min(repo.CLONE_TIMEOUT, left), own
             )  # fmt: skip
             if why:

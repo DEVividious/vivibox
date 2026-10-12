@@ -1138,3 +1138,28 @@ def test_a_branch_reset_below_its_base_is_refused_for_what_it_is(long_work, tmp_
         f"the task's branch no longer holds its base {base[:7]}: its commits were reset below it; reply, "
         "and the writer puts the branch back on its base, or delete the task"
     )
+
+
+def test_making_a_copy_and_deepening_it_to_its_base_share_one_time_limit(long_work, tmp_path, monkeypatch):
+    import time
+
+    clone, base, _ = long_work
+    view = tmp_path / "view"
+    view.mkdir()
+    monkeypatch.setattr(repo, "COPY_TIMEOUT", 30.0)
+    monkeypatch.setattr(repo, "CLONE_TIMEOUT", 1000.0)
+    real_in_clone, real_deepen, given = repo.in_clone, reading.deepen, []
+
+    def slow_fetch(at, *args, **kw):
+        if "fetch" in args:
+            time.sleep(1.0)  # the first fetch takes a second of the copy's time
+        return real_in_clone(at, *args, **kw)
+
+    def deepen(src, source, ref, depth, seconds, env, **kw):
+        given.append(seconds)
+        return real_deepen(src, source, ref, depth, seconds, env, **kw)
+
+    monkeypatch.setattr(repo, "in_clone", slow_fetch)
+    monkeypatch.setattr(reading, "deepen", deepen)
+    reading.view(clone, BRANCH, view, depth=3, base=base)
+    assert given and all(seconds <= 29.0 for seconds in given), given

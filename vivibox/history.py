@@ -163,19 +163,21 @@ class _Walk:
         self.boundary = reading.boundary(view)
 
     def has(self, commit: str) -> bool:
-        """The commit is an object of the copy and git show there is its change: its parent is
-        there too, or it is a root of the repository, whose change is against the empty tree.
-        A root is told from a boundary of the copy, whose parents were cut away, by the copy's
-        .git/shallow, which lists each boundary and never a root."""
+        """The commit is on the copy's history, an ancestor of its HEAD as git shows it there,
+        and git show there is its change: its parent is there too, or it is a root of the
+        repository, whose raw object names no parent (read as kept, whatever the copy's
+        boundary says), and whose change is against the empty tree. What a request that failed
+        left in the object store, or a remote's commit past the base, is on no such history."""
         own = reading.own_git(self.view)
         ask = lambda *args: repo.git(*args, cwd=self.view, check=False, env=own)  # noqa: E731
-        found = ask("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
-        if found.returncode != 0:
+        if ask("merge-base", "--is-ancestor", commit, "HEAD").returncode != 0:
             return False
         if ask("cat-file", "-e", f"{commit}^").returncode == 0:
             return True
-        cut = (reading.boundary(self.view) or b"").decode("ascii", "replace").split()
-        return found.stdout.strip() not in cut
+        raw = ask("cat-file", "commit", commit)
+        return raw.returncode == 0 and not any(
+            line.startswith("parent ") for line in raw.stdout.partition("\n\n")[0].splitlines()
+        )
 
     def along(self, commit: str, source: str, ref: str, check=None, from_remote: bool = False) -> str:
         """Steps from source along ref until the commit is there (AVAILABLE), until source has

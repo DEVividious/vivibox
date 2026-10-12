@@ -922,3 +922,36 @@ def test_the_planners_copy_made_fresh_holds_the_base_however_long_the_work_is(do
     sup = supervise.make_supervisor(task, project, pod, load_config())
     sup.planner.bring_up_to_date()
     assert diffed(pod.control_src, task.read_state().base_commit) == 0
+
+
+# --- fix round 1: available means reachable from the copy's HEAD, with its parent ------------------
+
+
+def test_a_commit_left_behind_by_a_request_that_failed_is_no_root(made, monkeypatch):
+    """A request that ran out of steps puts the copy's boundary back and leaves what it fetched
+    in the object store: its oldest commit has no parent there and is on no boundary listed.
+    Asked for next, it is made reachable again, and git show of it is its change."""
+    planned, ids = made
+    monkeypatch.setattr(history, "STEPS", 2)
+    assert not planned.ensure("0123456789abcdef0123456789abcdef01234567").available
+    monkeypatch.setattr(history, "STEPS", 20)
+    found = planned.ensure(ids[16])
+    assert found.available and found.steps > 0
+    shown = subprocess.run(["git", "-C", str(planned.view), "show", ids[16]], capture_output=True)
+    assert shown.returncode == 0, shown.stderr
+
+
+def test_a_commit_your_remote_has_past_the_base_is_not_found_and_not_brought(behind, tmp_path):
+    """Your remote moved on by three commits since your checkout: the newest is no ancestor of
+    the task's base, so it is not found, and the copy is as it was."""
+    bare, ids = behind
+    checkout = shallow_checkout(f"file://{bare}", tmp_path / "mine")
+    planned = Planned(checkout, tmp_path / "tasks")
+    work = tmp_path / "upstream-work"
+    newer = commits(work, 3, "newer")
+    git(work, "push", "-q", str(bare), "main")
+    before = planned.looks()
+    found = planned.ensure(newer[-1])
+    assert found.said == "not found within 100 commits before the base on its branch"
+    assert planned.looks() == before
+    assert newer[-1] not in git(planned.view, "rev-list", "--all").split()

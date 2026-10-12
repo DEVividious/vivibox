@@ -58,7 +58,8 @@ in [docs/install.md](docs/install.md)).
   one a line and at most five, in `/task/handoff/history-request.md`, and it ends the turn.
   vivibox looks for each along the task's branch, from the task's clone and then, when your
   checkout is shallow, from the remote your base branch tracks, writes what became of each to `/task/handoff/history.md`
-  (`available`, or why not: `not found within 2000 commits before the base on its branch`,
+  (`available` once it is on the copy's history as git shows it there, with its parent, or why
+  not: `not found within 2000 commits before the base on its branch`,
   `could not be fetched from <remote>: <reason>`, `no remote recorded`, `not a commit id`), and
   gives the planner a turn to read it and go on. The same holds for the supervisor's review
   turn in Supervisor ⇄ Worker. Three requests a planning, or a review, are answered; a fourth is

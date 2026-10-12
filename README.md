@@ -62,7 +62,8 @@ and your final decision.
 The first two review their own work before verification. The default uses a separate reviewer
 with a fresh conversation each review. Supervisor ⇄ Worker reuses the planning conversation to
 review every round, including when you plan in your CLI. Both send blocking notes back for
-correction and verification. [Flow details](docs/tasks.md#orchestration-modes).
+correction and verification. The planner reads the last 100 commits of the task's branch and
+asks vivibox for an older one by its id. [Flow details](docs/tasks.md#orchestration-modes).
 
 ## What it protects, and what it does not
 

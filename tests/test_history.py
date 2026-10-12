@@ -758,3 +758,21 @@ def test_the_planners_brief_says_how_deep_its_copy_is_made(docker):  # noqa: F81
     control.prepare(task, load_config(), ["true"])
     told = " ".join((control.harness_dir(task) / "instructions.md").read_text().split())
     assert "It holds the last 7 commits of the branch" in told
+
+
+def test_every_fetch_of_a_request_has_its_input_closed_its_output_counted_and_a_time(made, monkeypatch):
+    planned, ids = made
+    real, asked = repo.run_git, []
+
+    def run_git(args, **how):
+        asked.append((list(args), how))
+        return real(args, **how)
+
+    monkeypatch.setattr(repo, "run_git", run_git)
+    assert planned.ensure(ids[10]).available
+    fetches = [(args, how) for args, how in asked if args[0] == "fetch"]
+    assert len(fetches) == 4
+    for args, how in fetches:
+        assert how["stdin"] is subprocess.DEVNULL and how["limit"] == history.LIMIT
+        assert 0 < how["timeout"] <= repo.CLONE_TIMEOUT and how["to_remotes"] is False
+        assert args[-2:] == [str(planned.task.repo), f"refs/heads/{BRANCH}"] and "--deepen=5" in args

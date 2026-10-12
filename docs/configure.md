@@ -110,6 +110,12 @@ reviewer's `mode`. `max_reviews` and `mode` are ignored; `max_iterations` suppli
 only when the latter is absent. The supervisor reports these old fields once, in its window
 and in the task's timeline.
 
+`history_depth`, a top-level key of `config.toml`, is how many commits of the task's branch the
+planner's and the reviewer's copies of the commits are made with (100), and how many more each
+step brings when the planner asks for an older commit (`docs/tasks.md`, *Older commits*). A
+larger figure lets a planner read further back without asking, at a copy's cost in disk; the
+task's clone keeps your checkout's whole history either way.
+
 ## Limits on the pod
 
 Every container of a task's pod runs with limits of its own, under one cgroup slice of the task's

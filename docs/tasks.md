@@ -326,6 +326,21 @@ reviewer or the supervisor reads, and the reviewing's cost stands in a column of
 the mode has one. From the first review on, the panel shows the newest one with its counts;
 `l` opens every round.
 
+### Older commits
+
+The planner's copy of the commits, and the reviewer's, holds the last `history_depth` commits of
+the task's branch (100, `config.toml`). A planner, or the supervisor while it reviews, that needs
+an older commit writes its id to `/task/handoff/history-request.md`, one a line and at most
+five, and ends its turn; vivibox looks for each along the task's branch, first in the task's
+clone and then, when your checkout is shallow, in the remote your base branch tracked when the
+task was made, writes `/task/handoff/history.md` (`available`, or why not: `not found within
+2000 commits before the base on its branch`, `could not be fetched from <remote>: <reason>`, `no
+remote recorded`, `not a commit id`) and gives it a turn to read that and go on. Three requests
+a planning or a review are answered; the fourth is refused with "ask the person", and the turn
+goes on. You see each in the timeline (`l`): `older commits asked for, request 1 of 3: …`, then
+for each id `brought into the planner's copy in n steps` or `not brought:` and why. The
+reviewer's copy is never made deeper.
+
 What the reviewer reads, and what comes to you, is the commit the gate verified: commits that
 changed since (you talked to the agent under `w`, an agent committed after its turn) go through
 the gate again first, for no round.

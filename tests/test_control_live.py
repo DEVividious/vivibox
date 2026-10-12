@@ -31,10 +31,12 @@ from test_pod_live import (
     unreachable,
 )
 
-from vivibox import claudecode, comments, control, image, names, opencode, repo, secrets
+from vivibox import claudecode, comments, control, history, image, names, opencode, prompts, repo, secrets
 from vivibox.config import load_config
 from vivibox.pod import Mount, Pod
 from vivibox.pod_egress import helper_missing
+from vivibox.states import State
+from vivibox.task import TASK_SCHEMA_VERSION, Task, TaskState, now
 
 pytestmark = pytest.mark.docker
 
@@ -742,6 +744,79 @@ def test_deleting_a_task_leaves_nothing_of_its_control_container():
     assert not Path(f"/sys/class/net/{bridge}").exists()
     assert not pod.control_home.exists() and not pod.control_src.exists() and not task.root.exists()
     assert not secrets.runtime_dir(control.secrets_id(task.id)).exists()
+
+
+def test_an_older_commit_the_planner_asks_for_is_in_its_copy_for_its_next_turn():
+    """History on request, on a real pod: the planner's copy of the commits is made three deep;
+    its turn (the stand-in provider's calls) writes the id of a commit past them to its request
+    in the handoff; at the end of the turn the host brings that commit from the task's clone,
+    and in the next turn, asked with HISTORY_PROMPT, git show of it in the control container is
+    the commit's change, its parent there too."""
+    if not TASKS_ROOT.is_dir():
+        pytest.skip("run host/setup.sh first")
+    if why := helper_missing():
+        pytest.skip(why)
+    ref, _ = image.build()
+    task = a_task("historycheck")
+    made = []
+    for i in range(5):
+        (task.repo / "value.py").write_text(f"VALUE = {i}\n")
+        sh("git", "add", "value.py", cwd=task.repo)
+        sh("git", "commit", "-q", "-m", f"Value {i}", cwd=task.repo)
+        made.append(sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip())
+    repo.record_protection(task.repo, task.meta)
+    older = made[0]
+    recorded = Task(task.root)
+    at = now()
+    recorded._write_state(
+        TaskState(
+            task.id, "historycheck", "History on request", State.PLAN, 0, False, at, at,
+            base_commit=task.base, base_branch="main", orchestration="supervisor_worker",
+            task_schema_version=TASK_SCHEMA_VERSION,
+        )
+    )  # fmt: skip
+    pod = a_pod(task, ref)
+    planner = None
+    try:
+        pod.up()
+        control.refresh(task, pod, depth=3)
+        planner = pod.control_side()
+        there = shlex.quote(str(pod.repo))
+        assert bash(planner, f"git -C {there} rev-list --count HEAD").stdout.strip() == "3"
+        assert bash(planner, f"git -C {there} cat-file -e {older}").returncode != 0, "past the copy's depth"
+        reader = control.Reader(
+            opencode.OpenCode(planner, MOCK_MODEL),
+            lambda: control.refresh(task, pod, depth=3),
+            lambda: history.answer(recorded, pod, 3, task.repo),
+        )
+        provider_up(planner)
+        request = {
+            "tool": "write",
+            "arguments": {"filePath": "/task/handoff/history-request.md", "content": f"{older}\n"},
+        }
+        show = {"tool": "bash", "arguments": {"command": f"git show {older}", "description": "the commit"}}
+        script = lambda *calls: "".join(json.dumps(call) + "\n" for call in calls)  # noqa: E731
+        calls = f"> {mock_provider.calls(MOCK_LOG)}"
+        assert bash(planner, f"printf %s {shlex.quote(script(request))} {calls}").returncode == 0
+        first = turn(reader, "Planner: plan the change.")
+        assert reader.answer_history() is True, "the request, answered at the end of the turn"
+        assert (task.meta / "handoff" / "history.md").read_text() == f"{older}: available\n"
+        assert not (task.meta / "handoff" / "history-request.md").exists()
+        # The calls are counted by the tool results in the conversation: the request's is the
+        # first, so the next turn's call is the second.
+        assert bash(planner, f"printf %s {shlex.quote(script(request, show))} {calls}").returncode == 0
+        before = len(asked(planner))
+        turn(reader, prompts.HISTORY_PROMPT, first.session)
+        sent = json.dumps(asked(planner)[before:])
+        assert "/task/handoff/history.md" in sent, "the turn is asked with HISTORY_PROMPT"
+        assert "+VALUE = 0" in sent and older in sent, "git show of the older commit: its change"
+        assert bash(planner, f"git -C {there} rev-parse {older}^").stdout.strip() == task.base
+        assert sh("git", "rev-parse", "HEAD", cwd=task.repo).stdout.strip() == made[-1], "the clone as it was"
+        assert sh("git", "status", "--porcelain", cwd=task.repo).stdout == ""
+    finally:
+        if planner is not None:
+            bash(planner, f"rm -f {mock_provider.calls(MOCK_LOG)}")
+        gone(task, pod)
 
 
 @pytest.mark.real_start

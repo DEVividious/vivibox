@@ -13,6 +13,7 @@ task's clone or the request names: the request is commit ids and nothing else.
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -56,8 +57,19 @@ def remote(source: Path, branch: str) -> str:
     branch, which tracks nothing."""
     for name in (_tracked(source, branch), "origin"):
         if name and (found := _config(source, f"remote.{name}.url")):
-            return found
+            return _as_recorded(source, found)
     return ""
+
+
+def _as_recorded(source: Path, address: str) -> str:
+    """The address as the host can fetch from it later, from a folder of its own: "" for one
+    git would take for an option; a path on this machine from your checkout made whole, as git
+    in your checkout reads it. A URL, and the user@host:path form, are as they are."""
+    if address.startswith("-"):
+        return ""
+    if "://" in address or ":" in address.split("/", 1)[0] or os.path.isabs(address):
+        return address
+    return os.path.normpath(source / address)
 
 
 def _tracked(source: Path, branch: str) -> str:

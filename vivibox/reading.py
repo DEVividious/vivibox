@@ -136,7 +136,8 @@ def view(
             # its shallow roots into another repository without it (the fetch ends with nothing
             # in FETCH_HEAD). The source is the clone on disk, never a remote.
             clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow", *deep,
-            str(clone), f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=own,
+            "--end-of-options", str(clone), f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT,
+            env=own,
         )  # fmt: skip
     except repo.GitTimeout as e:
         raise repo.GitTimeout(f"{whose} copy of the work could not be brought up to date: {e}") from None

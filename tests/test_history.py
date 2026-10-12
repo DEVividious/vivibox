@@ -955,3 +955,29 @@ def test_a_commit_your_remote_has_past_the_base_is_not_found_and_not_brought(beh
     assert found.said == "not found within 100 commits before the base on its branch"
     assert planned.looks() == before
     assert newer[-1] not in git(planned.view, "rev-list", "--all").split()
+
+
+# --- fix round 1: what is recorded, and how it is fetched -----------------------------------------
+
+
+def test_a_remote_that_reads_as_an_option_is_not_recorded(mine):
+    git(mine, "config", "remote.origin.url", "--upload-pack=touch /tmp/x; git-upload-pack")
+    assert history.remote(mine, "main") == ""
+
+
+def test_a_remote_at_a_relative_path_is_recorded_from_your_checkout(mine, tmp_path):
+    git(mine, "remote", "add", "origin", "../upstream.git")
+    assert history.remote(mine, "main") == str(tmp_path / "upstream.git")
+    git(mine, "remote", "set-url", "origin", "git@example.com:r.git")
+    assert history.remote(mine, "main") == "git@example.com:r.git", "an address, as it is"
+
+
+def test_a_recorded_remote_is_never_taken_for_an_option(behind, tmp_path):
+    bare, ids = behind
+    planned = Planned(shallow_checkout(f"file://{bare}", tmp_path / "mine"), tmp_path / "tasks")
+    mark = tmp_path / "ran"
+    st = planned.task.read_state()
+    st.history_remote = f"--upload-pack=touch {mark}; git-upload-pack"
+    planned.task._write_state(st)
+    found = planned.ensure(ids[10])
+    assert not found.available and not mark.exists()

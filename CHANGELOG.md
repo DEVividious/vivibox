@@ -1157,7 +1157,9 @@ in [docs/install.md](docs/install.md)).
   kept choices moved from `panel.py` to `panels.py`; nothing changes for a person.
 - A task records, when it is made, the address of the remote its base branch tracks in your
   checkout, else `origin`'s (`history_remote` in `state.json`), read in your repository by the
-  host's git; a task without it has none, and runs as before.
+  host's git; a task without it has none, and runs as before. An address git would take for an
+  option is not recorded, and a path relative to your checkout is recorded whole; every fetch of
+  a copy names its source after `--end-of-options`.
 - `history.ensure` makes the planner's copy of the commits deeper for one commit id: hexadecimal
   and nothing else, refused before any git runs; then `history_depth` commits a step along the
   task's branch from the task's clone, checked first as every git of the host's in it, and,

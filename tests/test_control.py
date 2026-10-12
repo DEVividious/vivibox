@@ -500,6 +500,10 @@ def test_the_copy_is_checked_out_without_your_git_lfs_fetching_anything(reading,
         "[user]\n\tname = T\n\temail = t@example.com\n"
         '[filter "lfs"]\n\tsmudge = false\n\tprocess = false\n\trequired = true\n'
     )
+    # The pointer goes in as it is: a git-lfs this machine's /etc/gitconfig names (a CI runner's)
+    # would clean it at the add and at the commit, and install its hooks in the clone, which the
+    # refresh then refuses. Only the test's own git: vivibox's takes no GIT_* from here.
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     (task.repo / ".gitattributes").write_text("*.bin filter=lfs\n")
     (task.repo / "model.bin").write_text("version https://git-lfs.github.com/spec/v1\n")
     subprocess.run(["git", "-C", str(task.repo), "add", "."], check=True)

@@ -61,7 +61,7 @@ in [docs/install.md](docs/install.md)).
   checkout is shallow, from the remote your base branch tracks, writes what became of each to `/task/handoff/history.md`
   (`available` once it is on the copy's history as git shows it there, with its parent, or why
   not: `not found within 2000 commits before the base on its branch`,
-  `could not be fetched from <remote>: <reason>`, `no remote recorded`, `not a commit id`), and
+  `could not be fetched from <remote>: <reason>`, the remote named by its scheme and host alone, `no remote recorded`, `not a commit id`), and
   gives the planner a turn to read it and go on. The same holds for the supervisor's review
   turn in Supervisor ⇄ Worker. The answer is written and on the timeline before the copy is
   brought up to date, so a clone the task blocked stops the task with it kept. Three requests a planning, or a review, are answered; a fourth is

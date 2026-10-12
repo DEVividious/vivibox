@@ -415,14 +415,19 @@ def test_a_task_started_on_no_branch_has_none_to_fetch_along(behind, tmp_path):
     git(checkout, "checkout", "-q", "--detach")
     planned = Planned(checkout, tmp_path / "tasks")
     found = planned.ensure(ids[10])
-    assert (
-        found.said == f"could not be fetched from file://{bare}: the task started on no branch to fetch along"
-    )
+    said = "the task started on no branch to fetch along"
+    assert found.said == f"could not be fetched from a repository on this machine: {said}"
 
 
 def test_a_remotes_address_is_said_without_the_password_written_into_it():
-    assert history.shown("https://me:s3cret@example.com/r.git") == "https://example.com/r.git"
-    assert history.shown("git@example.com:r.git") == "git@example.com:r.git"
+    assert history.shown("https://me:s3cret@example.com/r.git") == "https://example.com"
+    assert (
+        history.shown("https://u:p@ss@host.example/group/r.git?private_token=t0k") == "https://host.example"
+    )
+    assert history.shown("ssh://git@host.example:2222/srv/r.git") == "ssh://host.example"
+    assert history.shown("git@example.com:org/r.git") == "example.com"
+    assert history.shown("file:///home/you/r.git") == "a repository on this machine"
+    assert history.shown("/home/you/r.git") == "a repository on this machine"
 
 
 class OverSsh:
@@ -497,7 +502,7 @@ def test_your_remote_is_not_reached_for_a_task_on_work_not_yet_yours(behind, tmp
     yours.reach(monkeypatch)
     found = planned.ensure(ids[10])
     said = "the task does not start from your own work"
-    assert found.said == f"could not be fetched from {yours.address}: {said}"
+    assert found.said == f"could not be fetched from ssh://git.example.invalid: {said}"
     assert yours.handed() == [] and not yours.asked.exists()
 
 
@@ -507,7 +512,7 @@ def test_what_your_remote_says_names_it_without_the_password_written_into_it(beh
     git(checkout, "remote", "set-url", "origin", "https://me:s3cret@127.0.0.1:9/r.git")
     planned = Planned(checkout, tmp_path / "tasks")
     found = planned.ensure(ids[10])
-    assert found.said.startswith("could not be fetched from https://127.0.0.1:9/r.git: ")
+    assert found.said.startswith("could not be fetched from https://127.0.0.1: ")
     assert "s3cret" not in found.said and found.steps == 3, found.said
 
 
@@ -525,7 +530,8 @@ def test_a_project_whose_checkout_vivibox_no_longer_knows_is_not_fetched_for(beh
 
     monkeypatch.setattr(history, "load_project", gone)
     found = history.ensure(planned.task, planned.pod, ids[10], depth=5)
-    assert found.said == f"could not be fetched from file://{bare}: no project demo" and asked == ["demo"]
+    assert found.said == "could not be fetched from a repository on this machine: no project demo"
+    assert asked == ["demo"]
 
 
 # --- the request in the handoff, answered at the end of a reader's turn ---------------------------

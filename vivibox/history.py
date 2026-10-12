@@ -162,10 +162,23 @@ def _deepened(task, walk: _Walk, commit: str, source: Path | None) -> str:
     return NOT_FOUND.format(commits=STEPS * walk.depth)
 
 
+# How history.md and the timeline name a remote on this machine: its path is the task's
+# business no more than a user, a password or a token written into an address.
+ON_THIS_MACHINE = "a repository on this machine"
+
+
 def shown(address: str) -> str:
-    """A remote's address as history.md and the timeline say it: without a user and password
-    written into it (https://user:token@host/…), which are yours and no reader's."""
-    return display.name(re.sub(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@", r"\1", address))
+    """A remote as history.md and the timeline say it: its scheme and host, or its host for the
+    user@host:path form, and never a path, a user, a password, a port or a query."""
+    scheme, sep, rest = address.partition("://")
+    if sep:
+        host = rest.split("/", 1)[0].rpartition("@")[2].split("?", 1)[0]
+        host = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        return ON_THIS_MACHINE if scheme == "file" or not host else display.name(f"{scheme}://{host}")
+    before, colon, _ = address.partition(":")
+    if colon and "/" not in before:
+        return display.name(before.rpartition("@")[2])
+    return ON_THIS_MACHINE
 
 
 class _Walk:

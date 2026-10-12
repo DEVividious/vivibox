@@ -302,6 +302,50 @@ def a_clone(where: Path) -> tuple[Path, str]:
     return where, base
 
 
+def test_a_view_is_made_and_kept_up_to_date_from_a_clone_of_a_shallow_checkout(tmp_path):
+    """A checkout made with --depth is shallow, and so is the task's clone of it. The view the
+    host makes for the planner and the reviewer is fetched from that clone with --update-shallow:
+    without it git refuses the clone's shallow roots and leaves FETCH_HEAD empty, and the task
+    could not start. The view holds the clone's commit and no more, is refreshed to the next one,
+    and a clone of an ordinary checkout is read as before."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    older = commit(origin, "calc.py", "x = 1\n")
+    tip = commit(origin, "calc.py", "x = 2\n")
+    git(tmp_path, "clone", "-q", "--depth", "1", f"file://{origin}", "checkout")
+    checkout = tmp_path / "checkout"
+    assert git(checkout, "rev-parse", "--is-shallow-repository") == "true"
+    git(tmp_path, "clone", "-q", str(checkout), "clone")  # the task's clone, as repo.prepare makes it
+    clone = tmp_path / "clone"
+    assert git(clone, "rev-parse", "--is-shallow-repository") == "true", "a clone of a shallow checkout"
+    git(clone, "checkout", "-q", "-b", BRANCH)
+    view = tmp_path / "view"
+    view.mkdir()
+    reading.view(clone, BRANCH, view, whose="the planner's")
+    assert git(view, "rev-parse", "HEAD") == tip and (view / "calc.py").read_text() == "x = 2\n"
+    assert git(view, "rev-list", "--count", "HEAD") == "1", (
+        "the clone's commit, nothing beyond its shallow root"
+    )
+    assert (
+        subprocess.run(["git", "-C", str(view), "cat-file", "-e", older], capture_output=True).returncode != 0
+    )
+    assert git(view, "remote") == "", "no remote: nothing to deepen from"
+    newer = commit(clone, "calc.py", "x = 3\n")
+    reading.view(clone, BRANCH, view, whose="the planner's")
+    assert git(view, "rev-parse", "HEAD") == newer and (view / "calc.py").read_text() == "x = 3\n"
+    assert git(view, "rev-list", "--count", "HEAD") == "2"
+    assert git(clone, "rev-parse", "--is-shallow-repository") == "true", "the clone is as it was"
+    whole, base = a_clone(tmp_path / "whole")
+    full = tmp_path / "full"
+    full.mkdir()
+    reading.view(whole, BRANCH, full, whose="the reviewer's")
+    assert (
+        git(full, "rev-parse", "HEAD") == base
+        and git(full, "rev-parse", "--is-shallow-repository") == "false"
+    )
+
+
 def program(path: Path, mark: Path, then: str = "exit 0") -> Path:
     """A program that leaves a mark when it runs."""
     path.parent.mkdir(parents=True, exist_ok=True)

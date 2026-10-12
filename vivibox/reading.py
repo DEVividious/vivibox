@@ -114,7 +114,10 @@ def view(clone: Path, branch: str, src: Path, commit: str = "", whose: str = "th
     _own_settings(src)
     try:
         repo.in_clone(
-            clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", str(clone),
+            # --update-shallow: a clone of a shallow checkout is shallow, and git refuses to bring
+            # its shallow roots into another repository without it (the fetch ends with nothing
+            # in FETCH_HEAD). The source is the clone on disk, never a remote: nothing is deepened.
+            clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow", str(clone),
             f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=own,
         )  # fmt: skip
     except repo.GitTimeout as e:

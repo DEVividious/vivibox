@@ -359,6 +359,13 @@ in [docs/install.md](docs/install.md)).
 
 ### Fixed
 
+- A task on a shallow checkout (`git clone --depth`) runs again in the flows with a planner
+  of its own: the copy of the commits vivibox makes for the planner's and the reviewer's
+  containers is fetched from the task's clone with `--update-shallow`, since a clone of a
+  shallow checkout is shallow and git refused to bring its roots into the copy, which left
+  the task at `could not start: git reset --quiet --hard…: fatal: ambiguous argument
+  'FETCH_HEAD'`. The copy is made from the clone on disk, as before: nothing is deepened or
+  fetched from a remote.
 - The verification can run a project's Maven wrapper again: `./mvnw` keeps the distribution
   it fetches under `MAVEN_USER_HOME`, which the gate now points at a folder of its own caches
   (`m2-home`, fresh for every verification, like Gradle's home there). It was `$HOME/.m2`, a

@@ -11,6 +11,8 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
+from .config import DEFAULT_HISTORY_DEPTH
+
 ROLES = ("planner", "writer", "reviewer")
 # The briefs of an agent that runs in a control container of its own (orchestration.Mode.control)
 # and reads the work there: the planner's, and the supervisor's, which plans and then reviews.
@@ -47,18 +49,31 @@ WRITES_HANDOFF = ", and where you write.\n  Besides"
 READS_HANDOFF = ". Besides"
 
 
+# What the reader's brief says of its copy's history that is true of the planner alone, after the
+# paragraph on the view: it holds history_depth commits, and the host makes it deeper for an
+# older commit the planner asks for in the handoff (history.answer). The reviewer's copy is never
+# made deeper, and the handoff is not its to write: its brief has nothing in its place.
+ASKS_FOR_HISTORY = """
+
+It holds the last {history_depth} commits of the branch; for an older commit, write its id to
+`/task/handoff/history-request.md` and end the turn."""
+
+
 def reader(
-    task_id: str, repo: str | Path, branch: str, verify: list[str] | tuple = (), writes_handoff: bool = True
-) -> str:
+    task_id: str, repo: str | Path, branch: str, verify: list[str] | tuple = (), writes_handoff: bool = True,
+    history_depth: int = DEFAULT_HISTORY_DEPTH,
+) -> str:  # fmt: skip
     """The common brief of an agent that reads the work in a container of its own: where the
     project is (repo: the read-only view of the task's commits there), what the container has
     not, and where the agent writes. What common() says of the writer's container is not true
-    there. writes_handoff: False for the reviewer, whose container has the handoff read-only."""
+    there. writes_handoff: False for the reviewer, whose container has the handoff read-only.
+    history_depth: the commits the planner's copy is made with (config.history_depth)."""
     text = _template("instructions-reader.md").format(
         task_id=task_id,
         repo=repo,
         branch=branch,
         verify="\n".join(f"  - `{c}`" for c in verify),
+        asks_for_history=ASKS_FOR_HISTORY.format(history_depth=history_depth) if writes_handoff else "",
     )
     if not verify:  # a project with no verification command (yet): the fact, without a list
         assert NO_COMMANDS in text

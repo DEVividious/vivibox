@@ -750,3 +750,11 @@ def test_a_writer_or_a_reviewer_of_its_own_is_never_answered(made):
     sup.step()
     assert prompts.HISTORY_PROMPT not in [p for p, _ in writer.asked]
     assert not (planned.task.meta / "handoff" / "history.md").exists()
+
+
+def test_the_planners_brief_says_how_deep_its_copy_is_made(docker):  # noqa: F811
+    depth_of(7)
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    control.prepare(task, load_config(), ["true"])
+    told = " ".join((control.harness_dir(task) / "instructions.md").read_text().split())
+    assert "It holds the last 7 commits of the branch" in told

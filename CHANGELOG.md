@@ -64,6 +64,8 @@ in [docs/install.md](docs/install.md)).
   turn in Supervisor ⇄ Worker. Three requests a planning, or a review, are answered; a fourth is
   refused with "ask the person", and the turn goes on as if none had been made. The timeline
   says what was asked for and what became of each; the reviewer's copy is never made deeper.
+  The planner's brief says in one sentence how deep its copy is and how to ask; the reviewer's
+  brief is as it was.
 
 ### Changed
 

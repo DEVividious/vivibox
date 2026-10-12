@@ -151,9 +151,10 @@ def test_a_reader_is_told_what_its_own_container_has_and_nothing_of_the_writers(
 
 
 def test_the_reviewer_is_told_the_handoff_is_its_channel_and_not_where_it_writes():
-    """The one sentence of the reader's brief that is the planner's alone: the planner writes its
-    draft and its question in the handoff, which the reviewer's container has read-only. The
-    reviewer's brief says of it what the writer's brief says, and is otherwise the planner's."""
+    """The two sentences of the reader's brief that are the planner's alone: the planner writes
+    its draft and its question in the handoff, which the reviewer's container has read-only, and
+    asks there for older commits, which the reviewer's copy is never given. The reviewer's brief
+    says of the handoff what the writer's brief says, and is otherwise the planner's."""
     planners, reviewers = brief.reader(*FACTS), brief.reader(*FACTS, writes_handoff=False)
     assert "your channel to the user and the orchestrator, and where you write." in planners
     assert "and where you write" not in reviewers
@@ -161,6 +162,9 @@ def test_the_reviewer_is_told_the_handoff_is_its_channel_and_not_where_it_writes
         "- `/task/handoff/`: your channel to the user and the orchestrator. Besides your role's own files:\n"
     )
     assert line in reviewers and line in brief.common(*FACTS), "the sentence of the writer's brief"
+    asks = brief.ASKS_FOR_HISTORY.format(history_depth=100)
+    assert asks in planners and "history-request.md" not in reviewers
+    planners = planners.replace(asks, "")
     assert planners.replace(brief.WRITES_HANDOFF, brief.READS_HANDOFF) == reviewers, "nothing else differs"
     assert "/task/review/review.md" in reviewers and "/task/review/review.md" in brief.role_text("reviewer")
 
@@ -181,8 +185,10 @@ def test_a_reader_with_no_verification_command_is_told_of_none():
 
 
 # The reader's brief with a command, as the behavioural run of 2026-10-03 read it (its project
-# had one): a change to it is a prompt change, with a run of its own.
-READER_AS_RUN = "50fb06d1f969fe13b4005feaa39330e95d50a7e6b5d9aca2b30a58c3cbf0a9e5"
+# had one): a change to it is a prompt change, with a run of its own. Changed since by the one
+# sentence on the copy's depth and how to ask for older commits (brief.ASKS_FOR_HISTORY): the run
+# that covers it is the keycloak acceptance smoke of history on request, before the release.
+READER_AS_RUN = "f1a2a50bc1e87d6bebe4025b0c7a1014c51a2b96f2f70823f5c6fa0df16ff341"
 
 
 def test_the_readers_brief_with_a_command_is_the_one_the_behavioural_run_read():
@@ -418,3 +424,15 @@ def test_what_the_reviewer_reads_is_what_its_behavioural_run_read():
     assert digest(role) == REVIEWERS_ROLE_AS_RUN
     assert digest(brief.reader(*FACTS, writes_handoff=False).encode()) == REVIEWERS_BRIEF_AS_RUN
     assert BRIEFS["reviewer"] == brief.reader(*FACTS, writes_handoff=False) + "\n" + role.decode()
+
+
+def test_the_planner_is_told_how_deep_its_copy_is_and_how_to_ask_for_older_commits():
+    """One sentence, the planner's and the supervisor's: their copy is made deeper on request
+    (history.answer). The reviewer's never is, and the handoff is not its to write: its brief
+    is as its behavioural run read it."""
+    told = " ".join(brief.reader(*FACTS, history_depth=250).split())
+    assert (
+        "It holds the last 250 commits of the branch; for an older commit, write its id to "
+        "`/task/handoff/history-request.md` and end the turn." in told
+    )
+    assert "history-request.md" not in brief.reader(*FACTS, writes_handoff=False, history_depth=250)

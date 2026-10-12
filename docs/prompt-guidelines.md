@@ -20,10 +20,15 @@ here in the same commit.
   `templates/instructions-reader.md` (`brief.reader`): where the project is there (a read-only
   view of the task's commits, at its path, brought up to date before each of its turns), what
   that container has not (Docker, a build, a way to change the code, a language server), and
-  where the agent writes. What is true only where the writer works is not said to it. The
-  reviewer, in a container of its own for each round, has the same common part without the one
-  clause that is the planner's alone (`brief.WRITES_HANDOFF`): its container has the handoff to
-  read, and it writes its review and nothing else.
+  where the agent writes. What is true only where the writer works is not said to it. One
+  sentence says how deep the planner's view is (`history_depth` commits) and how it asks for an
+  older commit: its id in `/task/handoff/history-request.md`, and the turn ended; the turn after
+  starts with `HISTORY_PROMPT`, which names `/task/handoff/history.md`, where the orchestrator
+  said what became of each (`history.answer`). The
+  reviewer, in a container of its own for each round, has the same common part without the two
+  parts that are the planner's alone (`brief.WRITES_HANDOFF`, `brief.ASKS_FOR_HISTORY`): its
+  container has the handoff to read, its view is never made deeper, and it writes its review
+  and nothing else.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
   …): what to do now, which files to read and write, and the sentence that ends
   the turn. The same turn asked of agents that stand in the same kind of place is one prompt:
@@ -133,8 +138,9 @@ Mechanical, in `tests/test_prompt_rules.py`:
 - what the writer and the single agent read is as it was (by digest: a change to one of those
   texts replaces its digest, with its own behavioural run), and the review turn's prompt is the
   one the supervisor's run read;
-- the reviewer's common brief is the reader's, differing from the planner's in the one clause
-  on the handoff; it and the reviewer's role file are what the reviewer's run read (by digest).
+- the reviewer's common brief is the reader's, differing from the planner's in the clause on
+  the handoff and the sentence on asking for older commits; it and the reviewer's role file are
+  what the reviewer's run read (by digest).
 
 Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
 models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,

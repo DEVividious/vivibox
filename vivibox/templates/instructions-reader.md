@@ -8,7 +8,7 @@ container; the user reads the plan and the work at checkpoints.
 
 `{repo}` holds the task's committed work, on branch {branch}, read-only. The orchestrator
 makes this view and brings it up to date before each of your turns: what is not committed is
-not in it, and during a review it is the commit the verification passed.
+not in it, and during a review it is the commit the verification passed.{asks_for_history}
 
 You start in an empty directory. Name the project's files by their path under `{repo}`; git
 commands answer for the project from any directory.

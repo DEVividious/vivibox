@@ -93,7 +93,9 @@ def prepare(task: Task, config: Config, verify: list[str] | tuple = ()) -> bool:
     before = {p.name: p.read_text() for p in d.iterdir()}
     # The reader's brief: the project as a read-only view at the clone's path, what this
     # container has not; the writer's brief would describe the writer's container.
-    (d / "instructions.md").write_text(brief.reader(task.id, task.repo, repo.branch_name(task.id), verify))
+    branch = repo.branch_name(task.id)
+    told = brief.reader(task.id, task.repo, branch, verify, history_depth=config.history_depth)
+    (d / "instructions.md").write_text(told)
     if settings:
         (d / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     else:

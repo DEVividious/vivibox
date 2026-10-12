@@ -1170,7 +1170,8 @@ in [docs/install.md](docs/install.md)).
   task's branch from the task's clone, checked first as every git of the host's in it, and,
   once the clone has no more and only when your checkout is shallow (asked of your checkout,
   never of the clone), along your base branch from the recorded remote, your way of
-  reaching it handed to that fetch only when the task starts from your own work; 20 steps in
+  reaching it handed to that fetch only when the task starts from your own work, which asks
+  nowhere for credentials (no terminal prompt, no askpass window) and fails without them; 20 steps in
   all, a minute a step from the clone and ten minutes in all, the copy as deep as it was when
   the commit does not come.
 - What the host makes for a container that only reads the work (its harness's working

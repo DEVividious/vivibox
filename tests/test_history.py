@@ -1064,3 +1064,40 @@ def test_a_plain_shallow_file_of_the_clone_is_no_change_also_for_an_older_record
     record.pop(".git/shallow", None)  # recorded before the clone's shallow file was
     (meta / "git-protection.json").write_text(json.dumps(record))
     repo.check_protection(clone, meta)
+
+
+def remote_fetches(monkeypatch) -> list[tuple[list[str], dict]]:
+    """Every fetch sent to a remote from here on: its arguments, and what vivibox set for it."""
+    real, sent = repo.run_git, []
+
+    def run_git(args, **how):
+        if args[0] == "fetch" and how.get("to_remotes"):
+            sent.append((list(args), dict(how.get("env") or {})))
+        return real(args, **how)
+
+    monkeypatch.setattr(repo, "run_git", run_git)
+    return sent
+
+
+def test_the_recorded_remote_is_fetched_whatever_the_clone_names(behind, tmp_path, monkeypatch):
+    bare, ids = behind
+    planned = Planned(shallow_checkout(f"file://{bare}", tmp_path / "mine"), tmp_path / "tasks")
+    elsewhere = tmp_path / "elsewhere.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(bare), str(elsewhere)], check=True)
+    git(planned.task.repo, "remote", "set-url", "origin", f"file://{elsewhere}")
+    repo.record_protection(planned.task.repo, planned.task.meta)
+    sent = remote_fetches(monkeypatch)
+    assert planned.ensure(ids[10]).available
+    assert sent and all(f"file://{bare}" in args and f"file://{elsewhere}" not in args for args, _ in sent)
+
+
+def test_the_fetch_from_your_remote_asks_nowhere_for_what_it_lacks(behind, tmp_path, monkeypatch):
+    """No terminal, no askpass window on your desktop, nothing fetched lazily: a remote that
+    wants credentials no helper of yours gives fails at once."""
+    bare, ids = behind
+    planned = Planned(shallow_checkout(f"file://{bare}", tmp_path / "mine"), tmp_path / "tasks")
+    sent = remote_fetches(monkeypatch)
+    assert planned.ensure(ids[10]).available and sent
+    for _, env in sent:
+        assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_NO_LAZY_FETCH"] == "1"
+        assert env["GIT_ASKPASS"] == "" and env["SSH_ASKPASS_REQUIRE"] == "never"

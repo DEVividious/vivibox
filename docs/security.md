@@ -212,10 +212,12 @@ an ancestor of the copy's HEAD with its parent there (a root commit, whose raw o
 parent, has none) or the clone has no more; then, when your checkout is shallow, along your
 base branch from the remote it tracked when the task was made (recorded then from your
 checkout, never read from the clone or the request), by your own way of reaching it
-(`GIT_SSH_COMMAND`, `GIT_ASKPASS`, your credential helper), the same path as the submodules of a
-new clone and only for a task that starts from your own work; that fetch runs with
-`GIT_TERMINAL_PROMPT=0`, so git never waits on a terminal for a user name or password your
-credential helper does not give. At most 20 fetches in all, each
+(`GIT_SSH_COMMAND`, your certificates, your credential helper), the same path as the submodules of a
+new clone and only for a task that starts from your own work; that fetch asks nowhere for
+credentials: with `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS` and
+`SSH_ASKPASS_REQUIRE=never` it opens no prompt on a terminal and no askpass window on your
+desktop, and fails at once when it needs a user name, a password or a passphrase your
+credential helper or ssh agent does not give. At most 20 fetches in all, each
 from the clone within a minute and all within ten minutes, what each prints read up to 64 MiB,
 input closed, no retry; a commit that does not come leaves the copy as deep as it was, and
 `/task/handoff/history.md` says why for each id. The reviewer's copy is never made deeper. Not

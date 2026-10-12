@@ -245,9 +245,13 @@ class _Walk:
 
 
 def _to_your_remote(view: Path) -> dict[str, str]:
+    """The fetch from your remote, beside how you reach it (repo.TO_YOUR_REMOTES): on the
+    copy, fetching nothing lazily, and asking nowhere for what your credential helper does not
+    give: not on a terminal, and in no askpass window on your desktop (an empty GIT_ASKPASS
+    stops git looking for one; ssh is told never to use its own). It fails at once instead."""
     return {
         "GIT_DIR": f"{view}/.git", "GIT_WORK_TREE": str(view), "GIT_NO_LAZY_FETCH": "1",
-        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS_REQUIRE": "never",
     }  # fmt: skip
 
 

@@ -209,7 +209,9 @@ one) or the clone has no more; then, when your checkout is shallow, along your
 base branch from the remote it tracked when the task was made (recorded then from your
 checkout, never read from the clone or the request), by your own way of reaching it
 (`GIT_SSH_COMMAND`, `GIT_ASKPASS`, your credential helper), the same path as the submodules of a
-new clone and only for a task that starts from your own work. At most 20 fetches in all, each
+new clone and only for a task that starts from your own work; that fetch runs with
+`GIT_TERMINAL_PROMPT=0`, so git never waits on a terminal for a user name or password your
+credential helper does not give. At most 20 fetches in all, each
 from the clone within a minute and all within ten minutes, what each prints read up to 64 MiB,
 input closed, no retry; a commit that does not come leaves the copy as deep as it was, and
 `/task/handoff/history.md` says why for each id. The reviewer's copy is never made deeper. Not

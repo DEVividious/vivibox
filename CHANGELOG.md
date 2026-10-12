@@ -372,8 +372,8 @@ in [docs/install.md](docs/install.md)).
   started by hand with `docker start` after a restart has no rules until the task's next
   `vivibox start`, so start tasks, not containers.
 - The readers' copies of the commits (the planner's, and the reviewer's of each round) are
-  shallow: made with the last `history_depth` commits of the task's branch (100; a top-level key
-  of `config.toml`, per machine), and kept that deep by each refresh, instead of the whole
+  shallow: made with the last `history_depth` commits of the task's branch (100, at most
+  100 000; a top-level key of `config.toml`, per machine), and kept that deep by each refresh, instead of the whole
   history, which on a large repository was a gigabyte per copy. The task's clone keeps the whole
   history of your checkout, as before.
 - Either copy always holds the task's base, which the review's `git diff <base>..HEAD` needs:

@@ -127,6 +127,9 @@ DEFAULT_MAX_ROUNDS = 3
 # how many more each step of history a planner asks for brings (history.ensure): an ordinary
 # git log, blame or show reaches no further, and a large repository's view stays megabytes.
 DEFAULT_HISTORY_DEPTH = 100
+# The most history_depth may be: git refuses a depth past what it counts, and said here it is
+# refused when the file is read, not at a task's first copy.
+MOST_HISTORY_DEPTH = 100_000
 # What the view says of limits.max_rounds.
 ROUNDS_HELP = (
     "Fix turns the writer gets on its own, from the gate or from the review, before the work "
@@ -323,8 +326,10 @@ def load_config(base: Path | None = None) -> Config:
         costs[name] = float(value)
     pod_limits = _limits(limits, path)
     history_depth = data.get("history_depth", DEFAULT_HISTORY_DEPTH)
-    if isinstance(history_depth, bool) or not isinstance(history_depth, int) or history_depth < 1:
-        raise ConfigError(f"{path}: history_depth is a number of commits >= 1, e.g. {DEFAULT_HISTORY_DEPTH}")
+    counts = isinstance(history_depth, int) and not isinstance(history_depth, bool)
+    if not counts or not 0 < history_depth <= MOST_HISTORY_DEPTH:
+        said = f"from 1 to {MOST_HISTORY_DEPTH}, e.g. {DEFAULT_HISTORY_DEPTH}"
+        raise ConfigError(f"{path}: history_depth is a number of commits {said}")
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")

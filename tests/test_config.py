@@ -416,8 +416,13 @@ def test_the_readers_views_hold_a_hundred_commits_unless_you_say_otherwise(tmp_p
     assert load_config(base).history_depth == 500
 
 
-@pytest.mark.parametrize("value", ["0", "-5", '"100"', "true", "2.5"])
+@pytest.mark.parametrize("value", ["0", "-5", '"100"', "true", "2.5", "100001", str(2**63 - 1)])
 def test_rejects_a_history_depth_that_is_not_a_number_of_commits(tmp_path, value):
     base = write(tmp_path / "config.toml", f'tasks_dir = "/srv/vivibox"\nhistory_depth = {value}\n' + ROLES)
     with pytest.raises(ConfigError, match="history_depth"):
         load_config(base)
+
+
+def test_a_history_depth_of_a_hundred_thousand_is_the_most_taken(tmp_path):
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\nhistory_depth = 100000\n' + ROLES)
+    assert load_config(base).history_depth == 100_000

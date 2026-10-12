@@ -222,7 +222,7 @@ credential helper or ssh agent does not give. At most 20 fetches in all, each
 from the clone within a minute and all within ten minutes, what each prints read up to 64 MiB,
 input closed, no retry; what a remote sends is not counted in bytes, only bounded by those ten
 minutes and the task disk's quota; a commit that does not come leaves the copy as deep as it was, and
-`/task/handoff/history.md` says why for each id. The reviewer's copy is never made deeper. The
+`/task/handoff/history.md` says why for each id. The reviewer's copy is never made deeper on request. The
 remote step fetches the base branch of the remote recorded when the task was made, and nothing
 of any other branch or remote: a commit of that branch newer than the base is never reported
 available and never reachable from the copy's HEAD, but its objects may be in the copy's object

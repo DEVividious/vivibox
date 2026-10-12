@@ -64,9 +64,10 @@ in [docs/install.md](docs/install.md)).
   `could not be fetched from <remote>: <reason>`, the remote named by its scheme and host alone, `no remote recorded`, `not a commit id`), and
   gives the planner a turn to read it and go on. The same holds for the supervisor's review
   turn in Supervisor ⇄ Worker. The answer is written and on the timeline before the copy is
-  brought up to date, so a clone the task blocked stops the task with it kept. Three requests a planning, or a review, are answered; a fourth is
-  refused with "ask the person", and the turn goes on as if none had been made. The timeline
-  says what was asked for and what became of each; the reviewer's copy is never made deeper.
+  brought up to date, so a clone the task blocked stops the task with it kept. Three requests a
+  planning, or a review, are answered; a fourth is refused with "ask the person", and the turn
+  goes on as if none had been made. The timeline says what was asked for and what became of
+  each; the reviewer's copy is never made deeper on request.
   The planner's brief says in one sentence how deep its copy is and how to ask; the reviewer's
   brief is as it was.
   The remote step fetches only the recorded remote's base branch: its commits newer than the

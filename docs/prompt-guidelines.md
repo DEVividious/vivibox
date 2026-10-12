@@ -27,8 +27,8 @@ here in the same commit.
   said what became of each (`history.answer`). The
   reviewer, in a container of its own for each round, has the same common part without the two
   parts that are the planner's alone (`brief.WRITES_HANDOFF`, `brief.ASKS_FOR_HISTORY`): its
-  container has the handoff to read, its view is never made deeper, and it writes its review
-  and nothing else.
+  container has the handoff to read, its view is never made deeper on request, and it writes
+  its review and nothing else.
 - **The turn prompt** (`PLAN_PROMPT`, `IMPLEMENT_PROMPT`, `REVIEW_PROMPT`, `SELF_REVIEW_PROMPT`,
   …): what to do now, which files to read and write, and the sentence that ends
   the turn. The same turn asked of agents that stand in the same kind of place is one prompt:

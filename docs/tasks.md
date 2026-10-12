@@ -339,7 +339,7 @@ remote recorded`, `not a commit id`) and gives it a turn to read that and go on.
 a planning or a review are answered; the fourth is refused with "ask the person", and the turn
 goes on. You see each in the timeline (`l`): `older commits asked for, request 1 of 3: …`, then
 for each id `brought into the planner's copy in n steps` or `not brought:` and why. The
-reviewer's copy is never made deeper.
+reviewer's copy is never made deeper on request.
 
 What the reviewer reads, and what comes to you, is the commit the gate verified: commits that
 changed since (you talked to the agent under `w`, an agent committed after its turn) go through

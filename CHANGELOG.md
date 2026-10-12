@@ -373,6 +373,10 @@ in [docs/install.md](docs/install.md)).
   of `config.toml`, per machine), and kept that deep by each refresh, instead of the whole
   history, which on a large repository was a gigabyte per copy. The task's clone keeps the whole
   history of your checkout, as before.
+- Either copy always holds the task's base, which the review's `git diff <base>..HEAD` needs:
+  work longer than `history_depth` commits has its copy made deeper from the task's clone until
+  the base is there, and work more than 20 × `history_depth` commits past its base is refused
+  with the step (raise `history_depth`, start the task again).
 
 ### Fixed
 

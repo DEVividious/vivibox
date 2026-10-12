@@ -85,7 +85,7 @@ def review_round(task, pod: Pod, commit: str) -> SimpleNamespace:
     settings = {**mock_provider.opencode_config(MOCK_PORT), **opencode.READER}
     (harness / "opencode.json").write_text(json.dumps(settings, indent=2) + "\n")
     (harness / "instructions.md").write_text("# A live test of vivibox\n\nAnswer briefly.\n")
-    task.read_state = lambda: SimpleNamespace(verified_commit=commit)
+    task.read_state = lambda: SimpleNamespace(verified_commit=commit, base_commit="")
     reviewing.view(task, pod)
     mounts = [
         Mount(str(meta), "/task", read_only=True),

@@ -120,14 +120,24 @@ def reviewed_commit(task: Task) -> str:
     return st.verified_commit if st.state is State.REVIEW else ""
 
 
-def refresh(task: Task, pod: Pod, commit: str = "", depth: int = DEFAULT_HISTORY_DEPTH) -> None:
+def refresh(
+    task: Task, pod: Pod, commit: str = "", depth: int = DEFAULT_HISTORY_DEPTH, base: str = ""
+) -> None:
     """The planner's copy of the committed work (reading.view), in a folder of the task's disk
     that only the control container mounts, read-only: on commit when one is given (the verified
     one, for a review), else on the task's branch as it is; made with depth commits of the
-    branch (history_depth). Before the planner's first turn and before each one after it; the
-    harness's working directory (workdir) is made with it."""
+    branch (history_depth), and holding base, the task's, when it is given. Before the planner's
+    first turn and before each one after it; the harness's working directory (workdir) is made
+    with it."""
     workdir(pod)
-    reading.view(task.repo, repo.branch_name(task.id), pod.control_src, commit, PLANNERS_OWN, depth)
+    branch = repo.branch_name(task.id)
+    reading.view(task.repo, branch, pod.control_src, commit, PLANNERS_OWN, depth, base)
+
+
+def refresh_for(task: Task, pod: Pod, depth: int = DEFAULT_HISTORY_DEPTH) -> None:
+    """refresh as the task is now: on the verified commit in its review (reviewed_commit), and
+    holding its base, which a review's `git diff <base>..HEAD` needs."""
+    refresh(task, pod, reviewed_commit(task), depth=depth, base=task.read_state().base_commit)
 
 
 class Reader:

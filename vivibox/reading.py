@@ -13,11 +13,14 @@ view from wherever it is run (git_env).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import subprocess
+import time
 from pathlib import Path
 
-from . import repo
+from . import counted, display, repo
 from .config import DEFAULT_HISTORY_DEPTH
 
 # git on the host, in a view or a working directory, reads no configuration but the folder's
@@ -28,6 +31,11 @@ from .config import DEFAULT_HISTORY_DEPTH
 # said here, it does not, whatever your environment says or the git's own default is.
 HOST_GIT = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_LAZY_FETCH": "1"}
 HEX = re.compile(r"[0-9a-f]{40,64}")
+# Steps of history_depth commits each that one deepening of a copy may take: here, to the task's
+# base, which a review's `git diff <base>..HEAD` needs; for a commit the planner asks for, from
+# the clone and a remote together (history.ensure). And the bytes one such fetch may print.
+STEPS = 20
+FETCH_LIMIT = 64 * 2**20
 # The view's own configuration, written by the host: a symbolic link the writer committed is
 # checked out as a plain file holding the path it names. A link would be followed, in the
 # reader's container, to that container's own files (its secrets), which a plan or a review
@@ -99,7 +107,7 @@ def _own_settings(src: Path) -> None:
 
 def view(
     clone: Path, branch: str, src: Path, commit: str = "", whose: str = "the reader's",
-    depth: int = DEFAULT_HISTORY_DEPTH,
+    depth: int = DEFAULT_HISTORY_DEPTH, base: str = "",
 ) -> None:  # fmt: skip
     """A reader's copy of the committed work at src: made by git on the host, in a folder only
     that reader's container mounts, read-only. The writer's clone is read as every git of the
@@ -109,7 +117,8 @@ def view(
     templates, and a committed link is a plain file there (LINKS_AS_FILES). The copy stands on
     commit when one is given (the verified one, for a review; not on the task's branch, it is
     refused), else on the task's branch as it is, and holds that commit's files and nothing
-    else. It is made with depth commits of the branch, and kept as deep as it is after that."""
+    else. It is made with depth commits of the branch, and kept as deep as it is after that;
+    and, given the task's base, it always holds it (_to_base)."""
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"{whose} copy of the work has no folder at {src}; start the task again")
     own = own_git(src)
@@ -131,6 +140,8 @@ def view(
         )  # fmt: skip
     except repo.GitTimeout as e:
         raise repo.GitTimeout(f"{whose} copy of the work could not be brought up to date: {e}") from None
+    if base and HEX.fullmatch(base):
+        _to_base(clone, branch, src, base, depth, own)
     if commit:
         if not HEX.fullmatch(commit):
             raise repo.RepoError(f"not a commit to read the work at: {commit[:60]!r}")
@@ -148,3 +159,93 @@ def view(
     # other folder (_in); git removes a link itself, never what it names, and walks into none,
     # so nothing outside the view is touched.
     repo.git("clean", "-ffdxq", cwd=src, env=own)
+
+
+def _to_base(clone: Path, branch: str, src: Path, base: str, depth: int, own: dict[str, str]) -> None:
+    """The copy at src made deeper until it holds the task's base, which a review's `git diff
+    <base>..HEAD` needs and a writer's commits past history_depth would leave out: from the
+    clone alone, depth commits a step, the clone checked before each (repo.guard), each step
+    within repo.CLONE_TIMEOUT and all within repo.COPY_TIMEOUT, STEPS steps at most. Past them,
+    or on a step that fails, the copy is refused, as deep as it was."""
+    has = lambda: repo.git("cat-file", "-e", f"{base}^{{commit}}", cwd=src, check=False, env=own)  # noqa: E731
+    if has().returncode == 0:
+        return
+    before, until = boundary(src), time.monotonic() + repo.COPY_TIMEOUT
+    try:
+        for _ in range(STEPS):
+            repo.guard(clone)
+            step, left = boundary(src), until - time.monotonic()
+            why = f"no answer within {repo.COPY_TIMEOUT:g} s" if left <= 0 else deepen(
+                src, str(clone), f"refs/heads/{branch}", depth, min(repo.CLONE_TIMEOUT, left), own
+            )  # fmt: skip
+            if why:
+                said = f"the copy could not be made deep enough to hold the base {base[:7]}"
+                raise repo.RepoError(f"{said}: {why}")
+            if has().returncode == 0:
+                return
+            if boundary(src) == step:
+                break
+    except BaseException:
+        put_back(src, before)
+        raise
+    put_back(src, before)
+    raise repo.RepoError(
+        f"the work is more than {STEPS * depth} commits past its base {base[:7]}; raise history_depth in "
+        "the configuration and start the task again"
+    )
+
+
+def deepen(
+    src: Path, source: str, ref: str, depth: int, seconds: float, env: dict[str, str],
+    to_remotes: bool = False,
+) -> str:  # fmt: skip
+    """One fetch of depth commits more of ref, from source, into the copy at src: "" once it is
+    done, else why not, as one line. Its input closed, what it prints counted up to FETCH_LIMIT,
+    within seconds; source after --end-of-options, so that no address is taken for an option.
+    to_remotes: source is your remote (repo.git_environment)."""
+    args = ["fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow"]
+    args += [f"--deepen={depth}", "--end-of-options", source, ref]
+    try:
+        done = repo.run_git(
+            args, cwd=src, env=env, to_remotes=to_remotes, limit=FETCH_LIMIT, timeout=seconds,
+            stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return f"no answer within {seconds:g} s"
+    except counted.TooMuch:
+        return f"the fetch printed more than {FETCH_LIMIT // 2**20} MiB"
+    except OSError as e:
+        return one_line(str(e))
+    if done.returncode != 0:
+        return one_line(display.said(done.stderr.decode("utf-8", "replace"))) or f"exit {done.returncode}"
+    return ""
+
+
+def boundary(src: Path) -> bytes | None:
+    """The copy's shallow boundary as git keeps it, or None for a copy that holds every commit."""
+    try:
+        return (src / ".git" / "shallow").read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def put_back(src: Path, before: bytes | None) -> None:
+    """The copy's boundary as it was: what was fetched since is out of every history git shows
+    there. A fetch ended past its time leaves its lock, which would refuse the next one; the
+    copy is the host's alone."""
+    git_dir = src / ".git"
+    (git_dir / "shallow.lock").unlink(missing_ok=True)
+    if boundary(src) == before:
+        return
+    if before is None:
+        (git_dir / "shallow").unlink(missing_ok=True)
+        return
+    kept = git_dir / "shallow.vivibox"
+    kept.write_bytes(before)
+    os.replace(kept, git_dir / "shallow")
+
+
+def one_line(text: str) -> str:
+    """The last line of what was said, which is what git ends on, as one line."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return display.name(lines[-1])[:300] if lines else ""

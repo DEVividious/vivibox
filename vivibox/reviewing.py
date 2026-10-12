@@ -244,7 +244,8 @@ def view(task: Task, pod: Pod, depth: int = DEFAULT_HISTORY_DEPTH) -> None:
     verification passed. One that cannot be made stops the review with the reason. A task
     that records no verified commit gets none (Unverified): its branch as it happens to be is
     not reviewed, and the supervisor verifies it first."""
-    verified = task.read_state().verified_commit
+    st = task.read_state()
+    verified = st.verified_commit
     if not verified:
         raise Unverified(
             f"the review could not start: {task.id} records no commit that passed the verification; "
@@ -253,7 +254,7 @@ def view(task: Task, pod: Pod, depth: int = DEFAULT_HISTORY_DEPTH) -> None:
     try:
         reading.workdir(pod.review_work, REVIEWERS_OWN)
         branch, src = repo.branch_name(task.id), Path(pod.review_src)
-        reading.view(task.repo, branch, src, verified, REVIEWERS_OWN, depth)
+        reading.view(task.repo, branch, src, verified, REVIEWERS_OWN, depth, st.base_commit)
     except repo.GitTimeout as e:
         again = f"then start the task again: vivibox start {task.id}"  # the way to try again, here
         raise repo.GitTimeout(

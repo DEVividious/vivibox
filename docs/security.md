@@ -197,7 +197,11 @@ agent plans and writes in one conversation.
 
 That copy, and the reviewer's of each round, holds the last `history_depth` commits of the
 task's branch (100, set in `config.toml`), not the whole history; a refresh takes the new
-commits and keeps it as deep as it is. The task's clone keeps the whole history of your checkout.
+commits and keeps it as deep as it is. Either copy always holds the task's base, which the
+review's `git diff <base>..HEAD` needs: when the work is longer than that, the host makes the
+copy deeper from the clone alone, with the bounds below, and refuses it, with the step, when
+the base is more than 20 × `history_depth` commits back. The task's clone keeps the whole
+history of your checkout.
 Only the host makes the planner's copy deeper, and only for a commit the planner names by its id
 in `/task/handoff/history-request.md` at the end of its turn: hexadecimal and nothing else (no
 ref, range, option or address, refused before any git runs), five a request, three requests a

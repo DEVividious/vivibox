@@ -13,14 +13,12 @@ task's clone or the request names: the request is commit ids and nothing else.
 from __future__ import annotations
 
 import contextlib
-import os
 import re
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import control, counted, display, handoff, reading, repo
+from . import control, display, handoff, reading, repo
 from .config import DEFAULT_HISTORY_DEPTH, ConfigError, load_project
 
 # A commit as the planner names one: its id in hexadecimal, from the seven characters git
@@ -29,9 +27,9 @@ from .config import DEFAULT_HISTORY_DEPTH, ConfigError, load_project
 COMMIT_ID = re.compile(r"[0-9a-f]{7,64}")
 # Steps of history_depth commits each that one request may take, from the clone and the remote
 # together: 2 000 commits behind the copy's oldest at the default depth, and never more.
-STEPS = 20
+STEPS = reading.STEPS
 # Bytes one fetch may print, on both streams (counted.run): it prints a line or two.
-LIMIT = 64 * 2**20
+LIMIT = reading.FETCH_LIMIT
 
 AVAILABLE = "available"
 NOT_AN_ID = "not a commit id"
@@ -156,19 +154,13 @@ def shown(address: str) -> str:
 
 
 class _Walk:
-    """The planner's copy of the commits, made deeper a step at a time: its shallow boundary as
-    it was before the first step, to put back, and the steps taken."""
+    """The planner's copy of the commits, made deeper a step at a time (reading.deepen): its
+    shallow boundary as it was before the first step, to put back, and the steps taken."""
 
     def __init__(self, view: Path, depth: int):
         self.view, self.depth, self.steps = view, depth, 0
         self.until = time.monotonic() + repo.COPY_TIMEOUT
-        self.boundary = self._boundary()
-
-    def _boundary(self) -> bytes | None:
-        try:
-            return (self.view / ".git" / "shallow").read_bytes()
-        except FileNotFoundError:
-            return None
+        self.boundary = reading.boundary(view)
 
     def has(self, commit: str) -> bool:
         """The commit is an object of the copy and git show there is its change: its parent is
@@ -182,7 +174,7 @@ class _Walk:
             return False
         if ask("cat-file", "-e", f"{commit}^").returncode == 0:
             return True
-        cut = (self._boundary() or b"").decode("ascii", "replace").split()
+        cut = (reading.boundary(self.view) or b"").decode("ascii", "replace").split()
         return found.stdout.strip() not in cut
 
     def along(self, commit: str, source: str, ref: str, check=None, from_remote: bool = False) -> str:
@@ -190,7 +182,7 @@ class _Walk:
         no more or the steps are spent (""), or until a step fails (why). check: what refuses
         source before each step, as an error whose words are why."""
         while self.steps < STEPS:
-            before = self._boundary()
+            before = reading.boundary(self.view)
             try:
                 if check:
                     check()
@@ -200,7 +192,7 @@ class _Walk:
                 return why
             if self.has(commit):
                 return AVAILABLE
-            if self._boundary() == before:
+            if reading.boundary(self.view) == before:
                 return ""
         return ""
 
@@ -210,43 +202,16 @@ class _Walk:
         if left <= 0:
             return f"no answer within {repo.COPY_TIMEOUT:g} s"
         seconds = left if from_remote else min(repo.CLONE_TIMEOUT, left)
-        args = ["fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow"]
-        args += [f"--deepen={self.depth}", source, ref]
         # From the clone: the host's git, which reads none of your configuration. From your
         # remote: your configuration too, where your credential helper and your URL rewrites are,
         # as for the submodules of a new clone; never waiting on the terminal.
         own = reading.own_git(self.view) if not from_remote else _to_your_remote(self.view)
         self.steps += 1
-        try:
-            done = repo.run_git(
-                args, cwd=self.view, env=own, to_remotes=from_remote, limit=LIMIT, timeout=seconds,
-                stdin=subprocess.DEVNULL,
-            )  # fmt: skip
-        except subprocess.TimeoutExpired:
-            return f"no answer within {seconds:g} s"
-        except counted.TooMuch:
-            return f"the fetch printed more than {LIMIT // 2**20} MiB"
-        except OSError as e:
-            return _one_line(str(e))
-        if done.returncode != 0:
-            said = display.said(done.stderr.decode("utf-8", "replace"))
-            return _one_line(said) or f"exit {done.returncode}"
-        return ""
+        return reading.deepen(self.view, source, ref, self.depth, seconds, own, to_remotes=from_remote)
 
     def as_it_was(self) -> None:
-        """The copy's boundary as it was before the first step: what was fetched for a commit
-        that did not come is out of every history git shows there. A fetch ended past its time
-        leaves its lock, which would refuse the next one; the copy is the host's alone."""
-        git_dir = self.view / ".git"
-        (git_dir / "shallow.lock").unlink(missing_ok=True)
-        if self._boundary() == self.boundary:
-            return
-        if self.boundary is None:
-            (git_dir / "shallow").unlink(missing_ok=True)
-            return
-        kept = git_dir / "shallow.vivibox"
-        kept.write_bytes(self.boundary)
-        os.replace(kept, git_dir / "shallow")
+        """The copy's boundary as it was before the first step (reading.put_back)."""
+        reading.put_back(self.view, self.boundary)
 
 
 def _to_your_remote(view: Path) -> dict[str, str]:
@@ -257,9 +222,7 @@ def _to_your_remote(view: Path) -> dict[str, str]:
 
 
 def _one_line(text: str) -> str:
-    """The last line of what was said, which is what git ends on, as one line of history.md."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return display.name(lines[-1])[:300] if lines else ""
+    return reading.one_line(text)
 
 
 def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = None) -> bool:
@@ -293,7 +256,7 @@ def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = 
     task.event("history_requested", ids=asked[:IDS], round=answered + 1)
     found = [ensure(task, pod, commit, depth=depth, source=source) for commit in asked[:IDS]]
     found += [Outcome(commit, PAST_IDS) for commit in asked[IDS:]]
-    control.refresh(task, pod, control.reviewed_commit(task), depth)
+    control.refresh_for(task, pod, depth)
     _write(folder, [f"{o.commit}: {o.said}" for o in found])
     _record(task, found)
     return True

@@ -129,7 +129,7 @@ def make_supervisor(
         if not getattr(planner, "manual", False):
             planner = control.Reader(
                 planner,
-                lambda: control.refresh(task, pod, control.reviewed_commit(task), depth=config.history_depth),
+                lambda: control.refresh_for(task, pod, config.history_depth),
                 lambda: history.answer(task, pod, config.history_depth, project.repo),
             )
     reviewer = None

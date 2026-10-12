@@ -131,9 +131,9 @@ def depth_of(depth: int) -> None:
 def test_both_readers_views_are_made_as_deep_as_config_toml_says(docker):  # noqa: F811
     """The planner's copy, brought up to date before its turn, and the reviewer's of a round."""
     depth_of(2)
+    commits(config_dir().parent / "repo", 4)  # your history before the task's base
     task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
-    for i in range(4):
-        commit(task.repo, "calc.py", f"x = {i}\n")
+    commit(task.repo, "calc.py", "x = 1\n")
     task.set_verified_commit(git(task.repo, "rev-parse", "HEAD"))
     pod = actions.task_pod(task.id)
     pod.up(timeout=1)
@@ -831,3 +831,94 @@ def test_an_id_in_capitals_is_the_same_commit_and_answered_in_small_letters(made
     request(planned, ids[11].upper(), ids[-1][:7].upper())
     assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
     assert answered(planned) == [f"{ids[11]}: available", f"{ids[-1][:7]}: available"]
+
+
+# --- fix round 1: a reader's copy always holds the task's base -----------------------------------
+
+
+@pytest.fixture
+def long_work(mine, tmp_path) -> tuple[Path, str, list[str]]:
+    """A task's clone whose work is seven commits past its base; the base, and the work."""
+    clone = a_task(mine, tmp_path / "task")
+    base = git(clone, "rev-parse", "HEAD")
+    return clone, base, commits(clone, 7, "work")
+
+
+def test_a_copy_too_shallow_for_its_base_is_made_deeper_to_it(long_work, tmp_path):
+    clone, base, work = long_work
+    view = tmp_path / "view"
+    view.mkdir()
+    reading.view(clone, BRANCH, view, depth=3, base=base)
+    done = subprocess.run(["git", "-C", str(view), "diff", "--stat", f"{base}..HEAD"], capture_output=True)
+    assert done.returncode == 0 and b"work" in done.stdout
+    assert git(view, "rev-parse", "HEAD") == work[-1]
+    assert counted(view) == 9, "three, then three more a step, until the base is there"
+
+
+def test_a_copy_whose_base_is_past_every_step_is_refused_as_it_was(long_work, tmp_path, monkeypatch):
+    clone, base, _ = long_work
+    view = tmp_path / "view"
+    view.mkdir()
+    monkeypatch.setattr(reading, "STEPS", 1)
+    with pytest.raises(repo.RepoError) as refused:
+        reading.view(clone, BRANCH, view, depth=3, base=base)
+    assert str(refused.value) == (
+        f"the work is more than 3 commits past its base {base[:7]}; raise history_depth in the "
+        "configuration and start the task again"
+    )
+    assert git(view, "rev-list", "--count", "FETCH_HEAD") == "3", "the copy as the first fetch made it"
+
+
+def test_a_clone_blocked_on_the_way_to_the_base_gets_no_further_git(long_work, tmp_path, monkeypatch):
+    clone, base, _ = long_work
+    view = tmp_path / "view"
+    view.mkdir()
+    checks, fetches = [], []
+    real_run = repo.run_git
+
+    def guard(at):
+        checks.append(at)
+        if len(checks) > 2:  # the first fetch's check, the first step's, then blocked
+            raise repo.Blocked("blocked by what the task added", [])
+
+    def run_git(args, **how):
+        fetches.append((len(checks), list(args)))
+        return real_run(args, **how)
+
+    monkeypatch.setattr(repo, "guard", guard)
+    monkeypatch.setattr(repo, "run_git", run_git)
+    with pytest.raises(repo.Blocked):
+        reading.view(clone, BRANCH, view, depth=3, base=base)
+    assert not [args for at, args in fetches if at > 2 and "fetch" in args]
+
+
+def a_long_task(mode: str) -> tuple:
+    """A task of the docker fixture's machine, history_depth 3, its work five commits past its
+    base and verified; its pod up."""
+    depth_of(3)
+    task = actions.create("demo", "Add divide", orchestration=mode)
+    for i in range(5):
+        commit(task.repo, "calc.py", f"x = {i}\n")
+    task.set_verified_commit(git(task.repo, "rev-parse", "HEAD"))
+    pod = actions.task_pod(task.id)
+    pod.up(timeout=1)
+    return task, pod
+
+
+def diffed(view: Path, base: str) -> int:
+    asked = ["git", "-C", str(view), "diff", "--stat", f"{base}..HEAD"]
+    return subprocess.run(asked, capture_output=True).returncode
+
+
+def test_a_reviewers_round_reads_the_work_from_its_base_however_long_it_is(docker):  # noqa: F811
+    task, pod = a_long_task("planner_writer_reviewer")
+    reviewing.up(task, pod, load_config())
+    assert diffed(Path(pod.review_src), task.read_state().base_commit) == 0
+
+
+def test_the_planners_copy_made_fresh_holds_the_base_however_long_the_work_is(docker):  # noqa: F811
+    task, pod = a_long_task("supervisor_worker")
+    _, project = actions.load(task.id)
+    sup = supervise.make_supervisor(task, project, pod, load_config())
+    sup.planner.bring_up_to_date()
+    assert diffed(pod.control_src, task.read_state().base_commit) == 0

@@ -266,10 +266,11 @@ def test_two_gits_on_the_host_are_handed_how_you_reach_your_remotes():
     which asks by whether the commit it starts from is your own (repo.yours), and the fetch of
     older commits from the remote recorded with the task (history.ensure), sent only once
     repo.yours holds for its base; no other. The rest of repo.py only hands the choice down,
-    and only by name: the functions take it as a keyword alone, so no call says it out of this
-    count's sight, and none says it outright."""
-    assert keyword_sites("to_remotes", unless=constant(False)) == {"repo.py": 3, "history.py": 1}, (
-        "prepare, by repo.yours; history's fetch from your remote; git to run_git; run_git to git_environment"
+    as reading.deepen does for history's fetch, and only by name: the functions take it as a
+    keyword alone, so no call says it out of this count's sight, and none says it outright."""
+    sites = {"repo.py": 3, "history.py": 1, "reading.py": 1}
+    assert keyword_sites("to_remotes", unless=constant(False)) == sites, (
+        "prepare, by repo.yours; history's fetch, through reading.deepen; git to run_git; run_git on"
     )
     assert keyword_sites("to_remotes", unless=lambda node: not constant(True)(node)) == {}
 

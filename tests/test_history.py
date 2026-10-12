@@ -1016,3 +1016,17 @@ def test_a_request_that_begins_with_a_byte_order_mark_is_read_without_it(made):
     (planned.task.meta / "handoff" / "history-request.md").write_text(f"\ufeff{ids[-1]}\n")
     history.answer(planned.task, planned.pod, depth=5, source=planned.source)
     assert answered(planned) == [f"{ids[-1]}: available"]
+
+
+def test_an_answer_is_kept_when_the_copy_cannot_be_brought_up_to_date(made, monkeypatch):
+    planned, ids = made
+
+    def blocked(*args, **kw):
+        raise repo.Blocked("the task's clone is blocked by what was added to it", [])
+
+    monkeypatch.setattr(control, "refresh_for", blocked)
+    request(planned, ids[-1])
+    with pytest.raises(repo.Blocked):
+        history.answer(planned.task, planned.pod, depth=5, source=planned.source)
+    assert answered(planned) == [f"{ids[-1]}: available"]
+    assert [kind for kind, _ in of(planned, *KINDS)] == ["history_requested", "history_acquired"]

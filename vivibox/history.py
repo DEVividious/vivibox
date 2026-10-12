@@ -245,9 +245,9 @@ def _one_line(text: str) -> str:
 def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = None) -> bool:
     """The reader's request for older commits, at the end of its turn in its control container:
     REQUEST in the handoff, a commit id a line, read as every file there is (handoff), and taken
-    away. Each of the first IDS ids is looked for (ensure), the copy brought up to date
-    (control.refresh), and ANSWER says what became of each, a line an id; on the record as
-    history_requested, then history_acquired or history_refused for each. True when the reader
+    away. Each of the first IDS ids is looked for (ensure), ANSWER says what became of each, a
+    line an id, on the record as history_requested, then history_acquired or history_refused
+    for each; then the copy is brought up to date (control.refresh_for). True when the reader
     is to be given a turn to read it. False for no request, for one that is not read (a link,
     a special file), and for one past ROUNDS in this phase of the task, which is refused in
     ANSWER as a whole, nothing fetched: the turn then goes on as if none had been made."""
@@ -274,9 +274,11 @@ def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = 
         return False
     task.event("history_requested", ids=asked, round=answered + 1)
     found = [ensure(task, pod, commit, depth=depth, source=source) for commit in asked]
-    control.refresh_for(task, pod, depth)
+    # The answer and its record first: a copy that cannot be brought up to date (a clone the
+    # task blocked) stops the task with them kept.
     _write(folder, [f"{o.commit}: {o.said}" for o in found] + _more(more))
     _record(task, found, more)
+    control.refresh_for(task, pod, depth)
     return True
 
 

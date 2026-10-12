@@ -882,7 +882,7 @@ def test_a_clone_blocked_on_the_way_to_the_base_gets_no_further_git(long_work, t
 
     def guard(at):
         checks.append(at)
-        if len(checks) > 2:  # the first fetch's check, the first step's, then blocked
+        if len(checks) > 2:  # the first fetch's check, the branch's, then blocked before a step
             raise repo.Blocked("blocked by what the task added", [])
 
     def run_git(args, **how):
@@ -1120,3 +1120,21 @@ def test_the_fetch_from_your_remote_asks_nowhere_for_what_it_lacks(behind, tmp_p
     for _, env in sent:
         assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_NO_LAZY_FETCH"] == "1"
         assert env["GIT_ASKPASS"] == "" and env["SSH_ASKPASS_REQUIRE"] == "never"
+
+
+# --- fix round 2 ----------------------------------------------------------------------------------
+
+
+def test_a_branch_reset_below_its_base_is_refused_for_what_it_is(long_work, tmp_path):
+    """The writer moved the task's branch below its base: no depth brings the base back, and
+    raising history_depth is not the step."""
+    clone, base, _ = long_work
+    git(clone, "reset", "-q", "--hard", f"{base}~3")
+    view = tmp_path / "view"
+    view.mkdir()
+    with pytest.raises(repo.RepoError) as refused:
+        reading.view(clone, BRANCH, view, depth=3, base=base)
+    assert str(refused.value) == (
+        f"the task's branch no longer holds its base {base[:7]}: its commits were reset below it; reply, "
+        "and the writer puts the branch back on its base, or delete the task"
+    )

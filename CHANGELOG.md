@@ -382,7 +382,8 @@ in [docs/install.md](docs/install.md)).
 - Either copy always holds the task's base, which the review's `git diff <base>..HEAD` needs:
   work longer than `history_depth` commits has its copy made deeper from the task's clone until
   the base is there, and work more than 20 × `history_depth` commits past its base is refused
-  with the step (raise `history_depth`, start the task again).
+  with the step (raise `history_depth`, start the task again); a branch the writer reset below
+  its base is refused as that, with its own step (reply, or delete the task).
 
 ### Fixed
 

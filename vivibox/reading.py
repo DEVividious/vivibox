@@ -167,10 +167,22 @@ def _to_base(clone: Path, branch: str, src: Path, base: str, depth: int, own: di
     <base>..HEAD` needs and a writer's commits past history_depth would leave out: from the
     clone alone, depth commits a step, the clone checked before each (repo.guard), each step
     within repo.CLONE_TIMEOUT and all within repo.COPY_TIMEOUT, STEPS steps at most. Past them,
-    or on a step that fails, the copy is refused, as deep as it was."""
+    or on a step that fails, the copy is refused, as deep as it was; and so is a branch that no
+    longer holds the base at all (reset below it), for that reason."""
     has = lambda: repo.git("cat-file", "-e", f"{base}^{{commit}}", cwd=src, check=False, env=own)  # noqa: E731
     if has().returncode == 0:
         return
+    # A branch the writer reset below its base holds it at no depth: said as it is, with the
+    # step that works, and no fetch spent on it. Asked of the clone as every git of the host's
+    # asks it (repo.in_clone: checked first, within its time).
+    held = repo.in_clone(
+        clone, "merge-base", "--is-ancestor", base, f"refs/heads/{branch}", check=False, env=HOST_GIT
+    )
+    if held.returncode != 0:
+        raise repo.RepoError(
+            f"the task's branch no longer holds its base {base[:7]}: its commits were reset below it; "
+            "reply, and the writer puts the branch back on its base, or delete the task"
+        )
     before, until = boundary(src), time.monotonic() + repo.COPY_TIMEOUT
     try:
         for _ in range(STEPS):

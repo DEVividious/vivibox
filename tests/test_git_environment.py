@@ -22,6 +22,7 @@ import pytest
 from conftest import GIT_CONFIG, HOME, IDENTITY, git_with, global_git_config, make_repo, suites_own
 
 from vivibox import about, baseline, context, history, keys_work, reading, repo, version
+from vivibox.task import Task
 
 REAL_GIT = shutil.which("git")
 BRANCH = repo.branch_name("demo-1")
@@ -361,6 +362,24 @@ def test_a_readers_view_and_working_directory_are_the_hosts_own(site, tmp_path, 
         "vivibox <vivibox@localhost> vivibox The reviewer's working directory"
     )
     assert git(task.clone, "rev-parse", "HEAD") == newer and git(task.clone, "status", "--porcelain") == ""
+
+
+@every_variable
+def test_the_planners_copy_is_made_deeper_from_the_tasks_clone_and_nowhere_else(
+    site, tmp_path, monkeypatch, case
+):
+    """history.ensure, from the clone: the copy is the host's own, deepened from the clone
+    alone, and none of your shell's variables reaches a git of it."""
+    task = a_task(site, tmp_path / "demo-1")
+    view = tmp_path / "control-src"
+    view.mkdir()
+    reading.view(task.clone, BRANCH, view, depth=1)
+    with carried(site, monkeypatch, case):
+        found = history.ensure(Task(task.root), SimpleNamespace(control_src=view), task.base, depth=1)
+    assert found.available and found.steps == 2
+    assert git(view, "rev-parse", f"{task.base}^") == git(site.mine, "rev-parse", "HEAD^")
+    assert git(task.clone, "rev-parse", "HEAD") == task.work, "the clone as it was"
+    assert git(task.clone, "status", "--porcelain") == ""
 
 
 @every_variable

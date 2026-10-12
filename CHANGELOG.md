@@ -1141,6 +1141,13 @@ in [docs/install.md](docs/install.md)).
 - A task records, when it is made, the address of the remote its base branch tracks in your
   checkout, else `origin`'s (`history_remote` in `state.json`), read in your repository by the
   host's git; a task without it has none, and runs as before.
+- `history.ensure` makes the planner's copy of the commits deeper for one commit id: hexadecimal
+  and nothing else, refused before any git runs; then `history_depth` commits a step along the
+  task's branch from the task's clone, checked first as every git of the host's in it, and,
+  once the clone has no more, along your base branch from the recorded remote, your way of
+  reaching it handed to that fetch only when the task starts from your own work; 20 steps in
+  all, a minute a step from the clone and ten minutes in all, the copy as deep as it was when
+  the commit does not come.
 - What the host makes for a container that only reads the work (its harness's working
   directory, its view of the commits) moved from `control.py` to `reading.py`, for the
   reviewer's container to use too; nothing changes for a person.

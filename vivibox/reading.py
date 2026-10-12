@@ -59,7 +59,7 @@ def made(folder: Path) -> bool:
     return folder.is_dir() and not folder.is_symlink() and git_dir.is_dir() and not git_dir.is_symlink()
 
 
-def _in(folder: Path) -> dict[str, str]:
+def own_git(folder: Path) -> dict[str, str]:
     """The environment of the host's git for one folder of its own making: HOST_GIT, and that
     folder as its repository and its work tree, said outright. git takes both from the
     environment before the directory it is run in, so a GIT_DIR your shell carries (inside a
@@ -78,7 +78,7 @@ def workdir(work: Path, whose: str) -> None:
         raise repo.RepoError(f"{whose} working directory has no folder at {work}; start the task again")
     if (work / ".git").exists():
         return
-    own = _in(work)
+    own = own_git(work)
     repo.git("init", "--quiet", "--template=", "--initial-branch", "main", str(work), env=own)
     who = ("-c", "user.name=vivibox", "-c", "user.email=vivibox@localhost")
     message = f"{whose[0].upper()}{whose[1:]} working directory"
@@ -91,9 +91,9 @@ def _own_settings(src: Path) -> None:
     checkout that follows writes every file again, a link among them as a plain file."""
     shutil.rmtree(src / ".git" / "hooks", ignore_errors=True)
     key, value = LINKS_AS_FILES
-    has = repo.git("config", "--local", "--get", key, cwd=src, check=False, env=_in(src))
+    has = repo.git("config", "--local", "--get", key, cwd=src, check=False, env=own_git(src))
     if has.stdout.strip() != value:
-        repo.git("config", "--local", key, value, cwd=src, env=_in(src))
+        repo.git("config", "--local", key, value, cwd=src, env=own_git(src))
         (src / ".git" / "index").unlink(missing_ok=True)
 
 
@@ -112,7 +112,7 @@ def view(
     else. It is made with depth commits of the branch, and kept as deep as it is after that."""
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"{whose} copy of the work has no folder at {src}; start the task again")
-    own = _in(src)
+    own = own_git(src)
     if not (src / ".git").exists():
         repo.git("init", "--quiet", "--template=", "--initial-branch", branch, str(src), env=own)
     _own_settings(src)

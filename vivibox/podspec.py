@@ -408,6 +408,9 @@ def gate_tool_env(gate_dir) -> dict[str, str]:
     return {
         "MAVEN_ARGS": f"{IMAGE_MAVEN_ARGS.replace(CACHES['m2'], f'{caches}/m2')} {build_cache}",
         "MAVEN_OPTS": f"-Dmaven.repo.local={caches}/m2 {build_cache}",
+        # The wrapper's own home: $HOME/.m2 is a folder Docker made as root for the settings
+        # file mounted there, so the wrapper could not fetch a distribution into it.
+        "MAVEN_USER_HOME": f"{caches}/m2-home",
         "GRADLE_USER_HOME": f"{caches}/gradle",
         "GRADLE_RO_DEP_CACHE": f"{CACHES['gradle']}/caches",
         "npm_config_cache": f"{caches}/npm",

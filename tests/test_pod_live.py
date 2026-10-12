@@ -727,6 +727,38 @@ def test_a_project_jdk_still_beats_the_image_default(env):
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def test_the_gates_maven_wrapper_has_a_home_it_can_write_and_the_shared_ones_stay_read_only(env):
+    """A project's ./mvnw keeps the Maven it fetches under MAVEN_USER_HOME/wrapper/dists, $HOME/.m2
+    by default. In the gate that folder is one Docker made as root for the settings file mounted
+    in it, so the wrapper ended with "mkdir: cannot create directory" before any build. The gate
+    points the wrapper at a home of its own caches instead; the settings file and the shared
+    repository stay read-only."""
+    pod = env["pod"]
+    marker = f"dist-{secrets.token_hex(4)}"
+    pod.gate_up()
+    try:
+        home = gate(env, "echo $MAVEN_USER_HOME").stdout.strip()
+        assert home == f"{pod.gate_dir}/caches/m2-home", home
+        # What the wrapper does first (mvnw: MAVEN_HOME="$MAVEN_USER_HOME/wrapper/dists/<name>/<hash>").
+        made = gate(
+            env,
+            f'mkdir -p "$MAVEN_USER_HOME/wrapper/dists/{marker}"'
+            f' && touch "$MAVEN_USER_HOME/wrapper/dists/{marker}/ok"',
+            check=False,
+        )
+        assert made.returncode == 0, made.stderr
+        old = gate(env, "mkdir -p /config/.m2/wrapper", check=False)
+        assert old.returncode != 0 and "Permission denied" in old.stderr, (
+            "the folder of the settings file is not the wrapper's"
+        )
+        settings = gate(env, "touch /config/.m2/settings.xml", check=False)
+        assert settings.returncode != 0 and "Read-only file system" in settings.stderr, settings.stderr
+        shared = gate(env, f"touch /cache/m2/{marker}", check=False)
+        assert shared.returncode != 0 and "Read-only file system" in shared.stderr, shared.stderr
+    finally:
+        pod.gate_down()
+
+
 def test_a_fifo_in_the_clone_ends_the_gates_clone_in_time_and_takes_the_gate_down(env, monkeypatch):
     """A process the agent left running makes .git/packed-refs a named pipe after the host's
     checks: the gate's clone of the clone waits on it, and past its limit goes down with the gate."""

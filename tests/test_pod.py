@@ -775,6 +775,9 @@ def test_the_gate_reads_the_shared_caches_and_writes_only_its_own(pod, tmp_path)
     assert "-Daether.enhancedLocalRepository.split=true" in env["MAVEN_ARGS"], "as the image's"
     assert "-Dmaven.build.cache.location=/cache/build-cache" in env["MAVEN_ARGS"], "the sibling moved: named"
     assert env["GRADLE_USER_HOME"] == f"{caches}/gradle"
+    # The Maven wrapper keeps the distributions it fetches under MAVEN_USER_HOME, $HOME/.m2 by
+    # default, which in the gate is a folder Docker made as root for the settings file.
+    assert env["MAVEN_USER_HOME"] == f"{caches}/m2-home"
     assert env["GRADLE_RO_DEP_CACHE"] == "/cache/gradle/caches", "the directory with modules-2, read-only"
     assert env["MISE_DATA_DIR"] == f"{caches}/mise" and env["MISE_DISABLE_TOOLS"] == "java"
     # Yarn Classic's default is a user-level .yarnrc (gate_up), as the image's is the installation's

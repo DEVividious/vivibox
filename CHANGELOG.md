@@ -359,6 +359,12 @@ in [docs/install.md](docs/install.md)).
 
 ### Fixed
 
+- The verification can run a project's Maven wrapper again: `./mvnw` keeps the distribution
+  it fetches under `MAVEN_USER_HOME`, which the gate now points at a folder of its own caches
+  (`m2-home`, fresh for every verification, like Gradle's home there). It was `$HOME/.m2`, a
+  folder Docker makes as root for the settings file mounted there, so the wrapper ended with
+  `mkdir: cannot create directory '/config/.m2/wrapper': Permission denied` before any build,
+  and the verification of every `./mvnw` project failed.
 - Serena as vivibox starts it reports nothing of its use to its makers. As installed it asks
   their server at every start, with its version, the system and how it was started; vivibox
   now starts it with `SERENA_USAGE_REPORTING=false`, which turns that off.

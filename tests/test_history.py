@@ -584,9 +584,7 @@ def test_a_request_holds_five_ids_and_the_rest_are_not_looked_for(made, monkeypa
     request(planned, *ids[20:27])
     history.answer(planned.task, planned.pod, depth=5, source=planned.source)
     assert looked == ids[20:25]
-    assert answered(planned)[5:] == [
-        f"{i}: not looked for: a request holds at most 5 ids" for i in ids[25:27]
-    ]
+    assert answered(planned)[5:] == ["2 more lines not looked for: a request holds at most 5 ids"]
 
 
 def test_the_fourth_request_of_a_phase_is_refused_and_the_turn_goes_on(made):
@@ -994,3 +992,27 @@ def test_a_shallow_file_the_writer_left_in_a_whole_clone_reaches_no_remote(behin
     found = planned.ensure("0123456789abcdef0123456789abcdef01234567")
     assert found.said == "not found within 100 commits before the base on its branch"
     assert yours.handed() == [] and not yours.asked.exists()
+
+
+@pytest.mark.parametrize("fourth", [False, True], ids=["answered", "past the requests of the phase"])
+def test_a_request_of_ten_thousand_lines_is_answered_in_six(made, monkeypatch, fourth):
+    planned, ids = made
+    nothing = lambda task, pod, commit, **kw: history.Outcome(commit, "not a commit id")  # noqa: E731
+    monkeypatch.setattr(history, "ensure", nothing)
+    for _ in range(3 if fourth else 0):
+        request(planned, ids[-1])
+        history.answer(planned.task, planned.pod, depth=5, source=planned.source)
+    before = len(planned.task.events())
+    (planned.task.meta / "handoff" / "history-request.md").write_bytes(b"x\n" * 10_000)
+    history.answer(planned.task, planned.pod, depth=5, source=planned.source)
+    assert len(answered(planned)) <= 6
+    kinds = ("history_acquired", "history_refused")
+    assert len([e for e in planned.task.events()[before:] if e["type"] in kinds]) <= 6
+    assert answered(planned)[-1].endswith("more lines not looked for: a request holds at most 5 ids")
+
+
+def test_a_request_that_begins_with_a_byte_order_mark_is_read_without_it(made):
+    planned, ids = made
+    (planned.task.meta / "handoff" / "history-request.md").write_text(f"\ufeff{ids[-1]}\n")
+    history.answer(planned.task, planned.pod, depth=5, source=planned.source)
+    assert answered(planned) == [f"{ids[-1]}: available"]

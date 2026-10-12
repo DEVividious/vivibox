@@ -262,21 +262,27 @@ def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = 
         _write(folder, [f"{REQUEST} was not read: {e.why}"])
         return False
     _away(path)
-    asked = [as_id(display.name(line.strip())[:80]) for line in text.splitlines() if line.strip()]
+    # A byte order mark, as an editor may begin a file with, is no part of the first id.
+    lines = [line.strip() for line in text.removeprefix("\ufeff").splitlines() if line.strip()]
+    asked, more = [as_id(display.name(line)[:80]) for line in lines[:IDS]], len(lines) - IDS
     if not asked:
         return False
     if (answered := _rounds(task)) >= ROUNDS:
         refused = [Outcome(commit, PAST_ROUNDS) for commit in asked]
-        _write(folder, [f"{o.commit}: {o.said}" for o in refused])
-        _record(task, refused)
+        _write(folder, [f"{o.commit}: {o.said}" for o in refused] + _more(more))
+        _record(task, refused, more)
         return False
-    task.event("history_requested", ids=asked[:IDS], round=answered + 1)
-    found = [ensure(task, pod, commit, depth=depth, source=source) for commit in asked[:IDS]]
-    found += [Outcome(commit, PAST_IDS) for commit in asked[IDS:]]
+    task.event("history_requested", ids=asked, round=answered + 1)
+    found = [ensure(task, pod, commit, depth=depth, source=source) for commit in asked]
     control.refresh_for(task, pod, depth)
-    _write(folder, [f"{o.commit}: {o.said}" for o in found])
-    _record(task, found)
+    _write(folder, [f"{o.commit}: {o.said}" for o in found] + _more(more))
+    _record(task, found, more)
     return True
+
+
+def _more(more: int) -> list[str]:
+    """The line that stands for the lines of a request past IDS: none are listed one by one."""
+    return [f"{more} more lines {PAST_IDS}"] if more > 0 else []
 
 
 def _rounds(task) -> int:
@@ -290,7 +296,10 @@ def _rounds(task) -> int:
     return count
 
 
-def _record(task, found: list[Outcome]) -> None:
+def _record(task, found: list[Outcome], more: int = 0) -> None:
+    """An event an id, and one for the lines past IDS."""
+    if more > 0:
+        task.event("history_refused", more=more, outcome=PAST_IDS)
     for o in found:
         if o.available:
             task.event("history_acquired", id=o.commit, outcome=o.said, steps=o.steps)

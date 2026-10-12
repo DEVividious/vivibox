@@ -55,7 +55,8 @@ in [docs/install.md](docs/install.md)).
   disk larger at once (a disk never shrinks). `vivibox usage` and `u` count a task's disk from
   its mount.
 - A planner that needs a commit older than its copy of the commits holds asks for it: its id,
-  one a line and at most five, in `/task/handoff/history-request.md`, and it ends the turn.
+  one a line and at most five (more lines are counted in one line, not listed; a byte order
+  mark is no part of the first), in `/task/handoff/history-request.md`, and it ends the turn.
   vivibox looks for each along the task's branch, from the task's clone and then, when your
   checkout is shallow, from the remote your base branch tracks, writes what became of each to `/task/handoff/history.md`
   (`available` once it is on the copy's history as git shows it there, with its parent, or why

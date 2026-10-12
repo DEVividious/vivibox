@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import display, ui
 from .gate import proposal_fault
-from .history import ROUNDS
+from .history import IDS, ROUNDS
 from .risky import stop_said
 from .states import State
 from .task import Task
@@ -175,6 +175,8 @@ def entries(task: Task) -> list[tuple[str, str]]:
                 if steps
                 else f"older commit {commit} already in the planner's copy"
             )
+        elif kind == "history_refused" and data.get("more"):
+            text = f"{data['more']} more lines of the request not looked for: at most {IDS} ids a request"
         elif kind == "history_refused":
             text = f"older commit {data.get('id', '')[:12]} not brought: {data.get('outcome', '')}"
         elif kind == "whole_build":

@@ -134,6 +134,7 @@ def test_the_timeline_says_what_older_commits_were_asked_for_and_what_became_of_
     task.event("history_refused", id=asked, outcome="no remote recorded")
     task.event("history_refused", id="main", outcome="not a commit id")
     task.event("history_acquired", id=asked, outcome="available", steps=0)
+    task.event("history_refused", more=2043, outcome="not looked for: a request holds at most 5 ids")
     what = [text for _, text in timeline.entries(task)][1:]
     assert what == [
         "older commits asked for, request 2 of 3: 0123456789ab, fedcba9, main",
@@ -141,4 +142,5 @@ def test_the_timeline_says_what_older_commits_were_asked_for_and_what_became_of_
         "older commit fedcba9 not brought: no remote recorded",
         "older commit main not brought: not a commit id",
         "older commit fedcba9 already in the planner's copy",
+        "2043 more lines of the request not looked for: at most 5 ids a request",
     ]

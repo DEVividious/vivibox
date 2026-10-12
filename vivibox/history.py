@@ -90,10 +90,11 @@ def ensure(task, pod, commit: str, depth: int = DEFAULT_HISTORY_DEPTH, source: P
     any git runs; one the copy has is there with no fetch. Else the copy is made deeper along
     the task's branch, depth commits a step, from the task's clone (repo.guard first, as for
     every git of the host's that reads it), on this machine, until the commit is there or the
-    clone has no more; then, the same way along your base branch, from the remote recorded
-    when the task was made (remote), by your own means of reaching it (repo.TO_YOUR_REMOTES),
-    and only for a task that starts from your own work (repo.yours, in your checkout at
-    source: the project's, when not given). STEPS steps in all, each within
+    clone has no more; then, where the clone is shallow (your checkout is), the same way along
+    your base branch, from the remote recorded when the task was made (remote), by your own
+    means of reaching it (repo.TO_YOUR_REMOTES), and only for a task that starts from your
+    own work (repo.yours, in your checkout at source: the project's, when not given); a
+    commit a whole clone lacks is not found. STEPS steps in all, each within
     repo.CLONE_TIMEOUT from the clone, and the whole within repo.COPY_TIMEOUT. A request that
     does not end with the commit there leaves the copy as deep as it was."""
     if not COMMIT_ID.fullmatch(commit):
@@ -113,6 +114,14 @@ def _deepened(task, walk: _Walk, commit: str, source: Path | None) -> str:
     if why:
         return why if why == AVAILABLE else NOT_FETCHED.format(source=CLONE, why=why)
     if walk.steps >= STEPS:
+        return NOT_FOUND.format(commits=STEPS * walk.depth)
+    # The clone of a whole checkout holds the base branch's whole history as of the base: what
+    # it lacks is on no history of that branch, and no remote is asked for it.
+    try:
+        shallow = repo.in_clone(task.repo, "rev-parse", "--is-shallow-repository").stdout.strip()
+    except repo.RepoError as e:
+        return NOT_FETCHED.format(source=CLONE, why=_one_line(str(e)))
+    if shallow != "true":
         return NOT_FOUND.format(commits=STEPS * walk.depth)
     st = task.read_state()
     if not st.history_remote:

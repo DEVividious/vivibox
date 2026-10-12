@@ -287,12 +287,13 @@ def test_what_is_no_commit_id_is_refused_before_any_git_runs(made, monkeypatch, 
     assert ran == [] and planned.looks() == before
 
 
-def test_a_commit_the_clone_has_not_and_no_remote_recorded_is_said_so(made):
-    """The clone is all there is: deepened until it has no more, then nothing to fetch from."""
+def test_a_commit_a_whole_clone_has_not_is_not_found(made):
+    """The clone of a whole checkout holds the branch's whole history as of the base: deepened
+    until it has no more, a commit it lacks is on no history of the base branch."""
     planned, _ = made
     before = planned.looks()
     found = planned.ensure("0123456789abcdef0123456789abcdef01234567")
-    assert found.said == "no remote recorded" and not found.available
+    assert found.said == "not found within 100 commits before the base on its branch" and not found.available
     assert planned.looks() == before, "the copy as it was"
 
 
@@ -428,8 +429,14 @@ class OverSsh:
     """Your shallow checkout, whose remote answers only to the ssh command your shell names; a
     git first on PATH writes down every git started and whether it was handed that command."""
 
-    def __init__(self, bare: Path, tmp: Path):
-        self.checkout = shallow_checkout(f"file://{bare}", tmp / "mine")
+    def __init__(self, bare: Path, tmp: Path, whole: bool = False):
+        if whole:
+            subprocess.run(["git", "clone", "-q", f"file://{bare}", str(tmp / "mine")], check=True)
+            git(tmp / "mine", "config", "user.name", "Test User")
+            git(tmp / "mine", "config", "user.email", "test@example.com")
+            self.checkout = tmp / "mine"
+        else:
+            self.checkout = shallow_checkout(f"file://{bare}", tmp / "mine")
         self.address = f"ssh://git.example.invalid{bare}"
         git(self.checkout, "remote", "set-url", "origin", self.address)
         self.asked, self.log = tmp / "asked-of-your-ssh", tmp / "git.log"
@@ -802,3 +809,16 @@ def test_a_boundary_of_the_copy_is_no_root_and_is_made_deeper(made, monkeypatch)
     monkeypatch.setattr(history, "STEPS", 20)
     found = planned.ensure(boundary)
     assert found.available and found.steps == 1
+
+
+def test_a_whole_checkouts_remote_is_never_asked_for_a_commit_its_clone_lacks(behind, tmp_path, monkeypatch):
+    """A remote is recorded and reached your way, and the clone, of a whole checkout, has the
+    base branch's whole history: no fetch goes to the remote for what it lacks."""
+    bare, _ = behind
+    yours = OverSsh(bare, tmp_path, whole=True)
+    planned = Planned(yours.checkout, tmp_path / "tasks")
+    assert planned.task.read_state().history_remote == yours.address
+    yours.reach(monkeypatch)
+    found = planned.ensure("0123456789abcdef0123456789abcdef01234567")
+    assert found.said == "not found within 100 commits before the base on its branch"
+    assert yours.handed() == [] and not yours.asked.exists()

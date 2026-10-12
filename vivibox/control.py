@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from . import brief, claudecode, comments, opencode, providers, reading, repo, reviewing, roles, secrets
-from .config import Config
+from .config import DEFAULT_HISTORY_DEPTH, Config
 from .pod import Mount, Pod
 from .states import State
 from .task import Task
@@ -118,13 +118,14 @@ def reviewed_commit(task: Task) -> str:
     return st.verified_commit if st.state is State.REVIEW else ""
 
 
-def refresh(task: Task, pod: Pod, commit: str = "") -> None:
+def refresh(task: Task, pod: Pod, commit: str = "", depth: int = DEFAULT_HISTORY_DEPTH) -> None:
     """The planner's copy of the committed work (reading.view), in a folder of the task's disk
     that only the control container mounts, read-only: on commit when one is given (the verified
-    one, for a review), else on the task's branch as it is. Before the planner's first turn and
-    before each one after it; the harness's working directory (workdir) is made with it."""
+    one, for a review), else on the task's branch as it is; made with depth commits of the
+    branch (history_depth). Before the planner's first turn and before each one after it; the
+    harness's working directory (workdir) is made with it."""
     workdir(pod)
-    reading.view(task.repo, repo.branch_name(task.id), pod.control_src, commit, PLANNERS_OWN)
+    reading.view(task.repo, repo.branch_name(task.id), pod.control_src, commit, PLANNERS_OWN, depth)
 
 
 class Reader:

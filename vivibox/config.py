@@ -123,6 +123,10 @@ ORCHESTRATION_LEGEND = (
     "+ one agent, one session, one model · → then · ⇄ rounds of fixes, up to Rounds"
 )
 DEFAULT_MAX_ROUNDS = 3
+# Commits of the task's branch a reader's view of the commits is made with (reading.view), and
+# how many more each step of history a planner asks for brings (history.ensure): an ordinary
+# git log, blame or show reaches no further, and a large repository's view stays megabytes.
+DEFAULT_HISTORY_DEPTH = 100
 # What the view says of limits.max_rounds.
 ROUNDS_HELP = (
     "Fix turns the writer gets on its own, from the gate or from the review, before the work "
@@ -207,6 +211,8 @@ class Config:
     ntfy_events: str = "decisions"
     # What a task's containers may use, and the size of its disk (the rest of [limits]).
     limits: Limits = field(default_factory=Limits)
+    # Commits a reader's view of the work holds when it is made (DEFAULT_HISTORY_DEPTH).
+    history_depth: int = DEFAULT_HISTORY_DEPTH
 
     @property
     def host_ip(self) -> str:
@@ -316,6 +322,9 @@ def load_config(base: Path | None = None) -> Config:
             raise ConfigError(f"{path}: limits.{name} is dollars per task, e.g. 2.5; 0 for none")
         costs[name] = float(value)
     pod_limits = _limits(limits, path)
+    history_depth = data.get("history_depth", DEFAULT_HISTORY_DEPTH)
+    if isinstance(history_depth, bool) or not isinstance(history_depth, int) or history_depth < 1:
+        raise ConfigError(f"{path}: history_depth is a number of commits >= 1, e.g. {DEFAULT_HISTORY_DEPTH}")
     roles = {}
     for name, role in _expect(data, "roles", dict, path).items():
         harness = role.get("harness")
@@ -418,6 +427,7 @@ def load_config(base: Path | None = None) -> Config:
         hub_mirror_port=hub_mirror_port,
         host_address=host_address,
         limits=pod_limits,
+        history_depth=history_depth,
     )
 
 

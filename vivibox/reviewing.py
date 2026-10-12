@@ -30,7 +30,7 @@ from . import (
     roles,
     secrets,
 )
-from .config import Config, Role
+from .config import DEFAULT_HISTORY_DEPTH, Config, Role
 from .harness import Harness
 from .pod import Mount, Pod
 from .prompts import CLI_REVIEW as CLI_REVIEW_TEXT
@@ -238,7 +238,7 @@ def env(task: Task) -> dict[str, str]:
     return {"OPENCODE_CONFIG": opencode.CONFIG, **reading.git_env(task.repo), **opencode.READER_ENV}
 
 
-def view(task: Task, pod: Pod) -> None:
+def view(task: Task, pod: Pod, depth: int = DEFAULT_HISTORY_DEPTH) -> None:
     """The round's working directory for the reviewer's harness and its view of the commits,
     made on the host in the review directory (reading), before its container: on the commit the
     verification passed. One that cannot be made stops the review with the reason. A task
@@ -252,7 +252,8 @@ def view(task: Task, pod: Pod) -> None:
         )
     try:
         reading.workdir(pod.review_work, REVIEWERS_OWN)
-        reading.view(task.repo, repo.branch_name(task.id), Path(pod.review_src), verified, REVIEWERS_OWN)
+        branch, src = repo.branch_name(task.id), Path(pod.review_src)
+        reading.view(task.repo, branch, src, verified, REVIEWERS_OWN, depth)
     except repo.GitTimeout as e:
         again = f"then start the task again: vivibox start {task.id}"  # the way to try again, here
         raise repo.GitTimeout(
@@ -343,7 +344,7 @@ def up(
     out.mkdir()
     # The mount point inside /task, which the container has read-only: it has to exist already.
     (task.meta / "review").mkdir(exist_ok=True)
-    view(task, pod)
+    view(task, pod, config.history_depth)
     mounts = [
         Mount(str(task.meta), "/task", read_only=True),
         comments.mount(task.meta),  # REVIEW_PROMPT reads them; the file under /task is a mount point

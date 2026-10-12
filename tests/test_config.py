@@ -405,3 +405,19 @@ def test_a_live_test_sees_the_machines_own_cpus():
     import os
 
     assert type(os.sched_getaffinity).__name__ == "builtin_function_or_method"
+
+
+def test_the_readers_views_hold_a_hundred_commits_unless_you_say_otherwise(tmp_path):
+    """history_depth, per machine: how many commits of the task's branch a reader's view of the
+    commits is made with, and how many more each step of history asked for brings."""
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\n' + ROLES)
+    assert load_config(base).history_depth == 100
+    base = write(tmp_path / "config.toml", 'tasks_dir = "/srv/vivibox"\nhistory_depth = 500\n' + ROLES)
+    assert load_config(base).history_depth == 500
+
+
+@pytest.mark.parametrize("value", ["0", "-5", '"100"', "true", "2.5"])
+def test_rejects_a_history_depth_that_is_not_a_number_of_commits(tmp_path, value):
+    base = write(tmp_path / "config.toml", f'tasks_dir = "/srv/vivibox"\nhistory_depth = {value}\n' + ROLES)
+    with pytest.raises(ConfigError, match="history_depth"):
+        load_config(base)

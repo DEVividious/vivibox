@@ -702,7 +702,7 @@ def turns(docker, monkeypatch):
     monkeypatch.setattr(opencode.OpenCode, "turn", turn)
     monkeypatch.setattr(opencode.OpenCode, "start_session", lambda self, title: "")
     monkeypatch.setattr(
-        control, "refresh", lambda task, pod, commit="": seen.append(("copy", commit, "refreshed"))
+        control, "refresh", lambda task, pod, commit="", depth=0: seen.append(("copy", commit, "refreshed"))
     )
     return seen
 
@@ -784,7 +784,7 @@ def starting(docker, monkeypatch):
     monkeypatch.setattr(image, "exists", lambda ref: True)
     monkeypatch.setattr(actions, "available_models", lambda refresh=False: {})
     monkeypatch.setattr(Pod, "up", lambda self: order.append("up"))
-    monkeypatch.setattr(control, "refresh", lambda task, pod, commit="": order.append("copy"))
+    monkeypatch.setattr(control, "refresh", lambda task, pod, commit="", depth=0: order.append("copy"))
     monkeypatch.setattr(toolchain, "ensure", lambda pod, java, tools=(): order.append("tools"))
     monkeypatch.setattr(prepare, "begin", lambda task, project, pod: None)
     for what in ("ensure_server", "restart_server"):

@@ -356,6 +356,11 @@ in [docs/install.md](docs/install.md)).
   restart of your machine, and no pod container starts by itself after one; a pod container
   started by hand with `docker start` after a restart has no rules until the task's next
   `vivibox start`, so start tasks, not containers.
+- The readers' copies of the commits (the planner's, and the reviewer's of each round) are
+  shallow: made with the last `history_depth` commits of the task's branch (100; a top-level key
+  of `config.toml`, per machine), and kept that deep by each refresh, instead of the whole
+  history, which on a large repository was a gigabyte per copy. The task's clone keeps the whole
+  history of your checkout, as before.
 
 ### Fixed
 

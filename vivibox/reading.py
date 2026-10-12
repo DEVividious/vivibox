@@ -18,6 +18,7 @@ import shutil
 from pathlib import Path
 
 from . import repo
+from .config import DEFAULT_HISTORY_DEPTH
 
 # git on the host, in a view or a working directory, reads no configuration but the folder's
 # own, which is the host's making: your global and system configuration (a filter driver,
@@ -96,7 +97,10 @@ def _own_settings(src: Path) -> None:
         (src / ".git" / "index").unlink(missing_ok=True)
 
 
-def view(clone: Path, branch: str, src: Path, commit: str = "", whose: str = "the reader's") -> None:
+def view(
+    clone: Path, branch: str, src: Path, commit: str = "", whose: str = "the reader's",
+    depth: int = DEFAULT_HISTORY_DEPTH,
+) -> None:  # fmt: skip
     """A reader's copy of the committed work at src: made by git on the host, in a folder only
     that reader's container mounts, read-only. The writer's clone is read as every git of the
     host's reads it, once it is as recorded (repo.guard) and within a time limit, and only its
@@ -105,20 +109,25 @@ def view(clone: Path, branch: str, src: Path, commit: str = "", whose: str = "th
     templates, and a committed link is a plain file there (LINKS_AS_FILES). The copy stands on
     commit when one is given (the verified one, for a review; not on the task's branch, it is
     refused), else on the task's branch as it is, and holds that commit's files and nothing
-    else."""
+    else. It is made with depth commits of the branch, and kept as deep as it is after that."""
     if not src.is_dir() or src.is_symlink():
         raise repo.RepoError(f"{whose} copy of the work has no folder at {src}; start the task again")
     own = _in(src)
     if not (src / ".git").exists():
         repo.git("init", "--quiet", "--template=", "--initial-branch", branch, str(src), env=own)
     _own_settings(src)
+    # The first fetch of a view takes depth commits of the branch (history_depth), and every later
+    # one the new commits alone: a refresh keeps the view as deep as it is, the host's deepening
+    # of the planner's among it (history.ensure), and a view made whole before stays whole.
+    made = repo.git("rev-parse", "--verify", "--quiet", "HEAD^{commit}", cwd=src, check=False, env=own)
+    deep = () if made.returncode == 0 else (f"--depth={depth}",)
     try:
         repo.in_clone(
             # --update-shallow: a clone of a shallow checkout is shallow, and git refuses to bring
             # its shallow roots into another repository without it (the fetch ends with nothing
-            # in FETCH_HEAD). The source is the clone on disk, never a remote: nothing is deepened.
-            clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow", str(clone),
-            f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=own,
+            # in FETCH_HEAD). The source is the clone on disk, never a remote.
+            clone, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--update-shallow", *deep,
+            str(clone), f"refs/heads/{branch}", cwd=src, timeout=repo.COPY_TIMEOUT, env=own,
         )  # fmt: skip
     except repo.GitTimeout as e:
         raise repo.GitTimeout(f"{whose} copy of the work could not be brought up to date: {e}") from None

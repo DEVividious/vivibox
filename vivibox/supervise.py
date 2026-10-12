@@ -126,7 +126,8 @@ def make_supervisor(
         planner = actions.harness_for("planner", pod, task)
         if not getattr(planner, "manual", False):
             planner = control.Reader(
-                planner, lambda: control.refresh(task, pod, control.reviewed_commit(task))
+                planner,
+                lambda: control.refresh(task, pod, control.reviewed_commit(task), depth=config.history_depth),
             )
     reviewer = None
     if mode.separate_reviewer:

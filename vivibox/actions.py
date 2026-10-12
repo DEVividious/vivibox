@@ -537,7 +537,7 @@ def _start(
         # The commits, for the planner to read, before anything of the project runs.
         on_step("copying the commits for the planner…")
         try:
-            control.refresh(task, pod, control.reviewed_commit(task))
+            control.refresh(task, pod, control.reviewed_commit(task), depth=config.history_depth)
         except repo.Blocked as e:
             # What the task added blocks its clone, and no git of the host's reads it: the
             # planner's copy stays as it was, and the planner gets no turn on it (its copy is

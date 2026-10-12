@@ -46,7 +46,7 @@ MOUNTED = {"/task/plan.md", "/task/context", "/task/harness", "/task/review/revi
     for name in (
         "plan-draft.md", "criteria.md", "red.md", "question.md", "comments.md", "verify-feedback.md",
         "verify.log", "context.md", "demo.md", "demo-question.md", "review-N.md", "review-N-reply.md",
-        "prepare.log", "verify-proposal.md",
+        "prepare.log", "verify-proposal.md", "history-request.md", "history.md",
     )
 }  # fmt: skip
 TASK_PATH = re.compile(r"/task/[\w./-]*[\w/]")

@@ -12,8 +12,21 @@ from conftest import make_repo
 from test_control import commit
 from test_control import docker as docker  # noqa: F401  (the fixture: a machine and a recording Docker)
 
-from vivibox import actions, history, reading, repo, reviewing, supervise
+from vivibox import (
+    actions,
+    control,
+    history,
+    orchestration,
+    prompts,
+    reading,
+    repo,
+    reviewing,
+    supervise,
+    supervisor,
+)
 from vivibox.config import config_dir, load_config
+from vivibox.harness import Harness, Turn
+from vivibox.states import State
 from vivibox.task import create_task
 
 BRANCH = repo.branch_name("demo-1")
@@ -130,6 +143,19 @@ def test_both_readers_views_are_made_as_deep_as_config_toml_says(docker):  # noq
     assert counted(pod.control_src) == 2
     reviewing.up(task, pod, load_config())
     assert counted(Path(pod.review_src)) == 2
+
+
+def test_the_planner_the_command_line_runs_has_its_requests_answered(docker):  # noqa: F811
+    task = actions.create("demo", "Add divide", orchestration="supervisor_worker")
+    head = commit(task.repo, "calc.py", "x = 1\n")
+    pod = actions.task_pod(task.id)
+    pod.up(timeout=1)
+    _, project = actions.load(task.id)
+    sup = supervise.make_supervisor(task, project, pod, load_config())
+    sup.planner.bring_up_to_date()
+    (task.meta / "handoff" / "history-request.md").write_text(f"{head}\n")
+    assert sup.planner.answer_history() is True
+    assert (task.meta / "handoff" / "history.md").read_text() == f"{head}: available\n"
 
 
 # --- the remote your base branch tracks, recorded when the task is made ---------------------------
@@ -493,3 +519,234 @@ def test_a_project_whose_checkout_vivibox_no_longer_knows_is_not_fetched_for(beh
     monkeypatch.setattr(history, "load_project", gone)
     found = history.ensure(planned.task, planned.pod, ids[10], depth=5)
     assert found.said == f"could not be fetched from file://{bare}: no project demo" and asked == ["demo"]
+
+
+# --- the request in the handoff, answered at the end of a reader's turn ---------------------------
+
+
+def request(planned: Planned, *lines: str) -> Path:
+    path = planned.task.meta / "handoff" / "history-request.md"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("".join(f"{line}\n" for line in lines))
+    return path
+
+
+def answered(planned: Planned) -> list[str]:
+    return (planned.task.meta / "handoff" / "history.md").read_text().splitlines()
+
+
+def of(planned: Planned, *kinds: str) -> list[tuple[str, dict]]:
+    return [(e["type"], e["data"]) for e in planned.task.events() if e["type"] in kinds]
+
+
+KINDS = ("history_requested", "history_acquired", "history_refused")
+
+
+def test_a_request_is_answered_a_line_an_id_and_taken_away(made):
+    """One line a commit, in the order asked; a line that is no commit id is said to be none,
+    and the others are looked for all the same. The request goes, the answer stays."""
+    planned, ids = made
+    asked = request(planned, ids[10], "main", "", "  ", ids[-1][:7])
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
+    assert not asked.exists()
+    assert answered(planned) == [
+        f"{ids[10]}: available",
+        "main: not a commit id",
+        f"{ids[-1][:7]}: available",
+    ]
+    assert of(planned, *KINDS) == [
+        ("history_requested", {"ids": [ids[10], "main", ids[-1][:7]], "round": 1}),
+        ("history_acquired", {"id": ids[10], "outcome": "available", "steps": 4}),
+        ("history_refused", {"id": "main", "outcome": "not a commit id"}),
+        ("history_acquired", {"id": ids[-1][:7], "outcome": "available", "steps": 0}),
+    ]
+    assert git(planned.view, "rev-parse", f"{ids[10]}^") == ids[9], "and the copy, brought up to date, has it"
+
+
+def test_without_a_request_there_is_nothing_to_answer(made):
+    planned, _ = made
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is False
+    assert not (planned.task.meta / "handoff" / "history.md").exists() and of(planned, *KINDS) == []
+
+
+def test_a_request_holds_five_ids_and_the_rest_are_not_looked_for(made, monkeypatch):
+    planned, ids = made
+    looked = []
+    monkeypatch.setattr(history, "ensure", lambda task, pod, commit, **kw: looked.append(commit) or
+                        history.Outcome(commit, "available"))  # fmt: skip
+    request(planned, *ids[20:27])
+    history.answer(planned.task, planned.pod, depth=5, source=planned.source)
+    assert looked == ids[20:25]
+    assert answered(planned)[5:] == [
+        f"{i}: not looked for: a request holds at most 5 ids" for i in ids[25:27]
+    ]
+
+
+def test_the_fourth_request_of_a_phase_is_refused_and_the_turn_goes_on(made):
+    """Three requests a planning phase are answered; the fourth is refused, nothing is fetched,
+    and the reader is not given a turn for it. A new phase (the task moved on) has three again."""
+    planned, ids = made
+    for i in range(3):
+        request(planned, ids[-2 - i])
+        assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
+    before = planned.looks()
+    asked = request(planned, ids[3])
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is False
+    assert not asked.exists() and planned.looks() == before
+    assert answered(planned) == [f"{ids[3]}: refused: 3 requests were answered in this phase; ask the person"]
+    past = "refused: 3 requests were answered in this phase; ask the person"
+    assert of(planned, *KINDS)[-1] == ("history_refused", {"id": ids[3], "outcome": past})
+    planned.task.transition(State.CHECKPOINT_PLAN, reason="plan ready")
+    planned.task.transition(State.PLAN, reason="your reply")
+    request(planned, ids[3])
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
+
+
+def test_a_request_the_writer_wrote_is_answered_within_the_same_bounds_and_leaves_its_clone(made):
+    """The writer's pod writes the handoff too: what it puts there is a request like any other,
+    ids and nothing else, from the clone as recorded, which stays as it was."""
+    planned, ids = made
+    clone = planned.task.repo / ".git"
+    before = {p: p.read_bytes() for p in sorted(clone.rglob("*")) if p.is_file()}
+    request(planned, ids[10], "--upload-pack=touch /tmp/vivibox-history-x", "refs/heads/main")
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
+    assert answered(planned) == [
+        f"{ids[10]}: available", "--upload-pack=touch /tmp/vivibox-history-x: not a commit id",
+        "refs/heads/main: not a commit id",
+    ]  # fmt: skip
+    assert {p: p.read_bytes() for p in sorted(clone.rglob("*")) if p.is_file()} == before
+    assert not Path("/tmp/vivibox-history-x").exists()
+
+
+def test_a_request_that_is_a_link_is_not_read_and_goes(made, tmp_path):
+    planned, ids = made
+    yours = tmp_path / "yours.txt"
+    yours.write_text(f"{ids[10]}\n")
+    link = planned.task.meta / "handoff" / "history-request.md"
+    link.symlink_to(yours)
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is False
+    assert not link.is_symlink() and yours.read_text() == f"{ids[10]}\n"
+    assert answered(planned)[0].startswith("history-request.md was not read: ")
+    assert of(planned, *KINDS) == []
+
+
+# --- the turn after a request ---------------------------------------------------------------------
+
+
+class Asking(Harness):
+    """A reader whose turns do what it is given, a turn each, and record what each was asked
+    and whether history.md was there when it began."""
+
+    name = "opencode"
+
+    def __init__(self, task, *turns):
+        self.task, self.turns, self.asked = task, list(turns), []
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        had = (self.task.meta / "handoff" / "history.md").exists()
+        self.asked.append((prompt, had))
+        if self.turns:
+            self.turns.pop(0)(self.task)
+        return Turn("ses_1", True, 0.01, 100, "done")
+
+
+def asks_for(commit: str):
+    def ask(task):
+        (task.meta / "handoff" / "history-request.md").write_text(f"{commit}\n")
+
+    return ask
+
+
+DRAFT = '+++\nsummary = "Read history"\n+++\n\n## Acceptance criteria\n\n- [ ] the plan quotes the commit\n'
+
+
+def drafts(task):
+    (task.meta / "handoff" / "plan-draft.md").write_text(DRAFT)
+
+
+def supervised(planned: Planned, planner: Harness, mode: str) -> supervisor.Supervisor:
+    task, pod = planned.task, planned.pod
+    reader = control.Reader(
+        planner, lambda: None, lambda: history.answer(task, pod, depth=5, source=planned.source)
+    )
+    ports = supervisor.Ports(
+        run_gate=lambda t: None, risky_changes=lambda: [], clone_refused=lambda: "",
+        notify=lambda *a, **kw: None, sleep=lambda seconds: None,
+    )  # fmt: skip
+    task.set_orchestration(mode)
+    writer = Asking(task)
+    return supervisor.Supervisor(
+        task,
+        writer,
+        ports,
+        max_rounds=1,
+        mode=orchestration.MODES[mode],
+        planner=reader,
+        project_verify=["true"],
+    )
+
+
+def test_a_planner_that_asks_for_history_reads_the_answer_in_its_next_turn(made):
+    planned, ids = made
+    planner = Asking(planned.task, asks_for(ids[10]), drafts)
+    sup = supervised(planned, planner, "planner_executor")
+    sup.step()
+    assert [had for _, had in planner.asked] == [False, True], "the answer is there for the second turn"
+    assert planner.asked[1][0] == prompts.HISTORY_PROMPT
+    assert planned.task.read_state().state is State.CHECKPOINT_PLAN
+    assert answered(planned) == [f"{ids[10]}: available"]
+    turns = [e["data"].get("kind", "") for e in planned.task.events() if e["type"] == "turn"]
+    assert turns == ["", "history"], "the timeline says what the second turn was for"
+
+
+def test_a_planner_past_the_requests_of_its_phase_goes_on_with_what_it_has(made):
+    """Three answered; the fourth is refused, and the plan state reads the draft as it is."""
+    planned, ids = made
+    planner = Asking(planned.task, *(asks_for(i) for i in ids[-5:-1]), drafts)
+    sup = supervised(planned, planner, "planner_executor")
+    sup.step()
+    asked = [p for p, _ in planner.asked]
+    assert asked[1:4] == [prompts.HISTORY_PROMPT] * 3 and len(asked) == 5
+    assert "ask the person" in answered(planned)[0]
+    assert asked[4].startswith("The plan draft in /task/handoff/plan-draft.md is not ready"), (
+        "as after a turn with no request: no draft, so its one repair turn"
+    )
+    assert planned.task.read_state().state is State.CHECKPOINT_PLAN
+
+
+def test_the_supervisor_that_asks_for_history_in_its_review_reads_the_answer_next(made):
+    """supervisor_worker: the review turn is the planner's, in its control container."""
+    planned, ids = made
+    task = planned.task
+
+    def reviews(t):
+        (t.meta / "review").mkdir(exist_ok=True)
+        (t.meta / "review" / "review.md").write_text(
+            "## Blocking\n\n## Not blocking\n\n## Checked\n\n- the diff\n"
+        )
+
+    planner = Asking(task, asks_for(ids[10]), reviews)
+    sup = supervised(planned, planner, "supervisor_worker")
+    for target in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY, State.REVIEW):
+        task.transition(target)
+    task.set_verified_commit(git(task.repo, "rev-parse", "HEAD"))
+    sup.step()
+    assert [had for _, had in planner.asked] == [False, True]
+    assert planner.asked[1][0] == prompts.HISTORY_PROMPT
+    assert task.read_state().state is State.CHECKPOINT_FINAL
+
+
+def test_a_writer_or_a_reviewer_of_its_own_is_never_answered(made):
+    """Only a reader in its control container has a copy the host deepens: a request left
+    where the writer plans (a single agent) is no request of a reader's."""
+    planned, ids = made
+    writer = Asking(planned.task, asks_for(ids[10]), drafts)
+    ports = supervisor.Ports(run_gate=lambda t: None, risky_changes=lambda: [], clone_refused=lambda: "",
+                             notify=lambda *a, **kw: None)  # fmt: skip
+    planned.task.set_orchestration("single_agent")
+    sup = supervisor.Supervisor(
+        planned.task, writer, ports, max_rounds=1, mode=orchestration.MODES["single_agent"]
+    )
+    sup.step()
+    assert prompts.HISTORY_PROMPT not in [p for p, _ in writer.asked]
+    assert not (planned.task.meta / "handoff" / "history.md").exists()

@@ -124,3 +124,21 @@ def test_a_verification_by_modules_says_which_came_from_the_changes(tmp_path):
     assert "modules: adapters, adapters/japicmp (+adapters/japicmp under them)" in what
     assert "modules: core, app, extra (+extra from the changes)" in what
     assert "modules: core" in what
+
+
+def test_the_timeline_says_what_older_commits_were_asked_for_and_what_became_of_them(tmp_path):
+    task = create_task(tmp_path, "demo", "Add health endpoint", "")
+    found, asked = "0123456789abcdef0123456789abcdef01234567", "fedcba9"
+    task.event("history_requested", ids=[found, asked, "main"], round=2)
+    task.event("history_acquired", id=found, outcome="available", steps=3)
+    task.event("history_refused", id=asked, outcome="no remote recorded")
+    task.event("history_refused", id="main", outcome="not a commit id")
+    task.event("history_acquired", id=asked, outcome="available", steps=0)
+    what = [text for _, text in timeline.entries(task)][1:]
+    assert what == [
+        "older commits asked for, request 2 of 3: 0123456789ab, fedcba9, main",
+        "older commit 0123456789ab brought into the planner's copy in 3 steps",
+        "older commit fedcba9 not brought: no remote recorded",
+        "older commit main not brought: not a commit id",
+        "older commit fedcba9 already in the planner's copy",
+    ]

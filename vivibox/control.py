@@ -130,10 +130,12 @@ def refresh(task: Task, pod: Pod, commit: str = "", depth: int = DEFAULT_HISTORY
 
 class Reader:
     """The planner's harness in its control container, with its copy of the work brought up to
-    date before each of its turns; everything else is the harness's own."""
+    date before each of its turns, and what it asks of the history at the end of one answered
+    (answer_history: True when the supervisor is to give it a turn to read the answer, as
+    history.answer has it); everything else is the harness's own."""
 
-    def __init__(self, harness, bring_up_to_date):
-        self.harness, self.bring_up_to_date = harness, bring_up_to_date
+    def __init__(self, harness, bring_up_to_date, answer_history=lambda: False):
+        self.harness, self.bring_up_to_date, self.answer_history = harness, bring_up_to_date, answer_history
 
     def __getattr__(self, name):
         return getattr(self.harness, name)

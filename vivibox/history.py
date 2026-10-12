@@ -12,6 +12,7 @@ task's clone or the request names: the request is commit ids and nothing else.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
@@ -19,7 +20,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import counted, display, reading, repo
+from . import control, counted, display, handoff, reading, repo
 from .config import DEFAULT_HISTORY_DEPTH, ConfigError, load_project
 
 # A commit as the planner names one: its id in hexadecimal, from the seven characters git
@@ -38,6 +39,16 @@ NO_REMOTE = "no remote recorded"
 NOT_FOUND = "not found within {commits} commits before the base on its branch"
 NOT_FETCHED = "could not be fetched from {source}: {why}"
 CLONE = "the task's clone"
+
+# The reader's request, in the handoff: a commit id a line; and the host's answer beside it.
+REQUEST, ANSWER = "history-request.md", "history.md"
+# Characters of a request read: five ids and room to spare.
+READ = 4096
+# Ids looked for in one request, and requests answered in one phase of a task (a planning, a
+# round's review): a reader that asks again past them is told to ask the person.
+IDS, ROUNDS = 5, 3
+PAST_IDS = f"not looked for: a request holds at most {IDS} ids"
+PAST_ROUNDS = f"refused: {ROUNDS} requests were answered in this phase; ask the person"
 
 
 def remote(source: Path, branch: str) -> str:
@@ -224,3 +235,71 @@ def _one_line(text: str) -> str:
     """The last line of what was said, which is what git ends on, as one line of history.md."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return display.name(lines[-1])[:300] if lines else ""
+
+
+def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = None) -> bool:
+    """The reader's request for older commits, at the end of its turn in its control container:
+    REQUEST in the handoff, a commit id a line, read as every file there is (handoff), and taken
+    away. Each of the first IDS ids is looked for (ensure), the copy brought up to date
+    (control.refresh), and ANSWER says what became of each, a line an id; on the record as
+    history_requested, then history_acquired or history_refused for each. True when the reader
+    is to be given a turn to read it. False for no request, for one that is not read (a link,
+    a special file), and for one past ROUNDS in this phase of the task, which is refused in
+    ANSWER as a whole, nothing fetched: the turn then goes on as if none had been made."""
+    folder = task.meta / "handoff"
+    path = folder / REQUEST
+    try:
+        text, _ = handoff.read_start(path, READ)
+    except FileNotFoundError:
+        return False
+    except handoff.HandoffError as e:
+        _away(path)
+        _write(folder, [f"{REQUEST} was not read: {e.why}"])
+        return False
+    _away(path)
+    asked = [display.name(line.strip())[:80] for line in text.splitlines() if line.strip()]
+    if not asked:
+        return False
+    if (answered := _rounds(task)) >= ROUNDS:
+        refused = [Outcome(commit, PAST_ROUNDS) for commit in asked]
+        _write(folder, [f"{o.commit}: {o.said}" for o in refused])
+        _record(task, refused)
+        return False
+    task.event("history_requested", ids=asked[:IDS], round=answered + 1)
+    found = [ensure(task, pod, commit, depth=depth, source=source) for commit in asked[:IDS]]
+    found += [Outcome(commit, PAST_IDS) for commit in asked[IDS:]]
+    control.refresh(task, pod, control.reviewed_commit(task), depth)
+    _write(folder, [f"{o.commit}: {o.said}" for o in found])
+    _record(task, found)
+    return True
+
+
+def _rounds(task) -> int:
+    """The requests answered since the task entered the state it is in: this planning, or
+    this round's review."""
+    count = 0
+    for event in reversed(task.events()):
+        if event["type"] == "state":
+            break
+        count += event["type"] == "history_requested"
+    return count
+
+
+def _record(task, found: list[Outcome]) -> None:
+    for o in found:
+        if o.available:
+            task.event("history_acquired", id=o.commit, outcome=o.said, steps=o.steps)
+        else:
+            task.event("history_refused", id=o.commit, outcome=o.said)
+
+
+def _away(path: Path) -> None:
+    """The name gone, whatever it is, nothing it may name opened or followed."""
+    with contextlib.suppress(FileNotFoundError, IsADirectoryError, PermissionError):
+        path.unlink()
+
+
+def _write(folder: Path, lines: list[str]) -> None:
+    """ANSWER, anew: whatever had its name goes first, a link the writer left there among it."""
+    _away(folder / ANSWER)
+    handoff.write_text(folder / ANSWER, "".join(f"{line}\n" for line in lines))

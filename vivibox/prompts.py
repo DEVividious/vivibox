@@ -179,3 +179,10 @@ Look for what the verification cannot see: a test that cannot fail, a criterion 
 met, behaviour the plan rules out, red evidence that is not what the test showed. Fix what you
 find and commit, and keep the ticks true; leave what is right alone. End the turn when that is
 done and committed, or when a question is in /task/handoff/question.md."""
+
+# A reader's next turn after it asked for older commits in /task/handoff/history-request.md and
+# the orchestrator looked for them (history.answer): the turn goes on with what it was asked.
+HISTORY_PROMPT = """The orchestrator looked for the commits you asked for: /task/handoff/history.md
+says, a line each, "available" where the commit and its parent are now in the project's history,
+or why not. Go on with what your last turn was asked to do. End the turn when that is written,
+or when a question is in /task/handoff/question.md."""

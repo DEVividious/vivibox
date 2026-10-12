@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import display, ui
 from .gate import proposal_fault
+from .history import ROUNDS
 from .risky import stop_said
 from .states import State
 from .task import Task
@@ -164,6 +165,18 @@ def entries(task: Task) -> list[tuple[str, str]]:
         elif kind == "view_not_refreshed":
             whose = data.get("whose", "a reader's")
             text = f"{whose} copy of the commits left as it was: the task's clone is blocked"
+        elif kind == "history_requested":
+            ids = ", ".join(i[:12] for i in data.get("ids") or [])
+            text = f"older commits asked for, request {data.get('round', '?')} of {ROUNDS}: {ids}"
+        elif kind == "history_acquired":
+            steps, commit = data.get("steps", 0), data.get("id", "")[:12]
+            text = (
+                f"older commit {commit} brought into the planner's copy in {steps} steps"
+                if steps
+                else f"older commit {commit} already in the planner's copy"
+            )
+        elif kind == "history_refused":
+            text = f"older commit {data.get('id', '')[:12]} not brought: {data.get('outcome', '')}"
         elif kind == "whole_build":
             text = "whole build before your review"
         elif kind == "verify_widened":

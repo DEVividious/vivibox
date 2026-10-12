@@ -13,6 +13,7 @@ from . import (
     control,
     display,
     gate,
+    history,
     keys,
     limits,
     ntfy,
@@ -122,12 +123,14 @@ def make_supervisor(
         planner = opencode.OpenCode(pod, actions.role_of(task, "planner", config).model, task=task)
     else:
         # In its control container, never the agent's; its copy of the commits is brought up to
-        # date before each of its turns, so a review reads what the verification passed.
+        # date before each of its turns, so a review reads what the verification passed, and the
+        # older commits it asks for at the end of a turn are looked for there (history.answer).
         planner = actions.harness_for("planner", pod, task)
         if not getattr(planner, "manual", False):
             planner = control.Reader(
                 planner,
                 lambda: control.refresh(task, pod, control.reviewed_commit(task), depth=config.history_depth),
+                lambda: history.answer(task, pod, config.history_depth, project.repo),
             )
     reviewer = None
     if mode.separate_reviewer:

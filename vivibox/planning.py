@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import time
 
-from . import gate, handoff, manual, proposal
+from . import control, gate, handoff, manual, proposal
 from . import supervisor as _sup
+from .harness import Turn
 from .plan import Plan, PlanError, parse_plan, without_notes
-from .prompts import PLAN_PROMPT, PLAN_REPAIR_PROMPT
+from .prompts import HISTORY_PROMPT, PLAN_PROMPT, PLAN_REPAIR_PROMPT
 from .states import State
 from .task import TaskState
 
@@ -22,7 +23,7 @@ class Planning:
         if self.planner is not None and self.planner.manual:
             self._plan_manually(st)
             return
-        if self._turn(st, _sup.next_prompt(self.task, PLAN_PROMPT)) is None:
+        if self._reads(st, _sup.next_prompt(self.task, PLAN_PROMPT)) is None:
             return
         if q := self._asks():
             self._checkpoint(State.CHECKPOINT_PLAN, q)
@@ -33,7 +34,7 @@ class Planning:
             # criteria, no verify command): cheaper than your reply, and once, not a loop. What
             # was wrong goes with the turn, so the timeline says why the planner took a second.
             repair = f"plan repair: {problem[:120]}"
-            if self._turn(st, PLAN_REPAIR_PROMPT.format(problem=problem), kind=repair) is None:
+            if self._reads(st, PLAN_REPAIR_PROMPT.format(problem=problem), kind=repair) is None:
                 return
             if q := self._asks():
                 self._checkpoint(State.CHECKPOINT_PLAN, q)
@@ -54,6 +55,17 @@ class Planning:
         # Without the template's notes: from here the plan is yours to read, not a form to fill.
         self.task.plan_path.write_text(without_notes(text))
         self._plan_ready(st, plan)
+
+    def _reads(self, st: TaskState, prompt: str, role: str = "", kind: str = "") -> Turn | None:
+        """A turn, and, while the agent is a reader in its control container (control.Reader)
+        that ended it asking for older commits and the host answered (history.answer), one
+        more to read the answer and go on (HISTORY_PROMPT): as many as the answers, which a
+        phase has three of. None when a turn failed and the task stopped."""
+        turn = self._turn(st, prompt, role, kind)
+        reader = self.harness_of(self.agent_of(role or self.role_for(st.state)))
+        while turn is not None and isinstance(reader, control.Reader) and reader.answer_history():
+            turn = self._turn(st, HISTORY_PROMPT, role, kind="history")
+        return turn
 
     def _your_plan(self, st: TaskState) -> Plan | None:
         """The plan as you left it, when it is finished (--draft, then e) and this is the task's first

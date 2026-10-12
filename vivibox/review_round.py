@@ -170,11 +170,11 @@ class ReviewRound:
         prompt = REVIEW_PROMPT.format(base=st.base_commit)
         if n > 1 and (self.task.meta / "handoff" / f"review-{n - 1}-reply.md").exists():
             prompt = REVIEW_AGAIN_PREFIX + prompt
-        if self._turn(st, prompt, role="reviewer") is None:
+        if self._reads(st, prompt, role="reviewer") is None:
             return None
         text, refused = _written(out)
         if problem := refused or reviewing.problem(text):
-            if self._turn(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
+            if self._reads(st, REVIEW_REPAIR_PROMPT.format(problem=problem), role="reviewer") is None:
                 return None
             text, refused = _written(out)
         return text, refused

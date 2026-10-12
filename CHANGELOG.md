@@ -54,6 +54,16 @@ in [docs/install.md](docs/install.md)).
   `.task/limits.json`, applied at the task's next start; `vivibox disk grow <id> 40g` makes its
   disk larger at once (a disk never shrinks). `vivibox usage` and `u` count a task's disk from
   its mount.
+- A planner that needs a commit older than its copy of the commits holds asks for it: its id,
+  one a line and at most five, in `/task/handoff/history-request.md`, and it ends the turn.
+  vivibox looks for each along the task's branch, from the task's clone and then from the
+  remote your base branch tracks, writes what became of each to `/task/handoff/history.md`
+  (`available`, or why not: `not found within 2000 commits before the base on its branch`,
+  `could not be fetched from <remote>: <reason>`, `no remote recorded`, `not a commit id`), and
+  gives the planner a turn to read it and go on. The same holds for the supervisor's review
+  turn in Supervisor ⇄ Worker. Three requests a planning, or a review, are answered; a fourth is
+  refused with "ask the person", and the turn goes on as if none had been made. The timeline
+  says what was asked for and what became of each; the reviewer's copy is never made deeper.
 
 ### Changed
 

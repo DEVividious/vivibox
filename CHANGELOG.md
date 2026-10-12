@@ -1172,8 +1172,9 @@ in [docs/install.md](docs/install.md)).
   never of the clone), along your base branch from the recorded remote, your way of
   reaching it handed to that fetch only when the task starts from your own work, which asks
   nowhere for credentials (no terminal prompt, no askpass window) and fails without them; 20 steps in
-  all, a minute a step from the clone and ten minutes in all, the copy as deep as it was when
-  the commit does not come.
+  all, a minute a step from the clone and ten minutes in all, what git prints read up to 64 MiB
+  (a remote's pack is bounded by those ten minutes and the task disk's quota, not in bytes), the
+  copy as deep as it was when the commit does not come.
 - What the host makes for a container that only reads the work (its harness's working
   directory, its view of the commits) moved from `control.py` to `reading.py`, for the
   reviewer's container to use too; nothing changes for a person.

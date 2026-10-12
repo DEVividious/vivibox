@@ -69,6 +69,9 @@ in [docs/install.md](docs/install.md)).
   says what was asked for and what became of each; the reviewer's copy is never made deeper.
   The planner's brief says in one sentence how deep its copy is and how to ask; the reviewer's
   brief is as it was.
+  The remote step fetches only the recorded remote's base branch: its commits newer than the
+  base are never available nor reachable from the copy's HEAD, but their objects may be in the
+  copy's store, where the planner can read them by id.
 
 ### Changed
 

@@ -945,9 +945,10 @@ def test_a_commit_left_behind_by_a_request_that_failed_is_no_root(made, monkeypa
     assert shown.returncode == 0, shown.stderr
 
 
-def test_a_commit_your_remote_has_past_the_base_is_not_found_and_not_brought(behind, tmp_path):
+def test_a_commit_your_remote_has_past_the_base_is_not_found_nor_reachable(behind, tmp_path):
     """Your remote moved on by three commits since your checkout: the newest is no ancestor of
-    the task's base, so it is not found, and the copy is as it was."""
+    the task's base, so it is not found, and the copy shows the history it showed: none of
+    them on it, nor reachable from any of its refs."""
     bare, ids = behind
     checkout = shallow_checkout(f"file://{bare}", tmp_path / "mine")
     planned = Planned(checkout, tmp_path / "tasks")
@@ -958,7 +959,25 @@ def test_a_commit_your_remote_has_past_the_base_is_not_found_and_not_brought(beh
     found = planned.ensure(newer[-1])
     assert found.said == "not found within 100 commits before the base on its branch"
     assert planned.looks() == before
-    assert newer[-1] not in git(planned.view, "rev-list", "--all").split()
+    assert not set(newer) & set(git(planned.view, "rev-list", "--all").split())
+
+
+def test_a_step_from_your_remote_leaves_its_newer_commits_readable_in_the_copys_store(behind, tmp_path):
+    """What docs/security.md says the copy may hold: the remote step fetches your base branch
+    as the remote has it now, so commits of it newer than the base come into the copy's object
+    store, where the planner can read them by their id, though none is ever available or
+    reachable from the copy's HEAD. A change that prunes them changes this test."""
+    bare, ids = behind
+    checkout = shallow_checkout(f"file://{bare}", tmp_path / "mine")
+    planned = Planned(checkout, tmp_path / "tasks")
+    work = tmp_path / "upstream-work"
+    newer = commits(work, 3, "newer")
+    git(work, "push", "-q", str(bare), "main")
+    assert planned.ensure(ids[10]).available, "an older commit, from the remote"
+    held = subprocess.run(["git", "-C", str(planned.view), "cat-file", "-e", newer[-1]], capture_output=True)
+    assert held.returncode == 0, "in the store"
+    on = subprocess.run(["git", "-C", str(planned.view), "merge-base", "--is-ancestor", newer[-1], "HEAD"])
+    assert on.returncode != 0 and not set(newer) & set(git(planned.view, "rev-list", "--all").split())
 
 
 # --- fix round 1: what is recorded, and how it is fetched -----------------------------------------

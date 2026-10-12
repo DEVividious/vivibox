@@ -1162,6 +1162,9 @@ in [docs/install.md](docs/install.md)).
   host's git; a task without it has none, and runs as before. An address git would take for an
   option is not recorded, and a path relative to your checkout is recorded whole; every fetch of
   a copy names its source after `--end-of-options`.
+- The protection check of a task's clone looks at its `.git/shallow`, which git reads to serve a
+  copy from it: a plain file or none, never a link or a named pipe; a clone recorded before is
+  taken as it was.
 - `history.ensure` makes the planner's copy of the commits deeper for one commit id: hexadecimal
   and nothing else, refused before any git runs; then `history_depth` commits a step along the
   task's branch from the task's clone, checked first as every git of the host's in it, and,

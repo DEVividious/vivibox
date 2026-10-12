@@ -1036,3 +1036,31 @@ def test_an_answer_is_kept_when_the_copy_cannot_be_brought_up_to_date(made, monk
         history.answer(planned.task, planned.pod, depth=5, source=planned.source)
     assert answered(planned) == [f"{ids[-1]}: available"]
     assert [kind for kind, _ in of(planned, *KINDS)] == ["history_requested", "history_acquired"]
+
+
+@pytest.mark.parametrize("kind", ["a link", "a named pipe"])
+def test_a_shallow_file_of_the_clone_that_is_no_plain_file_is_a_change(mine, tmp_path, kind):
+    """git reads the clone's .git/shallow to serve a fetch from it: a link there would have it
+    read a file of yours, and a named pipe would have it wait."""
+    import os
+
+    clone = a_task(mine, tmp_path / "task")
+    yours = tmp_path / "yours.txt"
+    yours.write_text("SECRET\n")
+    shallow_file = clone / ".git" / "shallow"
+    shallow_file.symlink_to(yours) if kind == "a link" else os.mkfifo(shallow_file)
+    with pytest.raises(repo.RepoError, match="shallow"):
+        repo.check_protection(clone, tmp_path / "task" / ".task")
+
+
+def test_a_plain_shallow_file_of_the_clone_is_no_change_also_for_an_older_record(mine, tmp_path):
+    import json
+
+    clone = a_task(mine, tmp_path / "task")
+    meta = tmp_path / "task" / ".task"
+    (clone / ".git" / "shallow").write_text(git(clone, "rev-parse", "HEAD") + "\n")
+    repo.check_protection(clone, meta)
+    record = json.loads((meta / "git-protection.json").read_text())
+    record.pop(".git/shallow", None)  # recorded before the clone's shallow file was
+    (meta / "git-protection.json").write_text(json.dumps(record))
+    repo.check_protection(clone, meta)

@@ -13,7 +13,8 @@ past LIMIT. The index is read here, not by git: vivibox runs no git before the c
 
 Left out, because none of them can name a program, another config or another object store: refs,
 packed-refs, logs, ORIG_HEAD, FETCH_HEAD and the other heads, the index's entries but its
-submodules, objects and packs, the commit-graph, shallow, info/ (exclude; attributes, which name
+submodules, objects and packs, the commit-graph, shallow but for being a plain file or none
+(git reads it to serve a fetch from the clone), info/ (exclude; attributes, which name
 drivers only a config defines; grafts; sparse-checkout), description, rr-cache, the fsmonitor
 daemon's socket (used only when a config turns it on), and rebase and sequencer state, which only
 commands vivibox never runs on the host act on. remotes/ and branches/ name stores, but only for a
@@ -244,6 +245,10 @@ def _git_dir(root: Path, d: str) -> dict[str, str]:
         found[f"{d}/{name}"] = EMPTY if value in (ABSENT, f"{FILE} {hashlib.sha256().hexdigest()}") else value
     value = look(root, f"{d}/HEAD", read=False)  # it changes with every switch; a link or a FIFO must not
     found[f"{d}/HEAD"] = NOT_LINK if value in (ABSENT, FILE, FOLDER) else value
+    # git reads it to serve a fetch from the clone (a reader's copy, history.ensure): it comes
+    # and goes with a shallow clone's work, and a link or a FIFO must not.
+    value = look(root, f"{d}/shallow", read=False)
+    found[f"{d}/shallow"] = NOT_LINK if value in (ABSENT, FILE) else value
     for name in ("objects", "objects/info"):
         found[f"{d}/{name}"] = look(root, f"{d}/{name}", read=False)
     for name in ("hooks", "worktrees"):
@@ -616,6 +621,8 @@ def check(root: Path, meta: Path) -> list[str]:
     if "format" not in recorded:
         return _upgrade(root, meta, recorded)
     files = {k: v for k, v in recorded.items() if k not in ABOUT}
+    for d in recorded["git_dirs"]:  # a record from before the shallow file was looked at
+        files.setdefault(f"{d}/shallow", NOT_LINK)
     now = fingerprint(root, recorded["gitfiles"])
     found = differences(files, now, recorded["git_dirs"])
     if any(not isinstance(change, Added) for change in found):
@@ -644,6 +651,7 @@ def _as_prepared(d: str, old: dict[str, str]) -> dict[str, str]:
         ),
         **dict.fromkeys((f"{d}/{n}" for n in ALTERNATES), EMPTY),
         f"{d}/HEAD": NOT_LINK,
+        f"{d}/shallow": NOT_LINK,
         **dict.fromkeys((f"{d}/{n}" for n in ("objects", "objects/info")), FOLDER),
     }
     return found

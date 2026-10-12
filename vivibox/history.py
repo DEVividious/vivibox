@@ -97,6 +97,7 @@ def ensure(task, pod, commit: str, depth: int = DEFAULT_HISTORY_DEPTH, source: P
     commit a whole clone lacks is not found. STEPS steps in all, each within
     repo.CLONE_TIMEOUT from the clone, and the whole within repo.COPY_TIMEOUT. A request that
     does not end with the commit there leaves the copy as deep as it was."""
+    commit = as_id(commit)
     if not COMMIT_ID.fullmatch(commit):
         return Outcome(commit, NOT_AN_ID)
     walk = _Walk(Path(pod.control_src), depth)
@@ -106,6 +107,13 @@ def ensure(task, pod, commit: str, depth: int = DEFAULT_HISTORY_DEPTH, source: P
     if said != AVAILABLE:
         walk.as_it_was()
     return Outcome(commit, said, walk.steps)
+
+
+def as_id(text: str) -> str:
+    """A commit id in git's own small letters, the same commit in capitals included; anything
+    else as it is, to be refused as no id."""
+    lowered = text.lower()
+    return lowered if COMMIT_ID.fullmatch(lowered) else text
 
 
 def _deepened(task, walk: _Walk, commit: str, source: Path | None) -> str:
@@ -274,7 +282,7 @@ def answer(task, pod, depth: int = DEFAULT_HISTORY_DEPTH, source: Path | None = 
         _write(folder, [f"{REQUEST} was not read: {e.why}"])
         return False
     _away(path)
-    asked = [display.name(line.strip())[:80] for line in text.splitlines() if line.strip()]
+    asked = [as_id(display.name(line.strip())[:80]) for line in text.splitlines() if line.strip()]
     if not asked:
         return False
     if (answered := _rounds(task)) >= ROUNDS:

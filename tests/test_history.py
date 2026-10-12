@@ -269,7 +269,7 @@ def test_a_refresh_after_history_was_brought_keeps_it(made):
 
 
 NOT_IDS = [
-    "", "abc", "abcdef", "a" * 65, "ABCDEF12", "zzzzzzz", "main", "HEAD", "HEAD~3", "1234567..89abcde",
+    "", "abc", "abcdef", "a" * 65, "ABCDEFG1", "zzzzzzz", "main", "HEAD", "HEAD~3", "1234567..89abcde",
     "--upload-pack=touch /tmp/x", "-1234567", "1234567 --depth=1", "https://example.com/r.git",
     "git@example.com:r.git", "refs/heads/main", "1234567\n", " 1234567",
 ]  # fmt: skip
@@ -822,3 +822,12 @@ def test_a_whole_checkouts_remote_is_never_asked_for_a_commit_its_clone_lacks(be
     found = planned.ensure("0123456789abcdef0123456789abcdef01234567")
     assert found.said == "not found within 100 commits before the base on its branch"
     assert yours.handed() == [] and not yours.asked.exists()
+
+
+def test_an_id_in_capitals_is_the_same_commit_and_answered_in_small_letters(made):
+    planned, ids = made
+    found = planned.ensure(ids[10].upper())
+    assert found.available and found.commit == ids[10]
+    request(planned, ids[11].upper(), ids[-1][:7].upper())
+    assert history.answer(planned.task, planned.pod, depth=5, source=planned.source) is True
+    assert answered(planned) == [f"{ids[11]}: available", f"{ids[-1][:7]}: available"]

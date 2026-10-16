@@ -15,6 +15,7 @@ from hostile_index import MARK, HostileIndex
 from index_harness import INITIALIZE, INITIALIZED, VALID, call, listing
 from test_pod import FakeDocker, flag, starts
 
+import vivibox
 from vivibox import index, pod_index, pod_network, podspec
 from vivibox.index import channel, tools
 from vivibox.index.session import Session
@@ -25,11 +26,51 @@ SERVER = IndexServer(
     mounts=(Mount("/srv/index-server", "/opt/index", read_only=True),),
     command=("python3", "/opt/index/server.py"),
 )
+COMMIT = "a" * 40
+
+
+def git(where: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(where), *args], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def commit(clone: Path, files: dict[str, str | None], message: str = "work") -> str:
+    """A commit of the writer's on the task's branch: each file written, or deleted for None."""
+    for name, text in files.items():
+        path = clone / name
+        if text is None:
+            git(clone, "rm", "-q", name)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        git(clone, "add", name)
+    git(
+        clone,
+        "-c",
+        "user.name=W",
+        "-c",
+        "user.email=w@example.com",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        message,
+    )
+    return git(clone, "rev-parse", "HEAD")
+
+
+def a_clone(repo: Path) -> str:
+    """The task's clone on its branch, with one commit; the commit."""
+    if (repo / ".git").exists():
+        return git(repo, "rev-parse", "HEAD")
+    repo.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "vivibox/shop-1", str(repo)], check=True)
+    return commit(repo, {"README.md": "shop\n"}, "start")
 
 
 def a_pod(tmp_path: Path, control: bool = True, server: IndexServer | None = SERVER) -> Pod:
     repo = tmp_path / "repo"
-    repo.mkdir(exist_ok=True)
+    a_clone(repo)
     docker = FakeDocker()
     docker.sys_net = pod_network.SYS_NET
     return Pod(
@@ -48,7 +89,8 @@ def commands(pod: Pod) -> dict[str, list[str]]:
         "gate": pod.gate_command(),
         "review": pod.review_command([], {}),
         "control": pod.control_command(),
-        "index": pod.index_command(),
+        "index": pod.index_command(COMMIT),
+        "provision": pod.provision_command(COMMIT),
     }
 
 
@@ -61,42 +103,52 @@ def sources(cmd: list[str]) -> dict[str, str]:
     return found
 
 
-def test_only_the_index_mounts_its_store_and_only_it_and_the_planner_its_sockets(tmp_path):
-    """The mount matrix: I's store in I alone, read-write; the socket directory in I read-write
-    and in the planner's container read-only, in no other container; nothing in the writer's,
-    the gate's, the sidecar's (whose nested containers see only what it mounts) or the
+def test_only_the_index_mounts_its_folders_and_only_it_and_the_planner_its_sockets(tmp_path):
+    """The mount matrix: I's store, its copy of the commits and the host's view for it in I and
+    its provisioning run alone; the socket directory in I read-write and in the planner's
+    container read-only, in no other container (not the provisioning run); nothing in the
+    writer's, the gate's, the sidecar's (whose nested containers see only what it mounts) or the
     reviewer's."""
     pod = a_pod(tmp_path)
     store, sockets = str(pod.index_store), str(pod.index_sockets)
+    source, copy = str(pod.index_source), str(pod.index_copy)
+    index_only = (store, source, copy)
     made = commands(pod)
     for role, cmd in made.items():
         found = sources(cmd)
-        assert store not in found or role == "index", role
+        mine = role in ("index", "provision")
+        assert not [f for f in index_only if f in found] or mine, role
         assert sockets not in found or role in ("index", "control"), role
-        assert not [s for s in found if s.startswith(store + "/") or s.startswith(sockets + "/")], role
-        # Nor a folder above either: the task's disk, its folder, the tasks' folder, the root.
-        above = [
-            s
-            for s in found
-            if s.startswith("/") and Path(s) in (*Path(store).parents, *Path(sockets).parents)
-        ]
+        assert not [s for s in found if any(s.startswith(f + "/") for f in (*index_only, sockets))], role
+        # Nor a folder above any: the task's disk, its folder, the tasks' folder, the root.
+        parents = {p for f in (*index_only, sockets) for p in Path(f).parents}
+        above = [s for s in found if s.startswith("/") and Path(s) in parents]
         assert above == [], (role, above)
-    assert sources(made["index"])[store] == "/config"
+    for role in ("index", "provision"):
+        found = sources(made[role])
+        assert found[store] == "/config"
+        assert found[copy] == str(pod.repo), "at the path the planner reads its own copy"
+        assert found[source] == f"{podspec.INDEX_SOURCE_MOUNT}:ro"
     assert sources(made["index"])[sockets] == podspec.INDEX_SOCKET_MOUNT
+    assert sockets not in sources(made["provision"]), "nothing reads the socket while it runs"
     assert sources(made["control"])[sockets] == f"{podspec.INDEX_SOCKET_MOUNT}:ro"
+    assert source not in sources(made["control"]) and str(pod.control_src) not in sources(made["index"])
 
 
-def test_the_index_mounts_its_store_its_sockets_and_its_program_read_only_and_nothing_else(tmp_path):
-    """Nothing of the planner's (its home, its copy, its working directory, the task's files,
-    the handoff, its secrets), nothing of the writer's (the clone, its home, the Docker socket,
-    the caches, what a build installed), nothing of the reviewer's or the gate's, no CA bundle
-    (it has no network to use one on)."""
+def test_the_index_mounts_its_folders_and_its_program_read_only_and_nothing_else(tmp_path):
+    """Its store, its copy, the host's view read-only and its socket's folder; nothing of the
+    planner's (its home, its copy, its working directory, the task's files, the handoff, its
+    secrets), nothing of the writer's (the clone, its home, the Docker socket, the caches, what a
+    build installed), nothing of the reviewer's or the gate's, no CA bundle (it has no network to
+    use one on)."""
     pod = a_pod(tmp_path)
-    cmd = pod.index_command()
+    cmd = pod.index_command(COMMIT)
     assert binds(cmd) == [
         f"{pod.index_store}:/config",
-        f"{pod.index_sockets}:{podspec.INDEX_SOCKET_MOUNT}",
+        f"{pod.index_copy}:{pod.repo}",
+        f"{pod.index_source}:/source:ro",
         "/srv/index-server:/opt/index:ro",
+        f"{pod.index_sockets}:{podspec.INDEX_SOCKET_MOUNT}",
     ]
     assert "--mount" not in cmd and "--volumes-from" not in cmd
 
@@ -104,12 +156,12 @@ def test_the_index_mounts_its_store_its_sockets_and_its_program_read_only_and_no
 def test_a_program_of_the_index_mounted_writable_is_refused(tmp_path):
     writable = IndexServer(mounts=(Mount("/srv/x", "/opt/index"),), command=("x",))
     with pytest.raises(PodError, match="read-only"):
-        a_pod(tmp_path, server=writable).index_command()
+        a_pod(tmp_path, server=writable).index_command(COMMIT)
 
 
 def test_the_index_has_no_network_no_capability_no_variable_and_the_tasks_limits(tmp_path):
     pod = a_pod(tmp_path)
-    cmd = pod.index_command()
+    cmd = pod.index_command(COMMIT)
     assert cmd[:5] == ["docker", "run", "-d", "--name", "vivibox-shop-1-index"]
     assert flag(cmd, "--network") == "none"
     for absent in ("--add-host", "--ip", "-e", "--env", "--env-file", "-p", "--publish",
@@ -132,7 +184,13 @@ def test_the_index_has_no_network_no_capability_no_variable_and_the_tasks_limits
     # What its program prints is Docker's log on the host's disk: bounded, outside the task's disk.
     logs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--log-opt"]
     assert flag(cmd, "--log-driver") == "json-file" and logs == ["max-size=1m", "max-file=1"]
-    assert cmd[-3:] == [pod.image, "python3", "/opt/index/server.py"]
+    # Its copy synced to the commit by the host's fixed script, then its program.
+    script = (Path(vivibox.__file__).parent / "index_sync.py").read_text()
+    at = cmd.index(pod.image)
+    assert cmd[at:] == [
+        pod.image, "python3", "-I", "-c", script, str(pod.repo), COMMIT,
+        "--", "python3", "/opt/index/server.py",
+    ]  # fmt: skip
 
 
 def test_the_planner_mounts_the_sockets_and_the_wrapper_read_only_only_with_an_index(tmp_path):
@@ -182,16 +240,16 @@ def test_a_pod_without_an_index_makes_none_and_an_index_needs_a_planner(tmp_path
     assert "vivibox-shop-1-index" not in starts(pod.runner.calls)
     assert not pod.index_store.exists()
     with pytest.raises(PodError, match="no code index"):
-        pod.index_command()
+        pod.index_command(COMMIT)
     alone = a_pod(tmp_path, control=False)
     with pytest.raises(PodError, match="planner"):
         alone.up()
 
 
-@pytest.mark.parametrize("which", ["store", "sockets"])
+@pytest.mark.parametrize("which", ["index_store", "index_sockets", "index_source", "index_copy"])
 def test_a_folder_of_the_index_that_is_a_link_is_not_mounted(tmp_path, which):
     pod = a_pod(tmp_path)
-    folder = pod.index_store if which == "store" else pod.index_sockets
+    folder = getattr(pod, which)
     folder.parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / "elsewhere").mkdir()
     folder.symlink_to(tmp_path / "elsewhere")

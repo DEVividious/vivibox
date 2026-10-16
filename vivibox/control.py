@@ -128,10 +128,13 @@ def refresh(
     one, for a review), else on the task's branch as it is; made with depth commits of the
     branch (history_depth), and holding base, the task's, when it is given. Before the planner's
     first turn and before each one after it; the harness's working directory (workdir) is made
-    with it."""
+    with it. The planner's code index, when the pod has one, is brought to the same commit
+    (pod_index.index_refresh); an index that cannot be is down, and the turn goes on."""
     workdir(pod)
     branch = repo.branch_name(task.id)
     reading.view(task.repo, branch, pod.control_src, commit, PLANNERS_OWN, depth, base)
+    if pod.has_index:
+        pod.index_refresh(commit, depth)
 
 
 def refresh_for(task: Task, pod: Pod, depth: int = DEFAULT_HISTORY_DEPTH) -> None:

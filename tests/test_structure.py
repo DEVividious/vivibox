@@ -24,7 +24,8 @@ STARTERS = {
         "gate_command": 1,
         "review_command": 1,
         "control_command": 1,
-        "index_command": 1,
+        # the index's and its provisioning run's, which share it
+        "_index_hardening": 1,
     },
     # the Docker Hub mirror, a container of your Docker, not of any pod: made, and started again
     "mirror.py": {"command": 1, "ensure": 1},
@@ -37,14 +38,16 @@ STARTERS = {
 # ready argv to anyone who calls one; so nobody outside the pod does.
 BUILDER_NAMES = (
     "sidecar_command", "agent_command", "gate_command", "review_command", "control_command", "index_command",
+    "provision_command",
 )  # fmt: skip
+INDEX_BUILDERS = ("index_command", "provision_command")
 # Every place one is named, as it is written there, and why.
 BUILDERS = {
     "podspec.py": [f"def {name}" for name in BUILDER_NAMES],  # defined here
     # Pod's methods over them, and their only callers: up, _outdated_sidecar, gate_up, review_start
     "pod.py": [
-        *(f"def Pod.{name}" for name in BUILDER_NAMES if name != "index_command"),
-        *(f"podspec.{name}" for name in BUILDER_NAMES if name != "index_command"),
+        *(f"def Pod.{name}" for name in BUILDER_NAMES if name not in INDEX_BUILDERS),
+        *(f"podspec.{name}" for name in BUILDER_NAMES if name not in INDEX_BUILDERS),
         "self.agent_command",
         "self.control_command",
         "self.gate_command",
@@ -52,8 +55,16 @@ BUILDERS = {
         "self.sidecar_command",
         "self.sidecar_command",
     ],
-    # the index's, a method of the pod's mixed in from pod_index, and its only caller: up's _index_up
-    "pod_index.py": ["def PodIndex.index_command", "podspec.index_command", "self.index_command"],
+    # the index's and its provisioning run's, methods of the pod's mixed in from pod_index, and
+    # their only callers: up's _index_up, and _provision under it
+    "pod_index.py": [
+        "def PodIndex.index_command",
+        "podspec.index_command",
+        "self.index_command",
+        "def PodIndex.provision_command",
+        "podspec.provision_command",
+        "self.provision_command",
+    ],
     # the view's own review_command: the `review the command` decision, no pod in it
     "keys_plan.py": ["def PlanKeys.review_command", "self.review_command"],
     "tui.py": ["self.review_command"],  # the same, called
@@ -64,7 +75,7 @@ STARTER_AS_TEXT = re.compile(
     r"""["']docker["'][\s,+*\[\]]*(?:["']container["'][\s,+*\[\]]*)?["'](?:run|start|restart|unpause)["']"""
     r"""|["']docker\s+(?:container\s+)?(?:run|start|restart|unpause)\b"""
 )
-BUILDER_AS_TEXT = re.compile(r"\b(?:sidecar|agent|gate|review|control|index)_command\b")
+BUILDER_AS_TEXT = re.compile(r"\b(?:sidecar|agent|gate|review|control|index|provision)_command\b")
 
 
 # Where an argument list of git's own is written (a list or a tuple that begins with "git"),
@@ -78,6 +89,9 @@ GIT_ARGV = {
     # (tests/test_git_environment.py runs it with every variable exported)
     "panel.py": 1,
     "pod.py": 1,  # compared with a docker exec's command to bound it; runs nothing
+    # git in the code index's container, on its own copy: the file's text runs there (podspec.
+    # index_sync_command), never on the host (test_index_sync_runs_only_in_the_index)
+    "index_sync.py": 1,
 }
 
 
@@ -98,6 +112,25 @@ def test_git_on_the_host_runs_only_through_the_helper_that_cleans_its_environmen
     with its reason, so a new one is a failure until it goes through repo.run_git, repo.git or
     repo.in_clone, or is accounted for."""
     assert git_argv_sites() == GIT_ARGV, "git on the host runs through repo.run_git, repo.git or in_clone"
+
+
+def test_index_sync_runs_only_in_the_index():
+    """index_sync runs git on the code index's copy, whose .git the index writes: its text is
+    handed to python3 in the index's container, and nothing on the host calls it. Of it the
+    package names only the file and the path it reads its source at."""
+    package = ROOT / "vivibox"
+    used = set()
+    for path in package.rglob("*.py"):
+        if path.name == "index_sync.py":
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            named = isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            if named and node.value.id == "index_sync":
+                used.add((path.name, node.attr))
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("index_sync"):
+                used.add((path.name, "from-import"))
+    assert used == {("podspec.py", "__file__"), ("podspec.py", "SOURCE")}
 
 
 def git_argv(source: str) -> int:
@@ -155,6 +188,7 @@ GIT_STRINGS = {
         "git",  # its error's first word, to a person
     ],
     "gate.py": ["git"],  # in the gate's container (pod.gate_exec)
+    "index_sync.py": ["git"],  # in the code index's container: GIT_ARGV above
     "image.py": [
         "git",  # the name of a check of the image
         "git --version",  # what the check runs, in a throwaway container of the image

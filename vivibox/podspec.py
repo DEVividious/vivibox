@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import index
+from . import index, index_sync
 
 if TYPE_CHECKING:
     from .pod import Pod
@@ -278,6 +278,14 @@ class Limits:
 def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:
     """timeout: seconds, after which subprocess.TimeoutExpired is raised with the output so far."""
     return subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
+
+
+def run_silent(cmd: Sequence[str], timeout: float) -> int:
+    """A command whose output nobody reads, for its exit status alone: nothing is given to it,
+    nothing it prints is kept (the host holds no byte of a container taken to be compromised).
+    subprocess.TimeoutExpired past timeout seconds, the command killed."""
+    out = subprocess.DEVNULL
+    return subprocess.run(list(cmd), stdin=out, stdout=out, stderr=out, timeout=timeout).returncode
 
 
 @dataclass(frozen=True)
@@ -582,6 +590,12 @@ INDEX_STORE = "index"
 INDEX_SOCKETS = "index-socket"
 INDEX_SOCKET_MOUNT = "/run/vivibox-index"
 INDEX_SOCKET = "index.sock"
+# The index's source, the host's read-only view of the commits (index_sync.SOURCE: the same
+# path), and its private copy of them, which it writes: both folders of the task's disk, beside
+# its store, never in it, so that I never names what the host mounts or makes a view in.
+INDEX_SOURCE = "index-source"
+INDEX_SOURCE_MOUNT = index_sync.SOURCE
+INDEX_COPY = "index-copy"
 # Where the planner's container has the wrapper's package, read-only: vivibox/index under it.
 INDEX_WRAPPER_MOUNT = "/opt/vivibox-index"
 INDEX_WRAPPER = Path(index.__file__).parent
@@ -594,6 +608,9 @@ class IndexServer:
 
     mounts: tuple[Mount, ...]
     command: tuple[str, ...]
+    # What fills its store once, with the internet, before it serves (pod_index's provisioning
+    # run); () for an index that needs nothing it does not have.
+    provision: tuple[str, ...] = ()
 
 
 def index_channel(pod: Pod) -> list[Mount]:
@@ -605,28 +622,34 @@ def index_channel(pod: Pod) -> list[Mount]:
     ]
 
 
-def index_command(pod: Pod, server: IndexServer) -> list[str]:
-    """The index container: the control container's hardening with no network at all (only
-    loopback: no route to the planner, the writer, the reviewer, the host, another task or the
-    internet), no variable of vivibox's, no capability, its own processes, memory and pids under
-    the task's slice. It mounts its store as its home, the socket's folder, and its program
-    read-only: nothing of the planner's (its home, its copy, the task's files, the handoff, its
-    secrets), nothing of the writer's (the clone, its home, the Docker socket, the caches), no
-    CA bundle, since it has no network to use one on."""
+def index_sync_command(pod: Pod, commit: str, then: Sequence[str] = ()) -> list[str]:
+    """index_sync in the index's container: its copy, at the path the planner has its own, made or
+    brought to commit from the host's view; then the program in then, if any. The script's text
+    is the host's, given whole on the command line: nothing of it is read from what I writes."""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+        raise ValueError(f"not a commit to copy: {commit[:60]!r}")
+    script = Path(index_sync.__file__).read_text()
+    return ["python3", "-I", "-c", script, str(pod.repo), commit, *(("--", *then) if then else ())]
+
+
+def index_mounts(pod: Pod, server: IndexServer) -> list[Mount]:
+    """What the index's containers mount, the steady one and its provisioning run alike: its store
+    as its home, its copy of the commits at the path the planner reads its own, the host's view of
+    them read-only, and its program read-only."""
     if not all(m.read_only for m in server.mounts):
         raise ValueError("the index's program is mounted read-only")
-    mounts = [
+    return [
         Mount(str(pod.index_store), "/config"),
-        Mount(str(pod.index_sockets), INDEX_SOCKET_MOUNT),
+        Mount(str(pod.index_copy), str(pod.repo)),
+        Mount(str(pod.index_source), INDEX_SOURCE_MOUNT, read_only=True),
         *server.mounts,
     ]
+
+
+def _index_hardening(pod: Pod, name: str) -> list[str]:
     return [
-        "docker", "run", "-d", "--name", pod.index,
+        "docker", "run", "-d", "--name", name,
         "--label", f"vivibox.task={pod.task_id}",
-        "--network", "none",
-        # Docker writes the host's DNS servers and search domains into resolv.conf even without a
-        # network: a VPN's or an employer's, which the index could put into an answer.
-        "--dns", "127.0.0.1", "--dns-search", ".",
         # What its program prints is Docker's log, on the host's disk and outside the task's:
         # kept to a megabyte, so a compromised index cannot fill the disk Docker writes to.
         "--log-driver", "json-file", "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
@@ -634,9 +657,46 @@ def index_command(pod: Pod, server: IndexServer) -> list[str]:
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('index')}",
         *pod.limits.flags("index", pod.task_id),
+    ]  # fmt: skip
+
+
+def index_command(pod: Pod, server: IndexServer, commit: str) -> list[str]:
+    """The index container: the control container's hardening with no network at all (only
+    loopback: no route to the planner, the writer, the reviewer, the host, another task or the
+    internet), no variable of vivibox's, no capability, its own processes, memory and pids under
+    the task's slice. It mounts index_mounts and the socket's folder: nothing of the planner's
+    (its home, its copy, the task's files, the handoff, its secrets), nothing of the writer's (the
+    clone, its home, the Docker socket, the caches), no CA bundle, since it has no network to use
+    one on. Its copy is brought to commit before its program starts (index_sync)."""
+    mounts = [*index_mounts(pod, server), Mount(str(pod.index_sockets), INDEX_SOCKET_MOUNT)]
+    return [
+        *_index_hardening(pod, pod.index),
+        "--network", "none",
+        # Docker writes the host's DNS servers and search domains into resolv.conf even without a
+        # network: a VPN's or an employer's, which the index could put into an answer.
+        "--dns", "127.0.0.1", "--dns-search", ".",
         *(arg for m in mounts for arg in ("-v", m.arg())),
         "-w", "/config",
         # The image's entrypoint, tini, stays: processes the index starts and leaves (language
         # servers) are reaped, and a stop reaches them.
-        pod.image, *server.command,
+        pod.image, *index_sync_command(pod, commit, server.command),
+    ]  # fmt: skip
+
+
+def provision_command(
+    pod: Pod, server: IndexServer, commit: str, net: RoleNetwork, ca_mounts: list[Mount]
+) -> list[str]:
+    """The index's provisioning run: the steady container's hardening, store, copy and view, on a
+    network of its own (the code index's range of the task's block, net) in place of none, for
+    what it downloads; the host's CA bundle for that; DNS through the host's forwarder, as for
+    every role. Not the socket's folder: nothing reads it while it runs. No host service and no
+    host.docker.internal: its network's rules reach the internet and the forwarder alone."""
+    mounts = [*index_mounts(pod, server), *ca_mounts]
+    return [
+        *_index_hardening(pod, pod.index_provision),
+        "--network", pod.network_name(net.role), "--ip", net.address,
+        "--dns", pod.host_ip, "--dns-search", ".",
+        *(arg for m in mounts for arg in ("-v", m.arg())),
+        "-w", "/config",
+        pod.image, *index_sync_command(pod, commit, server.provision),
     ]  # fmt: skip

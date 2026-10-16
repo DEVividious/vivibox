@@ -161,6 +161,11 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
+    # What runs a command for its exit status alone, its output read by nobody (the code index's
+    # operations in its container, pod_index).
+    silent: Callable[[Sequence[str], float], int] = podspec.run_silent
+    # Why the code index is down, when a start or a refresh of it failed; "" else (pod_index).
+    index_failure: str = field(default="", compare=False)
     _in_memory: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -318,6 +323,9 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
         if net is None:
             raise PodError(f"{self.task_id} has no network allocated yet; start it first")
         return podspec.review_command(self, mounts, env, ca_mounts(), net)
+
+    def ca_mounts(self) -> list[Mount]:
+        return ca_mounts()
 
     def control_command(self) -> list[str]:
         """The control container in the planner's network; none without it (never the writer's)."""
@@ -495,13 +503,16 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
         namespace; left behind, it would hang without a network once the sidecar stops."""
         self.review_down()
         self.gate_down()
-        # The index's whether or not this pod was given its program, as remove takes it.
+        # The index's whether or not this pod was given its program, as remove takes it; its
+        # provisioning run is not kept to be started again, nor its network.
+        self._provision_stop()
         for name in (self.agent, self.index, self.control, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
     def kill(self) -> None:
         """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
         self._run("docker", "kill", self.agent, self.sidecar, self.control, self.index, check=False)
+        self._provision_stop()
         self.review_down()
         self.gate_down()
 
@@ -650,6 +661,7 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
             self.review,
             self.control,
             self.index,
+            self.index_provision,
             check=False,
         )
         kept = [self.remove_disk()]

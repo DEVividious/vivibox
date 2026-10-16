@@ -50,6 +50,19 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   the planner's opencode waits for a call past the wrapper's own limits. The wrapper makes its
   process undumpable at its start, so the index, at the socket's other end, gets no handle to
   the planner's namespaces through it.
+- The code index's project data, still switched on by nothing: the host makes a read-only view
+  of the commits for the index (`index-source/` on the task's disk, at `/source` in the index),
+  as it does for the planner, on the same commit the planner reads; the index keeps its own
+  writable copy of them (`index-copy/`, at the path the planner reads its own) and its store.
+  The copy is made and brought up to date by one fixed operation that runs in the index's
+  container (`vivibox/index_sync.py`: fetch from the view, reset, clean), before its program
+  starts and before each planner's turn; the host learns only its exit status and never runs git
+  in the copy. When it fails, the index is removed and its copy and store deleted, to be made
+  again at the pod's next start. An index whose program needs it is provisioned once before its
+  first start, in a run of its own with the index's mounts on a network of its own that exists,
+  with the host's rules for it, only while the run lasts; the run, its network and its rules
+  are removed when it ends, fails, runs out of time, or the pod is stopped, and the index itself
+  never has a network.
 
 ## [0.2.0] - 2026-10-12
 

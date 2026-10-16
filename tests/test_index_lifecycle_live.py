@@ -152,8 +152,8 @@ def live():
         wait_for_socket(pod)
         provision = ("python3", f"{PROGRAM}/index_provision.py")
         yield SimpleNamespace(
-            task=task, pod=pod, planner=pod.control_side(), steady=steady,
-            provisioning=IndexServer(steady.mounts, steady.command, provision=provision),
+            task=task, pod=pod, planner=pod.control_side(), steady=steady, program=program,
+            provision=provision, runs=0,
         )  # fmt: skip
     finally:
         gone(task, pod)
@@ -265,12 +265,17 @@ def test_a_copy_the_index_broke_is_discarded_and_made_again_at_the_next_start(li
 
 
 def provisioning(live, asked: dict) -> None:
-    """The index made to be provisioned again: down, its data discarded, the run's request in its
-    store (the test's word to the fixture, written where the run reads it)."""
+    """The index made to be provisioned again for the product's own reason: its provisioning
+    command is another one (a new configuration, a new vivibox), and the pod is stopped, to be
+    started by the test. Nothing of the index's data is touched here: the product discards it
+    before the run. The run's request (the test's word to the fixture) is in the host's folder
+    the run has read-only, the fixture's own."""
     pod = live.pod
-    pod.index_server = live.provisioning
-    pod.index_discard()
-    (pod.index_store / "provision-asked.json").write_text(json.dumps(asked))
+    live.runs += 1
+    again = (*live.provision, "--run", str(live.runs))
+    pod.index_server = IndexServer(live.steady.mounts, live.steady.command, provision=again)
+    (live.program / "provision-asked.json").write_text(json.dumps(asked))
+    pod.down()
 
 
 def none_left(pod) -> None:
@@ -284,6 +289,40 @@ def none_left(pod) -> None:
 
 def tcp(host: str, port: int) -> dict:
     return {"kind": "tcp", "host": host, "port": port}
+
+
+def test_a_provisioning_run_never_meets_what_the_steady_index_wrote(live):
+    """The steady index, which has no network, keeps in its store what the planner asked it and
+    leaves its copy hostile: a filter in its .git that git runs on a checkout, an untracked file.
+    The provisioning command changes and the pod starts again: the run, which has the internet,
+    finds an empty store and a copy made from the host's view of the branch as it is now, and
+    the filter never runs. The controls: the store's canary is there before, and the index's own
+    operation on that copy runs the filter."""
+    task, pod = live.task, live.pod
+    wait_for_socket(pod)
+    side, copy = index_side(pod), str(task.repo)
+    tracked = f'rm -- "{copy}/$(git -C {copy} ls-files | head -n1)"'
+    side.exec("sh", "-c", "echo 'CANARY: find_symbol PaymentSecret' > /config/planner-asked")
+    side.exec("git", "-C", copy, "config", "filter.i.smudge", "sh -c 'echo ran >> /config/filter-ran; cat'")
+    side.exec("sh", "-c", f"mkdir -p {copy}/.git/info && echo '* filter=i' > {copy}/.git/info/attributes")
+    side.exec("sh", "-c", tracked)
+    assert pod.index_refresh(), "the index's own operation, on its own copy"
+    assert (pod.index_store / "filter-ran").read_text() == "ran\n", "the filter is live"
+    side.exec("sh", "-c", f"echo CANARY > {copy}/CANARY-untracked.txt && {tracked}")
+    assert (pod.index_store / "planner-asked").exists()
+    now = commit(task, {"later.txt": "later\n"}, "later")
+    provisioning(live, {"mode": "ok", "copy": copy})
+    pod.up()
+    report = json.loads((pod.index_store / "provision-report.json").read_text())
+    assert report["store_first"] == [], "the run starts on an empty store, and no filter wrote to it"
+    found = report["copy"]
+    assert "CANARY-untracked.txt" not in found["entries"] and ".git" in found["entries"]
+    assert "filter" not in found["config"] and "smudge" not in found["config"], found["config"]
+    assert found["head"] == now == found["source"], "the copy is the host's view's commit"
+    assert not (pod.index_store / "planner-asked").exists() and not (pod.index_store / "filter-ran").exists()
+    assert pod.index_failure == ""
+    none_left(pod)
+    wait_for_socket(pod)
 
 
 def test_the_provisioning_run_reaches_the_internet_and_the_forwarder_and_nothing_else(live):

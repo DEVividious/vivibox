@@ -12,7 +12,8 @@ it: its store, its copy of the commits and that copy's .git. The host makes I's 
 read-only view of the commits (reading.view, as for the planner), and runs git there only; it
 never runs git in, nor reads, what I writes. What it asks of I's copy is one fixed operation that
 runs in I (index_sync), whose exit status is all the host learns; when it fails, I and all it
-wrote are discarded, and made again from the view at the pod's next start."""
+wrote are discarded, and made again from the view at the pod's next start. Before each
+provisioning run, which has the internet, all I wrote is discarded too."""
 
 from __future__ import annotations
 
@@ -315,10 +316,17 @@ class PodIndex:
     def _provision(self, commit: str) -> None:
         """The provisioning run, I stopped: its own container on the code index's network, made
         with the host's rules for it before it starts, and removed with them after it ends, done
-        or not. Recorded as done once it exited 0 and nothing of it is left."""
+        or not. Recorded as done once it exited 0 and nothing of it is left.
+
+        It starts on nothing a container of I's wrote before it: the run has the internet, and an
+        I without one may have kept in its store what the planner asked it, or left in its copy's
+        .git a command git runs (a filter). So I's store and copy are discarded first, every
+        time, as when I's own operation fails (index_discard: nothing deleted while a container
+        of I's is there, the old folders set aside and never mounted again), and the run makes
+        its copy from the host's view alone."""
         command = self.provision_command(commit)
         net = self.recorded_network(INDEX_ROLE)
-        self.index_provisioned.unlink(missing_ok=True)
+        self.index_discard()
         code = None
         try:
             if not self._network_there(INDEX_ROLE) and (said := self._make(INDEX_ROLE, net.subnet)):

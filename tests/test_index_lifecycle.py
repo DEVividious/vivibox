@@ -442,6 +442,81 @@ def test_rules_that_cannot_be_loaded_start_no_provisioning_run(tmp_path):
     assert "could not start" in pod.index_failure and pod.index not in starts(pod.runner.calls)
 
 
+def what_the_run_meets(pod, monkeypatch, seen: dict) -> None:
+    """pod's runner made to do, as the provisioning run's container starts, what the run does
+    first, on the host's folders the run mounts: the real index_sync on its copy, from the
+    host's view at SOURCE (as /source is in the run). seen: what the run found in its store and
+    its copy before that, and the copy's .git configuration and commit after it."""
+    real = pod.runner
+    monkeypatch.setattr(index_sync, "SOURCE", str(pod.index_source))
+
+    def runner(cmd, timeout=None):
+        cmd = list(cmd)
+        if cmd[:5] == ["docker", "run", "-d", "--name", pod.index_provision]:
+            seen["store"] = sorted(p.name for p in pod.index_store.iterdir())
+            seen["copy"] = sorted(p.name for p in pod.index_copy.iterdir())
+            given = cmd[cmd.index("-c") + 2 :]  # after the script: the copy's path, the commit
+            seen["synced"] = index_sync.sync(str(pod.index_copy), given[1])
+            seen["config"] = (pod.index_copy / ".git" / "config").read_text()
+            seen["head"] = git(pod.index_copy, "rev-parse", "HEAD")
+        return real(cmd, timeout)
+
+    for kept in ("calls", "find", "states", "networks"):
+        setattr(runner, kept, getattr(real, kept))
+    pod.runner = runner
+
+
+@pytest.mark.parametrize("discarded", [True, False], ids=["product", "control-without-discard"])
+def test_a_provisioning_run_never_meets_what_an_index_without_a_network_wrote(
+    tmp_path, monkeypatch, discarded
+):
+    """The steady I, which has no network, keeps in its store what the planner asked it and
+    leaves its copy's .git hostile: a filter git runs on a checkout. The provisioning command
+    changes (a new configuration, a new vivibox), the pod starts again, and the run, which has
+    the internet, starts on an empty store and an empty copy, and makes its copy from the host's
+    view of the branch as it is now; the filter never runs. The control: the same run with the
+    discard taken away meets every one of these, so the test sees them when they are there."""
+    pod = provisioning_pod(tmp_path)
+    pod.up()
+    assert pod.index in starts(pod.runner.calls) and pod.index_failure == ""
+    # What the steady I did: its copy made from the view (the real operation), then its traps.
+    monkeypatch.setattr(index_sync, "SOURCE", str(pod.index_source))
+    first = git(pod.index_source, "rev-parse", "HEAD")
+    assert index_sync.sync(str(pod.index_copy), first) == 0
+    (pod.index_store / "planner-asked").write_text("CANARY: find_symbol PaymentSecret\n")
+    ran = tmp_path / "filter-ran"
+    git(pod.index_copy, "config", "filter.i.smudge", f"sh -c 'echo ran >> {ran}; cat'")
+    (pod.index_copy / ".git" / "info").mkdir(exist_ok=True)
+    (pod.index_copy / ".git" / "info" / "attributes").write_text("* filter=i\n")
+    (pod.index_copy / "README.md").unlink()
+    # The trap is live: git on that copy runs I's command (the control of the filter).
+    assert index_sync.sync(str(pod.index_copy), first) == 0 and ran.read_text() == "ran\n"
+    ran.unlink()
+    (pod.index_copy / "README.md").unlink()
+    (pod.index_copy / "CANARY-untracked.txt").write_text("CANARY\n")
+    if not discarded:
+        monkeypatch.setattr(pod, "index_discard", lambda: None)
+    now = commit(pod.repo, {"src/new.py": "new\n"})
+    pod.down()
+    pod.index_server = IndexServer(SERVER.mounts, SERVER.command, provision=(*PROVISIONING.provision, "--v2"))
+    seen: dict = {}
+    what_the_run_meets(pod, monkeypatch, seen)
+    pod.up()
+    assert seen, "the run started"
+    if not discarded:
+        assert "planner-asked" in seen["store"] and "CANARY-untracked.txt" in seen["copy"]
+        assert ran.exists() and 'filter "i"' in seen["config"]
+        return
+    assert seen["store"] == [] and seen["copy"] == [], "the run starts on nothing I wrote"
+    assert seen["synced"] == 0 and not ran.exists(), "I's filter never runs"
+    assert "filter" not in seen["config"] and not (pod.index_copy / ".git" / "info" / "attributes").exists()
+    assert seen["head"] == now == git(pod.index_source, "rev-parse", "HEAD"), "from the host's view as it is"
+    assert not (pod.index_store / "planner-asked").exists()
+    assert pod.index_failure == "" and pod.index_provisioned.read_text() == json.dumps(
+        list(pod.index_server.provision)
+    )
+
+
 def test_the_pool_still_holds_eight_tasks_in_a_slash_24():
     """The index's range is cut from the planner's /29, which held one container: a task's
     block is still a /27, and the default pool holds as many tasks as before."""

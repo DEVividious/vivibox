@@ -59,7 +59,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   starts and before each planner's turn; the host learns only its exit status and never runs git
   in the copy. When it fails, the index is removed and its copy and store deleted, to be made
   again at the pod's next start. An index whose program needs it is provisioned once before its
-  first start, in a run of its own with the index's mounts on a network of its own that exists,
+  first start, and again when its provisioning command changes, each time on an empty store and
+  an empty copy (all an index wrote before is discarded first, so nothing an index without a
+  network kept reaches a run with one), in a run of its own on a network of its own that exists,
   with the host's rules for it, only while the run lasts; the run, its network and its rules
   are removed when it ends, fails, runs out of time, or the pod is stopped, and the index itself
   never has a network.

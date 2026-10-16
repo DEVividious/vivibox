@@ -26,6 +26,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   notification of the index's, closes the connection on anything malformed, and hands the model
   the answer's text with invisible characters shown as code points, under a line that says it is
   data derived from the repository.
+- The index wrapper connects through the socket it checked: it opens the socket's entry without
+  following a link (`O_PATH`), checks on that descriptor that it is a socket, and connects
+  through `/proc/self/fd/<fd>`, so the index changing the name between the check and the
+  connect (to a link to a socket of the planner's side) no longer redirects the connect.
 
 ## [0.2.0] - 2026-10-12
 

@@ -10,6 +10,7 @@ nowhere, not what the text says."""
 
 from __future__ import annotations
 
+import array
 import json
 import os
 import socket
@@ -37,6 +38,7 @@ class HostileIndex:
         self.received: list[list[dict]] = []  # what the wrapper sent, a list a connection
         self.raw: list[bytes] = []  # the same, as bytes
         self.answered: list[dict] = []  # replies the wrapper sent to the index's own requests
+        self.passed = os.devnull  # the file whose descriptor pass_fd hands over
         self._closed = threading.Event()
         folder = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
         self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -138,6 +140,16 @@ class HostileIndex:
                 conn.sendall(chunk)
         elif mode == "hang":
             return
+        elif mode == "pass_fd":
+            # A descriptor of its own handed over with the answer, as a unix socket allows.
+            held = os.open(self.passed, os.O_RDONLY)
+            try:
+                conn.sendmsg(
+                    [text(ident, "with a descriptor")],
+                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, bytes(memoryview(array.array("i", [held]))))],
+                )
+            finally:
+                os.close(held)
         elif mode == "progress":
             while not self._closed.is_set():
                 note = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 1}}

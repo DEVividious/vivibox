@@ -338,3 +338,86 @@ def test_a_socket_with_no_one_listening_is_unavailable(folder):
     os.close(fd)
     dead.close()
     assert one_call(folder) == (tools.failure("unavailable", FAST), True)
+
+
+class Victim:
+    """A socket of the planner's own side, listening where the index cannot reach it but by a
+    link: it records whatever connects to it."""
+
+    def __init__(self, directory) -> None:
+        self.path = directory / "victim.sock"
+        self.got: list[bytes] = []
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.bind(str(self.path))
+        self._sock.listen(4)
+        self._sock.settimeout(0.2)
+
+    def connected(self) -> bool:
+        try:
+            conn, _ = self._sock.accept()
+        except TimeoutError:
+            return False
+        conn.settimeout(0.2)
+        try:
+            self.got.append(conn.recv(4096))
+        except TimeoutError:
+            self.got.append(b"")
+        conn.close()
+        return True
+
+    def close(self) -> None:
+        self._sock.close()
+
+
+@pytest.mark.parametrize("swap", ["link", "gone", "file"])
+def test_an_entry_swapped_between_its_check_and_the_connect_never_redirects_it(
+    tmp_path, monkeypatch, index, folder, swap
+):
+    """The index changes its socket's name after the wrapper checked it and before the connect:
+    to a link to a socket of the planner's side, to nothing, to a file. The connect still
+    reaches the socket that was checked, and nothing reaches the planner's side."""
+    elsewhere = tmp_path / "planner-side"
+    elsewhere.mkdir()
+    victim = Victim(elsewhere)
+    entry = folder / "index.sock"
+    aside = folder / "index.sock.aside"
+
+    def swapped() -> None:
+        os.rename(entry, aside)  # the listener keeps its socket; only its name moves
+        if swap == "link":
+            entry.symlink_to(victim.path)
+        elif swap == "file":
+            entry.write_text("x")
+
+    class Swapping(socket.socket):
+        def connect(self, address):
+            if self.family == socket.AF_UNIX and entry.is_socket() and not entry.is_symlink():
+                swapped()
+            return super().connect(address)
+
+    monkeypatch.setattr(channel.socket, "socket", Swapping)
+    try:
+        text, failed = one_call(folder)
+        assert not failed and "answer of find_symbol" in text
+        assert len(index.calls()) == 1
+        assert not entry.is_socket() or entry.is_symlink(), "the swap happened before the connect"
+        assert not victim.connected() and victim.got == []
+    finally:
+        victim.close()
+
+
+def test_a_descriptor_the_index_passes_over_the_socket_is_never_taken(tmp_path, index, folder):
+    """A unix socket carries descriptors: one of the index's, sent with its answer, is not
+    received by the wrapper, which reads bytes and no ancillary data."""
+    index.mode, index.passed = "pass_fd", str(tmp_path / "the-index-s-own")
+    (tmp_path / "the-index-s-own").write_text("x")
+
+    def held() -> int:
+        return sum(
+            os.readlink(f"/proc/self/fd/{fd}") == index.passed
+            for fd in os.listdir("/proc/self/fd")
+            if os.path.exists(f"/proc/self/fd/{fd}")
+        )
+
+    assert one_call(folder) == (tools.result(tools.TOOLS[1], ["with a descriptor"], False, FAST), False)
+    assert held() == 0

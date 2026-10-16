@@ -19,8 +19,14 @@ from .config import TASK_NETWORK_BITS
 # The kernel's interfaces: whether a bridge of that name is there is asked of it, not of Docker.
 SYS_NET = Path("/sys/class/net")
 # How a task's block is split: the writer's role first, the widest (the sidecar, the gate and the
-# nested containers are on it), then the reviewer's and the planner's, each a /29.
-ROLE_BITS = {"w": 28, "r": 29, "p": 29}
+# nested containers are on it), then the reviewer's, a /29, then the planner's and the code
+# index's provisioning run's, a /30 each: one container each, at the address after the gateway.
+# A task allocated before the index had a range keeps the planner's /29 and has no index range
+# (LAYOUTS).
+ROLE_BITS = {"w": 28, "r": 29, "p": 30, "i": 30}
+# The sets of roles a task's allocation may record: every role's, or an earlier vivibox's
+# without the code index's.
+LAYOUTS = (frozenset(names.ROLES), frozenset(("w", "r", "p")))
 # The roles whose Docker network every task has. The planner's is made for a task whose planner
 # runs in a control container of its own (PodNetwork.made_roles); in a task without one its range
 # stays recorded and reserved, with no network, no bridge and no rules.
@@ -127,7 +133,7 @@ class PodNetwork:
         allocated the writer's network alone was made before every role had one, and is not given
         the others after the fact (its layout is an earlier vivibox's)."""
         found = self._allocated()
-        if found and set(found) != set(names.ROLES):
+        if found and frozenset(found) not in LAYOUTS:
             return (
                 f"{self.task_id}'s network is from an earlier vivibox, which gave a task one network "
                 f"and not one per role; delete it and create it again: vivibox delete {self.task_id}"

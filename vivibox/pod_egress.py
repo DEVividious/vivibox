@@ -18,7 +18,7 @@ from .podspec import HOST_GATEWAY, Runner, run
 HELPER = "/usr/local/libexec/vivibox-host"
 # The helper this vivibox speaks to (its VERSION): one that answers another number takes
 # another policy, and the person is told to install this one.
-HELPER_VERSION = "3"
+HELPER_VERSION = "4"
 # The one policy there is until a task's names are allowed by name (phase 4a): the internet open,
 # everything private, the host and the other tasks refused.
 POLICY = "open"
@@ -133,14 +133,15 @@ class PodEgress:
             targets += [f"{ip}:{s.port}" for ip in found if f"{ip}:{s.port}" not in targets]
         return targets
 
-    def policy(self) -> dict:
+    def policy(self, extra: tuple[str, ...] = ()) -> dict:
         """What the helper is given for this task: its role networks, each with the host services
         it may reach, the pool (every other task's range, refused), the uplink's MTU (the MSS
         clamp follows a VPN going on or off) and where the forwarder listens. The networks are
         those with a bridge (pod_network.made_roles): the writer's, the reviewer's, and the
         planner's in a task with a control container; without one its range is only reserved,
-        and no chain is loaded for a bridge nothing is on."""
-        nets = self.made_networks()
+        and no chain is loaded for a bridge nothing is on. extra: roles whose network is there for
+        a while besides (the code index's provisioning run's)."""
+        nets = self.made_networks() + [n for r in extra if (n := self.recorded_network(r))]
         if not nets:
             raise PodError(f"{self.task_id} has no network allocated yet")
         # The project's host services are its build's: the writer's network reaches them, on its
@@ -164,14 +165,14 @@ class PodEgress:
             "dns_port": resolver.PORT,
         }
 
-    def apply_firewall(self) -> None:
-        helper(self.runner, "apply-policy", self.task_id, json.dumps(self.policy()))
+    def apply_firewall(self, extra: tuple[str, ...] = ()) -> None:
+        helper(self.runner, "apply-policy", self.task_id, json.dumps(self.policy(extra)))
 
-    def remove_firewall(self) -> str:
-        """The task's rules gone, for every role it may have had a network for; "" when they are,
-        else what the helper said. A task id that is not one has none."""
+    def remove_firewall(self, roles: tuple[str, ...] = names.ROLES) -> str:
+        """The task's rules gone, for every role it may have had a network for (or for roles);
+        "" when they are, else what the helper said. A task id that is not one has none."""
         try:
-            nets = [{"role": r, "bridge": names.bridge(self.task_id, r)} for r in names.ROLES]
+            nets = [{"role": r, "bridge": names.bridge(self.task_id, r)} for r in roles]
         except ValueError:
             return ""
         gone = json.dumps({"state": "absent", "networks": nets})

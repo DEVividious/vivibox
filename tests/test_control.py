@@ -81,7 +81,7 @@ def test_a_pod_with_a_control_container_has_the_planners_network_and_its_rules(t
     made = pod.runner.find("docker", "network", "create")
     assert [c[-1] for c in made] == ["vivibox-shop-1-net", "vivibox-shop-1-r", "vivibox-shop-1-p"]
     planners = made[2]
-    assert planners[planners.index("--subnet") + 1] == "198.51.100.24/29"
+    assert planners[planners.index("--subnet") + 1] == "198.51.100.24/30"
     assert planners[planners.index("--gateway") + 1] == "198.51.100.25"
     assert "com.docker.network.bridge.name=vbx-shop-1-p" in planners
     calls = pod.runner.calls
@@ -91,7 +91,7 @@ def test_a_pod_with_a_control_container_has_the_planners_network_and_its_rules(t
     assert [(n["role"], n["bridge"], n["subnet"]) for n in nets] == [
         ("w", "vbx-shop-1-w", "198.51.100.0/28"),
         ("r", "vbx-shop-1-r", "198.51.100.16/29"),
-        ("p", "vbx-shop-1-p", "198.51.100.24/29"),
+        ("p", "vbx-shop-1-p", "198.51.100.24/30"),
     ]
     assert nets[0]["hostsvc"] == ["198.51.100.1:5432"]
     assert nets[1]["hostsvc"] == [] and nets[2]["hostsvc"] == [], "the writer's network alone"
@@ -105,7 +105,7 @@ def test_a_pod_without_a_control_container_has_no_planners_network_nor_rules_for
         "vivibox-shop-1-net", "vivibox-shop-1-r",
     ]  # fmt: skip
     assert [n["role"] for n in applied_policy(pod)["networks"]] == ["w", "r"]
-    assert [n.role for n in pod.networks()] == ["w", "r", "p"], "recorded all the same"
+    assert [n.role for n in pod.networks()] == ["w", "r", "p", "i"], "recorded all the same"
 
 
 def test_a_planners_network_gone_while_the_task_was_stopped_is_made_again_on_its_range(tmp_path):
@@ -116,7 +116,7 @@ def test_a_planners_network_gone_while_the_task_was_stopped_is_made_again_on_its
     pod.ensure_networks()
     made = [c for c in pod.runner.calls[before:] if c[:3] == ["docker", "network", "create"]]
     assert [c[-1] for c in made] == ["vivibox-shop-1-p"]
-    assert made[0][made[0].index("--subnet") + 1] == "198.51.100.24/29"
+    assert made[0][made[0].index("--subnet") + 1] == "198.51.100.24/30"
 
 
 def test_removing_a_task_removes_the_planners_network_whether_it_had_one(tmp_path):
@@ -125,9 +125,9 @@ def test_removing_a_task_removes_the_planners_network_whether_it_had_one(tmp_pat
         pod = a_pod(tmp_path, with_one)
         pod.remove()
         gone = [c[-1] for c in pod.runner.find("docker", "network", "rm")]
-        assert gone == ["vivibox-shop-1-net", "vivibox-shop-1-r", "vivibox-shop-1-p"]
+        assert gone == ["vivibox-shop-1-net", "vivibox-shop-1-r", "vivibox-shop-1-p", "vivibox-shop-1-i"]
         absent = json.loads([c for c in pod.runner.find("sudo") if c[3] == "apply-policy"][-1][5])
-        assert [n["role"] for n in absent["networks"]] == ["w", "r", "p"]
+        assert [n["role"] for n in absent["networks"]] == ["w", "r", "p", "i"]
 
 
 def test_a_task_from_before_the_control_container_is_from_an_earlier_vivibox():

@@ -50,17 +50,20 @@ import stat
 import subprocess
 import sys
 
-VERSION = "3"
+VERSION = "4"
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
 TABLE = "vivibox"
 DUMMY = "vivibox0"
 # Every task bridge starts so (vivibox/names.py); one without a policy is refused outright.
 BRIDGE_PREFIX = "vbx"
-ROLES = ("w", "r", "p")
+# The task's role networks (vivibox/names.py: the same): the writer's, the reviewer's, the
+# planner's, and the code index's provisioning run's, which reaches no host service.
+ROLES = ("w", "r", "p", "i")
+NO_HOST_SERVICES = ("i",)
 POLICIES = ("open",)
 TASK_ID = re.compile(r"[a-z0-9][a-z0-9-]*-[0-9]+")
 TASK_ID_MAX = 64
-BRIDGE = re.compile(r"vbx(-[a-z0-9-]+|[0-9a-f]{10})-[wrp]")
+BRIDGE = re.compile(r"vbx(-[a-z0-9-]+|[0-9a-f]{10})-[wrpi]")
 IFNAME_MAX = 15
 HASH_LENGTH = 10
 MAX_JSON = 16384
@@ -213,6 +216,8 @@ def role_network(task_id, given, where, present):
         if given["policy"] not in POLICIES:
             raise Refused(f"{where}: not a policy: {given['policy']!r:.20}")
         found["policy"] = given["policy"]
+        if role in NO_HOST_SERVICES and given["hostsvc"] != []:
+            raise Refused(f"{where}: the role {role} reaches no host service")
         found["hostsvc"] = given["hostsvc"]  # checked once the pool is known (parse_policy)
     return found
 

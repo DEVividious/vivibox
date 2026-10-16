@@ -268,10 +268,59 @@ def test_the_hosts_services_are_let_through_for_the_network_that_lists_them_only
         assert all("5053" in r for r in accepted), (chain, accepted)
 
 
+INDEX_NETWORKS = [
+    *ROLE_NETWORKS,
+    {"role": "p", "bridge": "vbx-shop-1-p", "subnet": "198.51.100.24/30", "policy": "open"},
+    {"role": "i", "bridge": "vbx-shop-1-i", "subnet": "198.51.100.28/30", "policy": "open"},
+]
+
+
+def test_the_code_indexs_provisioning_network_reaches_the_internet_and_the_forwarder_alone():
+    """The fourth role, the code index's provisioning run: its out chain refuses every other range
+    of the task's and the pool, then lets the internet through; its host chain lets the forwarder
+    through and nothing else of the host's; port 53 goes to the forwarder."""
+    text = helper.policy_file("shop-1", helper.parse_policy("shop-1", policy(networks=INDEX_NETWORKS)))
+    out = rules(text, "out_vbx_shop_1_i")
+    for other in ("198.51.100.0/28", "198.51.100.16/29", "198.51.100.24/30"):
+        assert f"ip daddr {other} meta l4proto tcp reject with tcp reset" in out, other
+        assert f"ip daddr {other} reject with icmpx admin-prohibited" in out, other
+    assert "ip saddr != 198.51.100.28/30 reject with icmpx admin-prohibited" in out
+    assert not [r for r in out if r.endswith("accept") and "dport" in r], "no host service"
+    assert out[-1] == "accept"
+    host = rules(text, "host_vbx_shop_1_i")
+    assert [r for r in host if r.endswith("accept")] == [
+        "ct state established,related accept",
+        "ip daddr 203.0.113.1 udp dport 5053 accept",
+        "ip daddr 203.0.113.1 tcp dport 5053 accept",
+    ]
+    assert host[-1] == "reject with icmpx admin-prohibited"
+    assert rules(text, "dns_vbx_shop_1_i") == [
+        "udp dport 53 dnat ip to 203.0.113.1:5053",
+        "tcp dport 53 dnat ip to 203.0.113.1:5053",
+    ]
+    for theirs in ("out_vbx_shop_1_w", "out_vbx_shop_1_r", "out_vbx_shop_1_p"):
+        assert "ip daddr 198.51.100.28/30 reject with icmpx admin-prohibited" in rules(text, theirs), theirs
+
+
+def test_the_code_indexs_provisioning_network_is_given_no_host_service():
+    networks = [{**INDEX_NETWORKS[-1], "hostsvc": ["198.51.100.29:5432"]}]
+    code, host = call("apply-policy", "shop-1", policy(networks=networks))
+    assert code == 1 and host.calls == []
+    with pytest.raises(helper.Refused, match="no host service"):
+        helper.parse_policy("shop-1", policy(networks=networks))
+
+
+def test_the_code_indexs_network_alone_is_removed_alone():
+    gone = {"state": "absent", "networks": [{"role": "i", "bridge": "vbx-shop-1-i"}]}
+    text = helper.policy_file("shop-1", helper.parse_policy("shop-1", json.dumps(gone)))
+    deleted = [line for line in text.splitlines() if line.startswith("delete")]
+    assert deleted and all("vbx_shop_1_i" in line or '"vbx-shop-1-i"' in line for line in deleted)
+
+
 def test_the_helpers_version_is_the_one_vivibox_asks_for():
     from vivibox.pod_egress import HELPER_VERSION
 
-    assert helper.VERSION == HELPER_VERSION == "3", "the policy's shape changed: a host service per network"
+    assert helper.VERSION == HELPER_VERSION == "4", "a fourth role: the code index's provisioning run"
 
 
 def test_the_dry_run_of_both_role_networks_is_the_reviewed_file():

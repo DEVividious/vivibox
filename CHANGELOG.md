@@ -8,6 +8,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+### Changed
+
+- The root helper is version 4: run `host/setup.sh` again after updating (an older helper stops
+  every start by name). It knows a fourth network of a task's, the code index's provisioning
+  run's, which reaches the internet and the host's DNS forwarder and nothing else: no host
+  service, no other range of the task's or of the pool. A new task's planner network is a /30
+  (it holds one container), and the provisioning run's /30 is cut beside it: a task still takes
+  a /27, and the default pool still holds eight tasks. A task allocated before keeps its ranges
+  and has no range for the index.
+
 ### Fixed
 
 - A pod stopped by force starts again. `docker kill` left the daemon's pid file in the sidecar,

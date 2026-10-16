@@ -54,8 +54,9 @@ class FakeDocker:
         self.refuses = ""  # what the root helper says when it refuses; "" and it does its job
         self.refuses_only = ""  # the one operation it refuses, when not every one
         self.helper_version = HELPER_VERSION  # what the root helper answers --version with
+        self.exits: dict[str, str] = {}  # what docker wait says of a container: its exit status
 
-    def __call__(self, cmd):
+    def __call__(self, cmd, timeout=None):
         cmd = list(cmd)
         self.calls.append(cmd)
         out, rc = "", 0
@@ -82,7 +83,11 @@ class FakeDocker:
             self.binds[cmd[4]] = binds(cmd)
             self.labels[cmd[4]] = dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "--label")
         elif cmd[:3] == ["docker", "rm", "-f"]:
-            self.states.pop(cmd[3], None)
+            for name in cmd[3:]:
+                self.states.pop(name, None)
+        elif cmd[:2] == ["docker", "wait"]:
+            out = self.exits.get(cmd[2], "0") + "\n"
+            self.states[cmd[2]] = "exited"
         elif cmd[:2] == ["docker", "stop"] and cmd[-1] in self.states:
             self.states[cmd[-1]] = "exited"
         elif cmd[:2] == ["docker", "exec"] and cmd[-2:] == ["cat", "/etc/hosts"]:
@@ -325,7 +330,7 @@ def test_up_makes_the_writers_and_the_reviewers_networks_before_the_rules(pod):
     assert [(n["role"], n["subnet"]) for n in policy["networks"]] == [
         ("w", "198.51.100.0/28"), ("r", "198.51.100.16/29"),
     ], "the planner's reserved range is not in the policy"  # fmt: skip
-    assert [n.role for n in pod.networks()] == ["w", "r", "p"], "but it is recorded"
+    assert [n.role for n in pod.networks()] == ["w", "r", "p", "i"], "but it is recorded"
 
 
 def test_a_reviewers_network_gone_while_the_task_was_stopped_is_made_again_on_its_range(pod):
@@ -670,6 +675,7 @@ def test_remove_detaches_the_disk_deletes_its_image_then_the_rules_and_the_netwo
     ]
     assert steps == [
         "rm", "detach-disk", "apply-policy", "vivibox-shop-1-net", "vivibox-shop-1-r", "vivibox-shop-1-p",
+        "vivibox-shop-1-i",
     ]  # fmt: skip
     detached = next(c for c in pod.runner.calls[before:] if c[0] == "sudo" and c[3] == "detach-disk")
     assert json.loads(detached[5]) == {"dir": str(pod.folder)}
@@ -965,18 +971,20 @@ def test_each_task_gets_its_own_range_avoiding_what_docker_already_uses(pod):
 
 def test_a_task_takes_one_block_of_the_pool_split_by_role(pod, tmp_path):
     """A /27 of the pool per task, recorded whole at the first allocation: the writer's /28
-    first, then the reviewer's /29 and the planner's /29 (reserved: its network is made later).
-    Each role's address is the third of its range, and its gateway the first."""
+    first, then the reviewer's /29, the planner's /30 (reserved: its network is made later) and
+    the code index's provisioning run's /30 (its network made only while the run lasts). Each
+    role's address is the third of its range, and its gateway the first."""
     pod.allocation = tmp_path / "network.json"
     pod.ensure_network()
     assert json.loads(pod.allocation.read_text()) == {
         "networks": [
-            {"role": "p", "subnet": "198.51.100.24/29"},
+            {"role": "i", "subnet": "198.51.100.28/30"},
+            {"role": "p", "subnet": "198.51.100.24/30"},
             {"role": "r", "subnet": "198.51.100.16/29"},
             {"role": "w", "subnet": "198.51.100.0/28"},
         ]
     }
-    assert [n.role for n in pod.networks()] == ["w", "r", "p"], "in the roles' order"
+    assert [n.role for n in pod.networks()] == ["w", "r", "p", "i"], "in the roles' order"
     reviewer = pod.recorded_network("r")
     assert (reviewer.bridge, reviewer.gateway, reviewer.address) == (
         "vbx-shop-1-r",
@@ -987,6 +995,24 @@ def test_a_task_takes_one_block_of_the_pool_split_by_role(pod, tmp_path):
         pod.recorded_network("w").address == "198.51.100.2"
         and pod.recorded_network("p").gateway == "198.51.100.25"
     )
+    index = pod.recorded_network("i")
+    assert (index.bridge, index.gateway, index.address) == ("vbx-shop-1-i", "198.51.100.29", "198.51.100.30")
+
+
+def test_a_task_allocated_before_the_index_had_a_range_still_starts_without_one(pod, tmp_path):
+    """A task of v0.2.0 recorded the writer's, the reviewer's and the planner's /29: it is not
+    refused as an earlier vivibox's, keeps its ranges, and has no range for the index."""
+    pod.allocation = tmp_path / "network.json"
+    old = [{"role": "w", "subnet": "198.51.100.0/28"}, {"role": "r", "subnet": "198.51.100.16/29"},
+           {"role": "p", "subnet": "198.51.100.24/29"}]  # fmt: skip
+    pod.allocation.write_text(json.dumps({"networks": old}))
+    assert pod.allocation_problem() == ""
+    pod.up()
+    assert [(n.role, str(n.subnet)) for n in pod.networks()] == [
+        ("w", "198.51.100.0/28"), ("r", "198.51.100.16/29"), ("p", "198.51.100.24/29"),
+    ]  # fmt: skip
+    assert pod.recorded_network("i") is None
+    assert json.loads(pod.allocation.read_text())["networks"] == old, "not allocated again"
 
 
 def test_the_sidecar_is_pinned_to_the_same_address_every_time(pod):
@@ -1057,9 +1083,9 @@ def test_an_older_root_helper_is_said_with_what_to_run():
     def answering(text, rc=0):
         return lambda cmd: subprocess.CompletedProcess(list(cmd), rc, stdout=text, stderr="")
 
-    assert helper_missing(answering("vivibox-host 3\n")) == ""
-    said = helper_missing(answering("vivibox-host 2\n"))
-    assert "another version" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
+    assert helper_missing(answering("vivibox-host 4\n")) == ""
+    said = helper_missing(answering("vivibox-host 3\n"))
+    assert "another version" in said and "vivibox-host 3" in said and "vivibox-host 4" in said
     assert "host/setup.sh" in said
     assert "not installed" in helper_missing(answering("", rc=1))
 
@@ -1067,11 +1093,11 @@ def test_an_older_root_helper_is_said_with_what_to_run():
 def test_a_root_helper_of_another_version_stops_the_start_before_anything(pod):
     """The helper this vivibox speaks to is one version; another takes another policy. A task's
     start asks it first and stops, naming both and what to run, before the host is prepared."""
-    pod.runner.helper_version = "2"
+    pod.runner.helper_version = "3"
     with pytest.raises(PodError) as stopped:
         pod.up()
     said = str(stopped.value)
-    assert "another version" in said and "vivibox-host 2" in said and "vivibox-host 3" in said
+    assert "another version" in said and "vivibox-host 3" in said and "vivibox-host 4" in said
     assert "host/setup.sh" in said
     assert [c[3] for c in pod.runner.find("sudo")] == ["--version"], "nothing else of the host"
     assert not pod.runner.find("docker", "run") and not pod.runner.find("docker", "network", "create")
@@ -1092,7 +1118,8 @@ def test_the_allocation_is_kept_and_used_again_without_asking_docker(pod, tmp_pa
     pod.allocation = tmp_path / "network.json"
     first = pod.ensure_network()
     assert json.loads(pod.allocation.read_text())["networks"] == [
-        {"role": "p", "subnet": "198.51.100.24/29"},
+        {"role": "i", "subnet": "198.51.100.28/30"},
+        {"role": "p", "subnet": "198.51.100.24/30"},
         {"role": "r", "subnet": "198.51.100.16/29"},
         {"role": "w", "subnet": "198.51.100.0/28"},
     ]
@@ -1201,7 +1228,7 @@ def test_removing_a_task_takes_its_network_and_its_rules_with_it(pod):
     assert calls[gone][3:5] == ["apply-policy", "shop-1"]
     assert json.loads(calls[gone][5]) == {
         "state": "absent",
-        "networks": [{"role": r, "bridge": f"vbx-shop-1-{r}"} for r in ("w", "r", "p")],
+        "networks": [{"role": r, "bridge": f"vbx-shop-1-{r}"} for r in ("w", "r", "p", "i")],
     }
 
 
@@ -1574,7 +1601,8 @@ def test_a_block_whose_reviewers_range_was_taken_meanwhile_is_given_up_whole(pod
     assert [str(s) for s in pod._allocated().values()] == [
         "198.51.100.32/28",
         "198.51.100.48/29",
-        "198.51.100.56/29",
+        "198.51.100.56/30",
+        "198.51.100.60/30",
     ]
     assert real.networks == {"vivibox-shop-1-net", "vivibox-shop-1-r"}
 

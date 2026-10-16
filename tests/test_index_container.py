@@ -74,6 +74,13 @@ def test_only_the_index_mounts_its_store_and_only_it_and_the_planner_its_sockets
         assert store not in found or role == "index", role
         assert sockets not in found or role in ("index", "control"), role
         assert not [s for s in found if s.startswith(store + "/") or s.startswith(sockets + "/")], role
+        # Nor a folder above either: the task's disk, its folder, the tasks' folder, the root.
+        above = [
+            s
+            for s in found
+            if s.startswith("/") and Path(s) in (*Path(store).parents, *Path(sockets).parents)
+        ]
+        assert above == [], (role, above)
     assert sources(made["index"])[store] == "/config"
     assert sources(made["index"])[sockets] == podspec.INDEX_SOCKET_MOUNT
     assert sources(made["control"])[sockets] == f"{podspec.INDEX_SOCKET_MOUNT}:ro"
@@ -105,7 +112,7 @@ def test_the_index_has_no_network_no_capability_no_variable_and_the_tasks_limits
     cmd = pod.index_command()
     assert cmd[:5] == ["docker", "run", "-d", "--name", "vivibox-shop-1-index"]
     assert flag(cmd, "--network") == "none"
-    for absent in ("--add-host", "--dns", "--ip", "-e", "--env", "--env-file", "-p", "--publish",
+    for absent in ("--add-host", "--ip", "-e", "--env", "--env-file", "-p", "--publish",
                    "--privileged", "--cap-add", "--device", "--pid", "--userns", "--runtime"):  # fmt: skip
         assert absent not in cmd, absent
     assert not [a for a in cmd if a.startswith("--restart") or a.startswith("--network=")]
@@ -119,6 +126,12 @@ def test_the_index_has_no_network_no_capability_no_variable_and_the_tasks_limits
     assert flag(cmd, "--memory") == flag(cmd, "--memory-swap") == str(pod.limits.memory_of("index"))
     assert flag(cmd, "--pids-limit") == str(pod.limits.pids_of("index"))
     assert flag(cmd, "--label") == "vivibox.task=shop-1"
+    # No server of the host's in its resolv.conf, nor the host's search domains (a VPN's, an
+    # employer's): it could put them in an answer the planner reads.
+    assert flag(cmd, "--dns") == "127.0.0.1" and flag(cmd, "--dns-search") == "."
+    # What its program prints is Docker's log on the host's disk: bounded, outside the task's disk.
+    logs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--log-opt"]
+    assert flag(cmd, "--log-driver") == "json-file" and logs == ["max-size=1m", "max-file=1"]
     assert cmd[-3:] == [pod.image, "python3", "/opt/index/server.py"]
 
 
@@ -151,6 +164,16 @@ def test_the_index_starts_after_the_planner_and_goes_with_the_pod(tmp_path):
     pod.runner.calls.clear()
     pod.remove()
     assert any("vivibox-shop-1-index" in c for c in pod.runner.find("docker", "rm", "-f"))
+
+
+def test_a_stop_and_a_forced_stop_take_the_index_whatever_the_pod_was_made_with(tmp_path):
+    """A pod made without the index's program (a command that names none, an index switched off
+    since) still stops and kills one the task has running, as remove removes it."""
+    pod = a_pod(tmp_path, server=None)
+    pod.down()
+    assert ["docker", "stop", "-t", "10", "vivibox-shop-1-index"] in pod.runner.calls
+    pod.kill()
+    assert any("vivibox-shop-1-index" in c for c in pod.runner.find("docker", "kill"))
 
 
 def test_a_pod_without_an_index_makes_none_and_an_index_needs_a_planner(tmp_path):
@@ -229,3 +252,26 @@ def test_a_slow_index_answers_after_its_delay(tmp_path):
         assert not failed and parts == ["answer of find_symbol: {}"]
     finally:
         hostile.close()
+
+
+def test_the_wrapper_makes_itself_undumpable_before_it_connects(tmp_path):
+    """A peer of a unix socket can ask the kernel for the other end's process (SO_PEERPIDFD)
+    and, through it, for handles to that process's namespaces, which its user may take of its
+    own processes. The wrapper's process is made undumpable at its start: its /proc entries
+    become root's, and the index gets no handle of the planner's container through it."""
+    folder = tmp_path / "sockets"
+    folder.mkdir()
+    root = Path(index.__file__).parent.parent.parent
+    command = pod_index.wrapper_command(str(root), str(folder))
+    wrapper = subprocess.Popen(
+        [sys.executable if c == "python3" else c for c in command],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, cwd=tmp_path,
+    )  # fmt: skip
+    try:
+        wrapper.stdin.write(json.dumps(INITIALIZE).encode() + b"\n")
+        wrapper.stdin.flush()
+        assert json.loads(wrapper.stdout.readline())["id"] == 1, "started and serving"
+        assert Path(f"/proc/{wrapper.pid}/environ").stat().st_uid == 0
+    finally:
+        wrapper.kill()
+        wrapper.wait()

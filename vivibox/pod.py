@@ -495,14 +495,13 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
         namespace; left behind, it would hang without a network once the sidecar stops."""
         self.review_down()
         self.gate_down()
-        index = [self.index] if self.has_index else []
-        for name in (self.agent, *index, self.control, self.sidecar):
+        # The index's whether or not this pod was given its program, as remove takes it.
+        for name in (self.agent, self.index, self.control, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
     def kill(self) -> None:
         """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
-        index = [self.index] if self.has_index else []
-        self._run("docker", "kill", self.agent, self.sidecar, self.control, *index, check=False)
+        self._run("docker", "kill", self.agent, self.sidecar, self.control, self.index, check=False)
         self.review_down()
         self.gate_down()
 

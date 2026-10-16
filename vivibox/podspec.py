@@ -624,6 +624,12 @@ def index_command(pod: Pod, server: IndexServer) -> list[str]:
         "docker", "run", "-d", "--name", pod.index,
         "--label", f"vivibox.task={pod.task_id}",
         "--network", "none",
+        # Docker writes the host's DNS servers and search domains into resolv.conf even without a
+        # network: a VPN's or an employer's, which the index could put into an answer.
+        "--dns", "127.0.0.1", "--dns-search", ".",
+        # What its program prints is Docker's log, on the host's disk and outside the task's:
+        # kept to a megabyte, so a compromised index cannot fill the disk Docker writes to.
+        "--log-driver", "json-file", "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
         "--ipc", "private",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('index')}",

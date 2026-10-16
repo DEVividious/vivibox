@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import array
 import contextlib
+import errno
+import fcntl
 import json
 import os
 import socket
@@ -40,6 +42,7 @@ class HostileIndex:
         self.raw: list[bytes] = []  # the same, as bytes
         self.answered: list[dict] = []  # replies the wrapper sent to the index's own requests
         self.passed = os.devnull  # the file whose descriptor pass_fd hands over
+        self.peers: list[str] = []  # what each connection's peer gave of its namespaces
         self._closed = threading.Event()
         folder = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
         self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -61,6 +64,7 @@ class HostileIndex:
                 conn, _ = self._listener.accept()
             except OSError:
                 return
+            self.peers.append(peer_namespace(conn))
             got: list[dict] = []
             self.received.append(got)
             threading.Thread(target=self._serve, args=(conn, got), daemon=True).start()
@@ -221,6 +225,26 @@ class HostileIndex:
             conn.sendall(RAW[mode](ident))
 
 
+SO_PEERPIDFD = 77
+PIDFD_GET_MNT_NAMESPACE = 0xFF03  # _IO(PIDFS_IOCTL_MAGIC, 3)
+
+
+def peer_namespace(conn: socket.socket) -> str:
+    """What the kernel gives a server of the client at the other end: a handle to the client's
+    process, and through it one to its mount namespace; "taken", or the errno that refused it."""
+    try:
+        pidfd = conn.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD)
+    except OSError as e:
+        return f"no pidfd: {errno.errorcode.get(e.errno, e.errno)}"
+    try:
+        os.close(fcntl.ioctl(pidfd, PIDFD_GET_MNT_NAMESPACE))
+        return "taken"
+    except OSError as e:
+        return errno.errorcode.get(e.errno, str(e.errno))
+    finally:
+        os.close(pidfd)
+
+
 def _q(ident) -> str:
     return json.dumps(ident)
 
@@ -270,8 +294,10 @@ def main(argv: list[str]) -> None:
     with contextlib.suppress(FileNotFoundError):
         (directory / "index.sock").unlink()
     index = HostileIndex(directory, mode=argv[1] if len(argv) > 1 else "echo")
-    given, chosen = index.mode, Path(os.environ.get("HOME", "/config")) / "mode"
+    home = Path(os.environ.get("HOME", "/config"))
+    given, chosen = index.mode, home / "mode"
     while True:
+        (home / "peers.json").write_text(json.dumps(index.peers))
         try:
             index.mode = chosen.read_text().strip() or given
         except OSError:

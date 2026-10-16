@@ -96,6 +96,11 @@ def writable(folders: list[str]) -> list[str]:
     return can
 
 
+def read(path: str) -> str:
+    with open(path) as f:
+        return f.read()
+
+
 def status() -> dict:
     found = {}
     with open("/proc/self/status") as f:
@@ -132,7 +137,10 @@ def main() -> None:
         "interfaces": interfaces,
         "unix": unix,
         "tries": tries(asked.get("tries", [])),
-        "writable": writable(sorted({*walked, "/", "/etc", "/usr", "/opt", "/cache/m2", "/var/tmp"})),
+        "writable": writable(
+            sorted({*walked, "/", "/etc", "/usr", "/opt", "/cache/m2", "/var/tmp", "/dev/mqueue"})
+        ),
+        "resolv": read("/etc/resolv.conf"),
         "status": status(),
         "processes": processes(),
         "environment": sorted(os.environ),

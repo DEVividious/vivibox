@@ -126,8 +126,8 @@ def plant(task, pod, other: Path) -> None:
     (other / "canary").write_text(CANARY["other-task"])
 
 
-def probe(live, attempts: list[dict] | None = None, side=None) -> dict:
-    asked_for = json.dumps({"canaries": list(CANARY.values()), "tries": attempts or []})
+def probe(live, attempts: list[dict] | None = None, side=None, canaries: list[str] = ()) -> dict:
+    asked_for = json.dumps({"canaries": [*CANARY.values(), *canaries], "tries": attempts or []})
     done = (side or live.index).exec("python3", f"{PROGRAM}/index_probe.py", asked_for, check=False)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
@@ -135,11 +135,23 @@ def probe(live, attempts: list[dict] | None = None, side=None) -> dict:
 
 def bind_mounts(report: dict) -> dict[str, str]:
     """The index's mounts that come from a folder of the host's, mount point to its options."""
-    return {
-        m["point"]: m["options"]
-        for m in report["mounts"]
-        if m["type"] not in index_probe.SKIP_TYPES and not m["point"].startswith(("/proc", "/sys"))
-    }
+    return {m["point"]: m["options"] for m in report["mounts"] if not usual(m)}
+
+
+# The kernel's own file systems a container has, at the places Docker puts them: one of these
+# types anywhere else (a host's /proc mounted in) is a mount like any other.
+USUAL = {
+    "/proc": "proc", "/sys": "sysfs", "/sys/fs/cgroup": "cgroup2", "/dev/pts": "devpts",
+    "/dev/mqueue": "mqueue",
+}  # fmt: skip
+
+
+def usual(m: dict) -> bool:
+    """Docker's mounts of the kernel's file systems, and its masks over parts of /proc and /sys."""
+    if USUAL.get(m["point"]) == m["type"]:
+        return True
+    masked = m["point"].startswith(("/proc/", "/sys/")) and m["type"] in ("tmpfs", "proc", "sysfs")
+    return masked and m["point"] not in ("/proc", "/sys")
 
 
 def wrapper(live, *lines: dict, side=None) -> list[dict]:
@@ -177,8 +189,10 @@ def test_the_index_mounts_its_store_its_sockets_and_its_program_and_nothing_else
 
 
 def test_no_canary_of_the_planner_the_writer_the_reviewer_or_another_task_is_in_the_index(live):
-    report = probe(live)
-    assert report["canaries"] == []
+    own = f"CANARY-index-own-{token.token_hex(6)}"
+    live.index.exec("sh", "-c", f"printf %s {own} > /config/own-canary")
+    report = probe(live, canaries=[own])
+    assert report["canaries"] == [f"/config/own-canary: {own}"], "the probe finds one where there is one"
     for path in (
         "/task",
         "/task/handoff",
@@ -226,7 +240,14 @@ def test_the_index_reaches_no_unix_socket_but_its_own(live):
 
 def test_the_index_writes_its_store_its_sockets_and_its_scratch_only(live):
     report = probe(live)
-    assert set(report["writable"]) == {"/config", podspec.INDEX_SOCKET_MOUNT, "/tmp", "/dev/shm"}
+    # /dev/shm and /dev/mqueue are its own IPC namespace's (--ipc private).
+    assert set(report["writable"]) == {
+        "/config",
+        podspec.INDEX_SOCKET_MOUNT,
+        "/tmp",
+        "/dev/shm",
+        "/dev/mqueue",
+    }
 
 
 def test_the_index_has_no_capability_no_variable_of_vivibox_s_and_sees_its_own_processes(live):
@@ -257,7 +278,10 @@ def test_neither_the_writer_nor_its_nested_containers_see_the_index(live):
     assert f"/{podspec.INDEX_SOCKETS}" not in mounted and f"/{podspec.INDEX_STORE} " not in mounted
     found = pod.exec(
         "docker", "run", "--rm", "-v", "/:/host", "alpine:3", "sh", "-c",
-        "find /host -xdev \\( -name index.sock -o -name index-socket \\) 2>/dev/null; true",
+        # Into every mount of the sidecar's (no -xdev): one of the task's disk would hold both.
+        "find /host \\( -path /host/proc -o -path /host/sys -o -path /host/dev "
+        "-o -path /host/var/lib/docker \\) -prune -o \\( -name index.sock -o -name index-socket "
+        "-o -name own-canary \\) -print 2>/dev/null; true",
         check=False,
     )  # fmt: skip
     assert found.returncode == 0 and found.stdout.strip() == "", found.stdout + found.stderr
@@ -428,3 +452,35 @@ def test_a_call_past_the_harness_s_default_time_limit_still_reaches_the_planner(
         assert results and "answer of find_symbol" in results[-1], results
     finally:
         mode(live.pod, "echo")
+
+
+# --- what the index can do to the host and the planner besides the channel --------------------
+
+
+def test_what_the_index_prints_is_kept_to_a_megabyte_of_the_hosts_disk(live):
+    """Its program's output is Docker's log on the host's disk: 27 MB printed, at most a megabyte
+    and a little kept."""
+    live.index.exec("sh", "-c", "head -c 20000000 /dev/zero | base64 > /proc/1/fd/1")
+    time.sleep(2)
+    kept = subprocess.run(["docker", "logs", live.pod.index], capture_output=True)
+    assert len(kept.stdout) + len(kept.stderr) < 2 * 2**20
+
+
+def test_the_index_learns_nothing_of_the_hosts_name_servers(live):
+    report = probe(live)
+    lines = [
+        line.split() for line in report["resolv"].splitlines() if line.strip() and not line.startswith("#")
+    ]
+    assert [w for w in lines if w[0] == "nameserver"] == [["nameserver", "127.0.0.1"]], report["resolv"]
+    assert not [w for w in lines if w[0] in ("search", "domain")], report["resolv"]
+
+
+def test_the_index_gets_no_handle_to_the_planners_namespaces_through_the_wrappers_process(live):
+    """The index asks the kernel for the connecting process (SO_PEERPIDFD) and for its mount
+    namespace through it: the wrapper made itself undumpable, so that is refused."""
+    mode(live.pod, "echo")
+    live.index.exec("sh", "-c", "rm -f /config/peers.json")
+    six_calls(live)
+    time.sleep(0.5)
+    peers = json.loads(live.index.exec("cat", "/config/peers.json").stdout)
+    assert peers and set(peers) == {"EACCES"}, peers

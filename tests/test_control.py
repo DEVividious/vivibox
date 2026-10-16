@@ -360,14 +360,16 @@ def test_a_stop_a_forced_stop_and_a_removal_take_the_control_container(tmp_path)
     pod.up()
     pod.down()
     stopped = [c[-1] for c in pod.runner.find("docker", "stop")]
-    assert stopped == ["vivibox-shop-1-agent", "vivibox-shop-1-control", "vivibox-shop-1-dind"]
+    assert stopped == [
+        "vivibox-shop-1-agent", "vivibox-shop-1-index", "vivibox-shop-1-control", "vivibox-shop-1-dind",
+    ]  # fmt: skip
     before = len(pod.runner.calls)
     pod.up(timeout=1)
     ran = [c[4] for c in pod.runner.calls[before:] if c[:2] == ["docker", "run"]]
     assert "vivibox-shop-1-control" in ran, "a stopped one is made again, with today's mounts and limits"
     pod.kill()
     assert pod.runner.find("docker", "kill")[-1][2:] == [
-        "vivibox-shop-1-agent", "vivibox-shop-1-dind", "vivibox-shop-1-control",
+        "vivibox-shop-1-agent", "vivibox-shop-1-dind", "vivibox-shop-1-control", "vivibox-shop-1-index",
     ]  # fmt: skip
     pod.remove()
     assert "vivibox-shop-1-control" in pod.runner.find("docker", "rm", "-f")[-1]

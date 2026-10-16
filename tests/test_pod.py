@@ -211,6 +211,15 @@ def test_sidecar_mounts_repo_read_only_and_listens_only_on_socket(pod):
     assert "DOCKER_MIN_API_VERSION=1.24 dind dockerd" in script, "older Testcontainers still finds Docker"
 
 
+def test_the_sidecar_starts_again_after_a_forced_stop(pod):
+    """docker kill (a stop by force) leaves the daemon's pid file in the container; docker start
+    runs the same script, and a daemon that finds the file names a process that exists (its own
+    low pid, as likely as not) refuses to start: the pod waits for a socket that never comes."""
+    script = pod.sidecar_command()[-1]
+    before = script.index("dockerd")
+    assert "rm -f /run/vivibox-docker/docker.sock /var/run/docker.pid;" in script[:before]
+
+
 def test_mavens_build_cache_has_a_volume_of_its_own(pod):
     """The Maven build cache extension keeps its cache beside the local repository, /cache/build-cache.
     Only the volumes are writable in the pod, so without one of its own every module logged a

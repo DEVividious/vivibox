@@ -6,6 +6,16 @@ line, the configuration files and what `host/setup.sh` changes on your machine m
 between minor versions. The version itself comes from git: a tag `vX.Y.Z` names a release, and
 every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` prints.
 
+## [Unreleased]
+
+### Fixed
+
+- A pod stopped by force starts again. `docker kill` left the daemon's pid file in the sidecar,
+  and the daemon the next start ran in the same container took the pid for a running one and
+  refused to start, so the start waited for a socket that never came ("Docker in … did not
+  start"). The sidecar's script now removes the pid file with the old socket; a sidecar made by
+  an earlier vivibox is made again at its next start, its data in volumes as before.
+
 ## [0.2.0] - 2026-10-12
 
 **Upgrading from 0.1.0.** Tasks created by 0.1.0 are not run by this version: the task's layout

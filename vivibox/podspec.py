@@ -298,15 +298,17 @@ def sidecar_command(
     # The daemon listens only on the unix socket. 666: the socket is owned by root of the
     # Sysbox user namespace, the agent runs as your UID, and only this pair mounts the volume.
     # The socket left by the last run goes first: the wait would find it at once, chmod it, and
-    # the daemon would then replace it with one the agent cannot use ("permission denied").
+    # the daemon would then replace it with one the agent cannot use ("permission denied"). So
+    # does the pid file a killed daemon (a stop by force) leaves: the next daemon, started by the
+    # same script in the same container, finds its own low pid in it and refuses to start.
     # The trap passes docker stop on to the daemon, which then shuts down cleanly.
     # Docker 29 refuses API versions below 1.40, and Testcontainers before 1.21 speaks 1.32: it
     # would find no Docker at all while `docker version` works. 1.24 is the oldest it still knows.
     mirror = f"--registry-mirror={pod.hub_mirror} " if pod.hub_mirror else ""
     # The daemon writes to the container's output, which Docker keeps in three files of 10 MB.
     daemon = (
-        f"rm -f {SOCKET}; DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} "
-        f"{mirror}& "
+        f"rm -f {SOCKET} /var/run/docker.pid; "
+        f"DOCKER_MIN_API_VERSION=1.24 dind dockerd --host=unix://{SOCKET} {mirror}& "
         'pid=$!; trap \'kill -TERM "$pid"; wait "$pid"\' TERM; '
         f"while [ ! -S {SOCKET} ]; do sleep 0.2; done; chmod 666 {SOCKET}; wait"
     )

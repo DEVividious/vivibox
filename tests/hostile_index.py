@@ -11,6 +11,7 @@ nowhere, not what the text says."""
 from __future__ import annotations
 
 import array
+import contextlib
 import json
 import os
 import socket
@@ -140,6 +141,10 @@ class HostileIndex:
                 conn.sendall(chunk)
         elif mode == "hang":
             return
+        elif mode.startswith("slow:"):
+            # An honest index that takes its time: the answer of echo after so many seconds.
+            time.sleep(float(mode.partition(":")[2]))
+            conn.sendall(text(ident, f"answer of {name}: " + json.dumps(params["arguments"], sort_keys=True)))
         elif mode == "pass_fd":
             # A descriptor of its own handed over with the answer, as a unix socket allows.
             held = os.open(self.passed, os.O_RDONLY)
@@ -256,3 +261,25 @@ RAW = {
     "result_list": lambda i: line({"jsonrpc": "2.0", "id": i, "result": [MARK]}),
     "blank": lambda i: b"\n",
 }
+
+
+def main(argv: list[str]) -> None:
+    """python3 hostile_index.py <directory> [<mode>]: the index as a container's program, until
+    it is stopped. A file `mode` in its home, when there, names the mode of every call after."""
+    directory = Path(argv[0])
+    with contextlib.suppress(FileNotFoundError):
+        (directory / "index.sock").unlink()
+    index = HostileIndex(directory, mode=argv[1] if len(argv) > 1 else "echo")
+    given, chosen = index.mode, Path(os.environ.get("HOME", "/config")) / "mode"
+    while True:
+        try:
+            index.mode = chosen.read_text().strip() or given
+        except OSError:
+            index.mode = given
+        time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    import sys
+
+    main(sys.argv[1:])

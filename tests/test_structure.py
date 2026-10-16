@@ -17,13 +17,14 @@ VERBS = ("run", "start", "restart", "unpause")
 # writes), and why: the pod's own, and containers that are not of a pod.
 STARTERS = {
     "pod.py": {"Pod.up": 1},  # docker start of the sidecar; the runs of its containers come from podspec
-    # the argv of the sidecar, the agent, the gate, the review and the control, built only here
+    # the argv of the sidecar, the agent, the gate, the review, the control and the index, built only here
     "podspec.py": {
         "sidecar_command": 1,
         "agent_command": 1,
         "gate_command": 1,
         "review_command": 1,
         "control_command": 1,
+        "index_command": 1,
     },
     # the Docker Hub mirror, a container of your Docker, not of any pod: made, and started again
     "mirror.py": {"command": 1, "ensure": 1},
@@ -34,14 +35,16 @@ STARTERS = {
 }
 # The builders of a pod container's argv (podspec, and Pod's methods over them): public, and a
 # ready argv to anyone who calls one; so nobody outside the pod does.
-BUILDER_NAMES = ("sidecar_command", "agent_command", "gate_command", "review_command", "control_command")
+BUILDER_NAMES = (
+    "sidecar_command", "agent_command", "gate_command", "review_command", "control_command", "index_command",
+)  # fmt: skip
 # Every place one is named, as it is written there, and why.
 BUILDERS = {
     "podspec.py": [f"def {name}" for name in BUILDER_NAMES],  # defined here
     # Pod's methods over them, and their only callers: up, _outdated_sidecar, gate_up, review_start
     "pod.py": [
-        *(f"def Pod.{name}" for name in BUILDER_NAMES),
-        *(f"podspec.{name}" for name in BUILDER_NAMES),
+        *(f"def Pod.{name}" for name in BUILDER_NAMES if name != "index_command"),
+        *(f"podspec.{name}" for name in BUILDER_NAMES if name != "index_command"),
         "self.agent_command",
         "self.control_command",
         "self.gate_command",
@@ -49,6 +52,8 @@ BUILDERS = {
         "self.sidecar_command",
         "self.sidecar_command",
     ],
+    # the index's, a method of the pod's mixed in from pod_index, and its only caller: up's _index_up
+    "pod_index.py": ["def PodIndex.index_command", "podspec.index_command", "self.index_command"],
     # the view's own review_command: the `review the command` decision, no pod in it
     "keys_plan.py": ["def PlanKeys.review_command", "self.review_command"],
     "tui.py": ["self.review_command"],  # the same, called
@@ -59,7 +64,7 @@ STARTER_AS_TEXT = re.compile(
     r"""["']docker["'][\s,+*\[\]]*(?:["']container["'][\s,+*\[\]]*)?["'](?:run|start|restart|unpause)["']"""
     r"""|["']docker\s+(?:container\s+)?(?:run|start|restart|unpause)\b"""
 )
-BUILDER_AS_TEXT = re.compile(r"\b(?:sidecar|agent|gate|review|control)_command\b")
+BUILDER_AS_TEXT = re.compile(r"\b(?:sidecar|agent|gate|review|control|index)_command\b")
 
 
 # Where an argument list of git's own is written (a list or a tuple that begins with "git"),

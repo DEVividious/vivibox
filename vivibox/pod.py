@@ -39,6 +39,7 @@ from .pod_egress import PodEgress
 from .pod_egress import RulesLeft as RulesLeft
 from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
+from .pod_index import PodIndex
 from .pod_network import PodError as PodError
 from .pod_network import PodNetwork, RoleNetwork
 from .podspec import AGENT_MAVEN_OPTS as AGENT_MAVEN_OPTS
@@ -118,7 +119,7 @@ COPYING_IS_SLOW = "a very large repository, or a slow fetch of its submodules ov
 
 
 @dataclass
-class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
+class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
     task_id: str
     repo: Path
     image: str
@@ -140,6 +141,8 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
     # container, and no planner's network.
     control_mounts: list[Mount] | None = None
     control_env: dict[str, str] = field(default_factory=dict)
+    # What the planner's code index runs (pod_index); None: the task has no index container.
+    index_server: podspec.IndexServer | None = None
     # The gate's PATH, JDK and mise (toolchain.gate_env); None: as for a project without a JDK.
     gate_env: dict[str, str] | None = None
     # Addresses task networks are cut from; see config.Config.network_pool.
@@ -393,7 +396,9 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
             self._run("docker", "rm", "-f", self.agent, check=False)
             self._placeholders(self.agent_mounts)
             self._run(*self.agent_command())
+        self._index_folders()
         self._control_up()
+        self._index_up()
 
     def _control_up(self) -> None:
         """The planner's control container, after the sidecar and the agent (it is in neither's
@@ -490,12 +495,14 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         namespace; left behind, it would hang without a network once the sidecar stops."""
         self.review_down()
         self.gate_down()
-        for name in (self.agent, self.control, self.sidecar):
+        index = [self.index] if self.has_index else []
+        for name in (self.agent, *index, self.control, self.sidecar):
             self._run("docker", "stop", "-t", "10", name, check=False)
 
     def kill(self) -> None:
         """Kills the pod's containers at once, keeping its data: for a pod that ignores a stop."""
-        self._run("docker", "kill", self.agent, self.sidecar, self.control, check=False)
+        index = [self.index] if self.has_index else []
+        self._run("docker", "kill", self.agent, self.sidecar, self.control, *index, check=False)
         self.review_down()
         self.gate_down()
 
@@ -635,7 +642,16 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk):
         Shared caches stay. Returns what the host kept (a disk the helper did not detach, its
         rules), "" else."""
         self._run(
-            "docker", "rm", "-f", self.agent, self.sidecar, self.gate, self.review, self.control, check=False
+            "docker",
+            "rm",
+            "-f",
+            self.agent,
+            self.sidecar,
+            self.gate,
+            self.review,
+            self.control,
+            self.index,
+            check=False,
         )
         kept = [self.remove_disk()]
         self._run("docker", "volume", "rm", self.volumes["socket"], check=False)

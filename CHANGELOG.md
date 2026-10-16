@@ -30,6 +30,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   following a link (`O_PATH`), checks on that descriptor that it is a socket, and connects
   through `/proc/self/fd/<fd>`, so the index changing the name between the check and the
   connect (to a link to a socket of the planner's side) no longer redirects the connect.
+- The planner's code-index container (`vivibox-<id>-index`), not switched on by anything yet:
+  with no network at all, no capability, no variable of vivibox's, its own processes, memory and
+  pids under the task's slice, and only its store (`index/`) and its socket's folder
+  (`index-socket/`) on the task's disk mounted, with its program read-only. The planner's
+  container mounts the socket's folder and the wrapper read-only; no other container mounts
+  either. It starts after the planner's container and goes with the pod; the wrapper's entry for
+  the planner's opencode waits for a call past the wrapper's own limits.
 
 ## [0.2.0] - 2026-10-12
 

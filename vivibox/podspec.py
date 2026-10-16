@@ -13,7 +13,10 @@ import re
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from . import index
 
 if TYPE_CHECKING:
     from .pod import Pod
@@ -104,8 +107,11 @@ SIZE = re.compile(r"^(\d+(?:\.\d+)?)\s*([kmgt])(?:i?b)?$", re.IGNORECASE)
 ROLES = ("agent", "gate", "sidecar", "review", "control")
 DEFAULT_MEMORY = {
     "agent": 4 * GIB, "gate": 4 * GIB, "sidecar": 2 * GIB, "review": 3 * GIB // 2, "control": 3 * GIB // 2,
+    # The planner's code index: not a key of [limits] yet, nor a row of the panel; its figures
+    # wait for the measurement of a real index (Serena and its language servers) on a pod.
+    "index": 4 * GIB,
 }  # fmt: skip
-DEFAULT_PIDS = {"agent": 2048, "gate": 4096, "sidecar": 4096, "review": 1024, "control": 1024}
+DEFAULT_PIDS = {"agent": 2048, "gate": 4096, "sidecar": 4096, "review": 1024, "control": 1024, "index": 1024}
 DEFAULT_POD_MEMORY, DEFAULT_POD_PIDS, DEFAULT_DISK = 6 * GIB, 8192, 20 * GIB
 # The CPUs each container may use: six, or the machine's when it has fewer (Docker refuses
 # --cpus past the machine's count, and the default must start a pod on a four-core laptop).
@@ -544,6 +550,7 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
         Mount(str(pod.control_home), "/config"),
         *ca_mounts,
         *(pod.control_mounts or []),
+        *(index_channel(pod) if pod.has_index else []),
     ]
     # git reads a tree it cannot write: no index refresh, no lock.
     env = {"GIT_OPTIONAL_LOCKS": "0", **pod.control_env}
@@ -561,4 +568,69 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
         *(arg for m in all_mounts for arg in ("-v", m.arg())),
         "-w", READER_WORK,
         pod.image, "sleep", "infinity",
+    ]  # fmt: skip
+
+
+# The planner's code index, I: a container of the task that runs an index on the repository and
+# is taken to be compromised by it from its start (it may run the repository's code). Its store
+# and the directory where it makes its socket are folders of the task's disk; the store is
+# mounted in I alone, the socket's folder in I and, read-only, in the planner's container, where
+# vivibox's own wrapper connects to the socket and is the only thing the planner's harness
+# speaks to. Every role runs as the same user, so what keeps I from the others is what it
+# mounts and that it has no network, never a file's owner or mode.
+INDEX_STORE = "index"
+INDEX_SOCKETS = "index-socket"
+INDEX_SOCKET_MOUNT = "/run/vivibox-index"
+INDEX_SOCKET = "index.sock"
+# Where the planner's container has the wrapper's package, read-only: vivibox/index under it.
+INDEX_WRAPPER_MOUNT = "/opt/vivibox-index"
+INDEX_WRAPPER = Path(index.__file__).parent
+
+
+@dataclass(frozen=True)
+class IndexServer:
+    """What runs in the index container: the files of its program, mounted read-only, and the
+    command that serves the index on INDEX_SOCKET in INDEX_SOCKET_MOUNT."""
+
+    mounts: tuple[Mount, ...]
+    command: tuple[str, ...]
+
+
+def index_channel(pod: Pod) -> list[Mount]:
+    """What the planner's container mounts for its index: the socket's folder and the wrapper,
+    both read-only. Nothing the index writes is ever run there: the wrapper is the host's."""
+    return [
+        Mount(str(pod.index_sockets), INDEX_SOCKET_MOUNT, read_only=True),
+        Mount(str(INDEX_WRAPPER), f"{INDEX_WRAPPER_MOUNT}/vivibox/index", read_only=True),
+    ]
+
+
+def index_command(pod: Pod, server: IndexServer) -> list[str]:
+    """The index container: the control container's hardening with no network at all (only
+    loopback: no route to the planner, the writer, the reviewer, the host, another task or the
+    internet), no variable of vivibox's, no capability, its own processes, memory and pids under
+    the task's slice. It mounts its store as its home, the socket's folder, and its program
+    read-only: nothing of the planner's (its home, its copy, the task's files, the handoff, its
+    secrets), nothing of the writer's (the clone, its home, the Docker socket, the caches), no
+    CA bundle, since it has no network to use one on."""
+    if not all(m.read_only for m in server.mounts):
+        raise ValueError("the index's program is mounted read-only")
+    mounts = [
+        Mount(str(pod.index_store), "/config"),
+        Mount(str(pod.index_sockets), INDEX_SOCKET_MOUNT),
+        *server.mounts,
+    ]
+    return [
+        "docker", "run", "-d", "--name", pod.index,
+        "--label", f"vivibox.task={pod.task_id}",
+        "--network", "none",
+        "--ipc", "private",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('index')}",
+        *pod.limits.flags("index", pod.task_id),
+        *(arg for m in mounts for arg in ("-v", m.arg())),
+        "-w", "/config",
+        # The image's entrypoint, tini, stays: processes the index starts and leaves (language
+        # servers) are reaped, and a stop reaches them.
+        pod.image, *server.command,
     ]  # fmt: skip

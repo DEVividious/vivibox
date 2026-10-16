@@ -16,6 +16,17 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   start"). The sidecar's script now removes the pid file with the old socket; a sidecar made by
   an earlier vivibox is made again at its next start, its data in volumes as before.
 
+### Internal
+
+- The planner's code-index wrapper (`vivibox/index/`), not wired to any container yet: a stdio
+  MCP server of the planner's harness with six read-only navigation tools whose names,
+  descriptions and schemas are vivibox's, in front of an index taken to be compromised. Of the
+  index it asks only `tools/call`, one call at a time, offering it no capability; it reads only
+  the answer to that call, bounded in bytes, characters and seconds, drops every request and
+  notification of the index's, closes the connection on anything malformed, and hands the model
+  the answer's text with invisible characters shown as code points, under a line that says it is
+  data derived from the repository.
+
 ## [0.2.0] - 2026-10-12
 
 **Upgrading from 0.1.0.** Tasks created by 0.1.0 are not run by this version: the task's layout

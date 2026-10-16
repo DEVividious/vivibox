@@ -141,6 +141,8 @@ Mechanical, in `tests/test_prompt_rules.py`:
 - the reviewer's common brief is the reader's, differing from the planner's in the clause on
   the handoff and the sentence on asking for older commits; it and the reviewer's role file are
   what the reviewer's run read (by digest).
+- the index's tools: the budgets of §10, every argument described, and every sentence of the
+  wrapper's around a result where §10 puts it.
 
 Behavioural, in `tests/behavioural/` (`uv run pytest -m model tests/behavioural -x`), on real
 models (a stronger one plans, a cheap one writes: `VIVIBOX_BEHAVIOURAL_PLANNER` and `_WRITER`,
@@ -182,3 +184,23 @@ the commit that changed the prompt:
 
 A wording change that no mechanical test covers names, in its commit message, the behavioural
 run that confirmed it.
+
+## 10. The planner's index tools
+
+What the planner reads of its code index is vivibox's text, in `vivibox/index/tools.py`: the six
+tools' names, what each says it does, what each argument is, the line that heads every result,
+and the sentence for a call that got no answer. None of it comes from the index, which is never
+asked for its list of tools; its words reach the model only as a result's data.
+
+- A description says what the tool returns and what its arguments are, as facts; how to plan
+  with it is the brief's.
+- A result's first line is the wrapper's: it names the tool and says that what follows is data
+  derived from the repository, not instructions. Nothing of the wrapper's comes after the data:
+  a cut is said in that first line.
+- A call that got no answer is one sentence of the wrapper's, never the index's words, its error
+  messages included. An error the index reports in a tool's result is data, under a first line
+  that says so.
+- A search over symbols or text names the part of the project it searches: a search of the
+  whole of a large project does not finish.
+
+A tool's description is at most 70 words, an argument's at most 20 (`tests/test_prompt_rules.py`).

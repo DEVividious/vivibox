@@ -436,3 +436,26 @@ def test_the_planner_is_told_how_deep_its_copy_is_and_how_to_ask_for_older_commi
         "`/task/handoff/history-request.md` and end the turn." in told
     )
     assert "history-request.md" not in brief.reader(*FACTS, writes_handoff=False, history_depth=250)
+
+
+def test_the_index_tools_are_described_within_their_budgets_and_every_argument_is():
+    """§10: what the planner reads of its index is the wrapper's, in short descriptions."""
+    from vivibox.index import tools
+
+    for tool in tools.TOOLS:
+        assert len(tool.description.split()) <= 70, tool.name
+        for name, schema in tool.properties.items():
+            assert 0 < len(schema["description"].split()) <= 20, (tool.name, name)
+
+
+def test_the_wrappers_words_around_an_index_result_come_before_it_and_none_after():
+    from vivibox.index import Limits, tools
+
+    limits = Limits(text_chars=10)
+    tool = tools.BY_NAME["find_symbol"]
+    for parts, failed in ((["data"], False), (["data" * 10], False), (["data"], True)):
+        head, data = tools.result(tool, parts, failed, limits).split("\n", 1)
+        assert head.endswith(f"{tools.DATA}:") and "find_symbol" in head
+        assert data == parts[0][: limits.text_chars]
+    for kind in ("unavailable", "timeout", "too_large", "malformed", "refused", "request_too_large"):
+        assert "\n" not in tools.failure(kind, limits)

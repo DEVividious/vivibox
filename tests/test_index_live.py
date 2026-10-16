@@ -479,8 +479,14 @@ def test_the_index_gets_no_handle_to_the_planners_namespaces_through_the_wrapper
     """The index asks the kernel for the connecting process (SO_PEERPIDFD) and for its mount
     namespace through it: the wrapper made itself undumpable, so that is refused."""
     mode(live.pod, "echo")
-    live.index.exec("sh", "-c", "rm -f /config/peers.json")
+
+    def peers() -> list[str]:
+        """What the index learned of every connection since it started (the race's own
+        connections, not the wrapper's process, among them)."""
+        time.sleep(0.5)
+        return json.loads(live.index.exec("cat", "/config/peers.json").stdout)
+
+    before = len(peers())
     six_calls(live)
-    time.sleep(0.5)
-    peers = json.loads(live.index.exec("cat", "/config/peers.json").stdout)
-    assert peers and set(peers) == {"EACCES"}, peers
+    now = peers()[before:]
+    assert now and set(now) == {"EACCES"}, now

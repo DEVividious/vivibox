@@ -36,8 +36,11 @@ def text(ident, words: str, **more) -> bytes:
 
 
 class HostileIndex:
-    def __init__(self, directory: Path, name: str = "index.sock", mode: str = "echo") -> None:
+    def __init__(
+        self, directory: Path, name: str = "index.sock", mode: str = "echo", project: str = ""
+    ) -> None:
         self.mode = mode
+        self.project = project  # the copy of the commits it reads in mode "project"
         self.received: list[list[dict]] = []  # what the wrapper sent, a list a connection
         self.raw: list[bytes] = []  # the same, as bytes
         self.answered: list[dict] = []  # replies the wrapper sent to the index's own requests
@@ -132,6 +135,9 @@ class HostileIndex:
         mode, name = self.mode, params["name"]
         if mode == "echo":
             conn.sendall(text(ident, f"answer of {name}: " + json.dumps(params["arguments"], sort_keys=True)))
+        elif mode == "project":
+            # Not an index: what its copy of the commits holds, file by file, as it reads it now.
+            conn.sendall(text(ident, json.dumps(read_project(self.project), sort_keys=True)))
         elif mode == "big":
             conn.sendall(text(ident, "B" * (5 * 2**20)))
         elif mode == "wide":
@@ -229,6 +235,18 @@ SO_PEERPIDFD = 77
 PIDFD_GET_MNT_NAMESPACE = 0xFF03  # _IO(PIDFS_IOCTL_MAGIC, 3)
 
 
+def read_project(top: str) -> dict[str, str]:
+    """Every file of the copy but its .git, with the start of what it holds."""
+    found = {}
+    for folder, dirs, files in os.walk(top):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for name in files:
+            path = os.path.join(folder, name)
+            with open(path, errors="replace") as f:
+                found[os.path.relpath(path, top)] = f.read(200)
+    return found
+
+
 def peer_namespace(conn: socket.socket) -> str:
     """What the kernel gives a server of the client at the other end: a handle to the client's
     process, and through it one to its mount namespace; "taken", or the errno that refused it."""
@@ -288,12 +306,15 @@ RAW = {
 
 
 def main(argv: list[str]) -> None:
-    """python3 hostile_index.py <directory> [<mode>]: the index as a container's program, until
-    it is stopped. A file `mode` in its home, when there, names the mode of every call after."""
+    """python3 hostile_index.py <directory> [<mode> [<project>]]: the index as a container's
+    program, until it is stopped. A file `mode` in its home, when there, names the mode of every
+    call after; project is the copy of the commits mode "project" reads."""
     directory = Path(argv[0])
     with contextlib.suppress(FileNotFoundError):
         (directory / "index.sock").unlink()
-    index = HostileIndex(directory, mode=argv[1] if len(argv) > 1 else "echo")
+    index = HostileIndex(
+        directory, mode=argv[1] if len(argv) > 1 else "echo", project=argv[2] if len(argv) > 2 else ""
+    )
     home = Path(os.environ.get("HOME", "/config"))
     given, chosen = index.mode, home / "mode"
     while True:

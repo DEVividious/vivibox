@@ -51,6 +51,12 @@ CANARY = {
 }
 
 
+def sh_head(pod) -> str:
+    """The commit the host's view for the index stands on."""
+    done = subprocess.run(["git", "rev-parse", "HEAD"], cwd=pod.index_source, capture_output=True, text=True)
+    return done.stdout.strip()
+
+
 def index_side(pod) -> ContainerSide:
     return ContainerSide(pod, pod.index)
 
@@ -178,14 +184,17 @@ def test_the_index_mounts_its_store_its_sockets_and_its_program_and_nothing_else
     found = bind_mounts(report)
     assert set(found) == {
         "/", "/dev", "/dev/shm", "/tmp", "/config", podspec.INDEX_SOCKET_MOUNT, PROGRAM,
-        "/etc/hosts", "/etc/hostname", "/etc/resolv.conf",
+        podspec.INDEX_SOURCE_MOUNT, str(live.task.repo), "/etc/hosts", "/etc/hostname", "/etc/resolv.conf",
     }, found  # fmt: skip
     assert found["/"].startswith("ro") and found[PROGRAM].startswith("ro")
+    assert found[podspec.INDEX_SOURCE_MOUNT].startswith("ro") and found[str(live.task.repo)].startswith("rw")
     assert found["/config"].startswith("rw") and found[podspec.INDEX_SOCKET_MOUNT].startswith("rw")
     roots = {m["point"]: m["root"] for m in report["mounts"]}
     assert roots["/config"] == f"/{podspec.INDEX_STORE}" and roots[podspec.INDEX_SOCKET_MOUNT] == (
         f"/{podspec.INDEX_SOCKETS}"
     ), "folders of the task's own disk"
+    assert roots[podspec.INDEX_SOURCE_MOUNT] == f"/{podspec.INDEX_SOURCE}"
+    assert roots[str(live.task.repo)] == f"/{podspec.INDEX_COPY}", "I's own copy, not the writer's clone"
 
 
 def test_no_canary_of_the_planner_the_writer_the_reviewer_or_another_task_is_in_the_index(live):
@@ -197,7 +206,7 @@ def test_no_canary_of_the_planner_the_writer_the_reviewer_or_another_task_is_in_
         "/task",
         "/task/handoff",
         "/work",
-        str(live.task.repo),
+        f"{live.task.repo}/canary.txt",  # the clone's uncommitted canary: I's copy holds commits only
         podspec.SOCKET_DIR,
         "/var/run/docker.sock",
     ):
@@ -243,6 +252,7 @@ def test_the_index_writes_its_store_its_sockets_and_its_scratch_only(live):
     # /dev/shm and /dev/mqueue are its own IPC namespace's (--ipc private).
     assert set(report["writable"]) == {
         "/config",
+        str(live.task.repo),  # its own copy
         podspec.INDEX_SOCKET_MOUNT,
         "/tmp",
         "/dev/shm",
@@ -380,7 +390,7 @@ def test_the_fd_connect_works_with_the_index_under_sysbox(live):
     makes is still one the planner's connect through the descriptor reaches, and the race is
     closed the same way."""
     pod = live.pod
-    made = pod.index_command()
+    made = pod.index_command(sh_head(pod))
     subprocess.run(["docker", "rm", "-f", pod.index], capture_output=True, check=True)
     try:
         subprocess.run([*made[:3], "--runtime=sysbox-runc", *made[3:]], capture_output=True, check=True)

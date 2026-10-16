@@ -457,5 +457,13 @@ def test_the_wrappers_words_around_an_index_result_come_before_it_and_none_after
         head, data = tools.result(tool, parts, failed, limits).split("\n", 1)
         assert head.endswith(f"{tools.DATA}:") and "find_symbol" in head
         assert data == parts[0][: limits.text_chars]
-    for kind in ("unavailable", "timeout", "too_large", "malformed", "refused", "request_too_large"):
+    for kind in (
+        "unavailable",
+        "timeout",
+        "connect_timeout",
+        "too_large",
+        "malformed",
+        "refused",
+        "request_too_large",
+    ):
         assert "\n" not in tools.failure(kind, limits)

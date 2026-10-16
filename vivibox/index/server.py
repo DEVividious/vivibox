@@ -7,7 +7,6 @@ index's but a result's text."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 
 from vivibox.index import Limits, protocol, tools
@@ -50,10 +49,14 @@ def answer(line: bytes, session: Session, limits: Limits) -> dict | None:
     """The response to one line of the harness's, or None for a notification, a response, or
     a line that is no request."""
     try:
-        message = json.loads(line)
-    except (ValueError, RecursionError):
+        message = protocol.decoded(line)
+    except protocol.ProtocolError:
         return None
-    if not isinstance(message, dict) or not isinstance(message.get("method"), str) or "id" not in message:
+    if not isinstance(message, dict) or not isinstance(message.get("method"), str):
+        return None
+    # A request's id is a string or a whole number (JSON-RPC); anything else has no answer that
+    # could be written back as it came.
+    if type(message.get("id")) not in (str, int):
         return None
     method, ident, params = message["method"], message["id"], message.get("params")
     reply: dict = {"jsonrpc": "2.0", "id": ident}

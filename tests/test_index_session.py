@@ -63,7 +63,7 @@ def test_an_index_that_never_greets_is_ended_at_the_connection_s_time_limit():
     s, channel, clock = scripted(lambda m: b"", limits)
     with pytest.raises(Failed) as e:
         s.call("find_symbol", {})
-    assert e.value.failure is Failure.TIMEOUT
+    assert e.value.failure is Failure.CONNECT_TIMEOUT
     assert clock.now == 60
     assert [m.get("method") for m in channel.sent] == ["initialize"]
 
@@ -131,11 +131,15 @@ def test_a_request_longer_than_the_limit_is_never_sent():
         lambda n: "[" + ",".join(["[]"] * n) + "]",
         lambda n: "[" + ",".join(["{}"] * n) + "]",
         lambda n: "{" + ",".join(f'"{k}":0' for k in range(n)) + "}",
+        lambda n: "[" + ",".join(["[[[]]]"] * n) + "]",
+        lambda n: "[" + ",".join(["[[[[]]]]"] * n) + "]",
+        lambda n: "[" + ",".join(['{"":[[]]}'] * n) + "]",
     ],
 )
 def test_the_costliest_message_within_the_byte_limit_costs_a_bounded_amount_to_parse(shape):
     """A message is held whole only up to the byte limit; what parsing it costs is a multiple of
-    that, measured here (about 25 times for a list of empty lists) and pinned below 40."""
+    that, measured here (about 46 times for lists of lists nested three deep, some 23 MiB) and
+    pinned below 64."""
     limits = Limits()
     envelope = '{"jsonrpc":"2.0","id":"%s","result":{"content":[],"x":%s}}\n'
     n = 1
@@ -154,7 +158,7 @@ def test_the_costliest_message_within_the_byte_limit_costs_a_bounded_amount_to_p
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert peak < 40 * limits.response_bytes
+    assert peak < 64 * limits.response_bytes
 
 
 def test_framing_bytes_that_come_one_at_a_time_costs_no_more_than_at_once():
@@ -276,3 +280,19 @@ def test_small_messages_without_an_answer_end_at_the_byte_limit_for_the_call():
         s.call("find_symbol", {})
     assert e.value.failure is Failure.TOO_LARGE
     assert len(note) * 10_000 - len(channel.pending) <= limits.response_bytes
+
+
+def test_a_handshake_past_its_time_limit_is_told_with_the_connections_seconds():
+    limits = Limits(call_seconds=120, connect_seconds=60)
+    s, _, _ = scripted(lambda m: b"", limits)
+    responses, _ = harness(s, call(1, "find_symbol", {"name_path_pattern": "A", "relative_path": "src"}))
+    text = responses[0]["result"]["content"][0]["text"]
+    assert "60 seconds" in text and "120" not in text
+
+
+@pytest.mark.parametrize("ident", ["NaN", "Infinity", "-Infinity", "1e999", "true", "[1]", "{}"])
+def test_a_harness_request_with_an_id_of_no_json_rpc_kind_is_dropped_and_the_next_answered(ident):
+    s, _, _ = scripted(answer("ok"))
+    bad = f'{{"jsonrpc":"2.0","id":{ident},"method":"ping"}}\n'.encode()
+    responses, _ = harness(s, bad, {"jsonrpc": "2.0", "id": 2, "method": "ping"})
+    assert responses == [{"jsonrpc": "2.0", "id": 2, "result": {}}]

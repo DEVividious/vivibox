@@ -140,3 +140,27 @@ def test_a_cut_never_leaves_half_an_escape():
     assert (text, cut) == ("ab", True)
     assert tools.cleaned("ab\x00", 10) == ("ab‹U+0000›", False)
     assert tools.cleaned("x" * 11, 10) == ("x" * 10, True)
+
+
+def test_the_escapes_own_brackets_in_the_data_are_shown_as_code_points():
+    """The repository's own ‹ or › never reads as the wrapper's escape, and a cut never takes
+    the data from a lone one to the end."""
+    assert tools.cleaned("a‹U+202E›b", 100) == ("a‹U+2039›U+202E‹U+203A›b", False)
+    text, cut = tools.cleaned("‹" + "x" * 200, 100)
+    assert cut and len(text) >= 100 - len("‹U+2039›")
+    assert text.startswith("‹U+2039›x")
+
+
+@pytest.mark.parametrize(
+    "c",
+    ["️", "︀", "\U000e0100", "͏", "ᅟ", "ᅠ", "ㅤ", "ﾠ", "⠀", " ", " ", "　", "᠎", "\U000e0041"],
+)
+def test_a_character_with_nothing_to_see_reaches_the_model_as_its_code_point(c):
+    assert tools.cleaned(f"a{c}b", 100) == (f"a‹U+{ord(c):04X}›b", False)
+
+
+def test_an_error_result_that_was_cut_says_so_in_its_first_line():
+    limits = Limits(text_chars=10)
+    head, data = tools.result(tools.BY_NAME["find_symbol"], ["e" * 50], True, limits).split("\n", 1)
+    assert "error" in head and "cut at 10 characters" in head and head.endswith(f"{tools.DATA}:")
+    assert data == "e" * 10

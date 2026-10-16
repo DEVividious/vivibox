@@ -1,8 +1,8 @@
 """One connection to the index and one call on it at a time. The connection is made at the
 first call, with the wrapper's own handshake (no capability offered: no roots, no sampling, no
 elicitation), and made again at the next call after any failure; a call that failed is never
-sent again. Every request has an id the index cannot guess, so nothing it sent before the
-request can be taken for its answer.
+sent again. Every request has an id the index cannot guess, so no message it finished before
+the request can be taken for its answer.
 
 What a call may cost is bounded whatever the index does: the bytes read for it (every message
 meanwhile counted), the longest message held, the seconds from the request to the answer
@@ -27,6 +27,7 @@ DEFAULT = Limits()
 class Failure(Enum):
     UNAVAILABLE = "unavailable"  # no connection, or the index closed it
     TIMEOUT = "timeout"
+    CONNECT_TIMEOUT = "connect_timeout"  # the handshake's: the call was never sent
     TOO_LARGE = "too_large"
     MALFORMED = "malformed"
     REFUSED = "refused"  # a JSON-RPC error: the connection stays
@@ -62,7 +63,10 @@ class Session:
         there is no answer the wrapper takes."""
         try:
             if self._channel is None:
-                self._open()
+                try:
+                    self._open()
+                except TimeoutError:
+                    raise Failed(Failure.CONNECT_TIMEOUT) from None
             deadline = self._clock() + self.limits.call_seconds
             reply = self._exchange("tools/call", {"name": tool, "arguments": arguments}, deadline)
             if reply.result is None:

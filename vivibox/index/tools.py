@@ -212,15 +212,24 @@ def _kind(schema: dict) -> str:
 
 
 # What has nothing to see, or moves or turns the text around it: controls but the line break
-# and the tab, format characters (bidi, zero-width), surrogates, private use, unassigned code
-# points, and the line and paragraph separators. Each is shown as its code point.
-HIDDEN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+# and the tab, format characters (bidi, zero-width, tags), surrogates, private use, unassigned
+# code points, the line and paragraph separators, and every space but the ASCII one. Each is
+# shown as its code point, between ‹ and ›, which are themselves always shown so: what the
+# repository spells as an escape never reads as one of the wrapper's.
+HIDDEN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"})
+# With nothing to see though their category is a letter, a mark or a symbol: the grapheme joiner,
+# the Hangul fillers, the Khmer inherent vowels, the Mongolian and the general variation
+# selectors, and the blank braille pattern (as display.UNSEEN).
+UNSEEN = re.compile(
+    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180d\u180f\u2800\u3164\ufe00-\ufe0f\uffa0"
+    "\U000e0100-\U000e01ef\u2039\u203a]"
+)
 _LOOK = re.compile(r"[^\x20-\x7e\n\t]")
 
 
 def _shown(m: re.Match) -> str:
     c = m.group()
-    return f"‹U+{ord(c):04X}›" if unicodedata.category(c) in HIDDEN else c
+    return f"‹U+{ord(c):04X}›" if unicodedata.category(c) in HIDDEN or UNSEEN.match(c) else c
 
 
 def cleaned(text: str, most: int) -> tuple[str, bool]:
@@ -229,7 +238,7 @@ def cleaned(text: str, most: int) -> tuple[str, bool]:
     if len(shown) <= most:
         return shown, False
     shown = shown[:most]
-    # Not half of a code point's escape at the cut.
+    # Not half of a code point's escape at the cut: every ‹ left is the start of one.
     if (start := shown.rfind("‹")) > shown.rfind("›"):
         shown = shown[:start]
     return shown, True
@@ -238,8 +247,9 @@ def cleaned(text: str, most: int) -> tuple[str, bool]:
 def result(tool: Tool, parts: list[str], failed: bool, limits: Limits) -> str:
     """The index's answer as the model reads it: the wrapper's line first, the data after it."""
     text, cut = cleaned("\n".join(parts), limits.text_chars)
+    cut_at = f", cut at {limits.text_chars} characters" if cut else ""
     if failed:
-        head = f"The index reported an error for {tool.name}; its words follow {DATA}:"
+        head = f"The index reported an error for {tool.name}{cut_at}; its words follow {DATA}:"
     elif cut:
         head = (
             f"Result of {tool.name}, cut at {limits.text_chars} characters; a narrower call shows "
@@ -256,6 +266,10 @@ def failure(kind: str, limits: Limits) -> str:
         "unavailable": "The index is not available: there is no connection to it, or it closed it.",
         "timeout": (
             f"The index did not answer within {limits.call_seconds:g} seconds; the call is not repeated."
+        ),
+        "connect_timeout": (
+            f"The index did not answer its connection within {limits.connect_seconds:g} seconds; "
+            "the call was not sent."
         ),
         "too_large": (
             f"The index's answer was longer than {limits.response_bytes} bytes and was not read; "

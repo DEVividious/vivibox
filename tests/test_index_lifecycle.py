@@ -16,7 +16,7 @@ import pytest
 from test_index_container import COMMIT, SERVER, a_clone, a_pod, commit, git, sources
 from test_pod import flag, starts
 
-from vivibox import control, index_sync, reading
+from vivibox import control, index_sync, podspec, reading
 from vivibox.pod import Mount, PodError
 from vivibox.podspec import IndexServer
 
@@ -454,3 +454,99 @@ def test_the_pool_still_holds_eight_tasks_in_a_slash_24():
     assert sum(r.num_addresses for r in ranges.values()) == 32 == block.num_addresses
     assert ROLE_BITS == {"w": 28, "r": 29, "p": 30, "i": 30}
     assert len(list(ipaddress.IPv4Network("198.51.100.0/24").subnets(new_prefix=27))) == 8
+
+
+@pytest.mark.parametrize("trap", ["unreadable", "deep"])
+def test_nothing_i_wrote_is_used_again_whatever_it_did_to_its_folders(tmp_path, trap):
+    """I can make its folders hard to delete for the host, which runs as the same user: a folder
+    with no permission at all, or one too deep to walk by recursion. The folder it wrote is set
+    aside whole before it is deleted, so the next I starts on empty ones either way; and what can
+    be deleted is."""
+    pod = a_pod(tmp_path)
+    pod.up()
+    locked = pod.index_store / "locked"
+    if trap == "unreadable":
+        (locked / "inside").mkdir(parents=True)
+        (locked / "inside" / "file").write_text("I's\n")
+        locked.chmod(0)
+    else:
+        fd = os.open(pod.index_copy, os.O_RDONLY | os.O_DIRECTORY)
+        for _ in range(5000):  # past both Python's recursion and PATH_MAX
+            os.mkdir("d", dir_fd=fd)
+            inner = os.open("d", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = inner
+        os.close(fd)
+    try:
+        pod.index_discard()
+    finally:
+        if locked.exists():
+            locked.chmod(0o700)
+    assert list(pod.index_store.iterdir()) == [] and list(pod.index_copy.iterdir()) == []
+    assert [p.name for p in pod.disk.iterdir() if "discarded" in p.name] == [], "deleted, once readable"
+
+
+def test_nothing_is_deleted_while_a_container_of_is_is_still_there(tmp_path):
+    pod = a_pod(tmp_path)
+    pod.up()
+    written_by_i(pod)
+    real = pod.runner
+
+    def refusing(cmd, timeout=None):
+        if list(cmd)[:3] == ["docker", "rm", "-f"] and pod.index in cmd:
+            real.calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 1, "", "the daemon said no")
+        return real(cmd)
+
+    refusing.calls, refusing.find, refusing.states = real.calls, real.find, real.states
+    pod.runner = refusing
+    with pytest.raises(PodError, match="could not be removed"):
+        pod.index_discard()
+    assert (pod.index_store / "cache" / "symbols").exists() and pod.index_provisioned.exists()
+
+
+def test_a_folder_swapped_for_a_link_while_it_is_deleted_is_not_followed(tmp_path, monkeypatch):
+    """Were I still writing (it is stopped first): an entry that was a folder when it was listed
+    and is a link when it is entered is never changed through the link."""
+    from vivibox import pod_index
+
+    top = tmp_path / "aside"
+    (top / "sub").mkdir(parents=True)
+    victim = tmp_path / "victim"
+    victim.mkdir(mode=0o750)
+    real = pod_index._files_gone
+
+    def swapping(fd):
+        folders = real(fd)
+        if "sub" in folders:
+            os.rmdir("sub", dir_fd=fd)
+            os.symlink(victim, "sub", dir_fd=fd)
+        return folders
+
+    monkeypatch.setattr(pod_index, "_files_gone", swapping)
+    with pytest.raises(OSError):
+        pod_index._delete(top)
+    assert victim.stat().st_mode & 0o777 == 0o750 and victim.is_dir()
+
+
+def test_what_could_not_be_deleted_is_set_aside_and_never_mounted_again(tmp_path, monkeypatch):
+    from vivibox import pod_index
+
+    pod = a_pod(tmp_path)
+    pod.up()
+    written_by_i(pod)
+
+    def failing(top):
+        raise OSError("an error of the disk's")
+
+    monkeypatch.setattr(pod_index, "_delete", failing)
+    with pytest.raises(PodError, match="could not all be deleted"):
+        pod.index_discard()
+    assert list(pod.index_store.iterdir()) == [] and list(pod.index_copy.iterdir()) == []
+    [store] = pod.disk.glob(f"{podspec.INDEX_STORE}-discarded-*")
+    [copy] = pod.disk.glob(f"{podspec.INDEX_COPY}-discarded-*")
+    assert (store / "cache" / "symbols").exists() and (copy / ".git").exists(), "set aside whole"
+    pod.runner.calls.clear()
+    pod.up()
+    [run] = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index]
+    assert not [b for b in sources(run) if "-discarded-" in b], "never mounted"

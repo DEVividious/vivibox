@@ -17,7 +17,9 @@ wrote are discarded, and made again from the view at the pod's next start."""
 from __future__ import annotations
 
 import json
-import shutil
+import os
+import secrets
+import stat
 import subprocess
 from pathlib import Path
 
@@ -63,17 +65,79 @@ def mcp_server(limits: index.Limits | None = None) -> dict:
     return {"type": "local", "command": wrapper_command(), "timeout": int(seconds * 1000)}
 
 
-def _empty(folder: Path) -> None:
-    """folder deleted with all in it and made again, empty, or PodError. What it holds is I's, made
-    to be deleted: rmtree walks it without following a link, and I, stopped, changes nothing."""
+def _set_aside(folder: Path) -> Path | None:
+    """folder replaced at once by an empty one: the next I starts on nothing it wrote, whatever it
+    did to make the old one hard to delete. Where the old one went, for _delete; None when there
+    was none. PodError when the folder cannot be replaced."""
     if folder.is_symlink():
         raise PodError(f"the code index's folder {folder} is a link; it is not deleted through it")
+    aside = folder.with_name(f"{folder.name}-discarded-{secrets.token_hex(4)}")
     try:
-        if folder.exists():
-            shutil.rmtree(folder)
+        moved = folder.exists()
+        if moved:
+            folder.rename(aside)
         folder.mkdir(mode=0o700)
-    except (OSError, RecursionError) as e:
+    except OSError as e:
         raise PodError(f"the code index's folder {folder} could not be emptied: {e}") from None
+    return aside if moved else None
+
+
+def _delete(top: Path) -> None:
+    """The tree at top deleted, top included, never through a link (a link is removed, not
+    followed) and at any depth: one folder open at a time, the way back by "..", each folder read
+    once, and made the owner's to list and change before it is entered, since I, the same user,
+    can take that away. I is stopped: nothing changes the tree meanwhile."""
+    os.chmod(top, 0o700)
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    names: list[str] = []  # each folder entered, by its name in the one above
+    left: list[list[str]] = []  # of each folder above, the folders in it still to enter
+    try:
+        pending = _files_gone(fd)
+        while True:
+            if pending:
+                name = pending.pop()
+                inner = _enter(fd, name)
+                os.close(fd)
+                fd = inner
+                names.append(name)
+                left.append(pending)
+                pending = _files_gone(fd)
+            elif names:
+                outer = os.open("..", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+                os.close(fd)
+                fd = outer
+                os.rmdir(names.pop(), dir_fd=fd)
+                pending = left.pop()
+            else:
+                break
+    finally:
+        os.close(fd)
+    top.rmdir()
+
+
+def _enter(fd: int, name: str) -> int:
+    """The folder name in the folder open at fd, made the owner's to list and change and opened:
+    the entry itself, held without following a link, and changed only once it is a folder."""
+    held = os.open(name, os.O_PATH | os.O_NOFOLLOW, dir_fd=fd)
+    try:
+        if not stat.S_ISDIR(os.fstat(held).st_mode):
+            raise OSError(f"{name} is no longer a folder")
+        os.chmod(f"/proc/self/fd/{held}", 0o700)
+        return os.open(f"/proc/self/fd/{held}", os.O_RDONLY | os.O_DIRECTORY)
+    finally:
+        os.close(held)
+
+
+def _files_gone(fd: int) -> list[str]:
+    """Everything in the folder open at fd that is not a folder removed (a link among them); the
+    folders in it, by name."""
+    folders = []
+    for entry in list(os.scandir(fd)):
+        if entry.is_dir(follow_symlinks=False):
+            folders.append(entry.name)
+        else:
+            os.unlink(entry.name, dir_fd=fd)
+    return folders
 
 
 class PodIndex:
@@ -223,9 +287,22 @@ class PodIndex:
         host's record of its provisioning with them: nothing I wrote is used again. The host's
         view stays, the host's own."""
         self._run("docker", "rm", "-f", self.index, self.index_provision, check=False)
+        if left := [n for n in (self.index, self.index_provision) if self._state(n) is not None]:
+            # Never a folder I may still be writing: what is deleted there could be swapped under it.
+            raise PodError(
+                f"{', '.join(left)} could not be removed; the code index's data is kept until it is"
+            )
         self.index_provisioned.unlink(missing_ok=True)
-        for folder in (self.index_store, self.index_copy):
-            _empty(folder)
+        asides = [_set_aside(folder) for folder in (self.index_store, self.index_copy)]
+        kept = []
+        for aside in filter(None, asides):
+            try:
+                _delete(aside)
+            except OSError as e:
+                kept.append(f"{aside} ({e})")
+        if kept:
+            # Set aside, never mounted again; the task's disk goes with the task.
+            raise PodError(f"what the code index wrote could not all be deleted: {'; '.join(kept)}")
 
     # --- the provisioning run ---------------------------------------------------------------
 

@@ -215,7 +215,9 @@ class Planned:
         branch = repo.start_branch(source, base_ref)
         self.task.set_base_commit(base, branch, history.remote(source, branch))
         root = tasks / "disk"
-        self.pod = SimpleNamespace(control_src=root / "control-src", control_work=root / "control-work")
+        self.pod = SimpleNamespace(
+            control_src=root / "control-src", control_work=root / "control-work", has_index=False
+        )
         self.pod.control_src.mkdir(parents=True)
         self.pod.control_work.mkdir()
         self.view = self.pod.control_src

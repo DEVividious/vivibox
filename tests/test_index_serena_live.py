@@ -14,6 +14,7 @@ Run with: uv run pytest -m docker tests/test_index_serena_live.py -s
 
 from __future__ import annotations
 
+import contextlib
 import json
 import secrets as token
 import shutil
@@ -562,12 +563,12 @@ def canary_reports(pod, seconds: float = 240) -> dict[str, dict]:
     deadline, found = time.monotonic() + seconds, {}
     while time.monotonic() < deadline:
         names = index_side(pod).exec("sh", "-c", "ls /tmp/canary/ 2>/dev/null", check=False).stdout.split()
-        found = {
-            n.removesuffix("-steady.json"): json.loads(index_side(pod).exec("cat", f"/tmp/canary/{n}").stdout)
-            for n in names
-            if n.endswith("-steady.json")
-            and index_side(pod).exec("test", "-s", f"/tmp/canary/{n}", check=False).returncode == 0
-        }
+        found = {}
+        for n in names:
+            if n.endswith("-steady.json"):
+                with contextlib.suppress(ValueError):  # still being written
+                    text = index_side(pod).exec("cat", f"/tmp/canary/{n}").stdout
+                    found[n.removesuffix("-steady.json")] = json.loads(text)
         if {"ts-workspace-tsserver", "gradle-settings"} <= set(found):
             return found
         time.sleep(3)

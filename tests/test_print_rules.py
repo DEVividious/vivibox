@@ -267,6 +267,11 @@ ACCOUNTED_FOR: dict[tuple[str, str, str], tuple[int, str]] = {
     ("__main__.py", "", "main()"): (1, "the same"),
     ("__main__.py", "", "main(sys.argv[1:])"): (1, "the same, of the index wrapper's (vivibox/index)"),
     ("index_sync.py", "", "main(sys.argv[1:])"): (1, "the same, in the index's container: nobody reads it"),
+    ("relay.py", "", "main(sys.argv[1:])"): (1, "the code index's relay, in its container: nobody reads it"),
+    ("provision.py", "", "main(sys.argv[1:])"): (
+        1,
+        "the index's provisioning run, in its container: nobody reads it",
+    ),
     ("cli_agent.py", "cmd_wait", "task['status']"): (1, "a status of the table in docs/ux-guidelines.md"),
     ("cli_agent.py", "cmd_wait", "task['next'][0]"): (1, "a command of vivibox's with the task's id"),
     ("cli_agent.py", "cmd_skill", "p.cli"): (1, "an agent CLI vivibox knows (skill.PLACES)"),

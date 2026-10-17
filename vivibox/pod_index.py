@@ -558,7 +558,8 @@ class PodIndex:
         if state == "running" and not late:
             self.index_failure = BEING_PROVISIONED
             return False
-        code = self._provision_wait(COLLECT_SECONDS) if state not in (None, "running") else None
+        # Only a run that ended has an exit status: one left created or paused never ends by itself.
+        code = self._provision_wait(COLLECT_SECONDS) if state in ("exited", "dead") else None
         identity = record.get("provision", "") if isinstance(record, dict) else ""
         commit = self.index_attempt.commit if self.index_attempt else ""
         try:

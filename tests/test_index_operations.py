@@ -283,3 +283,20 @@ def test_while_a_run_is_under_way_the_pods_start_takes_it_down_and_waits_for_its
     assert pod.runner.find("docker", "wait"), "a pod's start is no planner's turn: it waits"
     assert pod.runner.states.get(pod.index) == "running" and pod.index_failure == ""
     assert pod.index in starts(pod.runner.calls)
+
+
+def test_a_run_that_is_neither_running_nor_ended_is_not_waited_for_by_a_turn(tmp_path):
+    """A run left created (its start interrupted) or paused never ends by itself: a turn that
+    finds it takes it down at once, without waiting for an exit status Docker has none of."""
+    pod = a_pod(tmp_path, server=PROVISIONING)
+    timed(pod)
+    pod.index_server = replace(PROVISIONING, provision=())
+    pod.up()
+    pod.index_server = PROVISIONING
+    later = commit(pod.repo, {"a.txt": "a\n"})
+    pod.index_refresh(later)
+    pod.runner.states[pod.index_provision] = "created"
+    pod.runner.calls.clear()
+    assert pod.index_refresh(later) is False
+    assert not pod.runner.find("docker", "wait") and pod.runner.states.get(pod.index_provision) is None
+    assert pod.index_failure == "the code index's provisioning run was stopped"

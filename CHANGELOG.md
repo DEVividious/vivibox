@@ -83,6 +83,16 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   itself is started again once at the next planner's turn, on the planner's commit; a copy that
   cannot be brought up at the index's start is emptied and made again from the host's view, and
   why the host could not discard what the index wrote no longer names an entry of the index's.
+- A planner's turn never waits for the code index's provisioning run: a turn whose index needs
+  one begins it and goes on without an index (the wrapper says it is not available), a timer
+  ends it past its half hour, and a later turn finds it done and starts the index; the pod's
+  start still waits for its own. An index the project had no language for when the pod started
+  comes at the first turn whose commit has one: what a start came to decides what a later turn
+  tries again (no language yet, a failed start or an index that ended by itself, once more on
+  the commit and again on the next; a failed provisioning, not for the same languages until the
+  pod starts again; at most three provisioning runs in a pod's life), and a stopped pod's index
+  is never started by a turn. What is provisioned for is the set of the project's languages:
+  a commit that changes only which has the most files provisions nothing again.
 
 ## [0.2.0] - 2026-10-12
 

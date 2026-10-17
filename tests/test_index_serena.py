@@ -92,7 +92,7 @@ def test_a_language_the_project_gained_is_provisioned_for_on_a_store_discarded_f
     [provisioned] = [
         c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index_provision
     ]
-    assert provisioned[provisioned.index("--languages") + 1] == "typescript,java"
+    assert provisioned[provisioned.index("--languages") + 1] == "java,typescript"
     assert not (pod.index_store / "written-by-i").exists(), "the run starts on nothing I wrote"
     pod.down()
     pod.runner.calls.clear()
@@ -100,10 +100,39 @@ def test_a_language_the_project_gained_is_provisioned_for_on_a_store_discarded_f
     assert not [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index_provision]
 
 
+def test_what_is_provisioned_for_is_the_set_of_languages_and_serena_keeps_their_order(tmp_path):
+    repo = tmp_path / "repo"
+    one = serena_index.for_project(repo, ["java", "typescript"])
+    other = serena_index.for_project(repo, ["typescript", "java", "typescript"])
+    assert one.provision == other.provision, "{java, typescript} == {typescript, java}"
+    assert one.provision[one.provision.index("--languages") + 1] == "java,typescript"
+    # Serena's own order is the host's, most files first (its first is its default), once each.
+    assert other.command[other.command.index("--languages") + 1] == "typescript,java"
+    assert serena_index.for_project(repo, ["java"]).provision != one.provision, "another set"
+
+
+def test_a_change_of_the_languages_order_alone_provisions_nothing_and_one_of_their_set_does(tmp_path):
+    pod = a_pod(tmp_path, server=serena_index.server(tmp_path / "repo"))
+    commit(pod.repo, {f"src/A{i}.java": "class A {}\n" for i in range(20)})
+    commit(pod.repo, {f"web/b{i}.ts": "export const b = 1\n" for i in range(19)})
+    pod.up()
+    (pod.index_store / "m2").write_text("the dependencies the run downloaded\n")
+    flipped = commit(pod.repo, {f"web/c{i}.ts": "export const c = 1\n" for i in range(2)})
+    assert pod.index_refresh(flipped) is True
+    [run] = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index_provision]
+    *_, steady = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index]
+    assert steady[steady.index("--languages") + 1] == "typescript,java", "Serena's order follows"
+    assert (pod.index_store / "m2").exists(), "the store kept: nothing provisioned again"
+    gained = commit(pod.repo, {f"py/p{i}.py": "x = 1\n" for i in range(12)})
+    pod.index_refresh(gained)
+    *_, again = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index_provision]
+    assert again != run and again[again.index("--languages") + 1] == "java,python,typescript"
+
+
 def test_a_project_of_no_language_serena_reads_here_has_no_index(tmp_path):
     pod = a_pod(tmp_path, server=serena_index.server(tmp_path / "repo"))
     pod.up()
-    assert pod.index_failure == "the code index reads none of this project's languages"
+    assert pod.index_failure == "the code index reads none of this project's languages yet"
     assert not [c for c in pod.runner.find("docker", "run", "-d", "--name") if pod.index in c[4]]
 
 
@@ -156,23 +185,6 @@ def ended(pod, oom: bool, code: int = 1) -> None:
 
     run.states, run.calls, run.find = docker.states, docker.calls, docker.find
     pod.runner = run
-
-
-def test_an_index_that_ended_by_itself_is_started_again_once_on_the_planners_commit(tmp_path):
-    pod = a_pod(tmp_path)
-    pod.up()
-    verified = commit(pod.repo, {"a.txt": "verified\n"})
-    ended(pod, oom=True, code=137)
-    assert pod.index_refresh(verified) is True
-    assert pod.runner.states[pod.index] == "running"
-    *_, run = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index]
-    assert run[run.index("-c") + 2 : run.index("--")] == [str(pod.repo), verified]
-    assert pod.index_failure == "the code index ran out of memory and was started again"
-    ended(pod, oom=False, code=1)
-    runs = len(pod.runner.find("docker", "run", "-d", "--name"))
-    assert pod.index_refresh(verified) is False
-    assert len(pod.runner.find("docker", "run", "-d", "--name")) == runs, "once in the pod's life"
-    assert pod.index_failure == "the code index stopped with exit status 1 again; it starts with the pod"
 
 
 def test_why_the_index_could_not_be_discarded_names_nothing_i_chose(tmp_path, monkeypatch):

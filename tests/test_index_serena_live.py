@@ -442,6 +442,59 @@ def test_serena_ending_is_the_wrappers_not_available_and_i_starts_again_at_the_n
     )  # fmt: skip
 
 
+def test_a_language_the_project_gains_brings_an_index_at_a_later_turn_and_no_turn_waits(live):
+    """A project with no Java at the pod's start has no index; a verified commit gives it Java;
+    the planner's turn on it begins the provisioning run and goes on at once, its tools saying
+    the index is not available (the wrapper's own sentence, an error, never an empty answer);
+    once the run is over, the next turn starts the index on the commit, with no restart of the
+    task. Here the test, not vivibox, waits for the run to end."""
+    task = a_task("serenalate")
+    commit(task, {"README.md": "no code yet\n"}, "a start without code")
+    pod = a_pod(task, image.image_ref())
+    pod.index_server = serena_index.server(task.repo)
+    try:
+        pod.up()
+        assert pod.index_failure == pod_index.NO_LANGUAGE_YET
+        assert state(pod.index) == "" and state(pod.index_provision) == ""
+        java = {name: text for name, text in SHAPES.items() if name.endswith((".java", ".xml"))}
+        verified = commit(task, java, "the verified commit, with Java")
+        started = time.monotonic()
+        control.refresh(task, pod, verified)
+        turn_waited = time.monotonic() - started
+        assert turn_waited < 60, turn_waited
+        assert state(pod.index_provision) == "running" and state(pod.index) == ""
+        asked = time.monotonic()
+        text, failed = ask(pod, "find_symbol", SIX["find_symbol"])
+        refused_in = time.monotonic() - asked
+        assert failed and text == tools.failure("unavailable", pod_index.index.Limits()), text
+        assert refused_in < 15, refused_in
+        ended = subprocess.run(
+            ["docker", "wait", pod.index_provision], capture_output=True, text=True, timeout=900
+        )
+        assert ended.stdout.strip() == "0", ended
+        started = time.monotonic()
+        control.refresh(task, pod, verified)
+        assert pod.index_failure == "", pod.index_failure
+        assert state(pod.index_provision) == "" and pod.index_provisioned.exists()
+        wait_for_socket(pod)
+        _, first = answered(pod, "find_symbol", SIX["find_symbol"], lambda t: "side * side" in t)
+        attached = subprocess.run(
+            ["docker", "inspect", "-f", "{{json .NetworkSettings.Networks}}", pod.index],
+            capture_output=True,
+            text=True,
+        )
+        assert list(json.loads(attached.stdout)) == ["none"], "the steady index still has no network"
+        report(
+            "a language gained later",
+            turn_waited=round(turn_waited, 1),
+            not_available_in=round(refused_in, 1),
+            index_after_next_turn=round(time.monotonic() - started, 1),
+            first_answer=round(first, 1),
+        )
+    finally:
+        gone(task, pod)
+
+
 # --- a malicious repository, with real Serena ----------------------------------------------------
 
 # Every place I must never reach, and one it must: the repository's own commits.

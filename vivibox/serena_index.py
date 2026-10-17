@@ -62,14 +62,29 @@ def _launch(module: str) -> str:
 
 
 def for_project(repo: Path, chosen: list[str]) -> IndexServer:
-    """Serena on the project at repo (I's copy at the planner's path), for these languages."""
+    """Serena on the project at repo (I's copy at the planner's path), for these languages: in
+    their order for Serena (its first is its default), and as a set for what the provisioning
+    run fills the store for, so that a commit that changes only which language has the most files
+    provisions nothing again (the host provisions again on another command, on a store it
+    discarded: pod_index._provisioned)."""
+    chosen = list(dict.fromkeys(chosen))
     if not chosen:
         return replace(server(repo), command=(), provision=())
-    project = ("--project", str(repo), "--languages", ",".join(chosen))
+    project = ("--project", str(repo))
+    in_order = ("--languages", ",".join(chosen))
+    as_set = ("--languages", ",".join(sorted(chosen)))
     return IndexServer(
         mounts=(Mount(str(PROGRAM), f"{PROGRAM_MOUNT}/vivibox/index_program", read_only=True),),
-        command=("python3", "-I", "-c", _launch("relay"), *project, podspec.INDEX_SOCKET_MOUNT),
-        provision=(SERENA_PYTHON, "-I", "-c", _launch("provision"), *project),
+        command=(
+            "python3",
+            "-I",
+            "-c",
+            _launch("relay"),
+            *project,
+            *in_order,
+            podspec.INDEX_SOCKET_MOUNT,
+        ),
+        provision=(SERENA_PYTHON, "-I", "-c", _launch("provision"), *project, *as_set),
         for_view=lambda view: for_project(repo, languages(view)),
     )
 

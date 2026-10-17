@@ -39,7 +39,7 @@ from .pod_egress import PodEgress
 from .pod_egress import RulesLeft as RulesLeft
 from .pod_egress import prepare_host as prepare_host
 from .pod_egress import uplink_mtu as uplink_mtu
-from .pod_index import PodIndex
+from .pod_index import IndexLife, PodIndex
 from .pod_network import PodError as PodError
 from .pod_network import PodNetwork, RoleNetwork
 from .podspec import AGENT_MAVEN_OPTS as AGENT_MAVEN_OPTS
@@ -163,8 +163,9 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
     # Why the code index is down, when a start or a refresh of it failed; "" else (pod_index).
     index_failure: str = field(default="", compare=False)
-    # Whether the code index, having ended by itself, was started again in this pod's life.
-    index_restarted: bool = field(default=False, compare=False)
+    # What the host knows of the code index in this pod's life: its last start, its provisioning
+    # runs (pod_index.index_refresh); made anew at the pod's start.
+    index_life: IndexLife = field(default_factory=IndexLife, repr=False, compare=False)
     _in_memory: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:

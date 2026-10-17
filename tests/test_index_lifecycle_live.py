@@ -78,10 +78,13 @@ def wait_for(what, seconds: float = 60, step: float = 0.2) -> None:
 
 
 def wait_for_socket(pod) -> None:
+    """Until I's socket answers a connect: a name left by the I before is not one."""
     entry = f"{podspec.INDEX_SOCKET_MOUNT}/{podspec.INDEX_SOCKET}"
+    listens = f"import socket; socket.socket(socket.AF_UNIX).connect({entry!r})"
     wait_for(
         lambda: (
-            running(pod, pod.index) and index_side(pod).exec("test", "-S", entry, check=False).returncode == 0
+            running(pod, pod.index)
+            and index_side(pod).exec("python3", "-c", listens, check=False).returncode == 0
         )
     )
 
@@ -101,7 +104,9 @@ def wrapper(live, *lines: dict) -> list[dict]:
 
 
 def what_the_index_reads(live) -> str:
-    """The text the planner's wrapper hands on from one call, the index in its project mode."""
+    """The text the planner's wrapper hands on from one call, the index in its project mode (and
+    started again, when a refresh brought it to another commit)."""
+    wait_for_socket(live.pod)
     mode(live.pod, "project")
     replies = wrapper(
         live, INITIALIZE, INITIALIZED, call(2, "get_symbols_overview", VALID["get_symbols_overview"])
@@ -123,7 +128,7 @@ def mounts_of(report: dict) -> dict[str, tuple[str, str]]:
 
 
 @pytest.fixture(scope="module")
-def live():
+def live(tmp_path_factory):
     if not TASKS_ROOT.is_dir():
         pytest.skip("run host/setup.sh first")
     if why := helper_missing():
@@ -131,8 +136,8 @@ def live():
     ref, _ = image.build()
     task = a_task("indexlife")
     pod = a_pod(task, ref)
-    program = task.root / "index-program"
-    program.mkdir()
+    # The host's own folder, never one of the task's (podspec.index_mounts refuses that).
+    program = tmp_path_factory.mktemp("index-program")
     for module in (hostile_index, index_probe, index_provision):
         shutil.copy(module.__file__, program / Path(module.__file__).name)
     steady = IndexServer(
@@ -245,20 +250,19 @@ def test_the_six_wrapper_calls_still_answer_through_the_socket(live):
     assert hostile_index.MARK not in json.dumps(replies)
 
 
-def test_a_copy_the_index_broke_is_discarded_and_made_again_at_the_next_start(live):
+def test_a_copy_the_index_broke_is_made_again_at_its_next_start(live):
+    """I breaks its copy's .git; the next commit the planner reads starts I again on it, and the
+    copy, which cannot be brought up, is emptied and made again from the host's view in I."""
     task, pod = live.task, live.pod
     index_side(pod).exec("sh", "-c", "echo mine > /config/own")
     index_side(pod).exec("sh", "-c", f"cd {task.repo} && rm -rf .git && echo junk > .git")
+    later = commit(task, {"after-the-break.txt": "made again\n"}, "after the break")
     control.refresh(task, pod)
-    assert not running(pod, pod.index), "a copy behind the planner's is never answered from"
-    assert "from scratch" in pod.index_failure
-    assert list(pod.index_copy.iterdir()) == [] and list(pod.index_store.iterdir()) == []
-    pod.up()
-    wait_for_socket(pod)
-    control.refresh(task, pod)
-    head = sh("git", "rev-parse", "HEAD", cwd=task.repo)
-    assert sh("git", "rev-parse", "HEAD", cwd=pod.index_source) == head
-    assert '"calc.py"' in what_the_index_reads(live)
+    assert pod.index_failure == "", pod.index_failure
+    seen = what_the_index_reads(live)
+    assert '"after-the-break.txt": "made again' in seen and '"calc.py"' in seen
+    assert sh("git", "rev-parse", "HEAD", cwd=pod.index_source) == later
+    assert (pod.index_store / "own").exists(), "its store is its own, kept"
 
 
 # --- the provisioning run -------------------------------------------------------------------
@@ -306,8 +310,10 @@ def test_a_provisioning_run_never_meets_what_the_steady_index_wrote(live):
     side.exec("git", "-C", copy, "config", "filter.i.smudge", "sh -c 'echo ran >> /config/filter-ran; cat'")
     side.exec("sh", "-c", f"mkdir -p {copy}/.git/info && echo '* filter=i' > {copy}/.git/info/attributes")
     side.exec("sh", "-c", tracked)
-    assert pod.index_refresh(), "the index's own operation, on its own copy"
-    assert (pod.index_store / "filter-ran").read_text() == "ran\n", "the filter is live"
+    commit(task, {"control.txt": "the filter's control\n"}, "control")
+    assert pod.index_refresh(), "I started again: the index's own operation, on its own copy"
+    wait_for_socket(pod)
+    assert (pod.index_store / "filter-ran").read_text().startswith("ran\n"), "the filter is live"
     side.exec("sh", "-c", f"echo CANARY > {copy}/CANARY-untracked.txt && {tracked}")
     assert (pod.index_store / "planner-asked").exists()
     now = commit(task, {"later.txt": "later\n"}, "later")

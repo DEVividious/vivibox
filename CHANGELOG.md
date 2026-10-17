@@ -54,17 +54,35 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   of the commits for the index (`index-source/` on the task's disk, at `/source` in the index),
   as it does for the planner, on the same commit the planner reads; the index keeps its own
   writable copy of them (`index-copy/`, at the path the planner reads its own) and its store.
-  The copy is made and brought up to date by one fixed operation that runs in the index's
-  container (`vivibox/index_sync.py`: fetch from the view, reset, clean), before its program
-  starts and before each planner's turn; the host learns only its exit status and never runs git
-  in the copy. When it fails, the index is removed and its copy and store deleted, to be made
-  again at the pod's next start. An index whose program needs it is provisioned once before its
+  The copy is made by one fixed operation that runs in the index's container
+  (`vivibox/index_sync.py`: fetch from the view, reset, clean) at its start, before its program;
+  before a planner's turn on a commit the index does not stand on, the host starts the index
+  again on it, never changing the copy under a running program, and never runs git in the copy.
+  An index whose program needs it is provisioned once before its
   first start, and again when its provisioning command changes, each time on an empty store and
   an empty copy (all an index wrote before is discarded first, so nothing an index without a
   network kept reaches a run with one), in a run of its own on a network of its own that exists,
   with the host's rules for it, only while the run lasts; the run, its network and its rules
   are removed when it ends, fails, runs out of time, or the pod is stopped, and the index itself
   never has a network.
+- Serena as the code index's program, still switched on by nothing (`vivibox/serena_index.py`
+  on the host, `vivibox/index_program/` in the index): one Serena 1.7.0 for the index's life,
+  started with it, behind a relay that owns the socket, greets the wrapper itself and hands
+  Serena the wrapper's calls of the six tools under ids of its own (nothing else of the
+  wrapper's, nothing of Serena's but the answers). Its languages (Java, TypeScript with
+  JavaScript, Python, each with ten files or more) are chosen by the host from its own view at
+  the index's start; a new language is provisioned for, on a store discarded first. All of
+  Serena's state is in the index's store, none in the copy: vivibox's configuration is written
+  there at each start, with no project trusted for its own settings, the project's data folder
+  in the store (so a project's own `.serena/` is never read), and the Java language server's
+  heap from the index's memory; the Java language server starts on a workspace of its own at
+  each start (it trusts an old one over the tree). The provisioning run starts the language servers (Serena
+  downloads them) and waits for the Java import to download the project's dependencies.
+- The code index's program comes from the host's own files: a program mounted from the task's
+  folder (the index's store, the task's disk, or above them) is refused. An index that ended by
+  itself is started again once at the next planner's turn, on the planner's commit; a copy that
+  cannot be brought up at the index's start is emptied and made again from the host's view, and
+  why the host could not discard what the index wrote no longer names an entry of the index's.
 
 ## [0.2.0] - 2026-10-12
 

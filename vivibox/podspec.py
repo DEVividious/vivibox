@@ -280,14 +280,6 @@ def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.Complete
     return subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
 
 
-def run_silent(cmd: Sequence[str], timeout: float) -> int:
-    """A command whose output nobody reads, for its exit status alone: nothing is given to it,
-    nothing it prints is kept (the host holds no byte of a container taken to be compromised).
-    subprocess.TimeoutExpired past timeout seconds, the command killed."""
-    out = subprocess.DEVNULL
-    return subprocess.run(list(cmd), stdin=out, stdout=out, stderr=out, timeout=timeout).returncode
-
-
 @dataclass(frozen=True)
 class Mount:
     source: str
@@ -611,6 +603,9 @@ class IndexServer:
     # What fills its store once, with the internet, before it serves (pod_index's provisioning
     # run); () for an index that needs nothing it does not have.
     provision: tuple[str, ...] = ()
+    # The server for the project as the host's view for I shows it at I's start (its languages),
+    # for a program that depends on it; None for one that does not.
+    for_view: Callable[[Path], IndexServer] | None = field(default=None, compare=False, repr=False)
 
 
 def index_channel(pod: Pod) -> list[Mount]:
@@ -632,12 +627,24 @@ def index_sync_command(pod: Pod, commit: str, then: Sequence[str] = ()) -> list[
     return ["python3", "-I", "-c", script, str(pod.repo), commit, *(("--", *then) if then else ())]
 
 
+def _touches(source: Path, folder: Path) -> bool:
+    """Whether source, as the host resolves it, is the task's folder, in it or above it: a
+    program mounted from there would show I what is on the task's disk (its own store, which the
+    provisioning run must not meet, a role's folder) or a folder some role writes."""
+    found, task = Path(os.path.realpath(source)), Path(os.path.realpath(folder))
+    return found == task or task in found.parents or found in task.parents
+
+
 def index_mounts(pod: Pod, server: IndexServer) -> list[Mount]:
     """What the index's containers mount, the steady one and its provisioning run alike: its store
     as its home, its copy of the commits at the path the planner reads its own, the host's view of
     them read-only, and its program read-only."""
     if not all(m.read_only for m in server.mounts):
         raise ValueError("the index's program is mounted read-only")
+    if inside := [m.source for m in server.mounts if _touches(Path(m.source), pod.folder)]:
+        raise ValueError(
+            f"the index's program is the host's own, not of the task's folder: {', '.join(inside)}"
+        )
     return [
         Mount(str(pod.index_store), "/config"),
         Mount(str(pod.index_copy), str(pod.repo)),

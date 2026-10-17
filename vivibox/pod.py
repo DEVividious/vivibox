@@ -161,11 +161,10 @@ class Pod(PodNetwork, PodDemo, PodEgress, PodDisk, PodIndex):
     runner: Runner = run
     # What gate_stream starts a command with; a Popen-like whose stdout can be read line by line.
     popen: Callable[..., subprocess.Popen] = subprocess.Popen
-    # What runs a command for its exit status alone, its output read by nobody (the code index's
-    # operations in its container, pod_index).
-    silent: Callable[[Sequence[str], float], int] = podspec.run_silent
     # Why the code index is down, when a start or a refresh of it failed; "" else (pod_index).
     index_failure: str = field(default="", compare=False)
+    # Whether the code index, having ended by itself, was started again in this pod's life.
+    index_restarted: bool = field(default=False, compare=False)
     _in_memory: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:

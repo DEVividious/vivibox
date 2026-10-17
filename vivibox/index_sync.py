@@ -1,21 +1,23 @@
 """The code index's private copy of the commits, made and brought up to date by the index
-container I itself: the one operation on that copy that vivibox asks for, fixed here. The host
-runs it in I (podspec.index_sync_command), before I's program starts and by docker exec before a
-planner's turn, and gives it nothing but the copy's path, the commit the host's read-only view
-stands on and, at I's start, the program's command to run after it.
+container I itself: the one operation on that copy that vivibox asks for, fixed here. It is
+I's entrypoint (podspec.index_sync_command), and the provisioning run's: the copy made before the
+program starts, never under it. The host gives it nothing but the copy's path, the commit the
+host's read-only view stands on and the program's command to run after it; for another commit,
+the host starts I again.
 
 It runs in I, which is taken to be compromised by the repository: nothing it does is trusted,
-what it prints is never read, and only its exit status tells the host whether to take the copy
-for made. The copy's .git is written in I, so git runs on it here and never on the host. The
-source is the host's view of the commits, mounted read-only at SOURCE; the copy is reset to
-exactly the commit the host named, and nothing else stays: a file the commit deleted or renamed
-away, an untracked or an ignored one, a committed link (written as a plain file holding its
-path, as in the planner's view).
+what it prints is never read, and the host learns only whether I goes on running. The copy's
+.git is written in I, so git runs on it here and never on the host. The source is the host's view
+of the commits, mounted read-only at SOURCE; the copy is reset to exactly the commit the host
+named, and nothing else stays: a file the commit deleted or renamed away, an untracked or an
+ignored one, a committed link (written as a plain file holding its path, as in the planner's
+view).
 
 Plain Python and git, no import of vivibox's: the host passes this file's text to python3 -I.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -58,16 +60,35 @@ def sync(copy: str, commit: str) -> int:
     return 0
 
 
+def emptied(copy: str) -> None:
+    """Everything in the copy removed, the copy's folder itself kept (it is a mount point); a
+    link is removed, not followed."""
+    for name in os.listdir(copy):
+        path = os.path.join(copy, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+
+
 def main(argv: list[str]) -> int:
     """<copy> <commit> [-- <program> ...]: the copy synced; then, when one is given and the copy
-    is made, the program in this process's place."""
+    is made, the program in this process's place. At that start, a copy that cannot be synced
+    (its .git broken) is emptied and made again from the source, once: no one else would, since
+    the host never reads the copy and learns nothing of why I ended."""
     if len(argv) < 2 or (len(argv) > 2 and (argv[2] != "--" or len(argv) == 3)):
         return USAGE
     copy, commit, program = argv[0], argv[1], argv[3:]
     try:
         status = sync(copy, commit)
     except (OSError, subprocess.CalledProcessError):
-        return 1
+        if not program:
+            return 1
+        try:
+            emptied(copy)
+            status = sync(copy, commit)
+        except (OSError, subprocess.CalledProcessError):
+            return 1
     if status or not program:
         return status
     os.execvp(program[0], program)

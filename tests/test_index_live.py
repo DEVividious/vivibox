@@ -79,7 +79,7 @@ def mode(pod, chosen: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def live():
+def live(tmp_path_factory):
     if not TASKS_ROOT.is_dir():
         pytest.skip("run host/setup.sh first")
     if why := helper_missing():
@@ -87,8 +87,8 @@ def live():
     ref, _ = image.build()
     task = a_task("indexcheck")
     pod = a_pod(task, ref)
-    program = task.root / "index-program"
-    program.mkdir()
+    # The host's own folder, never one of the task's (podspec.index_mounts refuses that).
+    program = tmp_path_factory.mktemp("index-program")
     shutil.copy(hostile_index.__file__, program / "hostile_index.py")
     shutil.copy(index_probe.__file__, program / "index_probe.py")
     pod.index_server = IndexServer(

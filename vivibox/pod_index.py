@@ -1,8 +1,8 @@
 """The planner's code index container, I, in a task's pod (podspec.index_command): where its
 store, its socket's folder, its source and its copy of the commits are on the task's disk, its
 lifecycle with the pod's, its provisioning run, and the wrapper as the planner's harness starts it.
-Mixed into Pod, whose task_id, repo, disk, runner, silent, index_server, has_control and network
-methods it uses.
+Mixed into Pod, whose task_id, repo, disk, runner, index_server, has_control and network methods
+it uses.
 
 I is the task's for its whole life, like the planner's container, and only with it: the wrapper
 that reads I runs in the planner's container, so a pod without one has no index.
@@ -10,13 +10,14 @@ that reads I runs in the planner's container, so a pod without one has no index.
 I is taken to be compromised by the repository from its start, and everything it writes with
 it: its store, its copy of the commits and that copy's .git. The host makes I's source, a
 read-only view of the commits (reading.view, as for the planner), and runs git there only; it
-never runs git in, nor reads, what I writes. What it asks of I's copy is one fixed operation that
-runs in I (index_sync), whose exit status is all the host learns; when it fails, I and all it
-wrote are discarded, and made again from the view at the pod's next start. Before each
-provisioning run, which has the internet, all I wrote is discarded too."""
+never runs git in, nor reads, what I writes. What I does to its copy is one fixed operation (index_sync),
+run in I at its start, before its program: the host starts I again on a commit the planner reads
+that I does not stand on, never changing I's copy in place, and learns nothing of the operation but
+whether I runs. Before each provisioning run, which has the internet, all I wrote is discarded."""
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import secrets
@@ -46,6 +47,8 @@ INDEX_ROLE = "i"
 # The host's own record that I's store was provisioned, with which command: a file of the task's
 # disk beside I's folders, never in them, since nothing I writes tells the host anything.
 PROVISIONED = "index-provisioned"
+# The host's own record of the commit it last started I on, there too.
+STARTED_ON = "index-started-on"
 INDEX_OWN = "the code index's"
 
 
@@ -122,7 +125,7 @@ def _enter(fd: int, name: str) -> int:
     held = os.open(name, os.O_PATH | os.O_NOFOLLOW, dir_fd=fd)
     try:
         if not stat.S_ISDIR(os.fstat(held).st_mode):
-            raise OSError(f"{name} is no longer a folder")
+            raise OSError(errno.ENOTDIR, "an entry is no longer a folder")
         os.chmod(f"/proc/self/fd/{held}", 0o700)
         return os.open(f"/proc/self/fd/{held}", os.O_RDONLY | os.O_DIRECTORY)
     finally:
@@ -142,9 +145,7 @@ def _files_gone(fd: int) -> list[str]:
 
 
 class PodIndex:
-    # How long the index's operation on its copy (index_sync, by docker exec) and its
-    # provisioning run may take; past them, the container is removed.
-    SYNC_SECONDS = repo.COPY_TIMEOUT
+    # How long the index's provisioning run may take; past it, its container is removed.
     PROVISION_SECONDS = 1800.0
 
     @property
@@ -180,12 +181,18 @@ class PodIndex:
         return self.disk / PROVISIONED
 
     @property
+    def index_started_on(self) -> Path:
+        return self.disk / STARTED_ON
+
+    @property
     def has_index(self) -> bool:
         return self.index_server is not None
 
     def index_command(self, commit: str) -> list[str]:
         if not self.has_index:
             raise PodError(f"{self.task_id} has no code index")
+        if not self.index_server.command:
+            raise PodError("the code index reads none of this project's languages")
         try:
             return podspec.index_command(self, self.index_server, commit)
         except ValueError as e:
@@ -230,11 +237,12 @@ class PodIndex:
         head = repo.git("rev-parse", "--verify", "HEAD^{commit}", cwd=self.index_source, env=own)
         return head.stdout.strip()
 
-    def _index_up(self) -> None:
+    def _index_up(self, commit: str = "", depth: int = DEFAULT_HISTORY_DEPTH) -> None:
         """I, after the planner's container: running, it is left as it is. Else made again from
-        the host's view of the branch, provisioned first when its program needs it and its store
-        is not. A start that fails leaves I down, with why in index_failure; the pod goes on: the
-        wrapper says the index is not available."""
+        the host's view, on commit (the planner's) or else the branch as it is, its program the
+        one for that view (IndexServer.for_view: its languages), provisioned first when the
+        program needs it and its store is not. A start that fails leaves I down, with why in
+        index_failure; the pod goes on: the wrapper says the index is not available."""
         if not self.has_index or self._state(self.index) == "running":
             return
         self._run("docker", "rm", "-f", self.index, check=False)
@@ -243,10 +251,14 @@ class PodIndex:
             leftover = self._state(self.index_provision) is not None or self._network_there(INDEX_ROLE)
             if leftover and (left := self._provision_gone()):
                 raise PodError(left)
-            head = self._index_view("", DEFAULT_HISTORY_DEPTH)
+            head = self._index_view(commit, depth)
+            if self.index_server.for_view is not None:
+                self.index_server = self.index_server.for_view(self.index_source)
             if self.index_server.provision and not self._provisioned():
                 self._provision(head)
+            self.index_started_on.unlink(missing_ok=True)
             self._run(*self.index_command(head))
+            self.index_started_on.write_text(head + "\n")
         except (PodError, repo.RepoError) as e:
             self._run("docker", "rm", "-f", self.index, check=False)
             self.index_failure = str(e)
@@ -254,34 +266,61 @@ class PodIndex:
         self.index_failure = ""
 
     def index_refresh(self, commit: str = "", depth: int = DEFAULT_HISTORY_DEPTH) -> bool:
-        """I's copy brought to the planner's commit before a turn: the host's view first, then
-        index_sync in I. True once I says its copy is there; else I is down (its copy behind the
-        planner's is never answered from), and, when its own operation failed, all it wrote is
-        discarded. I not running is left so: the pod's next start makes it."""
-        if not self.has_index or self._state(self.index) != "running":
+        """I brought to the planner's commit before a turn: the host's view first; then, when I
+        stands on another commit, I made again on this one, its copy made at its start before its
+        program (Serena) starts. Never in place under a running program: a language server
+        starting while its tree changes answers from the tree it saw (measured with Serena: empty
+        references for minutes). True once I is on the planner's commit; else I is down (a copy
+        behind the planner's is never answered from). I that ended by itself is made again, once
+        in the pod's life, and after that left down until the pod starts again; I that is not
+        there at all (its start failed) is left so, for the pod's next start: neither is waited
+        for."""
+        if not self.has_index:
             return False
-        try:
-            head = self._index_view(commit, depth)
-        except (PodError, repo.RepoError) as e:
+        state = self._state(self.index)
+        if state is None:
+            return False
+        if state == "running":
+            try:
+                head = self._index_view(commit, depth)
+            except (PodError, repo.RepoError) as e:
+                self._run("docker", "rm", "-f", self.index, check=False)
+                self.index_failure = f"the code index's view of the commits could not be made: {e}"
+                return False
+            if self._index_commit() == head:
+                return True
             self._run("docker", "rm", "-f", self.index, check=False)
-            self.index_failure = f"the code index's view of the commits could not be made: {e}"
+            self._index_up(commit, depth)
+            return not self.index_failure
+        if self.index_restarted:
+            self.index_failure = f"the code index {self._index_ended()} again; it starts with the pod"
             return False
-        cmd = ["docker", "exec", self.index, *podspec.index_sync_command(self, head)]
-        try:
-            synced = self.silent(cmd, self.SYNC_SECONDS) == 0
-        except subprocess.TimeoutExpired:
-            synced = False
-        if synced:
-            return True
-        try:
-            self.index_discard()
-        except PodError as e:
-            self.index_failure = str(e)
+        # It ended by itself (its program, Serena, ended, or the memory limit): made again on the
+        # planner's commit.
+        ended = self._index_ended()
+        self.index_restarted = True
+        self._index_up(commit, depth)
+        if self.index_failure:
             return False
-        self.index_failure = (
-            "the code index could not bring its copy of the commits up to date; it starts again from scratch"
-        )
-        return False
+        self.index_failure = f"the code index {ended} and was started again"
+        return True
+
+    def _index_commit(self) -> str:
+        """The commit the host last started I on: its own record, beside I's folders."""
+        try:
+            return self.index_started_on.read_text().strip()
+        except OSError:
+            return ""
+
+    def _index_ended(self) -> str:
+        """How I's container ended, in the host's words: Docker's, never I's."""
+        found = self._run(
+            "docker", "inspect", "-f", "{{.State.OOMKilled}} {{.State.ExitCode}}", self.index, check=False
+        ).stdout.split()
+        if found[:1] == ["true"]:
+            return "ran out of memory"
+        code = found[1] if len(found) == 2 and found[1].isdigit() else ""
+        return f"stopped with exit status {code}" if code else "stopped"
 
     def index_discard(self) -> None:
         """I and its provisioning run removed, its copy and its store deleted and made empty, the
@@ -294,13 +333,16 @@ class PodIndex:
                 f"{', '.join(left)} could not be removed; the code index's data is kept until it is"
             )
         self.index_provisioned.unlink(missing_ok=True)
+        self.index_started_on.unlink(missing_ok=True)
         asides = [_set_aside(folder) for folder in (self.index_store, self.index_copy)]
         kept = []
         for aside in filter(None, asides):
             try:
                 _delete(aside)
             except OSError as e:
-                kept.append(f"{aside} ({e})")
+                # The host's own name for the folder and the kernel's word, never an entry's name:
+                # I chose those, and this sentence may be shown.
+                kept.append(f"{aside} ({os.strerror(e.errno) if e.errno else 'not deleted'})")
         if kept:
             # Set aside, never mounted again; the task's disk goes with the task.
             raise PodError(f"what the code index wrote could not all be deleted: {'; '.join(kept)}")

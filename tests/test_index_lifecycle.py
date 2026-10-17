@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -109,12 +110,39 @@ def test_the_program_runs_only_after_a_copy_that_is_made(tmp_path, source, monke
     assert ran == [["server", "--flag"]]
     ran.clear()
     assert index_sync.main([str(copy), "b" * 40, "--", "server"]) == index_sync.OTHER_COMMIT
-    (copy / ".git").rename(tmp_path / "moved")
-    (copy / ".git").write_text("gitdir: /elsewhere\n")  # a copy I broke
-    assert index_sync.main([str(copy), a, "--", "server"]) == 1
     assert ran == []
     for wrong in ([], [str(copy)], [str(copy), a, "server"], [str(copy), a, "--"]):
         assert index_sync.main(wrong) == index_sync.USAGE, wrong
+
+
+def test_a_copy_broken_before_a_start_is_made_again_and_one_broken_before_a_refresh_fails(
+    tmp_path, source, monkeypatch
+):
+    """At I's start nothing else would make it again (the host learns nothing of why I ended):
+    the copy is emptied, a link in it removed and not followed, and made from the source. At a
+    refresh the failure is the host's to act on (it discards all I wrote)."""
+    copy, outside = tmp_path / "copy", tmp_path / "outside"
+    copy.mkdir()
+    outside.mkdir()
+    (outside / "kept").write_text("not I's\n")
+    a = advance(tmp_path, {"a.txt": "A\n"})
+    ran = []
+    monkeypatch.setattr(os, "execvp", lambda file, args: ran.append(args))
+
+    def broken() -> None:
+        shutil.rmtree(copy / ".git")
+        (copy / ".git").write_text("gitdir: /elsewhere\n")
+        (copy / "junk").mkdir(exist_ok=True)
+        (copy / "junk" / "f").write_text("x\n")
+        (copy / "out").symlink_to(outside)
+
+    assert index_sync.main([str(copy), a]) == 0
+    broken()
+    assert index_sync.main([str(copy), a]) == 1, "a refresh"
+    assert index_sync.main([str(copy), a, "--", "server"]) == 1
+    assert ran == [["server"]], "a start"
+    assert tree(copy) == {"README.md": "shop\n", "a.txt": "A\n"}
+    assert (outside / "kept").read_text() == "not I's\n"
 
 
 def test_the_script_runs_as_the_host_hands_it_over(tmp_path, source):
@@ -141,22 +169,30 @@ def test_the_index_starts_on_the_hosts_view_of_the_branch(tmp_path):
     assert pod.index_failure == ""
 
 
-def test_a_refresh_brings_the_view_to_the_planners_commit_and_asks_i_for_its_copy(tmp_path):
+def started_on(pod) -> list[str]:
+    """The commit of each start of I, as its command names it."""
+    runs = [c for c in pod.runner.find("docker", "run", "-d", "--name") if c[4] == pod.index]
+    return [c[c.index("-c") + 3] for c in runs]
+
+
+def test_a_refresh_to_another_commit_starts_i_again_on_it_and_never_changes_its_copy_in_place(tmp_path):
+    """A language server answers from the tree it saw at its start: I's copy is made before its
+    program starts, and a refresh to a commit I does not stand on makes I again on it."""
     pod = a_pod(tmp_path)
     pod.up()
+    first = git(pod.repo, "rev-parse", "HEAD")
     verified = commit(pod.repo, {"a.txt": "verified\n"})
     commit(pod.repo, {"a.txt": "after the verification\n"})
-    silent = []
-    pod.silent = lambda cmd, timeout: silent.append((list(cmd), timeout)) or 0
+    assert pod.index_refresh(first) is True
+    assert started_on(pod) == [first], "on its commit already: left as it is"
     assert pod.index_refresh(verified) is True
     assert git(pod.index_source, "rev-parse", "HEAD") == verified
     assert (pod.index_source / "a.txt").read_text() == "verified\n", "the writer's later commit is not there"
-    [(cmd, timeout)] = silent
-    assert cmd[:3] == ["docker", "exec", pod.index] and cmd[3:7] == ["python3", "-I", "-c", podspec_script()]
-    assert cmd[7:] == [str(pod.repo), verified], "the host's words only: the copy's path and the commit"
-    assert timeout == pod.SYNC_SECONDS
-    exec_of_i = [c for c in pod.runner.find("docker", "exec") if pod.index in c]
-    assert not exec_of_i, "I's output never reaches the host"
+    assert started_on(pod) == [first, verified]
+    assert ["docker", "rm", "-f", pod.index] in pod.runner.calls
+    assert not [c for c in pod.runner.find("docker", "exec") if pod.index in c], "the host runs nothing in I"
+    assert pod.index_refresh(verified) is True and started_on(pod) == [first, verified]
+    assert pod.index_started_on.read_text() == verified + "\n", "the host's own record, outside I's folders"
 
 
 def podspec_script() -> str:
@@ -190,36 +226,10 @@ def written_by_i(pod) -> None:
     pod.index_provisioned.write_text("[]")
 
 
-@pytest.mark.parametrize("ending", ["failed", "timed out"])
-def test_a_copy_i_could_not_bring_up_to_date_is_discarded_with_all_i_wrote(tmp_path, ending):
-    pod = a_pod(tmp_path)
-    pod.up()
-    written_by_i(pod)
-    outside = tmp_path / "outside"
-    outside.write_text("kept\n")
-    os.symlink(outside, pod.index_store / "out")
-
-    def silent(cmd, timeout):
-        if ending == "failed":
-            return 1
-        raise subprocess.TimeoutExpired(cmd, timeout)
-
-    pod.silent = silent
-    assert pod.index_refresh() is False
-    assert ["docker", "rm", "-f", pod.index, pod.index_provision] in pod.runner.calls
-    assert pod.runner.states.get(pod.index) is None, "I is down: its copy is never answered from"
-    assert list(pod.index_store.iterdir()) == [] and list(pod.index_copy.iterdir()) == []
-    assert not pod.index_provisioned.exists(), "provisioned again at the next start"
-    assert outside.read_text() == "kept\n", "a link of I's is deleted, not followed"
-    assert (pod.index_source / "README.md").exists(), "the host's view stays"
-    assert "from scratch" in pod.index_failure
-
-
 def test_a_view_that_cannot_be_made_takes_i_down_and_keeps_what_it_wrote(tmp_path):
     pod = a_pod(tmp_path)
     pod.up()
     written_by_i(pod)
-    pod.silent = lambda cmd, timeout: pytest.fail("I is not asked for a copy of a view not made")
     assert pod.index_refresh("b" * 40) is False
     assert pod.runner.states.get(pod.index) is None
     assert (pod.index_store / "cache" / "symbols").exists()
@@ -228,7 +238,6 @@ def test_a_view_that_cannot_be_made_takes_i_down_and_keeps_what_it_wrote(tmp_pat
 
 def test_an_index_not_running_is_left_so_by_a_refresh(tmp_path):
     pod = a_pod(tmp_path)
-    pod.silent = lambda cmd, timeout: pytest.fail("not asked")
     assert pod.index_refresh() is False
     assert not pod.runner.find("docker", "run")
 
@@ -265,12 +274,10 @@ def test_the_host_never_runs_git_in_what_i_writes(tmp_path, monkeypatch):
     written_by_i(pod)
     pod.index_provisioned.unlink()
     pod.up()
-    pod.silent = lambda cmd, timeout: 0
     pod.index_refresh()
     commit(pod.repo, {"b.txt": "B\n"})
     pod.index_refresh()
-    pod.silent = lambda cmd, timeout: 1
-    pod.index_refresh()
+    pod.index_discard()
     mine = (pod.index_copy, pod.index_store)
     assert seen, "the host ran git"
     for argv, cwd, env in seen:

@@ -14,7 +14,7 @@ let API models do the coding; choose who reviews each round.
 Fictional tasks, simulated progress and illustrative costs.*
 [Still view](docs/img/view.svg) · [Quick start](#quick-start) · [Documentation](#documentation)
 
-**Where it stands.** v0.2.1 runs agents in [Sysbox](https://github.com/nestybox/sysbox)
+**Where it stands.** v0.2.2 runs agents in [Sysbox](https://github.com/nestybox/sysbox)
 containers on your Linux machine, not in virtual machines. It is a hardening release of that
 architecture: it says in [security.md](docs/security.md) what it enforces, which test holds each
 claim, and what it does not guarantee. Containers share the host's kernel, the internet is open
@@ -62,7 +62,7 @@ The planner, the writer and the reviewer are different trust roles, not just dif
   read-only copy of the task's commits on your host and mounts it in their containers; the
   writer's clone, its `.git` and its uncommitted work are not there. Their harness works in an
   empty directory vivibox made and loads no configuration, hook or MCP server the writer
-  committed. Neither gets a language server or Serena in v0.2.1.
+  committed. Neither gets a language server or Serena in v0.2.2.
 - **The gate** is mechanical verification: your build and test commands on a fresh clone of the
   commits, with the caches the writer can write mounted read-only. Each correction passes
   through it again; the default allows three fix rounds before you take over. Changes to build
@@ -184,7 +184,7 @@ other flows. [CLI workflow and skill setup](docs/tasks.md#driving-vivibox-from-a
 
 ## What it protects, and what it does not
 
-**Enforced in v0.2.1.** The [table in security.md](docs/security.md#what-is-enforced-and-what-holds-it)
+**Enforced in v0.2.2.** The [table in security.md](docs/security.md#what-is-enforced-and-what-holds-it)
 names the mechanism and the test that holds each claim of the boundary:
 
 - The host reads nothing through a link, FIFO or device an agent planted, in `handoff/` or in
@@ -209,7 +209,7 @@ names the mechanism and the test that holds each claim of the boundary:
   appear as code points.
 - Tasks from 0.1.0 are shown, never run or rewritten (see below).
 
-**Not guaranteed in v0.2.1.** The full list is in
+**Not guaranteed in v0.2.2.** The full list is in
 [Limits of the boundary](docs/security.md#limits-of-the-boundary-what-vivibox-does-not-guarantee):
 
 - **Containers, not virtual machines.** Pods share the host's kernel under Sysbox. A kernel
@@ -234,14 +234,20 @@ names the mechanism and the test that holds each claim of the boundary:
   newer base-branch commits in the planner's copy's store, unreachable from its HEAD but
   readable by id; a project JDK the writer's mise installed is the one the gate runs.
 
+## Upgrading from v0.2.1
+
+Pull. The agent image is built again at the next start, now with ICU for .NET tools a build
+fetches (about 38 MB more). The root helper and the dependencies did not change, so neither
+`host/setup.sh` nor `uv tool install` is needed again.
+
 ## Upgrading from v0.2.0
 
-Pull and run `host/setup.sh` again: v0.2.1 talks to version 4 of the root helper, and an older
-helper stops every start by name. The agent image and the dependencies did not change, so
-nothing is rebuilt for this upgrade. Tasks created by v0.2.0 keep working with the network ranges
-they were given. A writer's or planner's container that is running while you upgrade gets the
-bounded Docker log once its task is stopped and started again (`vivibox stop <id>`, then
-`vivibox start <id>`).
+Pull and run `host/setup.sh` again: since v0.2.1 vivibox talks to version 4 of the root helper,
+and an older helper stops every start by name. The dependencies did not change; the agent image
+is built again at the next start (see above). Tasks created by v0.2.0 keep working with the
+network ranges they were given. A writer's or planner's container that is running while you
+upgrade gets the bounded Docker log once its task is stopped and started again
+(`vivibox stop <id>`, then `vivibox start <id>`).
 
 ## Upgrading from v0.1.0
 

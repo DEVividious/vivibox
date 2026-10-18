@@ -8,6 +8,26 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-18
+
+A patch release on 0.2.1: the agent image has ICU, so a build that fetches a .NET tool (Keycloak's
+JS build) gets past it, and a commit the agent makes while working out how to run the app is
+named to you. The writer's memory on a large Java project is unchanged: `docs/configure.md` says
+what was measured and what is known to work.
+
+**Upgrading from 0.2.1.** Pull. The agent image is built again at the next start (about 38 MB
+more); the root helper and the dependencies did not change, so `host/setup.sh` and
+`uv tool install` are not needed again.
+
+### Changed
+
+- `docs/configure.md` says what Serena's Java language server takes of the agent's memory on a
+  large Java project (2.8 to 3.3 GiB on Keycloak), and that a build of the project's whole
+  JavaScript stack (Maven's `-am`) did not fit in the agent's 4 GiB even with no language
+  server: setting Serena's mode to off leaves more room but does not make such a build fit.
+  What is known to work is more memory for the task, `vivibox limits <id> --agent-memory 8g`.
+  The default memory and Serena's default are unchanged.
+
 ### Fixed
 
 - The agent image, which the verification runs in too, has ICU (`libicu76`, about 38 MB). A .NET
@@ -18,6 +38,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   in `vivibox demo` and in the task's timeline: the work goes on from it, and nothing said where
   it came from (a web target added that way was later found outside the plan). The newest ten
   are named and the rest counted, and a turn that fails after committing names them in its error.
+
+### Internal
+
+- The test suite removes the two temporary folders each of its processes made (its home and its
+  temporary folder) when the run ends, also after a failure; it removes nothing else in `/tmp`.
 
 ## [0.2.1] - 2026-10-18
 

@@ -25,6 +25,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   refused to start, so the start waited for a socket that never came ("Docker in … did not
   start"). The sidecar's script now removes the pid file with the old socket; a sidecar made by
   an earlier vivibox is made again at its next start, its data in volumes as before.
+- What runs in a task can no longer fill the disk Docker writes to through a container's log.
+  The writer's, planner's, reviewer's and gate's containers and the Docker Hub mirror each keep
+  one file of 1 MB (`json-file`, `max-size=1m`, `max-file=1`), as the code index's did; the
+  sidecar keeps its three of 10 MB. A task's containers get the bound when they are next made
+  (its next start, or the next round for the reviewer and the gate); a mirror made by an earlier
+  vivibox is made again, what it holds kept in its volume.
 
 ### Internal
 

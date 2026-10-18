@@ -1,3 +1,4 @@
+import ast
 import ipaddress
 import json
 import re
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import review_made
 
+import vivibox
 from vivibox import pod_network, podspec, toolchain
 from vivibox.config import DEFAULT_NETWORK_POOL, HostService
 from vivibox.pod import HELPER as HELPER_PATH
@@ -1498,6 +1500,41 @@ def test_a_tasks_own_limits_reach_the_flags(pod, tmp_path):
     assert flag(commands["agent"], "--pids-limit") == "3000"
     assert flag(commands["agent"], "--cpus") == "2.5" and flag(commands["gate"], "--cpus") == "2.5"
     assert flag(commands["gate"], "--memory") == str(4 * 2**30), "the others as before"
+
+
+def test_every_role_keeps_one_megabyte_of_docker_log(pod, tmp_path):
+    """A role's own process is sleep, which prints nothing, but anything run in the role can write
+    to its output (/proc/1/fd/1), and Docker keeps that on the host's disk, outside the task's:
+    one file of a megabyte, as the index's, never Docker's default that grows without end."""
+    pod.control_mounts = []  # a flow with a planner of its own
+    commands = commands_of(pod, tmp_path)
+    commands["control"] = pod.control_command()
+    del commands["sidecar"]  # its daemon's output, three files of 10 MB: the test below
+    assert set(commands) == {"agent", "gate", "review", "control"}
+    for role, cmd in commands.items():
+        assert flag(cmd, "--log-driver") == "json-file", role
+        logs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--log-opt"]
+        assert logs == ["max-size=1m", "max-file=1"], role
+
+
+def test_every_container_vivibox_keeps_running_has_a_bounded_docker_log():
+    """Each docker run of the package that leaves a container running (-d) names its log's bound,
+    so a container added later does not fall back to Docker's unbounded default. One run without
+    -d is removed when it ends (--rm), and its log with it."""
+    package = Path(vivibox.__file__).parent
+    unbounded = []
+    for path in sorted(package.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.List):
+                continue
+            words = [e.value for e in node.elts if isinstance(e, ast.Constant)]
+            if words[:2] != ["docker", "run"] or "-d" not in words:
+                continue
+            spread = [e.value for e in node.elts if isinstance(e, ast.Starred)]
+            named = any(getattr(s, "id", getattr(s, "attr", None)) == "BOUNDED_LOG" for s in spread)
+            if not named and "--log-opt" not in words:
+                unbounded.append(f"{path.relative_to(package)}:{node.lineno}")
+    assert unbounded == []
 
 
 def test_the_sidecars_logs_rotate_and_say_why_its_daemon_did_not_start(pod):

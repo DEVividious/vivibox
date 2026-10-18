@@ -30,6 +30,12 @@ DIND_IMAGE = "docker:29.8.1-dind"
 RYUK_IMAGE = "testcontainers/ryuk:0.12.0"
 SOCKET_DIR = "/run/vivibox-docker"
 SOCKET = f"{SOCKET_DIR}/docker.sock"
+# What a container's own process prints is Docker's log, on the host's disk and outside the task's,
+# and anything run in a role can write to it (/proc/1/fd/1): one file of a megabyte, never Docker's
+# default that grows without end. Not the sidecar's, whose daemon's output is worth keeping.
+LOG_OPTS = {"max-size": "1m", "max-file": "1"}
+BOUNDED_LOG = ("--log-driver", "json-file")
+BOUNDED_LOG += tuple(a for k, v in LOG_OPTS.items() for a in ("--log-opt", f"{k}={v}"))
 # Shared between tasks (N2): the dependency caches are safe to share, the task's Docker data is not.
 CACHES = {
     "m2": "/cache/m2",
@@ -386,6 +392,7 @@ def agent_command(pod: Pod, ca_mounts: list[Mount]) -> list[str]:
     return [
         "docker", "run", "-d", "--name", pod.agent,
         "--label", f"vivibox.task={pod.task_id}",
+        *BOUNDED_LOG,
         "--network", f"container:{pod.sidecar}",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('agent')}",
@@ -460,6 +467,7 @@ def gate_command(pod: Pod, ca_mounts: list[Mount], env: dict[str, str]) -> list[
     return [
         "docker", "run", "-d", "--name", pod.gate,
         "--label", f"vivibox.task={pod.task_id}",
+        *BOUNDED_LOG,
         "--network", f"container:{pod.sidecar}",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('gate')}",
@@ -500,6 +508,7 @@ def review_command(
     return [
         "docker", "run", "-d", "--name", pod.review,
         "--label", f"vivibox.task={pod.task_id}",
+        *BOUNDED_LOG,
         # Pinned to the address allocated for it; its gateway is the host on its own bridge, so
         # host.docker.internal is never the writer's. Every DNS query to the host's forwarder,
         # no search domain of the host's, as for the sidecar.
@@ -557,6 +566,7 @@ def control_command(pod: Pod, ca_mounts: list[Mount], net: RoleNetwork) -> list[
     return [
         "docker", "run", "-d", "--name", pod.control,
         "--label", f"vivibox.task={pod.task_id}",
+        *BOUNDED_LOG,
         # Pinned to the address allocated for it, on its own bridge, as the reviewer's.
         "--network", pod.network_name(net.role), "--ip", net.address,
         "--add-host", f"{HOST_GATEWAY}:{net.gateway}",
@@ -657,9 +667,7 @@ def _index_hardening(pod: Pod, name: str) -> list[str]:
     return [
         "docker", "run", "-d", "--name", name,
         "--label", f"vivibox.task={pod.task_id}",
-        # What its program prints is Docker's log, on the host's disk and outside the task's:
-        # kept to a megabyte, so a compromised index cannot fill the disk Docker writes to.
-        "--log-driver", "json-file", "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
+        *BOUNDED_LOG,
         "--ipc", "private",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--read-only", "--tmpfs", f"/tmp:exec,mode=1777,size={pod.limits.tmpfs_size('index')}",

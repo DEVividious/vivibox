@@ -1,19 +1,25 @@
 """Docker Hub kept once on this machine: the mirror's container on your Docker, and how a task's
 pod is pointed at it."""
 
+import json
+
 import pytest
 
 from vivibox import mirror
 from vivibox.pod import PodError
 
+# The log a mirror is made with, as Docker reports it back.
+BOUNDED = {"Type": "json-file", "Config": {"max-file": "1", "max-size": "1m"}}
+
 
 class FakeDocker:
     """The host's Docker as the mirror sees it: one container, maybe."""
 
-    def __init__(self, state=None, listen=""):
+    def __init__(self, state=None, listen="", log=BOUNDED):
         self.calls: list[list[str]] = []
         self.state = state
         self.listen = listen
+        self.log = log
 
     def __call__(self, cmd):
         import subprocess
@@ -24,6 +30,8 @@ class FakeDocker:
         if cmd[:2] == ["docker", "inspect"]:
             if self.state is None:
                 rc = 1
+            elif "{{json .HostConfig.LogConfig}}" in cmd:
+                out = json.dumps(self.log) + "\n"
             else:
                 out = f"{self.state} {self.listen}\n"
         elif cmd[:2] == ["docker", "run"]:
@@ -71,6 +79,22 @@ def test_a_stopped_mirror_is_started_and_one_on_another_address_made_again():
     docker = FakeDocker("running", "172.17.0.1:5055")  # made by an earlier vivibox, or the port changed
     mirror.ensure(5055, "203.0.113.1", runner=docker, ready=ready)
     assert ["docker", "rm", "-f", mirror.NAME] in docker.calls and len(docker.made()) == 1
+
+
+def test_the_mirrors_log_is_bounded_and_one_made_with_none_made_again():
+    """Every request to the mirror is a line of its log, and a writer can send it as many as it
+    likes: one file of a megabyte, as each role's. One an earlier vivibox made without that bound
+    is made again; what it holds is in its volume."""
+    docker = FakeDocker()
+    mirror.ensure(5055, "203.0.113.1", runner=docker, ready=ready)
+    [cmd] = docker.made()
+    assert cmd[cmd.index("--log-driver") + 1] == "json-file"
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--log-opt"] == ["max-size=1m", "max-file=1"]
+
+    docker = FakeDocker("running", "203.0.113.1:5055", log={"Type": "json-file", "Config": {}})
+    mirror.ensure(5055, "203.0.113.1", runner=docker, ready=ready)
+    assert ["docker", "rm", "-f", mirror.NAME] in docker.calls and len(docker.made()) == 1
+    assert ["docker", "volume", "rm", mirror.VOLUME] not in docker.calls
 
 
 def test_a_mirror_that_does_not_answer_says_why():

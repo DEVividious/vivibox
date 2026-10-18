@@ -13,6 +13,7 @@ itself, so the mirror can only make a pull faster, never stop one.
 
 from __future__ import annotations
 
+import json
 import time
 import urllib.error
 import urllib.request
@@ -21,6 +22,7 @@ from collections.abc import Callable
 from . import display
 from .config import DEFAULT_HUB_MIRROR_PORT
 from .pod import CA_BUNDLE, HOST_CA_BUNDLE, PodError, Runner, run
+from .podspec import BOUNDED_LOG, LOG_OPTS
 
 NAME = "vivibox-mirror"
 VOLUME = "vivibox-mirror"
@@ -42,6 +44,8 @@ def command(listen: str) -> list[str]:
     return [
         "docker", "run", "-d", "--name", NAME, "--restart", "unless-stopped", "--network", "host",
         "--label", f"{LABEL}={listen}",
+        # Every request is a line of its log, and a pod sends it as many as it likes.
+        *BOUNDED_LOG,
         "-e", f"REGISTRY_HTTP_ADDR={listen}",
         "-e", f"REGISTRY_PROXY_REMOTEURL={UPSTREAM}",
         "-e", f"REGISTRY_PROXY_TTL={TTL}",
@@ -70,6 +74,16 @@ def found(runner: Runner = run) -> tuple[str, str]:
     return state, listen
 
 
+def bounded(runner: Runner = run) -> bool:
+    """Whether the mirror's log is bounded; an earlier vivibox made it with Docker's default."""
+    p = runner(["docker", "inspect", "-f", "{{json .HostConfig.LogConfig}}", NAME])
+    try:
+        made = json.loads(p.stdout)
+    except ValueError:
+        return False
+    return made == {"Type": "json-file", "Config": LOG_OPTS}
+
+
 def ensure(
     port: int, address: str, runner: Runner = run, ready: Callable[[str], bool] = answers, timeout: float = 15
 ) -> str:
@@ -77,7 +91,7 @@ def ensure(
     which must be there: pod.prepare_host); returns the address a pod's daemon pulls through."""
     listen = f"{address}:{port}"
     state, made_for = found(runner)
-    if state and made_for != listen:
+    if state and (made_for != listen or not bounded(runner)):
         runner(["docker", "rm", "-f", NAME])
         state = ""
     if not state:

@@ -112,6 +112,14 @@ def own_temporary_folder(monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(TEMPORARY))
 
 
+def pytest_unconfigure(config) -> None:
+    """The suite's home and temporary folder go as the run ends, passed or failed: every process
+    of a run makes its own, and they were left in the system's temporary directory by the
+    thousand. Only these two, made above."""
+    for folder in (HOME, TEMPORARY):
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def marked(request, name: str) -> bool:
     """Whether the test carries the mark: its own, its class's or its module's. Never whether the
     word is among its keywords: a parameter's id, a folder on the way to the test's file and an

@@ -5,6 +5,7 @@ under the size limit."""
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 
 from . import actions, limits, panel_resources
@@ -52,10 +53,11 @@ def cmd_limits(args: argparse.Namespace) -> int:
 
 
 def raising_both(task_id: str, given: dict, size: int) -> str:
-    """The command given, with the pod's budget first, as large as the largest container's in it
-    or the one refused: a command vivibox limits takes, said for the person to run, never run for them."""
-    sizes = [size] + [parse_size(v) for k, v in given.items() if k.endswith("_memory") and k != "pod_memory"]
-    both = {"pod_memory": size_option(max(sizes)), **{k: v for k, v in given.items() if k != "pod_memory"}}
+    """The command given, with the pod's budget first, as large as the largest container's once it
+    is applied (size, in whole megabytes up, a size the option takes): a command vivibox limits
+    takes, said for the person to run, never run for them."""
+    budget = size_option(math.ceil(size / 2**20) * 2**20)
+    both = {"pod_memory": budget, **{k: v for k, v in given.items() if k != "pod_memory"}}
     options = " ".join(
         f"--{k.replace('_', '-')} {f'{v:g}' if isinstance(v, float) else v}" for k, v in both.items()
     )

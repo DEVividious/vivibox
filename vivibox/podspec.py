@@ -187,7 +187,8 @@ def _count(value, key: str, most: int) -> int:
 
 
 class PastThePod(ValueError):
-    """A container's memory past the pod's limits.pod_memory; size: what the pod's needs to be."""
+    """A container's memory past the pod's limits.pod_memory, and nothing else wrong; size: what
+    the pod's needs to be, its largest container's with the limits given applied."""
 
     def __init__(self, message: str, size: int):
         super().__init__(message)
@@ -277,16 +278,19 @@ class Limits:
                 said = str(e) if str(e).startswith("limits.") else f"limits.{key}: {e}"
                 raise ValueError(said) from None
         for role in ROLES:
-            if memory[role] > pod_memory:
-                raise PastThePod(
-                    f"limits.{role}_memory ({size_text(memory[role])}) is past the pod's limits.pod_memory "
-                    f"({size_text(pod_memory)})",
-                    memory[role],
-                )
             if pids[role] > pod_pids:
                 raise ValueError(
                     f"limits.{role}_pids ({pids[role]}) is past the pod's limits.pod_pids ({pod_pids})"
                 )
+        # Last, so a memory past the pod's is all that is wrong: the pod's as large as the largest
+        # container's is then limits that pass.
+        if past := [role for role in ROLES if memory[role] > pod_memory]:
+            role = past[0]
+            raise PastThePod(
+                f"limits.{role}_memory ({size_text(memory[role])}) is past the pod's limits.pod_memory "
+                f"({size_text(pod_memory)})",
+                max(memory[role] for role in ROLES),
+            )
         return Limits(pod_memory, pod_cpus, pod_pids, memory, pids, disk)
 
 

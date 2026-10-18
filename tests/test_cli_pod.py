@@ -2,6 +2,7 @@
 task's containers may use, `vivibox disk grow <id> <size>` makes its disk larger."""
 
 import json
+import re
 import subprocess
 from functools import partial
 
@@ -11,6 +12,7 @@ from vivibox import actions, limits
 from vivibox.cli import main
 from vivibox.config import load_config
 from vivibox.pod import Pod
+from vivibox.podspec import ROLES
 from vivibox.task import find_task
 
 
@@ -94,6 +96,55 @@ def test_a_container_past_the_pods_budget_is_refused_with_the_command_that_raise
         "vivibox limits demo-1 --pod-memory 10g --gate-memory 10g --sidecar-memory 3g"
         in capsys.readouterr().err
     )
+
+
+def the_command_that_raises_both(err: str) -> list[str]:
+    found = re.search(r"Raise the pod's budget with it: (vivibox limits .+)$", err.strip())
+    assert found, err
+    return found.group(1).split()
+
+
+@pytest.mark.parametrize(
+    ("own", "given", "said"),
+    [
+        # A container raised before, larger than the one asked for now, is what the pod needs.
+        (
+            {"pod_memory": "10g", "gate_memory": "10g"},
+            ["--pod-memory", "7g", "--agent-memory", "8g"],
+            "--pod-memory 10g --agent-memory 8g",
+        ),
+        # Of several raised before, the largest.
+        (
+            {"pod_memory": "12g", "gate_memory": "9g", "sidecar_memory": "12g", "review_memory": "10g"},
+            ["--pod-memory", "7g", "--agent-memory", "8g"],
+            "--pod-memory 12g --agent-memory 8g",
+        ),
+        # The pod's lowered alone: as large as its largest container, at the defaults or raised.
+        ({}, ["--pod-memory", "3g"], "--pod-memory 4g"),
+        ({"pod_memory": "10g", "gate_memory": "10g"}, ["--pod-memory", "6g"], "--pod-memory 10g"),
+        # A size no whole unit says: the pod's said in whole megabytes, at least as large.
+        ({}, ["--agent-memory", "6.3g"], "--pod-memory 6452m --agent-memory 6.3g"),
+    ],
+)
+def test_the_command_that_raises_both_passes_as_it_is_said(task, capsys, own, given, said):
+    """Over the task's own limits: the pod's budget said is that of the largest container once the
+    command is applied, so the command said, run as it is, passes the first time."""
+    (task.meta / "limits.json").write_text(json.dumps(own))
+    assert main(["limits", "demo-1", *given]) == 1
+    command = the_command_that_raises_both(capsys.readouterr().err)
+    assert " ".join(command) == f"vivibox limits demo-1 {said}"
+    assert json.loads((task.meta / "limits.json").read_text()) == own, "nothing written"
+    assert main(command[1:]) == 0, capsys.readouterr().err
+    found = actions.task_pod("demo-1").limits
+    assert max(found.memory_of(role) for role in ROLES) <= found.pod_memory
+
+
+def test_a_count_past_the_pods_with_a_size_past_it_is_refused_for_the_count(task, capsys):
+    """A command that raises both would still be refused for the count: the count is said."""
+    assert main(["limits", "demo-1", "--agent-memory", "8g", "--agent-pids", "9000"]) == 1
+    err = capsys.readouterr().err
+    assert "limits.agent_pids (9000) is past the pod's limits.pod_pids (8192)" in err
+    assert "--pod-memory" not in err
 
 
 def test_the_command_said_after_a_first_and_a_second_oom_of_the_agent_is_taken(task, capsys):

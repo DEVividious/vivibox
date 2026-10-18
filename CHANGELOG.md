@@ -14,8 +14,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   project, are ones `vivibox limits` takes: a raise past the pod's `pod_memory` (6 GiB by
   default) raises it too, as `--pod-memory 9g --agent-memory 9g` after the agent's second kill,
   where `--agent-memory 9g` alone was refused. `vivibox limits <id> --agent-memory 8g` is still
-  refused, nothing written, and now says the command that raises both. The limits themselves
-  and what they mean are unchanged.
+  refused, nothing written, and now says the command that raises both, the pod's as large as
+  the task's largest container once it is applied, one raised before included, so it passes as
+  it is said. The limits themselves and what they mean are unchanged.
 
 ## [0.2.2] - 2026-10-18
 

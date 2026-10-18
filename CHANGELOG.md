@@ -6,17 +6,31 @@ line, the configuration files and what `host/setup.sh` changes on your machine m
 between minor versions. The version itself comes from git: a tag `vX.Y.Z` names a release, and
 every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` prints.
 
-## [Unreleased]
+## [0.2.1] - 2026-10-18
+
+A hardening release on 0.2.0: Docker's log of every container vivibox keeps running is bounded,
+a pod stopped by force starts again, and the root helper is version 4. The planner's code index
+is in the code, isolated and hardened, and switched off: in a preregistered comparison on
+Keycloak, a large Java repository, it brought no material benefit to the planner's plans, so this
+release does not offer it as a feature.
+
+**Upgrading from 0.2.0.** Run `host/setup.sh` again: this version talks to version 4 of the root
+helper, and an older helper stops every start by name. The agent image, the dependencies and the
+vivibox skill are unchanged, so nothing is rebuilt or reinstalled for this upgrade. Tasks created
+by 0.2.0 run as before, on the network ranges they were given; a new task's planner network is a
+/30. A writer's or planner's container still running from 0.2.0 keeps Docker's unbounded log
+until its task is stopped and started again. With `hub_mirror` on, the Docker Hub mirror is made
+again once, before the next pod starts, its images kept in its volume.
 
 ### Changed
 
 - The root helper is version 4: run `host/setup.sh` again after updating (an older helper stops
   every start by name). It knows a fourth network of a task's, the code index's provisioning
-  run's, which reaches the internet and the host's DNS forwarder and nothing else: no host
-  service, no other range of the task's or of the pool. A new task's planner network is a /30
-  (it holds one container), and the provisioning run's /30 is cut beside it: a task still takes
-  a /27, and the default pool still holds eight tasks. A task allocated before keeps its ranges
-  and has no range for the index.
+  run's (which nothing makes in this release), which reaches the internet and the host's DNS
+  forwarder and nothing else: no host service, no other range of the task's or of the pool. A
+  new task's planner network is a /30 (it holds one container), and the provisioning run's /30
+  is cut beside it: a task still takes a /27, and the default pool still holds eight tasks. A
+  task allocated before keeps its ranges and has no range for the index.
 
 ### Fixed
 

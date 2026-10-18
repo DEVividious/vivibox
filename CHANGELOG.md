@@ -34,6 +34,8 @@ again once, before the next pod starts, its images kept in its volume.
 
 ### Fixed
 
+- The refusal of a `network.pool` too small for one task names the planner's /30 and the /30
+  held in reserve beside it, no longer a /29 for the planner.
 - A pod stopped by force starts again. `docker kill` left the daemon's pid file in the sidecar,
   and the daemon the next start ran in the same container took the pid for a running one and
   refused to start, so the start waited for a socket that never came ("Docker in … did not

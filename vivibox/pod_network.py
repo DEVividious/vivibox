@@ -1,6 +1,7 @@
 """A task's own Docker networks, one per role: a /27 block of the configured pool, which no other
 network on this machine holds any of, split by role (the writer's /28, the reviewer's /29, the
-planner's /29), each on a bridge of vivibox's naming (names.bridge). vivibox picks the ranges and
+planner's /30, the code index's provisioning run's /30; a task allocated before keeps a planner's
+/29), each on a bridge of vivibox's naming (names.bridge). vivibox picks the ranges and
 their gateways and keeps them (the allocation): the host's rules, each role's pinned address and
 host.docker.internal come from there, never from what Docker says of a network (invariant 13).
 Mixed into Pod, whose _run, task_id, network, network_pool, allocation and has_control it uses."""

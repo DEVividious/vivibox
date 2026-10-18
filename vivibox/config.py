@@ -138,7 +138,8 @@ ROUNDS_HELP = (
 # A topic is a name: letters, digits, - and _, as ntfy has it.
 NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # One task takes one block of the pool, split between its roles' networks (pod_network.ROLE_BITS:
-# the writer's /28, the reviewer's /29, the planner's /29): 32 addresses, 8 tasks in a /24.
+# the writer's /28, the reviewer's /29, the planner's /30, the code index's provisioning run's
+# /30): 32 addresses, 8 tasks in a /24.
 TASK_NETWORK_BITS = 27
 # The widest pool there may be; host/vivibox-host refuses a wider one too (POOL_SHORTEST there).
 POOL_SHORTEST = 8
@@ -399,7 +400,8 @@ def load_config(base: Path | None = None) -> Config:
     if parsed.prefixlen > TASK_NETWORK_BITS:
         raise ConfigError(
             f"{path}: network.pool {pool} is smaller than the /{TASK_NETWORK_BITS} block one task needs "
-            "(a /28 for the writer's network, a /29 each for the reviewer's and the planner's)"
+            "(a /28 for the writer's network, a /29 for the reviewer's, "
+            "a /30 for the planner's and a /30 held in reserve)"
         )
     if parsed.prefixlen < POOL_SHORTEST:
         raise ConfigError(f"{path}: network.pool {pool} is wider than /{POOL_SHORTEST}, the most it may be")

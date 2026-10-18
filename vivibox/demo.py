@@ -15,6 +15,7 @@ from . import (
     handoff,
     opencode,
     probe,
+    repo,
 )
 from . import init as project_init
 from .config import (
@@ -75,6 +76,9 @@ class Demo:
     # What the agent had left listening in its container and was stopped to make room, so you
     # know what went and why the app you see is the current code.
     stopped: list[str] = field(default_factory=list)
+    # What the agent committed while working out how to run it, newest first: the work goes on from
+    # there, and nothing else would say where those commits came from.
+    committed: list[str] = field(default_factory=list)
 
     @property
     def urls(self) -> list[str]:
@@ -187,11 +191,14 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
     question = ""
     if not commands and (earlier := demo_from_history(project.name)) and not reply:
         return Demo(source="history", address=pod.address(), proposed=earlier)
+    committed: list[str] = []
     if not commands and (ask or reply):
+        before = _head(task)
         _, question = ask_agent_how_to_run(task, pod, reply)
+        committed = commits_since(task, before)
         commands, source = instruction_commands(demo_instruction(task)), "agent"
     if not commands:
-        return Demo([], source, pod.address(), question=question)
+        return Demo([], source, pod.address(), question=question, committed=committed)
     stopped = pod.stop_leftovers()
     heard = pod.demo_start(commands, workdir=str(task.repo), wait=wait)
     still_going = not heard and pod.demo_running()
@@ -204,7 +211,24 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
         question,
         starting=still_going,
         stopped=stopped,
+        committed=committed,
     )
+
+
+def _head(task: Task) -> str:
+    return repo.in_clone(task.repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def commits_since(task: Task, before: str) -> list[str]:
+    """The commits the task's branch gained since before, newest first, short; the new head alone
+    when the branch moved elsewhere. Recorded as an event, for the timeline."""
+    after = _head(task)
+    if after == before:
+        return []
+    listed = repo.in_clone(task.repo, "rev-list", "--abbrev-commit", "--abbrev=7", f"{before}..{after}")
+    found = listed.stdout.split() or [after[:7]]
+    task.event("demo_commit", commits=found)
+    return found
 
 
 def use_instruction(task_id: str, text: str, wait: float = 40) -> Demo:

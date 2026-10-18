@@ -2823,6 +2823,26 @@ def test_the_view_says_what_it_stopped_to_run_the_app(env, monkeypatch):
     run(scenario)
 
 
+def test_the_view_says_what_the_agent_committed_while_working_out_how_to_run_it(env, monkeypatch):
+    """fairy-1: the commit went unsaid, and the work went on from it."""
+    task = new_task()
+    result = actions.Demo(["npm run web"], "agent", "198.51.100.2", committed=["7a44efd"])
+    monkeypatch.setattr(actions, "demo", lambda task_id, ask=True, reply="", wait=40: result)
+
+    async def scenario(app, pilot):
+        app.reload()
+        await app.run_demo(task.id, ask=True).wait()
+        await pilot.pause()
+        said = [n for n in app._notifications if "7a44efd" in n.message]
+        assert said and said[-1].severity == "warning" and said[-1].markup is False
+        assert said[-1].message == (
+            "While working out how to run the app, the agent committed 7a44efd in the task's clone; "
+            "the work goes on from that commit: look at it before you accept"
+        )
+
+    run(scenario)
+
+
 def test_the_view_leaves_at_once_when_a_step_still_waits_on_docker(env, monkeypatch, capsys):
     """Textual runs thread workers in the loop's default executor, and asyncio waits for them at
     the end: a pod start that hung held the window until Ctrl-C, which showed a traceback. Nothing

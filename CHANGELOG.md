@@ -14,6 +14,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   program a build downloads loads it from the system and stopped without it: Keycloak's JS build
   ran Kiota, which ended with "Couldn't find a valid ICU package", so its verification never
   reached the task's own modules. The image is built again at the next start.
+- A commit the agent makes while working out how to run the app is named to you, in the view,
+  in `vivibox demo` and in the task's timeline: the work goes on from it, and nothing said where
+  it came from (a web target added that way was later found outside the plan).
 
 ## [0.2.1] - 2026-10-18
 

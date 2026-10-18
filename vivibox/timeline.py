@@ -192,6 +192,9 @@ def entries(task: Task) -> list[tuple[str, str]]:
                 text += f" (+{', '.join(added)} from the changes)"
             if under := data.get("nested") or []:
                 text += f" (+{', '.join(under)} under them)"
+        elif kind == "demo_commit":
+            made = ", ".join(data.get("commits") or [])
+            text = f"the agent committed {made} while working out how to run the app"
         elif kind == "turn_retry":
             text = f"turn failed, trying again in {data.get('wait', '?')} s: {data.get('error', '')}"
         elif kind == "paused":

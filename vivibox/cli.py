@@ -327,6 +327,10 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 0
     if result.proposed:
         result = actions.use_instruction(args.task, result.proposed)
+    if result.committed:
+        made = display.name(", ".join(result.committed))
+        print(f"While working out how to run the app, the agent committed {made} in the task's clone; the "
+              "work goes on from that commit: look at it before you accept.\n")  # fmt: skip
     if result.question:
         print(f"The agent asks:\n\n  {display.block(result.question)}\n")
         print(f'Answer with: vivibox demo {args.task} --reply "…"')

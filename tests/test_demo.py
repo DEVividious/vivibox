@@ -184,3 +184,54 @@ def test_what_the_agent_left_on_the_port_is_stopped_and_said(env, monkeypatch):
     result = actions.demo(task.id, ask=False)
     assert result.stopped == ["python -m http.server 8000 (port 8000)"]
     assert result.urls == ["http://198.51.100.2:8000"] and pod.started == [["python -m http.server 8000"]]
+
+
+def committing(task, message="Add a web target to run it in a browser"):
+    """A demo turn that commits in the task's clone, as fairy-1's did, and then writes its note."""
+    from vivibox import repo
+
+    def write(prompt, session):
+        (task.repo / "web.js").write_text(f"// {message}\n")
+        repo.git("add", "web.js", cwd=task.repo)
+        repo.git("commit", "-q", "-m", message, cwd=task.repo)
+        actions.write_instruction(task, "```bash\nnpm run web\n```\n")
+
+    return write
+
+
+def test_a_commit_made_while_working_out_how_to_run_it_is_said(env, monkeypatch, capsys):
+    """fairy-1: the turn that worked out how to run the app added a web target to the project and
+    committed it in the task's clone; the writer went on from that commit, a review found the
+    target outside the plan, and nobody had said where it came from. The commit is named to you,
+    in the result, in the task's timeline and on the command line."""
+    from vivibox import repo, timeline
+
+    task = back_with_you(a_task())
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: FakePod())
+    answering(monkeypatch, committing(task))
+    before = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+
+    result = actions.demo(task.id)
+
+    made = repo.git("rev-parse", "--short=7", "HEAD", cwd=task.repo).stdout.strip()
+    assert made != before[:7] and result.committed == [made]
+    assert f"the agent committed {made} while working out how to run the app" in [
+        what for _, what in timeline.entries(task)
+    ]
+    answering(monkeypatch, committing(task, "Another"))
+    (task.meta / "handoff" / actions.DEMO_FILE).unlink()
+    assert main(["demo", task.id]) == 1  # nothing listens in the fake pod
+    newer = repo.git("rev-parse", "--short=7", "HEAD", cwd=task.repo).stdout.strip()
+    out = capsys.readouterr().out
+    assert f"While working out how to run the app, the agent committed {newer} in the task's clone" in out
+    assert "the work goes on from that commit: look at it before you accept" in out
+
+
+def test_a_turn_that_commits_nothing_names_no_commit(env, monkeypatch):
+    task = back_with_you(a_task())
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: FakePod())
+    answering(
+        monkeypatch, lambda prompt, session: actions.write_instruction(task, "```bash\nnpm run dev\n```\n")
+    )
+    assert actions.demo(task.id).committed == []
+    assert not [e for e in task.events() if e["type"] == "demo_commit"]

@@ -78,6 +78,16 @@ class DemoKeys:
                 timeout=8,
                 markup=False,
             )
+        if result.committed:  # the work goes on from it, and nothing else says where it came from
+            made = ", ".join(result.committed)
+            self.call_from_thread(
+                self.notify,
+                f"While working out how to run the app, the agent committed {made} in the task's clone; "
+                "the work goes on from that commit: look at it before you accept",
+                severity="warning",
+                timeout=12,
+                markup=False,
+            )
         if result.question:
             self.call_from_thread(self.answer_demo, task_id, result.question)
         elif urls := result.urls:

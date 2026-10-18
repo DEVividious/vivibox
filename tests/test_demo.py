@@ -254,3 +254,61 @@ def test_a_long_run_of_commits_is_named_by_its_newest_ten_and_counted(env, monke
     newest = repo.git("rev-list", "--abbrev-commit", "--abbrev=7", "-10", "HEAD", cwd=task.repo).stdout
     newest = newest.split()
     assert committed == [*newest, "and 3 more"]
+
+
+def failing(task, how):
+    """A demo turn that commits in the task's clone and then fails: the turn itself, or with an
+    instruction too long to be one."""
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        from vivibox import repo
+
+        repo.git("commit", "-q", "--allow-empty", "-m", "Add a web target", cwd=task.repo)
+        if how == "turn failed":
+            return harness.Turn("ses_demo", False, 0.01, 10, "", error="the provider went away")
+        actions.write_instruction(task, "```bash\nnpm run web\n```\n" + "Background. " * 300)
+        return harness.Turn("ses_demo", True, 0.01, 10, "done")
+
+    return turn
+
+
+@pytest.mark.parametrize("how", ["turn failed", "instruction too long"])
+def test_a_commit_made_before_the_turn_failed_is_still_said(env, monkeypatch, how):
+    """The review of fairy-1's fix: a turn that committed and then failed said only its failure,
+    and the work went on from the commit all the same. The commit is named in the error and kept
+    in the timeline, once."""
+    from vivibox import opencode, repo, timeline
+
+    task = back_with_you(a_task())
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: FakePod())
+    monkeypatch.setattr(opencode.OpenCode, "turn", failing(task, how))
+    before = repo.git("rev-parse", "HEAD", cwd=task.repo).stdout.strip()
+
+    with pytest.raises(actions.PodError) as raised:
+        actions.demo(task.id)
+
+    made = repo.git("rev-parse", "--short=7", "HEAD", cwd=task.repo).stdout.strip()
+    assert made != before[:7]
+    said = str(raised.value)
+    assert said.startswith("the agent ")  # what failed comes first
+    assert f"\nWhile working out how to run the app, the agent committed {made} in the task's clone" in said
+    assert [e["data"]["commits"] for e in task.events() if e["type"] == "demo_commit"] == [[made]]
+    assert f"the agent committed {made} while working out how to run the app" in [
+        what for _, what in timeline.entries(task)
+    ]
+
+
+def test_a_failed_turn_that_committed_nothing_says_only_its_failure(env, monkeypatch):
+    from vivibox import opencode
+
+    task = back_with_you(a_task())
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: FakePod())
+
+    def turn(self, prompt, session="", title="", on_step=None):
+        return harness.Turn("ses_demo", False, 0.01, 10, "", error="the provider went away")
+
+    monkeypatch.setattr(opencode.OpenCode, "turn", turn)
+    with pytest.raises(actions.PodError) as raised:
+        actions.demo(task.id)
+    assert "committed" not in str(raised.value)
+    assert not [e for e in task.events() if e["type"] == "demo_commit"]

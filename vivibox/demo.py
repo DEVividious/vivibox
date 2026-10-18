@@ -195,9 +195,7 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
         return Demo(source="history", address=pod.address(), proposed=earlier)
     committed: list[str] = []
     if not commands and (ask or reply):
-        before = _head(task)
-        _, question = ask_agent_how_to_run(task, pod, reply)
-        committed = commits_since(task, before)
+        question, committed = ask_naming_commits(task, pod, reply)
         commands, source = instruction_commands(demo_instruction(task)), "agent"
     if not commands:
         return Demo([], source, pod.address(), question=question, committed=committed)
@@ -215,6 +213,30 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
         stopped=stopped,
         committed=committed,
     )
+
+
+def ask_naming_commits(task: Task, pod: Pod, reply: str) -> tuple[str, list[str]]:
+    """ask_agent_how_to_run, and what the agent committed in the task's clone meanwhile: named
+    whether the turn ends well or not, since the work goes on from those commits either way. A
+    failure says itself first and the commits after it; git that cannot read the clone then
+    leaves the failure as it was, and says why at the next git."""
+    before = _head(task)
+    try:
+        _, question = ask_agent_how_to_run(task, pod, reply)
+    except BaseException as e:
+        try:
+            committed = commits_since(task, before)
+        except repo.RepoError:
+            committed = []
+        if committed and isinstance(e, Exception):
+            said = e.args[0] if e.args else e
+            made = ", ".join(committed)
+            raise PodError(
+                f"{said}\nWhile working out how to run the app, the agent committed {made} in the task's "
+                "clone; the work goes on from that commit: look at it before you accept"
+            ) from e
+        raise
+    return question, commits_since(task, before)
 
 
 def _head(task: Task) -> str:

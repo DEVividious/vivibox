@@ -186,6 +186,14 @@ def _count(value, key: str, most: int) -> int:
     return value
 
 
+class PastThePod(ValueError):
+    """A container's memory past the pod's limits.pod_memory; size: what the pod's needs to be."""
+
+    def __init__(self, message: str, size: int):
+        super().__init__(message)
+        self.size = size
+
+
 @dataclass(frozen=True)
 class Limits:
     """What a task's containers may use: memory and processes per container, enforced by their
@@ -270,9 +278,10 @@ class Limits:
                 raise ValueError(said) from None
         for role in ROLES:
             if memory[role] > pod_memory:
-                raise ValueError(
+                raise PastThePod(
                     f"limits.{role}_memory ({size_text(memory[role])}) is past the pod's limits.pod_memory "
-                    f"({size_text(pod_memory)})"
+                    f"({size_text(pod_memory)})",
+                    memory[role],
                 )
             if pids[role] > pod_pids:
                 raise ValueError(

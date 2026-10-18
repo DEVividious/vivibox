@@ -1622,7 +1622,7 @@ def test_an_oom_after_a_turn_stops_the_task_with_the_limit_the_kernels_words_and
 
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT):
         task.transition(s)
-    hits = [[limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")]]
+    hits = [[limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", 6 * 2**30)]]
     harness = FakeHarness(task)
     sup, notes = make(task, harness)
     sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []
@@ -1649,7 +1649,9 @@ def test_a_full_disk_during_the_verification_stops_the_task_before_a_round_is_sp
 
     for s in (State.CHECKPOINT_PLAN, State.IMPLEMENT, State.VERIFY):
         task.transition(s)
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
+    full = limits.Exceeded(
+        "disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", 6 * 2**30
+    )
     hits = [[full]]
     sup, notes = make(task, FakeHarness(task), results=[gate_result(False)])
     sup.ports.limits_exceeded = lambda: hits.pop(0) if hits else []

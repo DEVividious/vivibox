@@ -24,7 +24,7 @@ CGROUP = Path("/sys/fs/cgroup")
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 # A task's own limits over the machine's, written by `vivibox limits`, host-owned like network.json.
 OVERRIDES = "limits.json"
-RAISING = re.compile(r"(vivibox (?:limits|disk grow) \S+(?: --[a-z-]+ \S+| [0-9]+[kmgt])?), then ")
+RAISING = re.compile(r"(vivibox (?:limits|disk grow) \S+(?:(?: --[a-z-]+ \S+)+| [0-9]+[kmgt])?), then ")
 # How a limit is said to be raised: half as much again, in whole gigabytes.
 RAISE_BY = 1.5
 # What each workload is to a person, and the option of `vivibox limits` that raises its memory.
@@ -49,6 +49,7 @@ class Exceeded:
     limit: int  # bytes
     used: int  # the peak of memory, or the disk's used bytes
     words: str  # the kernel's: "oom_kill 1", "statvfs: 3 MiB of 1 GiB free"
+    pod_memory: int  # bytes: the pod's budget the container's limit was checked against
 
 
 def event_data(hit: Exceeded) -> dict:
@@ -78,13 +79,16 @@ def number(path: Path) -> int:
         return 0
 
 
-def raise_option(workload: str, limit: int) -> str:
-    """The option of `vivibox limits` that raises a container's memory: half as much again, in
-    whole gigabytes; for the pod, none (its containers' limits are its)."""
+def raise_option(workload: str, limit: int, pod_memory: int) -> str:
+    """The options of `vivibox limits` that raise a container's memory: half as much again, in
+    whole gigabytes, with the pod's budget raised as far first where it would be past it (a
+    container's limit past the pod's is refused); for the pod, none (its containers' limits are its)."""
     if workload == "pod":
         return ""
     raised = math.ceil(limit * RAISE_BY / GIB) * GIB
-    return f"--{workload}-memory {size_option(raised)}"
+    size = size_option(raised)
+    pod = f"--pod-memory {size} " if raised > pod_memory else ""
+    return f"{pod}--{workload}-memory {size}"
 
 
 def problem(task_id: str, hits: list[Exceeded]) -> str:
@@ -103,7 +107,7 @@ def problem(task_id: str, hits: list[Exceeded]) -> str:
         todo = f"See the limits: vivibox limits {task_id}"
     else:
         what = f"{WORKLOADS[hit.workload]} ran out of memory ({size_text(hit.limit)})"
-        todo = f"Raise it: vivibox limits {task_id} {raise_option(hit.workload, hit.limit)}"
+        todo = f"Raise it: vivibox limits {task_id} {raise_option(hit.workload, hit.limit, hit.pod_memory)}"
     return f"out of memory: {what}: {hit.words}. {todo}, then vivibox start {task_id}"
 
 
@@ -256,14 +260,15 @@ class Watch:
             blamed = [r for r, n in counts.items() if r != "pod" and n > seen.get(r, 0)] or ["pod"]
             for role in blamed:
                 limit = self.limits.pod_memory if role == "pod" else self.limits.memory_of(role)
-                found.append(Exceeded("memory", role, limit, peaks[role], f"oom_kill {counts[role]}"))
+                words = f"oom_kill {counts[role]}"
+                found.append(Exceeded("memory", role, limit, peaks[role], words, self.limits.pod_memory))
         if not self.is_mount(self.disk):
             raise Unreadable(f"the task's disk is not mounted at {self.disk} while its pod runs")
         st = self.statvfs(self.disk)
         size, free = st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
         if disk_full(free, size):
             used = (st.f_blocks - st.f_bfree) * st.f_frsize
-            found.append(Exceeded("disk", "pod", size, used, disk_words(free, size)))
+            found.append(Exceeded("disk", "pod", size, used, disk_words(free, size), self.limits.pod_memory))
         return found
 
 

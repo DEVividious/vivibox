@@ -7,7 +7,7 @@ from functools import partial
 
 import pytest
 
-from vivibox import actions
+from vivibox import actions, limits
 from vivibox.cli import main
 from vivibox.config import load_config
 from vivibox.pod import Pod
@@ -76,6 +76,36 @@ def test_a_limit_that_is_not_one_is_refused_by_name_and_nothing_is_written(task,
     assert main(["limits", "demo-1", option, value]) == 1
     assert f"limits.{key}" in capsys.readouterr().err
     assert not (task.meta / "limits.json").exists()
+
+
+def test_a_container_past_the_pods_budget_is_refused_with_the_command_that_raises_both(task, capsys):
+    """The pod's limits.pod_memory (6 GiB) bounds each container's: --agent-memory 8g alone is
+    refused, nothing written, with the command that raises the pod's with it; that one passes."""
+    assert main(["limits", "demo-1", "--agent-memory", "8g"]) == 1
+    err = capsys.readouterr().err
+    assert "limits.agent_memory (8 GiB) is past the pod's limits.pod_memory (6 GiB)" in err
+    assert "vivibox limits demo-1 --pod-memory 8g --agent-memory 8g" in err
+    assert not (task.meta / "limits.json").exists()
+    assert main(["limits", "demo-1", "--pod-memory", "8g", "--agent-memory", "8g"]) == 0
+    assert json.loads((task.meta / "limits.json").read_text()) == {"agent_memory": "8g", "pod_memory": "8g"}
+    assert actions.task_pod("demo-1").limits.memory_of("agent") == 8 * 2**30
+    assert main(["limits", "demo-1", "--gate-memory", "10g", "--sidecar-memory", "3g"]) == 1
+    assert (
+        "vivibox limits demo-1 --pod-memory 10g --gate-memory 10g --sidecar-memory 3g"
+        in capsys.readouterr().err
+    )
+
+
+def test_the_command_said_after_a_first_and_a_second_oom_of_the_agent_is_taken(task, capsys):
+    """At the defaults: the agent's 4 GiB, then the 6 GiB its command gave it; each command the
+    problem says, run as it is, passes."""
+    for limit in (4 * 2**30, 6 * 2**30):
+        pod = actions.task_pod("demo-1").limits
+        hit = limits.Exceeded("memory", "agent", limit, limit, "oom_kill 1", pod.pod_memory)
+        command = limits.raising_command(limits.problem("demo-1", [hit])).split()
+        assert main(command[1:]) == 0, command
+        assert actions.task_pod("demo-1").limits.memory_of("agent") > limit
+    assert json.loads((task.meta / "limits.json").read_text()) == {"agent_memory": "9g", "pod_memory": "9g"}
 
 
 def test_a_limits_file_that_is_not_right_stops_the_pod_from_being_made(task, capsys):

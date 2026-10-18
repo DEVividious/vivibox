@@ -58,6 +58,7 @@ def test_an_oom_kill_is_attributed_to_the_container_whose_scope_saw_it(tmp_path)
     [hit] = watch(tmp_path).check({})
     assert (hit.kind, hit.workload, hit.limit, hit.used) == ("memory", "agent", 4 * 2**30, 4 * 2**30)
     assert hit.words == "oom_kill 1"
+    assert hit.pod_memory == Limits().pod_memory, "the budget its limit was checked against"
     assert watch(tmp_path).counts() == {"pod": 1, "agent": 1, "sidecar": 0, "gate": 0}
 
 
@@ -218,19 +219,21 @@ def test_nothing_is_read_while_the_pod_is_down(tmp_path):
 
 
 def test_the_problem_has_three_parts_and_names_the_option_that_raises_the_limit():
-    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")
+    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", 6 * 2**30)
     said = limits.problem("shop-1", [hit])
     what, _, why = said.partition(": ")
     assert what == "out of memory"
     assert "the agent's container ran out of memory (4 GiB)" in why and "oom_kill 1" in why
     assert "vivibox limits shop-1 --agent-memory 6g" in why and "vivibox start shop-1" in why
-    assert limits.raise_option("sidecar", 2 * 2**30) == "--sidecar-memory 3g"
-    assert limits.raise_option("review", 3 * 2**29) == "--review-memory 3g"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
+    assert limits.raise_option("sidecar", 2 * 2**30, 6 * 2**30) == "--sidecar-memory 3g"
+    assert limits.raise_option("review", 3 * 2**29, 6 * 2**30) == "--review-memory 3g"
+    full = limits.Exceeded(
+        "disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", 6 * 2**30
+    )
     said = limits.problem("shop-1", [full])
     assert said.startswith("out of disk space: the task's disk is full (20 GiB)")
     assert "vivibox disk grow shop-1 40g" in said and "then vivibox start shop-1" in said
-    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1")
+    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1", 6 * 2**30)
     said = limits.problem("shop-1", [pod])
     assert said.startswith("out of memory: the kernel killed a process in the pod for memory")
     assert "6 GiB" not in said, "the pod's figure is a budget, not a limit anything enforces"
@@ -238,12 +241,45 @@ def test_the_problem_has_three_parts_and_names_the_option_that_raises_the_limit(
     assert limits.raising_command(said) == "vivibox limits shop-1", "the command alone"
 
 
+def test_a_raise_past_the_pods_budget_raises_the_budget_with_it():
+    """A container's limit is checked against the pod's limits.pod_memory: the option that raises
+    one past it raises the pod's too, first, so the command said is one vivibox limits takes."""
+    first = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", 6 * 2**30)
+    said = limits.problem("shop-1", [first])
+    assert limits.raising_command(said) == "vivibox limits shop-1 --agent-memory 6g", "within it: as before"
+    second = limits.Exceeded("memory", "agent", 6 * 2**30, 6 * 2**30, "oom_kill 1", 6 * 2**30)
+    said = limits.problem("shop-1", [second])
+    assert (
+        "Raise it: vivibox limits shop-1 --pod-memory 9g --agent-memory 9g, then vivibox start shop-1" in said
+    )
+    assert limits.raising_command(said) == "vivibox limits shop-1 --pod-memory 9g --agent-memory 9g"
+    assert limits.raise_option("gate", 4 * 2**30, 6 * 2**30) == "--gate-memory 6g"
+    assert limits.raise_option("gate", 4 * 2**30, 5 * 2**30) == "--pod-memory 6g --gate-memory 6g"
+
+
+@pytest.mark.parametrize("role", ["agent", "sidecar", "gate", "review", "control"])
+def test_the_command_said_after_an_oom_is_one_vivibox_limits_takes_every_time(tmp_path, role):
+    """From the defaults, OOM after OOM of the same container: each command the problem says is
+    written over the task's own limits without a refusal, and raises the container's limit."""
+    meta = tmp_path / ".task"
+    meta.mkdir()
+    for _ in range(4):
+        task_limits = limits.for_task(Limits(), meta)
+        before = task_limits.memory_of(role)
+        hit = limits.Exceeded("memory", role, before, before, "oom_kill 1", task_limits.pod_memory)
+        _, _, _, *options = limits.raising_command(limits.problem("shop-1", [hit])).split()
+        pairs = zip(options[::2], options[1::2], strict=True)
+        given = {flag[2:].replace("-", "_"): value for flag, value in pairs}
+        limits.write_overrides(meta, given, Limits())
+        assert limits.for_task(Limits(), meta).memory_of(role) > before
+
+
 def test_the_event_carries_what_the_plan_names():
-    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 3 * 2**30, "oom_kill 2")
+    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 3 * 2**30, "oom_kill 2", 6 * 2**30)
     assert limits.event_data(hit) == {
         "kind": "memory", "workload": "gate", "limit": 4 * 2**30, "peak": 3 * 2**30, "words": "oom_kill 2",
     }  # fmt: skip
-    full = limits.Exceeded("disk", "pod", 10, 10, "statvfs: 0 of 1 blocks free")
+    full = limits.Exceeded("disk", "pod", 10, 10, "statvfs: 0 of 1 blocks free", 6 * 2**30)
     assert limits.event_data(full)["used"] == 10 and "peak" not in limits.event_data(full)
 
 
@@ -287,9 +323,9 @@ def test_overrides_are_checked_against_the_machines_limits_they_go_over(tmp_path
 
 
 def test_the_command_that_raises_a_limit_is_read_from_the_problem():
-    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 4 * 2**30, "oom_kill 1")
+    hit = limits.Exceeded("memory", "gate", 4 * 2**30, 4 * 2**30, "oom_kill 1", 6 * 2**30)
     assert limits.raising_command(limits.problem("shop-1", [hit])) == "vivibox limits shop-1 --gate-memory 6g"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 1 blocks free")
+    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 1 blocks free", 6 * 2**30)
     assert limits.raising_command(limits.problem("shop-1", [full])) == "vivibox disk grow shop-1 40g"
     assert limits.raising_command("agent turn failed: 429") == ""
 

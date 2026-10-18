@@ -9,7 +9,7 @@ import sys
 
 from . import actions, limits, panel_resources
 from .config import load_config
-from .podspec import DISK_LARGEST, DISK_SMALLEST, LIMIT_KEYS, parse_size, size_option
+from .podspec import DISK_LARGEST, DISK_SMALLEST, LIMIT_KEYS, PastThePod, parse_size, size_option
 
 # The options of `vivibox limits`: one per key of [limits] but the disk's size, which is the
 # image's (vivibox disk grow).
@@ -22,6 +22,12 @@ def cmd_limits(args: argparse.Namespace) -> int:
     if given:
         try:
             limits.write_overrides(task.meta, given, load_config().limits)
+        except PastThePod as e:
+            print(
+                f"vivibox: {e}. Raise the pod's budget with it: {raising_both(task.id, given, e.size)}",
+                file=sys.stderr,
+            )
+            return 1
         except ValueError as e:
             print(f"vivibox: {e}", file=sys.stderr)
             return 1
@@ -43,6 +49,17 @@ def cmd_limits(args: argparse.Namespace) -> int:
             f"{options}); a disk: vivibox disk grow {task.id} 40g."
         )
     return 0
+
+
+def raising_both(task_id: str, given: dict, size: int) -> str:
+    """The command given, with the pod's budget first, as large as the largest container's in it
+    or the one refused: a command vivibox limits takes, said for the person to run, never run for them."""
+    sizes = [size] + [parse_size(v) for k, v in given.items() if k.endswith("_memory") and k != "pod_memory"]
+    both = {"pod_memory": size_option(max(sizes)), **{k: v for k, v in given.items() if k != "pod_memory"}}
+    options = " ".join(
+        f"--{k.replace('_', '-')} {f'{v:g}' if isinstance(v, float) else v}" for k, v in both.items()
+    )
+    return f"vivibox limits {task_id} {options}"
 
 
 def a_count(text: str) -> int:

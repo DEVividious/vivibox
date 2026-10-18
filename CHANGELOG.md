@@ -8,6 +8,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+### Fixed
+
+- The command an `out of memory` names, and the one `docs/configure.md` gives for a large Java
+  project, are ones `vivibox limits` takes: a raise past the pod's `pod_memory` (6 GiB by
+  default) raises it too, as `--pod-memory 9g --agent-memory 9g` after the agent's second kill,
+  where `--agent-memory 9g` alone was refused. `vivibox limits <id> --agent-memory 8g` is still
+  refused, nothing written, and now says the command that raises both. The limits themselves
+  and what they mean are unchanged.
+
 ## [0.2.2] - 2026-10-18
 
 A patch release on 0.2.1: the agent image has ICU, so a build that fetches a .NET tool (Keycloak's

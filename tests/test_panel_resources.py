@@ -88,14 +88,16 @@ def test_the_panel_and_the_supervisor_read_free_space_from_the_same_field(env, m
 
 def test_next_is_the_command_that_raises_a_limit_the_task_hit(env):
     task = implementing()
-    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1")
+    hit = limits.Exceeded("memory", "agent", 4 * 2**30, 4 * 2**30, "oom_kill 1", 6 * 2**30)
     task.set_paused(True, problem=limits.problem(task.id, [hit]))
     st = task.read_state()
     seen = ui.view(task, st, True, 3)
     assert seen.status == "out of memory"
     nxt = panel.next_steps(task, st, seen, True, panel.PodView())
     assert nxt == f"`vivibox limits {task.id} --agent-memory 6g` in a shell, then `s`"
-    full = limits.Exceeded("disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free")
+    full = limits.Exceeded(
+        "disk", "pod", 20 * 2**30, 20 * 2**30, "statvfs: 0 of 5242880 blocks free", 6 * 2**30
+    )
     task.set_paused(True, problem=limits.problem(task.id, [full]))
     st = task.read_state()
     nxt = panel.next_steps(task, st, ui.view(task, st, True, 3), True, panel.PodView())
@@ -103,7 +105,7 @@ def test_next_is_the_command_that_raises_a_limit_the_task_hit(env):
     task.set_paused(True, problem="agent turn failed: 429")
     st = task.read_state()
     assert panel.next_steps(task, st, ui.view(task, st, True, 3), True, panel.PodView()) == "`s` try again"
-    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1")
+    pod = limits.Exceeded("memory", "pod", 6 * 2**30, 5 * 2**30, "oom_kill 1", 6 * 2**30)
     task.set_paused(True, problem=limits.problem(task.id, [pod]))
     st = task.read_state()
     nxt = panel.next_steps(task, st, ui.view(task, st, True, 3), True, panel.PodView())

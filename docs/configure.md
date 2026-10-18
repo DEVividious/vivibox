@@ -39,8 +39,10 @@ on Keycloak, Java's held 2.8 to 3.3 GiB before any build ran, and in the agent's
 killed it, or the build, once one ran beside it; the task then stops with `out of memory`. A
 build that takes in the project's whole JavaScript stack (Maven's `-am`) ran out of the 4 GiB
 beside the agent's own program with no language server at all. What is known to work for such a
-project is more memory for the task: `vivibox limits <id> --agent-memory 8g`, where a Keycloak
-writer with Serena ran its server-backed tests. Setting Serena's mode to off (it applies to every
+project is more memory for the task: `vivibox limits <id> --pod-memory 8g --agent-memory 8g`,
+where a Keycloak writer with Serena ran its server-backed tests (the pod's budget goes with it: a
+container's limit past the pod's 6 GiB is refused). This is a stopgap set by hand for one task,
+not how heavier tasks are meant to get their memory later. Setting Serena's mode to off (it applies to every
 project) leaves the agent more room, but does not make such a build fit in 4 GiB.
 The planner in a container of its own gets the MCP servers you brought and not Serena: its
 language servers would work on the writer's commits beside the planner's key and conversation.
@@ -170,13 +172,17 @@ The task's panel has a Resources section with each container's limits and, while
 what it uses; `vivibox limits <id>` prints the same. One task can have more than the machine's
 defaults: `vivibox limits <id> --agent-memory 6g` (one option per key above but `disk`) writes
 the task's own into `.task/limits.json`, over `config.toml`'s, and they apply at the task's next
-start, which makes its containers with the new flags. `vivibox disk grow <id> 40g` makes the
+start, which makes its containers with the new flags. A container's memory past the pod's
+`pod_memory` is refused, nothing written, with the command that raises both:
+`vivibox limits <id> --pod-memory 8g --agent-memory 8g`. `vivibox disk grow <id> 40g` makes the
 task's disk larger at once; a disk never shrinks.
 
 When the kernel kills a process of the pod for memory, or the disk is full, the task stops for
 you after the turn or the verification it happened in, with `out of memory` or `out of disk
 space` on its row: which container and its limit, the kernel's words, and the command that
-raises it, then `vivibox start <id>`; no fix round is spent on it.
+raises it, then `vivibox start <id>`; no fix round is spent on it. A raise that would go past the
+pod's `pod_memory` raises it too, in the same command (`--pod-memory 9g --agent-memory 9g` after
+the agent's 6 GiB).
 
 ## Project setup
 

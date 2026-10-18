@@ -420,4 +420,5 @@ def test_a_descriptor_the_index_passes_over_the_socket_is_never_taken(tmp_path, 
         )
 
     assert one_call(folder) == (tools.result(tools.TOOLS[1], ["with a descriptor"], False, FAST), False)
+    assert index.passed_closed.wait(5), "the index never closed its own copy"
     assert held() == 0

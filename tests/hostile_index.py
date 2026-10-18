@@ -45,6 +45,9 @@ class HostileIndex:
         self.raw: list[bytes] = []  # the same, as bytes
         self.answered: list[dict] = []  # replies the wrapper sent to the index's own requests
         self.passed = os.devnull  # the file whose descriptor pass_fd hands over
+        # Set once pass_fd has closed its own copy: it runs in the test's process, so until then
+        # the test would count it among the wrapper's.
+        self.passed_closed = threading.Event()
         self.peers: list[str] = []  # what each connection's peer gave of its namespaces
         self._closed = threading.Event()
         folder = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
@@ -165,6 +168,7 @@ class HostileIndex:
                 )
             finally:
                 os.close(held)
+                self.passed_closed.set()
         elif mode == "progress":
             while not self._closed.is_set():
                 note = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 1}}

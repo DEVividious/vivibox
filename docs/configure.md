@@ -34,6 +34,12 @@ its own shape. Its language servers are not in the image: when Serena starts on 
 fetches the one for the project's language through the pod's network, before any of its tools
 is asked for. Python's (Pyright) is run through `uv` and kept in the shared `uv` cache; one
 Serena downloads itself is kept in its home, on the task's disk.
+On a large Java repository the language server is the biggest process in the agent's container:
+on Keycloak, Java's held 2.8 to 3.3 GiB of the agent's 4 GiB before any build ran, and the kernel
+killed it, or the build, once one ran beside it; the task then stops with `out of memory`. For
+such a project, set Serena's mode to off (it applies to every project), or give the task more:
+`vivibox limits <id> --agent-memory 8g`, where a Keycloak writer with Serena ran its
+server-backed tests.
 The planner in a container of its own gets the MCP servers you brought and not Serena: its
 language servers would work on the writer's commits beside the planner's key and conversation.
 An MCP server explicitly configured by the user is a trusted integration. Vivibox v0.2.0 does

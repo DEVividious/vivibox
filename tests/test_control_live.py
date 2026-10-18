@@ -273,6 +273,13 @@ def test_the_planners_conversation_store_is_in_no_path_of_the_writers(live, plan
         assert not any(name in " ".join(argv) for name in ("config-control", "control-src"))
 
 
+def nobodys(p) -> str:
+    """An address of the planner's range no container holds, which the host forwards to its
+    bridge: the range's first. A planner's /30 has no other: the gateway is the host's own, the
+    planner holds the next, and the last is the bridge's broadcast, which nothing answers."""
+    return str(p.subnet[0])
+
+
 def test_the_planners_server_and_password_are_out_of_the_writers_reach(live, planned):
     """Path B, the server: the control container's address is unreachable from the agent and
     from a nested container on the pod's own network, on the server's port and on a port that
@@ -288,7 +295,7 @@ def test_the_planners_server_and_password_are_out_of_the_writers_reach(live, pla
         unreachable(pod, f"http://{p.address}:{port}/session")
         tried = nested(live, "--network host", f"wget -q -T 5 -O /dev/null http://{p.address}:{port}/session")
         assert tried.returncode != 0, f"a nested container reached the planner's port {port}"
-    refused_at_once(pod, f"http://{p.subnet[5]}:{opencode.PORT}/")
+    refused_at_once(pod, f"http://{nobodys(p)}:{opencode.PORT}/")
     unreachable(planner, f"http://{w.address}:{opencode.PORT}/")
     refused_at_once(planner, f"http://{w.subnet[13]}:{opencode.PORT}/")
     theirs = (secrets.runtime_dir(control.secrets_id(pod.task_id)) / secrets.PASSWORD).read_text()
@@ -318,7 +325,7 @@ def test_the_reviewer_and_the_planner_do_not_reach_each_other(live):
         )
         unreachable(reviewer, f"http://{p.address}:38433/")
         unreachable(planner, f"http://{r.address}:38433/")
-        refused_at_once(reviewer, f"http://{p.subnet[5]}:38433/")
+        refused_at_once(reviewer, f"http://{nobodys(p)}:38433/")
         refused_at_once(planner, f"http://{r.subnet[5]}:38433/")
     finally:
         pod.review_down()

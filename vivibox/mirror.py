@@ -75,13 +75,14 @@ def found(runner: Runner = run) -> tuple[str, str]:
 
 
 def bounded(runner: Runner = run) -> bool:
-    """Whether the mirror's log is bounded; an earlier vivibox made it with Docker's default."""
+    """Whether the mirror's log is bounded; an earlier vivibox made it with Docker's default. Docker
+    adds the daemon's own options (daemon.json's log-opts) to ours, so ours are what is looked for."""
     p = runner(["docker", "inspect", "-f", "{{json .HostConfig.LogConfig}}", NAME])
     try:
         made = json.loads(p.stdout)
-    except ValueError:
+        return made["Type"] == "json-file" and LOG_OPTS.items() <= made["Config"].items()
+    except (ValueError, TypeError, KeyError, AttributeError):
         return False
-    return made == {"Type": "json-file", "Config": LOG_OPTS}
 
 
 def ensure(

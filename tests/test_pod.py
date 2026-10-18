@@ -1518,21 +1518,22 @@ def test_every_role_keeps_one_megabyte_of_docker_log(pod, tmp_path):
 
 
 def test_every_container_vivibox_keeps_running_has_a_bounded_docker_log():
-    """Each docker run of the package that leaves a container running (-d) names its log's bound,
-    so a container added later does not fall back to Docker's unbounded default. One run without
-    -d is removed when it ends (--rm), and its log with it."""
+    """Each docker run of the package, as a list or as a call's arguments, that leaves a container
+    running (-d) names its log's size, so a container added later does not fall back to Docker's
+    unbounded default. One run without -d is removed when it ends (--rm), and its log with it."""
     package = Path(vivibox.__file__).parent
     unbounded = []
     for path in sorted(package.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
-            if not isinstance(node, ast.List):
+            if not isinstance(node, (ast.List, ast.Tuple, ast.Call)):
                 continue
-            words = [e.value for e in node.elts if isinstance(e, ast.Constant)]
-            if words[:2] != ["docker", "run"] or "-d" not in words:
+            elts = node.args if isinstance(node, ast.Call) else node.elts
+            words = [e.value for e in elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if words[:2] != ["docker", "run"] or not {"-d", "--detach"} & set(words):
                 continue
-            spread = [e.value for e in node.elts if isinstance(e, ast.Starred)]
+            spread = [e.value for e in elts if isinstance(e, ast.Starred)]
             named = any(getattr(s, "id", getattr(s, "attr", None)) == "BOUNDED_LOG" for s in spread)
-            if not named and "--log-opt" not in words:
+            if not named and not any(w.startswith("max-size=") for w in words):
                 unbounded.append(f"{path.relative_to(package)}:{node.lineno}")
     assert unbounded == []
 

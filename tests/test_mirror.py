@@ -97,6 +97,20 @@ def test_the_mirrors_log_is_bounded_and_one_made_with_none_made_again():
     assert ["docker", "volume", "rm", mirror.VOLUME] not in docker.calls
 
 
+def test_a_bounded_mirror_with_the_daemons_own_log_options_is_left_alone():
+    """Docker adds the daemon's default options (daemon.json's log-opts) to those a container was
+    made with: a mirror with ours and more is bounded, not one to make again at every start."""
+    log = {"Type": "json-file", "Config": {**BOUNDED["Config"], "compress": "true", "mode": "non-blocking"}}
+    docker = FakeDocker("running", "203.0.113.1:5055", log=log)
+    mirror.ensure(5055, "203.0.113.1", runner=docker, ready=ready)
+    assert not docker.made() and not any(c[:3] == ["docker", "rm", "-f"] for c in docker.calls)
+
+    log = {"Type": "json-file", "Config": {**BOUNDED["Config"], "max-size": "10m"}}
+    docker = FakeDocker("running", "203.0.113.1:5055", log=log)
+    mirror.ensure(5055, "203.0.113.1", runner=docker, ready=ready)
+    assert len(docker.made()) == 1, "a bound of another size is not ours"
+
+
 def test_a_mirror_that_does_not_answer_says_why():
     docker = FakeDocker()
     with pytest.raises(PodError, match="did not answer"):

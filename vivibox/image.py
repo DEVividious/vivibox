@@ -126,6 +126,13 @@ def checks(uid: int, gid: int) -> list[Check]:
         Check("corepack", "corepack --version", "."),
         Check("git", "git --version", "git version"),
         Check("a C compiler, for Rust's build scripts and native packages", "cc --version | head -1", "cc ("),
+        Check(
+            "ICU, for the .NET programs a build fetches",
+            'python3 -c "import ctypes, ctypes.util as u;'
+            " found = [u.find_library(n) for n in ('icuuc', 'icui18n')];"
+            " [ctypes.CDLL(n) for n in found if n]; print('loaded' if all(found) else 'missing')\"",
+            "loaded",
+        ),
         Check("docker client and compose", "docker --version && docker compose version", "Docker Compose"),
         Check("no docker daemon in the image", "command -v dockerd || echo none", "none"),
         Check("opencode", "opencode --version", "."),

@@ -23,10 +23,11 @@ ARG UID=1000
 ARG GID=1000
 
 # gcc and libc6-dev: the linker Rust calls (cc) for every build script, and the compiler a Python
-# package built from source needs.
+# package built from source needs. libicu76: ICU, which a .NET program a build downloads loads from
+# the system and stops without (Kiota, in Keycloak's JS build).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl gcc git jq less libc6-dev procps ripgrep tini unzip \
+      ca-certificates curl gcc git jq less libc6-dev libicu76 procps ripgrep tini unzip \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

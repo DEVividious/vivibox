@@ -6,6 +6,15 @@ line, the configuration files and what `host/setup.sh` changes on your machine m
 between minor versions. The version itself comes from git: a tag `vX.Y.Z` names a release, and
 every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` prints.
 
+## [Unreleased]
+
+### Fixed
+
+- The agent image, which the verification runs in too, has ICU (`libicu76`, about 38 MB). A .NET
+  program a build downloads loads it from the system and stopped without it: Keycloak's JS build
+  ran Kiota, which ended with "Couldn't find a valid ICU package", so its verification never
+  reached the task's own modules. The image is built again at the next start.
+
 ## [0.2.1] - 2026-10-18
 
 A hardening release on 0.2.0: Docker's log of every container vivibox keeps running is bounded,

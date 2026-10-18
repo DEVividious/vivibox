@@ -183,6 +183,19 @@ def test_there_is_a_c_compiler_for_build_scripts_and_native_packages():
     assert any(check.command.startswith("cc --version") for check in image.checks(1000, 1000))
 
 
+def test_there_is_icu_for_the_dotnet_tools_a_build_fetches():
+    """A .NET program a build downloads loads ICU from the system and stops without it: Keycloak's
+    JS build ran Kiota, which ended "Couldn't find a valid ICU package", so its verification
+    never reached the task's own modules."""
+    from importlib.resources import files
+
+    text = (files("vivibox") / "images" / "agent" / "Dockerfile").read_text()
+    packages = text.split("apt-get install -y --no-install-recommends")[1].split("&&")[0].split()
+    assert "libicu76" in packages
+    icu = next(c for c in image.checks(1000, 1000) if c.name.startswith("ICU"))
+    assert "icuuc" in icu.command and icu.expect == "loaded"
+
+
 def test_python_and_uv_are_the_images_own_and_mise_pins_nothing_by_default():
     """The verification finds its tools in the image's root filesystem, by the usual directories
     (its PATH has no shims of the shared cache): Python was mise's alone, so a gate's cold mise

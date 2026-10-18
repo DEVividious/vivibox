@@ -248,7 +248,9 @@ again. vivibox never rewrites or silently destroys their state.
 ## Future work
 
 - A VM per host with Sysbox in the guest, so the kernel is no longer shared.
-- Code intelligence for the planner on large repositories.
+- Code intelligence for the planner, only once a kind of task is found where it helps. An
+  isolated code index is in the code, switched on by nothing; on a large Java repository a
+  planner offered it never used it, and its plan was no better than one without.
 - Further controlled history improvements, starting with the residual objects noted above.
 - A domain allow-list for egress and keys that leave the pod.
 

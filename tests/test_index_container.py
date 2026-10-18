@@ -4,6 +4,7 @@ its start, and every role runs as the same user, so what keeps it from the other
 nothing of theirs is mounted in it and it has no network: the mount matrix below is that
 boundary, written down."""
 
+import ast
 import json
 import subprocess
 import sys
@@ -244,6 +245,58 @@ def test_a_pod_without_an_index_makes_none_and_an_index_needs_a_planner(tmp_path
     alone = a_pod(tmp_path, control=False)
     with pytest.raises(PodError, match="planner"):
         alone.up()
+
+
+# The modules of the package that may name what gives a pod a code index: the index's own.
+INDEX_OWN = ("pod_index.py", "serena_index.py")
+
+
+def index_switches(source: str) -> list[str]:
+    """What in source would give a pod a code index: an index_server set or passed, Serena's
+    index named, or the wrapper put in a harness's configuration."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        attribute = isinstance(node, ast.Attribute)
+        if attribute and node.attr == "index_server" and isinstance(node.ctx, ast.Store):
+            found.append("index_server set")
+        elif isinstance(node, ast.keyword) and node.arg == "index_server":
+            found.append("index_server passed")
+        elif attribute and node.attr in ("serena_index", "mcp_server"):
+            found.append(f"{node.attr} named")
+        elif isinstance(node, ast.Name) and node.id == "serena_index":
+            found.append("serena_index named")
+        elif isinstance(node, ast.alias) and node.name.endswith("serena_index"):
+            found.append("serena_index imported")
+    return found
+
+
+def test_nothing_in_the_package_gives_a_pod_a_code_index():
+    """The code index is off in this release, with no setting that turns it on: a pod the
+    product makes has no index container, no provisioning run, no network or rules for one and
+    none of its memory, and the planner's harness has no index server. Turning it on is a
+    decision of its own, and changes this test with it."""
+    package = Path(vivibox.__file__).parent
+    found = {}
+    for path in sorted(package.rglob("*.py")):
+        rel = path.relative_to(package)
+        if rel.parts[0] in ("index", "index_program") or rel.name in INDEX_OWN:
+            continue
+        if switches := index_switches(path.read_text()):
+            found[str(rel)] = switches
+    assert found == {}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "pod.index_server = serena.server(repo)",
+        "Pod(task_id, repo, image, index_server=server)",
+        "from . import serena_index",
+        "config = {'mcp': {'index': pod_index.mcp_server()}}",
+    ],
+)
+def test_the_guard_on_the_index_sees_each_way_of_switching_it_on(source):
+    assert index_switches(source)
 
 
 @pytest.mark.parametrize("which", ["index_store", "index_sockets", "index_source", "index_copy"])

@@ -93,6 +93,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   pod starts again; at most three provisioning runs in a pod's life), and a stopped pod's index
   is never started by a turn. What is provisioned for is the set of the project's languages:
   a commit that changes only which has the most files provisions nothing again.
+- The code index stays switched off in this release, and nothing turns it on: a pod gets no
+  index container, no provisioning run, no network for one and none of its 4 GiB, and the
+  planner's harness no index server (a test now fails on code that would give a pod one). On a
+  large Java repository, a planner offered the index's tools on a ready index called none of
+  them, and its plan was no better than one without; it is not a proven improvement.
 
 ## [0.2.0] - 2026-10-12
 

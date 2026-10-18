@@ -235,3 +235,22 @@ def test_a_turn_that_commits_nothing_names_no_commit(env, monkeypatch):
     )
     assert actions.demo(task.id).committed == []
     assert not [e for e in task.events() if e["type"] == "demo_commit"]
+
+
+def test_a_long_run_of_commits_is_named_by_its_newest_ten_and_counted(env, monkeypatch):
+    """The agent can make any number of commits in its turn; the view's notice stays a line."""
+    from vivibox import repo
+
+    task = back_with_you(a_task())
+    monkeypatch.setattr(actions, "task_pod", lambda task_id: FakePod())
+
+    def many(prompt, session):
+        for n in range(13):
+            repo.git("commit", "-q", "--allow-empty", "-m", f"Step {n}", cwd=task.repo)
+        actions.write_instruction(task, "```bash\nnpm run dev\n```\n")
+
+    answering(monkeypatch, many)
+    committed = actions.demo(task.id).committed
+    newest = repo.git("rev-list", "--abbrev-commit", "--abbrev=7", "-10", "HEAD", cwd=task.repo).stdout
+    newest = newest.split()
+    assert committed == [*newest, "and 3 more"]

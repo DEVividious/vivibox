@@ -33,6 +33,8 @@ DEMO_SESSION = "demo-session"
 BASH_BLOCK = re.compile(r"```(?:bash|sh|shell)\n(.*?)```", re.DOTALL)
 # Longer than this and the agent has written documentation instead of an instruction.
 MAX_INSTRUCTION = 3000
+# The commits of the agent's own named to you, newest first; the rest are counted.
+NAMED_COMMITS = 10
 
 DEMO_ASK = """Work out how to start this project so a person can open it in a browser, and write
 that down. Do not change what the project does.
@@ -220,13 +222,16 @@ def _head(task: Task) -> str:
 
 
 def commits_since(task: Task, before: str) -> list[str]:
-    """The commits the task's branch gained since before, newest first, short; the new head alone
-    when the branch moved elsewhere. Recorded as an event, for the timeline."""
+    """The commits the task's branch gained since before, newest first, short, the newest
+    NAMED_COMMITS of them and how many more; the new head alone when the branch moved elsewhere.
+    Recorded as an event, for the timeline."""
     after = _head(task)
     if after == before:
         return []
     listed = repo.in_clone(task.repo, "rev-list", "--abbrev-commit", "--abbrev=7", f"{before}..{after}")
     found = listed.stdout.split() or [after[:7]]
+    if len(found) > NAMED_COMMITS:
+        found = [*found[:NAMED_COMMITS], f"and {len(found) - NAMED_COMMITS} more"]
     task.event("demo_commit", commits=found)
     return found
 

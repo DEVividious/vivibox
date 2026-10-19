@@ -23,6 +23,14 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   failing on the `cd`. The agent that works out how to run the app is told to write the commands
   from the root of the repository, never with a `cd` into its own clone.
 
+### Internal
+
+- `vivibox/store/`: the SQLite database the tasks and their events are to move into,
+  `$XDG_DATA_HOME/vivibox/vivibox.db` (0700 folder, 0600 file), at schema 1 (`meta`, `tasks`,
+  `events`, `imports`), with WAL, a bounded wait for another process's write lock, and a
+  database of a newer vivibox read and never written. Nothing opens it yet: a structure test
+  fails on a module outside the package that uses it.
+
 ## [0.2.2] - 2026-10-18
 
 A patch release on 0.2.1: the agent image has ICU, so a build that fetches a .NET tool (Keycloak's

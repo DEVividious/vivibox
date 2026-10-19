@@ -775,6 +775,83 @@ def test_the_guard_on_your_replies_sees_a_list_of_mounts_without_them():
     assert task_mounts("mounts = [Mount(str(task.meta / 'review'), '/task/review')]") == (0, [])
 
 
+# The modules outside vivibox/store/ that use it, and why. None yet: the database is made and
+# tested, and nothing in the product opens it; each step that does adds its module here.
+STORE_USERS: dict[str, str] = {}
+# What the store reaches of the package never: the view and the command line, the facade, the
+# pod and the engines it runs on. It is below them all.
+ABOVE_STORE = re.compile(
+    r"^vivibox\.(actions|pod\w*|backend\w*|cli\w*|tui|table|keys\w*|panel\w*|markdown|blocks|ui|dialogs"
+    r"|newtask|browse|providers_ui|settings|logs|widgets|branches|usage_view)(\.|$)"
+)
+
+
+def imported(where: str, source: str) -> set[str]:
+    """Every name of a module a source reaches, absolute: what it imports, what it imports from
+    (the module and the module's name: `from . import store` reaches vivibox.store), a module
+    named in a string (importlib) and vivibox.<name> as an attribute."""
+    package = ["vivibox", *Path(where).parent.parts]
+    tree = parsed(source)
+    names = {s.value for s in strings(tree) if s.value.startswith("vivibox.")}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else []
+            module = ".".join([*base, *([node.module] if node.module else [])])
+            names |= {module, *(f"{module}.{alias.name}" for alias in node.names)}
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "vivibox"
+        ):
+            names.add(f"vivibox.{node.attr}")
+    return names
+
+
+def uses_store(where: str, source: str) -> bool:
+    return any(n == "vivibox.store" or n.startswith("vivibox.store.") for n in imported(where, source))
+
+
+def test_nothing_outside_the_store_uses_it_but_the_modules_listed():
+    """vivibox.db is opened by the modules in STORE_USERS and by no other, so no behaviour changes
+    until a step says which module starts to use it."""
+    users = {
+        where for where, source in modules() if not where.startswith("store/") and uses_store(where, source)
+    }
+    assert users == set(STORE_USERS), "a module that uses vivibox.store goes into STORE_USERS, with why"
+
+
+def test_the_store_reaches_nothing_above_it():
+    reached = {
+        where: sorted(n for n in imported(where, source) if ABOVE_STORE.match(n))
+        for where, source in modules()
+        if where.startswith("store/")
+    }
+    assert reached and not any(reached.values()), reached
+
+
+def test_the_guards_on_the_store_see_every_way_of_reaching_it():
+    for shape in (
+        "from vivibox.store import db",
+        "from vivibox import store",
+        "import vivibox.store.db",
+        "from . import store",
+        "from .store.db import connect",
+        "from .store import db as database",
+        "importlib.import_module('vivibox.store.db')",
+        "import vivibox\nvivibox.store.db.connect()",
+    ):
+        assert uses_store("tui.py", shape), shape
+    assert uses_store("index/tools.py", "from .. import store")
+    assert uses_store("index/tools.py", "from ..store import db")
+    for shape in ("from . import storefront", "from .index import store", "restore = 1", "import task"):
+        assert not uses_store("tui.py", shape), shape
+    assert imported("store/db.py", "from .. import pod") >= {"vivibox.pod"}
+    assert ABOVE_STORE.match("vivibox.podspec") and ABOVE_STORE.match("vivibox.keys_work")
+    assert not ABOVE_STORE.match("vivibox.store.db") and not ABOVE_STORE.match("vivibox.uid")
+
+
 def test_no_module_is_past_the_limit():
     package = Path(__file__).parent.parent / "vivibox"
     big = {

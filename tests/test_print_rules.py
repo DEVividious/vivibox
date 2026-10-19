@@ -335,7 +335,11 @@ ACCOUNTED_FOR: dict[tuple[str, str, str], tuple[int, str]] = {
     ),
     ("cli_host.py", "cmd_hostd", "config.host_ip"): (1, YOURS),
     ("cli_host.py", "cmd_hostd", "hostd.running()"): (1, "a process's number"),
-    ("cli_pod.py", "cmd_limits", "e"): (2, "vivibox's words about a limit, around what you typed or set"),
+    ("cli_pod.py", "cmd_limits", "e"): (3, "vivibox's words about a limit, around what you typed or set"),
+    ("cli_pod.py", "cmd_limits", "raising_both(task.id, given, e.size)"): (
+        1,
+        "a command of vivibox's: the task's id, the options you typed, and a size vivibox worked out",
+    ),
     (
         "cli_pod.py",
         "cmd_limits",

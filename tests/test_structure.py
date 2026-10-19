@@ -852,6 +852,46 @@ def test_the_guards_on_the_store_see_every_way_of_reaching_it():
     assert not ABOVE_STORE.match("vivibox.store.db") and not ABOVE_STORE.match("vivibox.uid")
 
 
+def uses_sqlite(where: str, source: str) -> bool:
+    """SQLite reached in any of the ways imported() sees, or named in a string (__import__)."""
+    names = imported(where, source) | {s.value for s in strings(parsed(source))}
+    return any(n.split(".")[0] in ("sqlite3", "_sqlite3") for n in names)
+
+
+def test_only_the_store_reaches_sqlite():
+    """The store is the one module that knows the engine: another goes through it, and into
+    STORE_USERS, never round it to the file."""
+    users = {where for where, source in modules() if uses_sqlite(where, source)}
+    assert users and all(where.startswith("store/") for where in users), users
+
+
+def test_the_guard_on_sqlite_sees_every_way_of_reaching_it():
+    for shape in (
+        "import sqlite3",
+        "import sqlite3 as db",
+        "from sqlite3 import connect",
+        "from sqlite3.dbapi2 import connect",
+        "import _sqlite3",
+        "importlib.import_module('sqlite3')",
+        "__import__('sqlite3')",
+    ):
+        assert uses_sqlite("tui.py", shape), shape
+    for shape in ("from .store import db", "import sqlite_utils_of_ours", "said = 'sqlite3 is old'"):
+        assert not uses_sqlite("tui.py", shape), shape
+
+
+def test_nothing_reads_a_resource_profile_yet():
+    """vivibox/profile.py is a model with no reader: limits come from config.toml and limits.json
+    as before, until the step that stores the profile with the task says which module reads it."""
+    users = {
+        where
+        for where, source in modules()
+        if where != "profile.py"
+        and any(n == "vivibox.profile" or n.startswith("vivibox.profile.") for n in imported(where, source))
+    }
+    assert users == set()
+
+
 def test_no_module_is_past_the_limit():
     package = Path(__file__).parent.parent / "vivibox"
     big = {

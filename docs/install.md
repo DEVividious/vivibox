@@ -12,6 +12,10 @@ Ubuntu's `1:2.43.0-1ubuntu7.1` and later, which 24.04 installs. A Git without it
 variable, and in a repository of yours that is a partial clone goes to its remote for an
 object it lacks. vivibox does not check the version.
 
+The database vivibox is to keep its tasks in needs SQLite 3.37 or later (its tables are
+`STRICT`), the SQLite built into the Python `vivibox` runs on: Ubuntu 24.04's Python 3.12 has
+3.45.1, and the Python builds uv installs have a newer one.
+
 Before starting, install Git and [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
 and make sure `docker info` works as your user without sudo (Docker's
 [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/): the `docker`

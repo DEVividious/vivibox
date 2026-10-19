@@ -1246,8 +1246,23 @@ def test_an_accepted_task_leaves_its_instruction_for_the_next_one(env):
     done = actions.Finished("demo-9", env, ui.Spend(0.0, 0.1), "Done", demo=actions.demo_instruction(task))
     actions.remember(done, load_project("demo"), "abc1234567")
 
-    assert "npm run dev" in actions.demo_from_history("demo")
-    assert actions.demo_from_history("other-project") == ""
+    assert "npm run dev" in actions.demo_from_history("demo", task)
+    assert actions.demo_from_history("other-project", task) == ""
+
+
+def test_an_earlier_tasks_instruction_is_offered_with_this_tasks_paths(env):
+    """snake-2 on 2026-10-19: the instruction snake-1 left began with a cd into snake-1's own
+    directory, gone once it was accepted, and the next task's demo died on that cd."""
+    earlier, task = new_task("First"), new_task("Second")
+    other = earlier.root.parent / f"{earlier.id}0"  # a task whose id starts with the earlier one's
+    actions.write_instruction(earlier, f"```bash\ncd {earlier.repo}\nls {other}\nnpm start\n```\n")
+    left = actions.demo_instruction(earlier)
+    done = actions.Finished(earlier.id, env, ui.Spend(0.0, 0.1), "Done", demo=left)
+    actions.remember(done, load_project("demo"), "abc1234567")
+
+    offered = actions.demo_from_history("demo", task)
+
+    assert actions.instruction_commands(offered) == [f"cd {task.repo}", f"ls {other}", "npm start"]
 
 
 async def until(pilot, check, within: float = 30.0):
@@ -1408,7 +1423,7 @@ def test_running_it_does_not_stop_to_ask_permission_to_work_out_how(env, monkeyp
     task = new_task("Runnable")
     at_plan_checkpoint(task)
     task.transition(State.IMPLEMENT)
-    monkeypatch.setattr(tui.actions, "demo_from_history", lambda name: "")
+    monkeypatch.setattr(tui.actions, "demo_from_history", lambda name, task: "")
     called: list[dict] = []
     monkeypatch.setattr(tui.Vivibox, "run_demo", lambda self, task_id, **kw: called.append(kw))
 
@@ -2878,7 +2893,7 @@ def test_a_deleted_task_stays_in_the_history_without_its_files(env, monkeypatch)
     assert (entry["id"], entry["title"], entry["deleted"]) == ("demo-1", "Try the other approach", "plan")
     assert ui.finished_cost(entry) == "$0.20 + $0.05"
     assert actions.used_numbers(load_project("demo")) == 1, "its number is not given to the next task"
-    assert actions.demo_from_history("demo") == ""
+    assert actions.demo_from_history("demo", task) == ""
 
     async def scenario(app, pilot):
         app.show_deleted = True  # hidden to start with; H shows them

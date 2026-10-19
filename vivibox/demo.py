@@ -49,7 +49,9 @@ Two things decide whether it is usable:
   Docker daemon here, so a container is a fine way to do that.
 
 Write it to /task/handoff/demo.md as short markdown: the commands in ```bash blocks, in the order
-they must run, with the app itself last. Around them put only what a person needs to know, in a
+they must run, with the app itself last. They are run from the root of the repository, and a later
+task runs them again from a clone at another path, so write them from there: never a cd into this
+clone's own path. Around them put only what a person needs to know, in a
 line or two. This is a note on how to start the project, not documentation: if it grows past a
 screen, you have misunderstood it.
 
@@ -114,12 +116,21 @@ def write_instruction(task: Task, text: str) -> Path:
     return path
 
 
-def demo_from_history(project_name: str) -> str:
-    """How the last task you accepted in this project was run. A record, never run on its own."""
+def demo_from_history(project_name: str, task: Task) -> str:
+    """How the last task you accepted in this project was run, offered for this task. A record,
+    never run on its own. A path into the earlier task's directory becomes the same path in this
+    one's: that directory is gone once its work is accepted, and saying yes to the instruction
+    must not run it against a directory that no longer exists."""
     for entry in actions.history(limit=50):
         if entry["project"] == project_name and entry.get("demo") and not entry.get("deleted"):
-            return entry["demo"]
+            return for_this_task(entry["demo"], task.root.parent / entry["id"], task.root)
     return ""
+
+
+def for_this_task(text: str, earlier: Path, root: Path) -> str:
+    """The earlier task's directory named as this task's, and only as a whole name: snake-1 is not
+    the start of snake-10."""
+    return re.sub(re.escape(str(earlier)) + r"(?![\w.-])", lambda _: str(root), text)
 
 
 def demo_commands(project: Project, task: Task) -> tuple[list[str], str]:
@@ -191,7 +202,7 @@ def demo(task_id: str, ask: bool = True, reply: str = "", wait: float = 40) -> D
     pod.up()
     commands, source = demo_commands(project, task)
     question = ""
-    if not commands and (earlier := demo_from_history(project.name)) and not reply:
+    if not commands and (earlier := demo_from_history(project.name, task)) and not reply:
         return Demo(source="history", address=pod.address(), proposed=earlier)
     committed: list[str] = []
     if not commands and (ask or reply):

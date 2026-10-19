@@ -17,6 +17,11 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   refused, nothing written, and now says the command that raises both, the pod's as large as
   the task's largest container once it is applied, one raised before included, so it passes as
   it is said. The limits themselves and what they mean are unchanged.
+- Saying yes to the way the last accepted task was run no longer runs it against that task's
+  directory. The instruction is offered with this task's paths, so one that began with a `cd`
+  into the earlier task's clone, gone once its work was accepted, starts the app instead of
+  failing on the `cd`. The agent that works out how to run the app is told to write the commands
+  from the root of the repository, never with a `cd` into its own clone.
 
 ## [0.2.2] - 2026-10-18
 

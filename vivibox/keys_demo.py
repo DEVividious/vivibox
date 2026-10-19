@@ -41,7 +41,7 @@ class DemoKeys:
         if found:
             self.run_demo(task.id)
             return
-        if earlier := actions.demo_from_history(project.name):
+        if earlier := actions.demo_from_history(project.name, task):
             about = f"The last task you accepted was run like this:\n\n{earlier}"
             self.push_screen(
                 Confirm("Still right?", "Use it", about=about),

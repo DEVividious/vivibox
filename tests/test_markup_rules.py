@@ -1033,7 +1033,7 @@ def test_an_earlier_tasks_way_to_run_it_is_shown_as_text(env, monkeypatch):
 
     new_task()
     monkeypatch.setattr(actions, "demo_commands", lambda project, task: ([], ""))
-    monkeypatch.setattr(actions, "demo_from_history", lambda name: f"npm start {EVIL}")
+    monkeypatch.setattr(actions, "demo_from_history", lambda name, task: f"npm start {EVIL}")
 
     async def scenario(app, pilot):
         app.reload()

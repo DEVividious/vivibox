@@ -308,6 +308,13 @@ def test_the_stuck_path_names_the_file_by_its_full_path():
             assert "/task/handoff/question.md" in text, name
 
 
+def test_the_way_to_run_the_app_is_written_from_the_repositorys_root():
+    """A later task runs the instruction again from a clone at another path: a cd into this one's
+    path is a cd into a directory that is gone by then (snake-2, 2026-10-19)."""
+    assert "from the root of the repository" in actions.DEMO_ASK
+    assert "never a cd into" in actions.DEMO_ASK
+
+
 def test_word_budgets():
     for role, text in BRIEFS.items():
         limit = MAX_JOINED_BRIEF_WORDS if "-" in role else MAX_BRIEF_WORDS

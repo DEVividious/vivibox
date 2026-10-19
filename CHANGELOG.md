@@ -32,10 +32,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   fails on a module outside the package that uses it.
 - `vivibox/profile.py`: a task's resource profile, every figure of its containers' limits
   (memory and processes per container, the index's among them, the pod's CPUs, processes and
-  `pod_memory` as it is today, the disk) with where it came from (default, the machine's
-  `config.toml`, the task's own, a person's change with who and when), and the agent's language
-  server as a figure apart, unaccounted for now. Made from today's limits and back to the same
-  ones, with the same flags; checked as `[limits]` is; nothing reads it yet. A structure test
+  `pod_memory` as it is today, the disk) with where it came from (default, a key the machine's
+  `config.toml` says, even at vivibox's own figure, the task's own, a person's change with who
+  and when), and the agent's language server as a figure apart, unaccounted for now. Made from
+  today's limits, given the keys `config.toml` said, and back to the same ones, with the same
+  flags; every profile, however made, checked as `[limits]` is (`Limits.checked`: each figure
+  in its range, and across them); nothing reads it yet. A structure test
   fails on a module outside `vivibox/store/` that reaches `sqlite3`.
 
 ## [0.2.2] - 2026-10-18

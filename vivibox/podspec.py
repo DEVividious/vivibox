@@ -186,6 +186,28 @@ def _count(value, key: str, most: int) -> int:
     return value
 
 
+def _within(key: str, value):
+    """A figure of [limits] in its key's range, sizes in bytes as parse_size gives them: CPUs above
+    0, at most 1024 and the machine's; processes from 1 to 4194304; a size above 0, the disk's
+    from 1g to 2t. Returns the figure; ValueError names the key."""
+    if key == "pod_cpus":
+        a_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not a_number or not 0 < value <= 1024:
+            raise ValueError("limits.pod_cpus must be a number of CPUs above 0, e.g. 6 or 2.5")
+        if value > (available := machine_cpus()):
+            raise ValueError(
+                f"limits.pod_cpus ({value:g}) is past this machine's {available} CPUs, which Docker refuses"
+            )
+    elif key.endswith("_pids"):
+        _count(value, f"limits.{key}", 4_194_304)
+    elif isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"limits.{key} must be a size above zero, in bytes")
+    elif key == "disk" and not DISK_SMALLEST <= value <= DISK_LARGEST:
+        smallest, largest = size_option(DISK_SMALLEST), size_option(DISK_LARGEST)
+        raise ValueError(f"limits.disk must be from {smallest} to {largest}")
+    return value
+
+
 class PastThePod(ValueError):
     """A container's memory past the pod's limits.pod_memory, and nothing else wrong; size: what
     the pod's needs to be, its largest container's with the limits given applied."""
@@ -252,28 +274,17 @@ class Limits:
                 raise ValueError(f"limits.{key} is not a limit; the limits are {', '.join(LIMIT_KEYS)}")
             try:
                 if key == "pod_cpus":
-                    a_number = isinstance(value, (int, float)) and not isinstance(value, bool)
-                    if not a_number or not 0 < value <= 1024:
-                        raise ValueError("limits.pod_cpus must be a number of CPUs above 0, e.g. 6 or 2.5")
-                    if value > (available := machine_cpus()):
-                        raise ValueError(
-                            f"limits.pod_cpus ({value:g}) is past this machine's {available} CPUs, "
-                            "which Docker refuses"
-                        )
-                    pod_cpus = float(value)
+                    pod_cpus = float(_within(key, value))
                 elif key == "pod_pids":
-                    pod_pids = _count(value, "limits.pod_pids", 4_194_304)
+                    pod_pids = _within(key, value)
                 elif key == "pod_memory":
                     pod_memory = parse_size(value)
                 elif key == "disk":
-                    disk = parse_size(value)
-                    if not DISK_SMALLEST <= disk <= DISK_LARGEST:
-                        smallest, largest = size_option(DISK_SMALLEST), size_option(DISK_LARGEST)
-                        raise ValueError(f"limits.disk must be from {smallest} to {largest}")
+                    disk = _within(key, parse_size(value))
                 elif key.endswith("_memory"):
                     memory[key[: -len("_memory")]] = parse_size(value)
                 else:
-                    pids[key[: -len("_pids")]] = _count(value, f"limits.{key}", 4_194_304)
+                    pids[key[: -len("_pids")]] = _within(key, value)
             except ValueError as e:
                 said = str(e) if str(e).startswith("limits.") else f"limits.{key}: {e}"
                 raise ValueError(said) from None
@@ -292,6 +303,17 @@ class Limits:
                 max(memory[role] for role in ROLES),
             )
         return Limits(pod_memory, pod_cpus, pod_pids, memory, pids, disk)
+
+    def checked(self) -> Limits:
+        """These limits checked whole as with_values checks the keys it is given and the figures
+        across them, for limits made with figures as they are (a stored profile's): every figure
+        in its key's range, the index's as a container's. ValueError names the key."""
+        figures = {"pod_memory": self.pod_memory, "pod_cpus": self.pod_cpus, "pod_pids": self.pod_pids}
+        figures |= {f"{container}_memory": n for container, n in self.memory.items()}
+        figures |= {f"{container}_pids": n for container, n in self.pids.items()}
+        for key, value in {**figures, "disk": self.disk}.items():
+            _within(key, value)
+        return self.with_values({})
 
 
 def run(cmd: Sequence[str], timeout: float | None = None) -> subprocess.CompletedProcess:

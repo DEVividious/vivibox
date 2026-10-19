@@ -6,13 +6,14 @@ unaccounted (None) until there are measurements of it.
 A model only: nothing in the product reads or writes a profile yet. It is made from the limits a
 task runs with today and gives back the very same Limits (to_limits(from_limits(m, own)) is
 limits.for_task's Limits, to the byte, with the same flags), and it is checked as Limits checks
-them: a value replaced goes through Limits.with_values. pod_memory is today's figure, a budget each
-container's limit is checked against and not their sum (docs/configure.md); what it is to mean is
-not decided here. Nothing adds the figures up: what a task costs is not this module's."""
+them, however it is made: a value replaced goes through Limits.with_values, every profile through
+Limits.checked. pod_memory is today's figure, a budget each container's limit is checked against
+and not their sum (docs/configure.md); what it is to mean is not decided here. Nothing adds the
+figures up: what a task costs is not this module's."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -78,9 +79,10 @@ class Value:
 
 @dataclass(frozen=True)
 class ResourceProfile:
-    """Every key of KEYS with its value, read only; checked whole when made: each value of its
-    kind, and the limits it gives passing what Limits checks across them (a container's memory at
-    most the pod's, its processes at most the pod's)."""
+    """Every key of KEYS with its value, read only; checked whole when made, however it is made
+    (here, from_json, from_limits, with_value): each value of its kind, and the limits it gives
+    passing Limits.checked, every figure in the range config.toml's [limits] may say and across
+    them (a container's memory at most the pod's, its processes at most the pod's)."""
 
     values: Mapping[str, Value]
 
@@ -94,7 +96,7 @@ class ResourceProfile:
                 raise ValueError(f"{key}: not a value with where it came from: {found!r}")
             _check(key, found.value)
         object.__setattr__(self, "values", MappingProxyType({key: self.values[key] for key in KEYS}))
-        to_limits(self).with_values({})
+        to_limits(self).checked()
 
     def value(self, key: str) -> int | float | None:
         return self.values[key].value
@@ -153,15 +155,16 @@ ENTRY = {"value", "source", "actor", "at"}
 
 
 def _check(key: str, value) -> None:
-    """A value of its key's kind: a whole number above zero (bytes, a count), CPUs above zero, or
-    for the language server also None; the ranges across keys are Limits'."""
+    """A value of its key's kind, before Limits.checked says whether it is in its range: a whole
+    number (bytes, a count), for the CPUs also a fraction; the language server's, in no Limits, a
+    size above zero or None."""
     if key == LANGUAGE_SERVER and value is None:
         return
     whole = isinstance(value, int) and not isinstance(value, bool)
     if key == "pod_cpus":
         whole = whole or isinstance(value, float)
-    if not whole or not value > 0:
-        raise ValueError(f"{key}: not a figure above zero: {value!r}")
+    if not whole or (key == LANGUAGE_SERVER and value <= 0):
+        raise ValueError(f"{key}: not a figure of its kind: {value!r}")
 
 
 def _of(found: Limits, key: str) -> int | float | None:
@@ -173,18 +176,24 @@ def _of(found: Limits, key: str) -> int | float | None:
     return (found.memory if kind == "memory" else found.pids)[container]
 
 
-def from_limits(machine: Limits, overrides: dict) -> ResourceProfile:
+def from_limits(machine: Limits, overrides: dict, *, machine_given: Collection[str]) -> ResourceProfile:
     """The profile of a task run with the machine's limits and its own over them (limits.json's
-    keys, as limits.for_task reads them, checked so): a key of the task's is the task's, one the
-    machine's differs in is the machine's, the rest vivibox's. A machine's value equal to
-    vivibox's is the default: Limits keeps no word of which keys config.toml said."""
+    keys, as limits.for_task reads them, checked so). machine_given: the keys config.toml's
+    [limits] said, whatever their value, since Limits keeps no word of them. A key of the task's
+    is the task's, else one the machine said is the machine's, even at vivibox's own figure, else
+    vivibox's; a figure of the machine's other than vivibox's that it is not given said is refused."""
+    said = set(machine_given)
+    if unknown := sorted(said - set(LIMIT_KEYS)):
+        raise ValueError(f"machine_given: {', '.join(unknown)} is not a limit of [limits]")
     found, default = machine.with_values(overrides), Limits()
     values = {}
     for key in KEYS:
         if key in overrides:
             source = Source.TASK
-        elif _of(machine, key) != _of(default, key):
+        elif key in said:
             source = Source.MACHINE
+        elif _of(machine, key) != _of(default, key):
+            raise ValueError(f"{key}: the machine's figure is not vivibox's, and not given as config.toml's")
         else:
             source = Source.DEFAULT
         values[key] = Value(_of(found, key), Provenance(source))

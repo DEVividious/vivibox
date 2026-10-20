@@ -624,6 +624,11 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     acting_as("you")
     args = parser().parse_args(argv)
+    # Every task's events.jsonl into vivibox.db before anything else (plan P1.3); the view does
+    # it once it shows, and vivibox import is the import itself.
+    if args.command not in (None, "import"):
+        for line in actions.import_at_start():
+            print(f"vivibox: {display.terminal(line)}", file=sys.stderr)
     try:
         if args.command is None:
             from . import firstrun, tui  # the view's library loads only when you use it

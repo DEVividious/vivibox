@@ -43,8 +43,34 @@ def rows(where: Path) -> list[tuple]:
         return conn.execute("SELECT seq, ts, task, actor, type, data FROM events ORDER BY seq").fetchall()
 
 
+def places(where: Path) -> list[tuple]:
+    """(seq, id, log_offset, placed_seq) of every event."""
+    with sqlite3.connect(where) as conn:
+        return conn.execute("SELECT seq, id, log_offset, placed_seq FROM events ORDER BY seq").fetchall()
+
+
+def known(where: Path) -> int:
+    with sqlite3.connect(where) as conn:
+        return conn.execute("SELECT n FROM knowledge").fetchone()[0]
+
+
 def log(t: Task) -> list[dict]:
     return [json.loads(line) for line in (t.meta / "events.jsonl").read_bytes().splitlines()]
+
+
+def view_at(where: Path, n: int, task_id: str = "demo-1") -> tuple[list[str], int]:
+    """What the database knew of a task's history at its n-th fact (plan P1.3, rule 9): the ids of
+    the events placed by then, in the log's order, and how many it knew of with no place yet."""
+    with sqlite3.connect(where) as conn:
+        known_then = "task = ? AND seq <= ?"
+        placed = "placed_seq IS NOT NULL AND placed_seq <= ?"
+        history = conn.execute(
+            f"SELECT id FROM events WHERE {known_then} AND {placed} ORDER BY log_offset, seq", (task_id, n, n)
+        ).fetchall()
+        outside = conn.execute(
+            f"SELECT count(*) FROM events WHERE {known_then} AND NOT ({placed})", (task_id, n, n)
+        ).fetchone()[0]
+    return [i for (i,) in history], outside
 
 
 def test_an_event_goes_into_the_database_as_it_goes_onto_the_log(where, one):
@@ -64,7 +90,62 @@ def test_an_event_goes_into_the_database_as_it_goes_onto_the_log(where, one):
             "seconds": 1.5,
             "why": None,
         },  # fmt: skip
+        "id": written["id"],
+        "actor": "you",
     }
+    assert list(written) == ["ts", "task", "type", "data", "id", "actor"]
+
+
+def test_each_event_has_one_identity_in_the_database_and_on_the_log(where, one):
+    """An id drawn before anything is written, the same in the row and on the line, as is the
+    actor; no two events share one."""
+    for n in range(3):
+        one.event("turn_retry", wait=n)
+    ids = [e["id"] for e in log(one)]
+    assert all(len(i) == 32 and set(i) <= set("0123456789abcdef") for i in ids)
+    assert len(set(ids)) == 3
+    assert [r[1] for r in places(where)] == ids
+    assert [r[3] for r in rows(where)] == [e["actor"] for e in log(one)] == ["you"] * 3
+
+
+def test_an_event_is_placed_at_the_byte_its_line_starts_at_by_a_later_fact(where, one):
+    """The row learns where its line is once the line is written: the offset of its first byte,
+    with a number of what is known after the event's own."""
+    one.event("goal", goal="first")
+    one.event("goal", goal="second ż")
+    data = (one.meta / "events.jsonl").read_bytes()
+    starts = [0, data.index(b"\n") + 1]
+    found = places(where)
+    assert [r[2] for r in found] == starts
+    assert [(r[0], r[3]) for r in found] == [(1, 2), (3, 4)], "event, then its place, each a number"
+    assert known(where) == 4
+
+
+def test_an_event_written_while_the_database_is_stale_goes_onto_the_log_alone(where, one):
+    """A schema 1 database with events is left as it is until it is removed: the log takes the
+    event with its id and actor, and nothing is lost for the database to be told of."""
+    where.parent.mkdir(parents=True)
+    from test_store_db import made_v1, v1_of
+
+    made_v1(where, rows=1)
+    before = v1_of(where)
+    one.event("goal", goal="stale")
+    [written] = log(one)
+    assert written["actor"] == "you" and len(written["id"]) == 32
+    assert v1_of(where) == before
+    assert events._lost.get(where, 0) == 0
+
+
+def test_an_event_whose_line_could_not_be_written_stays_in_the_database_unplaced(where, one, monkeypatch):
+    def full(path, record):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(task, "append_record", full)
+    with pytest.raises(OSError, match="No space"):
+        one.event("goal", goal="database only")
+    assert not (one.meta / "events.jsonl").exists()
+    [(seq, _, offset, placed)] = places(where)
+    assert (seq, offset, placed) == (1, None, None)
 
 
 def test_the_log_is_written_as_it_always_was(where, one):
@@ -81,7 +162,7 @@ def test_events_keep_their_order_in_both(where, one):
         one.event("turn_retry", wait=n)
     assert [e["data"]["wait"] for e in log(one)] == [0, 1, 2, 3, 4]
     found = rows(where)
-    assert [r[0] for r in found] == [1, 2, 3, 4, 5]
+    assert [r[0] for r in found] == [1, 3, 5, 7, 9], "between them, the numbers of their places"
     assert [json.loads(r[5])["wait"] for r in found] == [0, 1, 2, 3, 4]
     assert [r[1] for r in found] == [e["ts"] for e in log(one)]
 
@@ -381,8 +462,10 @@ def test_the_loss_and_the_event_are_one_transaction(where, one, monkeypatch):
     events._lost[where] = 3
     insert = events.insert
 
-    def refused(conn, entry, actor):
-        return insert(conn, entry, actor if entry["type"] == events.LOST else None)
+    def refused(conn, entry, **kwargs):
+        return insert(
+            conn, {**entry, "actor": entry["actor"] if entry["type"] == events.LOST else None}, **kwargs
+        )
 
     monkeypatch.setattr(events, "insert", refused)
     with pytest.raises(sqlite3.IntegrityError):
@@ -393,11 +476,12 @@ def test_the_loss_and_the_event_are_one_transaction(where, one, monkeypatch):
     transaction = db.transaction
     monkeypatch.setattr(db, "transaction", lambda conn: began.append(conn) or transaction(conn))
     one.event("goal", goal="after")
-    assert len(began) == 1, "one transaction for the two rows"
+    assert len(began) == 2, "one transaction for the two rows, one for the event's place"
     assert [(r[0], r[4], json.loads(r[5])) for r in rows(where)] == [
         (1, "audit.lost", {"count": 3}),
         (2, "goal", {"goal": "after"}),
     ]
+    assert [r[2:] for r in places(where)] == [(None, None), (0, 3)], "the loss has no line"
     assert events._lost.get(where, 0) == 0
 
 
@@ -405,10 +489,10 @@ def test_an_event_the_database_cannot_take_keeps_the_loss_owed_and_one_more(wher
     events._lost[where] = 2
     insert = events.insert
 
-    def full(conn, entry, actor):
+    def full(conn, entry, **kwargs):
         if entry["type"] != events.LOST:
             raise OSError(28, "No space left on device")
-        return insert(conn, entry, actor)
+        return insert(conn, entry, **kwargs)
 
     monkeypatch.setattr(events, "insert", full)
     one.event("goal", goal="disk full")
@@ -436,7 +520,7 @@ def test_an_event_the_database_refuses_is_a_fault_not_a_loss(where, one, monkeyp
     assert lost(where) == []
 
 
-def test_a_writer_killed_inside_its_write_leaves_seq_without_a_gap(where, one):
+def test_a_writer_killed_inside_its_write_takes_no_number(where, one):
     one.event("goal", goal="before")
     code = textwrap.dedent(
         f"""
@@ -445,7 +529,9 @@ def test_a_writer_killed_inside_its_write_leaves_seq_without_a_gap(where, one):
         from pathlib import Path
         from vivibox.store import db, events
         with closing(db.connect(Path({str(where)!r}), made_by="child")) as conn, db.transaction(conn):
-            events.insert(conn, {{"ts": "t", "task": "demo-1", "type": "goal", "data": {{}}}}, "you")
+            entry = {{"id": "killed", "ts": "t", "task": "demo-1", "actor": "you", "type": "goal"}}
+            entry["data"] = {{}}
+            events.insert(conn, entry)
             print("holding", flush=True)
             time.sleep(60)
         """
@@ -456,7 +542,8 @@ def test_a_writer_killed_inside_its_write_leaves_seq_without_a_gap(where, one):
     assert holder.wait(timeout=10) == -signal.SIGKILL
     one.event("goal", goal="after")
     seqs = [(r[0], json.loads(r[5])) for r in rows(where)]
-    assert seqs == [(1, {"goal": "before"}), (2, {"goal": "after"})]
+    assert seqs == [(1, {"goal": "before"}), (3, {"goal": "after"})], "2 is the first one's place"
+    assert known(where) == 4
     with sqlite3.connect(where) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
 
@@ -467,9 +554,66 @@ def test_a_writer_killed_inside_its_write_leaves_seq_without_a_gap(where, one):
 def test_the_task_s_events_are_read_from_its_log_never_the_database(where, one):
     one.event("goal", goal="logged")
     with sqlite3.connect(where) as conn:
-        conn.execute('UPDATE events SET data = \'{"goal": "changed"}\'')
         conn.execute(
-            "INSERT INTO events (ts, task, actor, type, data) VALUES (?, 'demo-1', 'you', 'box', '{}')", (TS,)
+            "INSERT INTO events (seq, id, ts, task, actor, type, data)"
+            " VALUES (99, 'x', ?, 'demo-1', 'you', 'box', '{}')",
+            (TS,),
         )
     assert one.events() == log(one)
     assert [e["data"] for e in one.events()] == [{"goal": "logged"}]
+
+
+# --- a place the database could not take: owed by the process, paid at its next write. ---
+
+
+def test_a_place_the_database_could_not_take_is_owed_then_paid_without_changing_the_past(
+    where, one, monkeypatch
+):
+    held = []
+    append = task.append_record
+
+    def then_held(path, record):
+        offset = append(path, record)
+        if not held:
+            held.append(busy(where, monkeypatch))
+        return offset
+
+    monkeypatch.setattr(task, "append_record", then_held)
+    one.event("goal", goal="first")
+    [(seq, first, offset, placed)] = places(where)
+    assert (seq, offset, placed) == (1, None, None)
+    assert events._unplaced[where] == {first: 0}, "the event and its offset, not a count"
+    assert lost(where) == [] and events._lost.get(where, 0) == 0, "a place owed is no event lost"
+    before = view_at(where, 1)
+    assert before == ([], 1)
+
+    held[0].execute("ROLLBACK")
+    held[0].close()
+    monkeypatch.setattr(task, "append_record", append)
+    one.event("goal", goal="second")
+    second = log(one)[1]["id"]
+    size = len((one.meta / "events.jsonl").read_bytes().split(b"\n")[0]) + 1
+    assert places(where) == [(1, first, 0, 3), (2, second, size, 4)], "the debt first, each its own number"
+    assert events._unplaced.get(where, {}) == {}
+    assert view_at(where, 1) == before, "what was known at 1 is what it was"
+    assert view_at(where, 2) == ([], 2)
+    assert view_at(where, 3) == ([first], 1)
+    assert view_at(where, 4) == ([first, second], 0)
+
+
+def test_a_place_owed_for_an_event_the_database_no_longer_has_is_let_go(where, one, monkeypatch):
+    """The database was removed between the two: the event's row is gone with it, the import
+    brings it in from the log, and nothing is placed or numbered for it here."""
+    events._unplaced[where] = {"a" * 32: 0}
+    one.event("goal", goal="after")
+    assert [r[1:] for r in places(where)] == [(log(one)[0]["id"], 0, 2)]
+    assert events._unplaced.get(where, {}) == {}
+
+
+def test_a_line_written_while_the_database_was_held_has_its_identity(where, one, monkeypatch):
+    holder = busy(where, monkeypatch)
+    one.event("goal", goal="held out")
+    holder.execute("ROLLBACK")
+    [written] = log(one)
+    assert len(written["id"]) == 32 and written["actor"] == "you"
+    assert places(where) == []

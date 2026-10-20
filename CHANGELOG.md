@@ -11,11 +11,26 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 ### Added
 
 - `vivibox events <id> --json` prints the events of a task that `vivibox.db` holds, a line each,
-  in the shape of its `events.jsonl`, for a script to compare the two. It is not the task's
-  whole history: the database holds only the events written from this version on, less any it
-  could not take then, and an event whose fields pass 8 KiB is kept there cut, with
-  `"truncated": true`. `events.jsonl` stays the history: the list, the panel, `u`, `vivibox
-  stats`, `vivibox usage` and the timeline read it as before.
+  in the shape of its `events.jsonl` and in its order, for a script to compare the two. An event
+  whose fields pass 8 KiB is kept there cut, with `"truncated": true`; one the log never got
+  (vivibox stopped between the two) comes after the rest. `events.jsonl` stays the history: the
+  list, the panel, `u`, `vivibox stats`, `vivibox usage` and the timeline read it as before.
+- `vivibox import` brings every task's `events.jsonl`, live and archived, into `vivibox.db`, as
+  every command and the view now do when they start, and says how many events it brought in and
+  any log it could not: one changed since it was imported, or a line that is no event (its file,
+  line, byte and why; nothing after it is brought in until it is one). At a start only such a
+  refusal is said, and nothing when there is none. Each event is brought in once, by its
+  identity, never by what it looks like, and no log is changed.
+- `vivibox backup <file>` copies `vivibox.db` whole into a new file.
+
+### Changed
+
+- Every line of a task's `events.jsonl` has two more fields, `id` and `actor`: the event's
+  identity, the same in `vivibox.db`, and who wrote it (`you`, `supervisor`, `vivibox`). The
+  others are as they were.
+- A `vivibox.db` made by the development versions between 0.2.2 and this one, with events in it,
+  is left as it is and said to be removed (with its `-wal` and `-shm`), at every start and by
+  `vivibox events`; it is built again from the logs. Events are written onto the logs meanwhile.
 
 ### Fixed
 
@@ -64,6 +79,18 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   written all the same; the next event written there is preceded by an `audit.lost` with the
   count, in the same transaction, said once even by two threads of the view. A payload that is no JSON, or a row the schema refuses, is raised and written nowhere.
   `task.py` is the one module outside the store that uses it (structure test).
+- `vivibox.db` at schema 2 (ADR-0051): every event has an identity (`events.id`, never empty,
+  never twice) and, once known, the byte its line begins at in its log (`log_offset`, set once);
+  each fact the database learns, an event or its place, takes the next number of one counter
+  (`knowledge`), so what it knew at any number never changes. An empty database of schema 1 is
+  copied beside itself (`vivibox.db.v1`, through a temporary file put in place at once) before
+  it is migrated. A line from before identities is named by its offset and bytes, its actor
+  `unknown-before-wave-b`. The import (`vivibox/store/importer.py`) keeps a cursor of bytes per
+  log, moved in the transaction of the events it covers, and is the one writer of it.
+- `task.append_record` is the one place that appends to an event log (structure test): under
+  the writers' lock, it says the byte the record began at, goes on after a short write, and
+  takes back what it wrote of a record it could not finish. The archive copies the log last,
+  under the same lock, so it has every event the archiving wrote.
 
 ## [0.2.2] - 2026-10-18
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
 import re
+import shutil
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -13,7 +16,7 @@ from pathlib import Path
 from . import version
 from .config import DEFAULT_ORCHESTRATION, current_mode
 from .states import State, check_transition
-from .store import db
+from .store import db, importer
 from .store import events as store_events
 
 TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
@@ -156,17 +159,107 @@ def acting_as(actor: str) -> None:
 
 def write_event(log: Path, task_id: str, type_: str, data: dict) -> None:
     """One event of a task: into vivibox.db first, then onto log, its events.jsonl, which every
-    reader reads (plan P1.2). The database is a copy nothing decides on yet: one that cannot be
-    written now (held by another past every wait, unopenable, no database, a newer vivibox's)
-    goes without it, and the log and the writer carry on (store/events.py says what is counted).
-    A payload that is no JSON, or a row the schema refuses, is the code's fault: raised, and
-    written nowhere. An end between the two leaves the event in the database alone."""
-    entry = {"ts": now(), "task": task_id, "type": type_, "data": data}
+    reader reads (plan P1.2), then the byte its line begins at, for the database (P1.3). The
+    event's identity is drawn before either is written, and the line has it and the actor too:
+    {ts, task, type, data, id, actor}. The database is a copy nothing decides on yet: one that
+    cannot be written now (held by another past every wait, unopenable, no database, a newer
+    vivibox's, one of schema 1 that is to be removed) goes without the event or its place, and
+    the log and the writer carry on (store/events.py says what is counted and owed). A payload
+    that is no JSON, or a row the schema refuses, is the code's fault: raised, and written
+    nowhere. An end between the two leaves the event in the database alone, with no place."""
+    entry = {
+        "ts": now(),
+        "task": task_id,
+        "type": type_,
+        "data": data,
+        "id": store_events.new_id(),
+        "actor": _actor,
+    }
     line = record(entry)
-    with suppress(db.StoreBusy, db.StoreUnavailable, db.StoreNewer):
-        store_events.append(entry, actor=_actor, made_by=version.current())
-    with log.open("ab") as f:
-        f.write(line)
+    unwritten = (db.StoreBusy, db.StoreUnavailable, db.StoreNewer, db.StoreStale)
+    stored = False
+    with suppress(*unwritten):
+        store_events.append(entry, made_by=version.current())
+        stored = True
+    offset = append_record(log, line)
+    if stored:
+        with suppress(*unwritten):
+            store_events.place(entry["id"], offset, made_by=version.current())
+
+
+class LogDamaged(Exception):
+    """A record cut short on an event log, which could not be taken back: the log ends in part of
+    one. Not an OSError: nothing that tries a write again may take it for one."""
+
+
+def append_record(path: Path, record: bytes) -> int:
+    """record, one whole line, onto the event log at path: the byte it begins at. The one place
+    that appends to a task's events.jsonl (tests/test_structure.py). Under the writers' lock
+    (flock), so the end of the file is this record's start and no other's, taken on the same
+    descriptor, never from the file's size, which another writer may have moved. A write cut
+    short goes on with the rest; one that fails part way has its part cut off again before the
+    lock is let go, and the error raised: the log holds whole records or none. Where even that
+    fails, LogDamaged. A link in the log's place is never followed."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(path, flags, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        start = os.lseek(fd, 0, os.SEEK_END)
+        written = 0
+        try:
+            while written < len(record):
+                if (n := os.write(fd, record[written:])) <= 0:
+                    raise OSError(errno.EIO, f"{path}: the log took none of a record")
+                written += n
+        except BaseException:
+            if written:
+                try:
+                    os.ftruncate(fd, start)
+                except OSError as e:
+                    why = e.strerror or e
+                    raise LogDamaged(
+                        f"{path}: a record was cut short at byte {start} and could not be taken back "
+                        f"({why}): the log ends in part of a record"
+                    ) from e
+            raise
+        return start
+    finally:
+        os.close(fd)  # which lets the lock go
+
+
+def copy_log(source: Path, target: Path) -> None:
+    """An event log copied whole, under the lock its writers take (shared, so copies go at once),
+    so that no record being written is copied in part. A link in its place is never followed."""
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as found, open(target, "wb") as kept:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        shutil.copyfileobj(found, kept)
+
+
+def task_logs(tasks_dir: Path) -> list[tuple[str, Path]]:
+    """The event log of every task in tasks_dir, by its id, whether it has one yet or not."""
+    if not tasks_dir.is_dir():
+        return []
+    return [
+        (p.name, p / ".task" / "events.jsonl") for p in sorted(tasks_dir.iterdir()) if TASK_ID.match(p.name)
+    ]
+
+
+def import_logs(logs: list[tuple[str, Path]]) -> importer.Report:
+    """Each (task id, events.jsonl) into vivibox.db, by the events' identities (plan P1.3): what it
+    brought in and what it could not. Never raises for the database: the report says it."""
+    return importer.run(logs, made_by=version.current())
+
+
+class BackupRefused(Exception):
+    """vivibox.db could not be copied: what was said."""
+
+
+def backup_store(target: Path) -> None:
+    try:
+        db.backup(target)
+    except db.StoreError as e:
+        raise BackupRefused(str(e)) from e
 
 
 class EventsUnread(Exception):

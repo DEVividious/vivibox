@@ -95,25 +95,31 @@ def test_a_task_with_no_events_kept_says_where_they_are(one, capsysbinary):
     code, out, err = exported(capsysbinary, "demo-9")
     assert (code, out) == (1, b"")
     assert err.decode() == (
-        "vivibox: no events of demo-9 in vivibox.db: it keeps the events written since this vivibox\n"
-        "    began to keep them there; a task's earlier ones are in its events.jsonl, and\n"
-        "    vivibox timeline demo-9 reads them\n"
+        "vivibox: no events of demo-9 in vivibox.db\n"
+        "    vivibox timeline demo-9 reads them from the task's events.jsonl\n"
     )
 
 
 def test_a_database_that_cannot_be_read_says_why(env, capsysbinary):
     where = env / "data" / "vivibox" / "vivibox.db"
-    code, out, err = exported(capsysbinary)
-    assert (code, out) == (1, b"")
-    assert err.decode() == (
-        f"vivibox: the events of demo-1 could not be read: no database at {where}\n"
-        "    vivibox timeline demo-1 reads them from the task's events.jsonl\n"
-    )
+    with pytest.raises(task.EventsUnread, match=f"no database at {where}"):
+        task.recorded_events("demo-1")
     where.parent.mkdir(parents=True)
     where.write_bytes(b"not a database, " * 100)
     code, out, err = exported(capsysbinary)
     assert code == 1 and err.decode().startswith("vivibox: the events of demo-1 could not be read: ")
     assert "file is not a database" in err.decode()
+    assert err.decode().endswith("    vivibox timeline demo-1 reads them from the task's events.jsonl\n")
+
+
+def test_a_database_from_before_identities_says_to_remove_it(one, env, capsysbinary):
+    from test_store_db import made_v1
+
+    where = env / "data" / "vivibox" / "vivibox.db"
+    made_v1(where, rows=1)
+    code, out, err = exported(capsysbinary)
+    stale = f"{where} is a copy of the events from before each had an identity (1 event)"
+    assert code == 1 and err.decode().count(stale) == 2, "said by the import at the start, and by the export"
 
 
 def test_a_newer_vivibox_s_database_is_read(one, env, capsysbinary):

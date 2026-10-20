@@ -779,7 +779,10 @@ def test_the_guard_on_your_replies_sees_a_list_of_mounts_without_them():
 # adds that module here. The readers of the events (the list, u, stats, the timeline, the
 # supervisor) read events.jsonl through task.py, and are not here until a step moves them.
 STORE_USERS: dict[str, str] = {
-    "task.py": "every event into vivibox.db before its events.jsonl, and the export read back from it (P1.2)",
+    "task.py": (
+        "every event into vivibox.db before its events.jsonl, and the export read back from it (P1.2); "
+        "the import of the logs and the backup, which the command line and the view ask of it (P1.3)"
+    ),
 }
 # What the store reaches of the package never: the view and the command line, the facade, the
 # pod and the engines it runs on. It is below them all.
@@ -892,6 +895,128 @@ def test_the_guard_on_sqlite_sees_every_way_of_reaching_it():
         assert uses_sqlite("tui.py", shape), shape
     for shape in ("from .store import db", "import sqlite_utils_of_ours", "said = 'sqlite3 is old'"):
         assert not uses_sqlite("tui.py", shape), shape
+
+
+# The places that append to a file, and what each appends to: none of them is a task's
+# events.jsonl but task.append_record, which takes the writers' lock and says where each record
+# begins (plan P1.3, rule 7). A new place to append goes here, with what it appends to.
+APPENDERS: dict[tuple[str, str], str] = {
+    ("task.py", "append_record"): "a task's events.jsonl: the one place",
+    ("actions.py", "one_at_a_time"): "the task's start lock, opened to be locked",
+    ("actions.py", "start_supervisor"): "the supervisor's log",
+    ("egress/hostd.py", "locked"): "the forwarder's lock file",
+    ("egress/hostd.py", "start"): "the forwarder's log",
+    ("gate.py", "run_gate"): "the verification's log",
+    ("handoff.py", "appending"): "a handoff file (criteria added for a comment)",
+    ("repo.py", "prepare"): "the clone's .git/info/exclude",
+    ("review.py", "remember"): "history.jsonl",
+    ("review.py", "remember_removed"): "history.jsonl",
+    ("transcript.py", "write"): "a role's transcript log",
+    ("unanswered.py", "could_not_verify"): "a verification log",
+}
+
+
+MODE = re.compile(r"^[rwxabt+]+$")
+
+
+def appends(where: str, source: str) -> set[tuple[str, str]]:
+    """(module, function) of every place that opens a file to append: open(..., "a"), a
+    path's .open("a"), mode="ab", or os.O_APPEND named."""
+    found: set[tuple[str, str]] = set()
+
+    def visit(node: ast.AST, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            named = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else function
+            if isinstance(child, ast.Attribute) and child.attr == "O_APPEND":
+                found.add((where, named))
+            func = child.func if isinstance(child, ast.Call) else None
+            if (
+                isinstance(func, ast.Name | ast.Attribute)
+                and getattr(func, "id", getattr(func, "attr", "")) == "open"
+            ):
+                # The mode: the first or second argument (a path's .open(mode), open(file, mode)),
+                # or mode=.
+                modes = [*child.args[:2], *(k.value for k in child.keywords if k.arg == "mode")]
+                if any(
+                    isinstance(m, ast.Constant)
+                    and isinstance(m.value, str)
+                    and MODE.match(m.value)
+                    and "a" in m.value
+                    for m in modes
+                ):
+                    found.add((where, named))
+            visit(child, named)
+
+    visit(parsed(source), "<module>")
+    return found
+
+
+def test_only_append_record_appends_to_a_task_s_event_log():
+    found = set().union(*(appends(where, source) for where, source in modules()))
+    assert found == set(APPENDERS), "a place that appends goes into APPENDERS, with what it appends to"
+    callers = {
+        (where, function)
+        for where, source in modules()
+        for function, call in calls_of(parsed(source), "append_record")
+    }
+    assert callers == {("task.py", "write_event")}, "every event is written through write_event"
+
+
+def calls_of(tree: ast.AST, name: str) -> list[tuple[str, ast.Call]]:
+    """(the function it is in, the call) of every call of name, as name(...) or x.name(...)."""
+    found = []
+
+    def visit(node: ast.AST, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            named = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else function
+            if isinstance(child, ast.Call):
+                func = child.func
+                if (isinstance(func, ast.Name) and func.id == name) or (
+                    isinstance(func, ast.Attribute) and func.attr == name
+                ):
+                    found.append((named, child))
+            visit(child, named)
+
+    visit(tree, "<module>")
+    return found
+
+
+def test_the_guard_on_appending_sees_every_way_of_it():
+    for shape in (
+        "def write_event(log):\n    with log.open('ab') as f: pass",
+        "def write_event(log):\n    with open(log, 'a') as f: pass",
+        "def write_event(log):\n    with open(log, mode='ab') as f: pass",
+        "def write_event(log):\n    os.open(log, os.O_WRONLY | os.O_APPEND)",
+        "def write_event(log):\n    io.open(log, 'a+')",
+    ):
+        assert appends("task.py", shape) == {("task.py", "write_event")}, shape
+    for shape in ("open(p, 'r')", "p.open('wb')", "p.open()", "open(p)"):
+        assert appends("task.py", shape) == set(), shape
+
+
+# A row of imports is the import's alone (plan P1.3): no other module of the store moves a cursor.
+WRITES_IMPORTS = re.compile(
+    r"\b(INSERT\s+(OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+imports\b", re.I
+)
+
+
+def test_only_the_importer_writes_the_imports():
+    writers = {
+        where
+        for where, source in modules()
+        if any(WRITES_IMPORTS.search(s.value) for s in strings(parsed(source)))
+    }
+    assert writers == {"store/importer.py"}, writers
+    for shape in (
+        "INSERT INTO imports (path)",
+        "delete from imports where",
+        "UPDATE imports SET",
+        "REPLACE INTO imports",
+    ):
+        assert WRITES_IMPORTS.search(shape), shape
+    assert not WRITES_IMPORTS.search("SELECT hash FROM imports") and not WRITES_IMPORTS.search(
+        "INSERT INTO events"
+    )
 
 
 def test_nothing_reads_a_resource_profile_yet():

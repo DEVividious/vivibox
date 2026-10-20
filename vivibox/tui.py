@@ -220,6 +220,7 @@ class Vivibox(
         self.call_after_refresh(self.offer_restart)
         self.call_after_refresh(self.hint_opencode)
         self.load_models()
+        self.import_events()
 
     def call_from_thread(self, callback, *args, **kwargs):
         """A step that outlives the view (a docker command that took longer than the window was
@@ -683,6 +684,14 @@ class Vivibox(
             warning="The agent is working on it now; it is stopped first." if running else "",
         )
         self.push_screen(dialog, lambda yes: self.remove_task(task.id) if yes else None)
+
+    @work(thread=True)
+    def import_events(self) -> None:
+        """Every task's events.jsonl into vivibox.db, as every command's start does (plan P1.3), off
+        the loop: what it could not do is said, and nothing when it did all of it."""
+        if (said := actions.import_at_start()) and self.screen_stack:
+            said = "\n".join([*said, "vivibox import says it again in a terminal."])
+            self.call_from_thread(self.notify, said, severity="warning", timeout=15, markup=False)
 
     @work(thread=True)
     def remove_task(self, task_id: str) -> None:

@@ -55,8 +55,9 @@ def cmd_usage(args: argparse.Namespace) -> int:
 
 
 def cmd_events(args: argparse.Namespace) -> int:
-    """A task's events as vivibox.db keeps them, in the shape of its events.jsonl: what the
-    database holds, for a script to compare with the log. No reader of vivibox reads it yet."""
+    """A task's events as vivibox.db keeps them, in the shape of its events.jsonl and its order,
+    the events the log never had after them: what the database holds, for a script to compare
+    with the log. No reader of vivibox reads it yet."""
     task_id, timeline = display.terminal(args.task), display.terminal(f"vivibox timeline {args.task}")
     try:
         lines = recorded_events(args.task)
@@ -66,12 +67,8 @@ def cmd_events(args: argparse.Namespace) -> int:
         print(f"    {timeline} reads them from the task's events.jsonl", file=sys.stderr)
         return 1
     if not lines:
-        print(
-            f"vivibox: no events of {task_id} in vivibox.db: it keeps the events written since this vivibox\n"
-            "    began to keep them there; a task's earlier ones are in its events.jsonl, and\n"
-            f"    {timeline} reads them",
-            file=sys.stderr,
-        )
+        print(f"vivibox: no events of {task_id} in vivibox.db", file=sys.stderr)
+        print(f"    {timeline} reads them from the task's events.jsonl", file=sys.stderr)
         return 1
     sys.stdout.buffer.write(b"".join(lines))
     sys.stdout.flush()

@@ -447,13 +447,20 @@ is an object with `tasks` (the task rows) and `shared_caches` (tool names mapped
 `null` when Docker could not be measured).
 
 `vivibox events <id> --json` prints the events of a task that `vivibox.db` holds
-(`~/.local/share/vivibox/vivibox.db`), one JSON line each, in the shape of its `events.jsonl`.
-It is not the task's whole history. The database holds only the events written since this
-version, and can miss some of those: one written while another vivibox held the database or
-it could not be opened, and every event before a removed database was made again. Until a
-later vivibox imports `events.jsonl` into it, `events.jsonl` is the task's history, and the
-list, the panel, `u`, `stats`, `usage` and the timeline read it. An event whose fields pass
-8 KiB is kept in the database cut, with `"truncated": true`; `events.jsonl` keeps it whole.
+(`~/.local/share/vivibox/vivibox.db`), one JSON line each, in the shape of its `events.jsonl`
+and in its order. Every command and the view bring each task's `events.jsonl`, live and
+archived, into the database when they start, so it holds what the logs hold; an event the log
+never got (vivibox stopped after the database took it) comes last. `events.jsonl` is still the
+task's history, and the list, the panel, `u`, `stats`, `usage` and the timeline read it. An
+event whose fields pass 8 KiB is kept in the database cut, with `"truncated": true`;
+`events.jsonl` keeps it whole.
+
+`vivibox import` does what a start does and says all of it: how many events it brought in, and
+each log it could not. A log whose bytes changed since they were imported is left out whole:
+put it back as it was, or remove `vivibox.db` with its `-wal` and `-shm`, and every log is
+imported again. A line that is no event stops its log there, said with its file, line, byte
+and why. A start says only these, and nothing when there are none. `vivibox backup <file>`
+copies the database whole into a new file.
 
 ## When a task costs too much
 

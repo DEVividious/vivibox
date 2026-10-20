@@ -37,7 +37,7 @@ from .plan import PlanError, parse_plan
 from .pod import PodError, RulesLeft
 from .risky import Approvals
 from .states import State
-from .task import Task, now, record, write_event
+from .task import TASK_ID, Task, copy_log, now, record, write_event
 
 
 def fetch_work(task: Task, project: Project) -> str:
@@ -124,15 +124,24 @@ def archive_path(task_id: str) -> Path:
     return history_path().with_name("archive") / task_id
 
 
+def archived_logs() -> list[tuple[str, Path]]:
+    """The event log of every task in the archive, by its id, whether it has one or not."""
+    folder = history_path().with_name("archive")
+    if not folder.is_dir():
+        return []
+    return [(p.name, p / EVENTS) for p in sorted(folder.iterdir()) if TASK_ID.match(p.name)]
+
+
 # What is worth keeping of a task that is gone: the plan it was held to, what happened to it,
-# what it delivered, its logs and the reviews it got; not its clone.
+# what it delivered, its logs and the reviews it got; not its clone. Its events.jsonl is kept
+# after all of these (EVENTS), since keeping them may write an event onto it (not_kept).
 ARCHIVED = (
     "plan.md",
     gate.ACCEPTED_PLAN,
-    "events.jsonl",
     "handoff/" + gate.CRITERIA_FILE,
     "handoff/" + actions.DEMO_FILE,
 )
+EVENTS = "events.jsonl"
 # Patterns under the task's files, kept under the same folder names.
 ARCHIVED_GLOBS = ("log/*.log", "handoff/review-*.md")
 
@@ -150,6 +159,10 @@ def archive(task: Task) -> Path:
             target = kept / ("log" if pattern.startswith("log/") else "") / source.name
             target.parent.mkdir(parents=True, exist_ok=True)
             _keep(task, source, target)
+    # Last, so the copy is the log with every event written so far, the archive's own after it
+    # (note), and under the writers' lock, so it holds no record in part.
+    with contextlib.suppress(FileNotFoundError):
+        copy_log(task.meta / EVENTS, kept / EVENTS)
     with contextlib.suppress(OSError, ValueError):
         (kept / "timeline.txt").write_text(timeline.render(task))
     return kept
@@ -367,7 +380,7 @@ def _put_back(task: Task, source: Path, found: str, commit: str) -> str:
 
 def note(task_id: str, type_: str, **data) -> None:
     """An event on a task that is gone: on the record its archive keeps (l shows it)."""
-    write_event(archive_path(task_id) / "events.jsonl", task_id, type_, data)
+    write_event(archive_path(task_id) / EVENTS, task_id, type_, data)
 
 
 def suggested_message(

@@ -138,6 +138,7 @@ from .review import (  # noqa: F401
     apply_work,
     archive,
     archive_path,
+    archived_logs,
     branch_choices,
     changed_files,
     commit_work,
@@ -186,7 +187,7 @@ from .roles import (  # noqa: F401
 )
 from .roles import agent_roles as agent_roles
 from .states import State
-from .task import DELETE, RUN, Task, TaskState, check_layout, create_task, find_task
+from .task import DELETE, RUN, Task, TaskState, check_layout, create_task, find_task, import_logs, task_logs
 from .window import (  # noqa: F401
     LEAVE_BINDING,
     LEAVE_KEY,
@@ -645,6 +646,26 @@ def stop(task: Task, force: bool = False) -> None:
         task.set_paused(True, problem=FORCED)
     elif not task.read_state().paused:
         task.set_paused(True)
+
+
+def import_events():
+    """Every task's events.jsonl, live and archived, into vivibox.db (plan P1.3): at every start
+    and at vivibox import. The report of store/importer.py."""
+    return import_logs(task_logs(load_config().tasks_dir) + archived_logs())
+
+
+def import_at_start() -> list[str]:
+    """import_events at the start of a command or of the view: what is worth saying of it, the
+    logs it refused, a database held by another or one to be removed; nothing when there is none
+    of these. A record still being written is no news. A configuration that cannot be read is
+    the command's to say, where it needs one."""
+    try:
+        report = import_events()
+    except ConfigError:
+        return []
+    except OSError as e:
+        return [f"the logs were not imported: {e.strerror or e}"]
+    return [*report.refused, *([report.problem] if report.busy or report.stale else [])]
 
 
 def remove(task: Task, project: Project, accepted: bool = False) -> Path | None:

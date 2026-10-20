@@ -1,15 +1,50 @@
 """The command line's commands for what runs on your machine beside the tasks: the agent image,
-the Docker Hub mirror and the DNS forwarder (hostd), apart from cli.py to keep it under the size
-limit."""
+the Docker Hub mirror, the DNS forwarder (hostd), and vivibox.db (import, backup), apart from
+cli.py to keep it under the size limit."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from . import display, image, mirror, pod_egress
+from . import actions, display, image, mirror, pod_egress
 from .config import load_config
 from .egress import hostd, resolver
+from .task import BackupRefused, backup_store
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Every task's events.jsonl into vivibox.db, as every start does, and all it found said."""
+    report = actions.import_events()
+    if report.problem:
+        print(f"vivibox: the logs were not imported: {display.terminal(report.problem)}", file=sys.stderr)
+        return 1
+    events, logs, placed = report.inserted, report.files, report.placed
+    print(
+        f"Imported {events:d} event{'' if events == 1 else 's'} "
+        f"from {logs:d} log{'' if logs == 1 else 's'} into vivibox.db."
+    )
+    if placed:
+        one = placed == 1
+        print(
+            f"Placed {placed:d} event{'' if one else 's'} it had already "
+            f"at {'its' if one else 'their'} line in the log."
+        )
+    for line in [*report.refused, *report.waiting]:
+        print(f"vivibox: {display.terminal(line)}", file=sys.stderr)
+    return 1 if report.refused else 0
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    target = Path(args.file)
+    try:
+        backup_store(target)
+    except BackupRefused as e:
+        print(f"vivibox: vivibox.db was not copied: {display.terminal(str(e))}", file=sys.stderr)
+        return 1
+    print(f"Copied vivibox.db to {display.terminal(str(target))}.")
+    return 0
 
 
 def cmd_image_build(args: argparse.Namespace) -> int:
@@ -88,6 +123,11 @@ def cmd_hostd(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("import", help="bring every task's events.jsonl into vivibox.db, as every start does")
+    p.set_defaults(func=cmd_import)
+    p = sub.add_parser("backup", help="copy vivibox.db, whole, to a new file")
+    p.add_argument("file", help="the copy's path; it must not exist")
+    p.set_defaults(func=cmd_backup)
     p = sub.add_parser("hostd", help="the DNS forwarder every pod asks, on this machine: whether it runs")
     p.add_argument(
         "action", nargs="?", choices=["status", "start", "stop", "run"], default="status",

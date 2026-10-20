@@ -29,10 +29,11 @@ from . import (
 from .config import Config, ConfigError, Project, load_config, load_project
 from .risky import Approvals
 from .states import waits_for_user
-from .task import Task
+from .task import Task, acting_as
 
 
 def cmd_supervise(args: argparse.Namespace) -> int:
+    acting_as("supervisor")
     config = load_config()
     task, project = actions.load(args.task)
     pod = actions.task_pod(task.id)

@@ -33,12 +33,12 @@ from . import pod as pod_module
 from .cli_decisions import cmd_accept, cmd_approve_risky, cmd_plan, cmd_reply, cmd_risky, cmd_verify_again
 from .cli_host import cmd_image_build, cmd_image_check, cmd_mirror
 from .cli_providers import cmd_auth, cmd_models
-from .cli_reports import cmd_stats, cmd_usage
+from .cli_reports import cmd_events, cmd_stats, cmd_usage
 from .config import ORCHESTRATION_MODES, ConfigError, config_dir, current_mode, load_config
 from .plan import KINDS, PlanError, parse_plan
 from .pod import Pod, PodError
 from .supervise import cmd_supervise
-from .task import CURRENT, DELETE, SHOW, Task, TaskLayoutError, find_task, layout, list_tasks
+from .task import CURRENT, DELETE, SHOW, Task, TaskLayoutError, acting_as, find_task, layout, list_tasks
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -471,6 +471,12 @@ def parser() -> argparse.ArgumentParser:
     use.add_argument("--json", action="store_true", help="as JSON, for a note or a script")
     use.set_defaults(func=cmd_usage)
 
+    events = sub.add_parser("events", help="a task's events as vivibox.db keeps them, a line each")
+    events.add_argument("task", help="task id")
+    shape = events.add_mutually_exclusive_group(required=True)
+    shape.add_argument("--json", action="store_true", help="as its events.jsonl has them, for a script")
+    events.set_defaults(func=cmd_events)
+
     status = sub.add_parser("status", help="list tasks, or show one task")
     status.add_argument("task", nargs="?", help="task id")
     status.add_argument("--events", type=int, default=10, help="recent events to show (default 10)")
@@ -616,6 +622,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    acting_as("you")
     args = parser().parse_args(argv)
     try:
         if args.command is None:

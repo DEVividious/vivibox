@@ -8,6 +8,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ## [Unreleased]
 
+### Added
+
+- `vivibox events <id> --json` prints a task's events as `vivibox.db` keeps them, a line each,
+  in the shape of its `events.jsonl` and byte for byte the same, for a script to compare the two.
+  The database keeps the events written from this version on; a task's earlier ones are only in
+  its `events.jsonl` (the command says so), and an event whose fields pass 8 KiB is kept there
+  cut, with `"truncated": true`. Nothing else reads it: the list, the panel, `u`, `vivibox
+  stats`, `vivibox usage` and the timeline read `events.jsonl` as before.
+
 ### Fixed
 
 - The command an `out of memory` names, and the one `docs/configure.md` gives for a large Java
@@ -45,6 +54,15 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   gone. Every figure they show is the one they showed, a test against copies of the old loops
   says it field by field; a structure test fails on a module other than `fold.py` that reads
   whether a turn was on a subscription or a CLI's use.
+- Every event a task writes goes into `vivibox.db` first (`vivibox/store/events.py`: who wrote
+  it, `you`, `supervisor` or `vivibox`, by the process; numbered in the order written; fields
+  past 8 KiB cut field by field, the largest first, and said to be cut), then onto its
+  `events.jsonl` as before, one path for a live task's and an archived one's. The log stays
+  what every reader reads. A database another process holds past every wait, one that cannot
+  be opened or is no database, or a newer vivibox's, is left without the event and the log is
+  written all the same; the next event written there is preceded by an `audit.lost` with the
+  count. A payload that is no JSON, or a row the schema refuses, is raised and written nowhere.
+  `task.py` is the one module outside the store that uses it (structure test).
 
 ## [0.2.2] - 2026-10-18
 

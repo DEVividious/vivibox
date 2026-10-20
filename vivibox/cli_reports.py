@@ -4,9 +4,9 @@ import argparse
 import json
 import sys
 
-from . import actions, stats, usage
+from . import actions, display, stats, usage
 from .config import load_config
-from .task import list_tasks
+from .task import EventsUnread, list_tasks, recorded_events
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
@@ -51,4 +51,28 @@ def cmd_usage(args: argparse.Namespace) -> int:
         print(usage.report(rows, None if problems else caches), end="")
     for problem in problems:
         print(f"CPU, RAM and DISK not measured: {problem}", file=sys.stderr)
+    return 0
+
+
+def cmd_events(args: argparse.Namespace) -> int:
+    """A task's events as vivibox.db keeps them, in the shape of its events.jsonl: what the
+    database holds, for a script to compare with the log. No reader of vivibox reads it yet."""
+    task_id, timeline = display.terminal(args.task), display.terminal(f"vivibox timeline {args.task}")
+    try:
+        lines = recorded_events(args.task)
+    except EventsUnread as e:
+        said = display.terminal(str(e))
+        print(f"vivibox: the events of {task_id} could not be read: {said}", file=sys.stderr)
+        print(f"    {timeline} reads them from the task's events.jsonl", file=sys.stderr)
+        return 1
+    if not lines:
+        print(
+            f"vivibox: no events of {task_id} in vivibox.db: it keeps the events written since this vivibox\n"
+            "    began to keep them there; a task's earlier ones are in its events.jsonl, and\n"
+            f"    {timeline} reads them",
+            file=sys.stderr,
+        )
+        return 1
+    sys.stdout.buffer.write(b"".join(lines))
+    sys.stdout.flush()
     return 0

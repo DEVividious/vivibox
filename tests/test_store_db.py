@@ -1,6 +1,6 @@
 """vivibox.db: its place, its schema, its pragmas, the version it is at, and what it does when
-another process holds it or one dies holding it. Nothing in the product opens it yet
-(tests/test_structure.py), so these are its only callers."""
+another process holds it or one dies holding it. The product writes its events there through
+store/events.py alone (tests/test_store_events.py)."""
 
 import os
 import signal

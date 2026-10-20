@@ -37,7 +37,7 @@ from .plan import PlanError, parse_plan
 from .pod import PodError, RulesLeft
 from .risky import Approvals
 from .states import State
-from .task import Task, now, record
+from .task import Task, now, record, write_event
 
 
 def fetch_work(task: Task, project: Project) -> str:
@@ -367,8 +367,7 @@ def _put_back(task: Task, source: Path, found: str, commit: str) -> str:
 
 def note(task_id: str, type_: str, **data) -> None:
     """An event on a task that is gone: on the record its archive keeps (l shows it)."""
-    with (archive_path(task_id) / "events.jsonl").open("ab") as f:
-        f.write(record({"ts": now(), "task": task_id, "type": type_, "data": data}))
+    write_event(archive_path(task_id) / "events.jsonl", task_id, type_, data)
 
 
 def suggested_message(

@@ -775,9 +775,12 @@ def test_the_guard_on_your_replies_sees_a_list_of_mounts_without_them():
     assert task_mounts("mounts = [Mount(str(task.meta / 'review'), '/task/review')]") == (0, [])
 
 
-# The modules outside vivibox/store/ that use it, and why. None yet: the database is made and
-# tested, and nothing in the product opens it; each step that does adds its module here.
-STORE_USERS: dict[str, str] = {}
+# The modules outside vivibox/store/ that use it, and why; each step that opens it for another
+# adds that module here. The readers of the events (the list, u, stats, the timeline, the
+# supervisor) read events.jsonl through task.py, and are not here until a step moves them.
+STORE_USERS: dict[str, str] = {
+    "task.py": "every event into vivibox.db before its events.jsonl, and the export read back from it (P1.2)",
+}
 # What the store reaches of the package never: the view and the command line, the facade, the
 # pod and the engines it runs on. It is below them all.
 ABOVE_STORE = re.compile(
@@ -813,13 +816,24 @@ def uses_store(where: str, source: str) -> bool:
     return any(n == "vivibox.store" or n.startswith("vivibox.store.") for n in imported(where, source))
 
 
+def store_users(sources: list[tuple[str, str]]) -> set[str]:
+    outside = (w for w, source in sources if not w.startswith("store/") and uses_store(w, source))
+    return set(outside)
+
+
 def test_nothing_outside_the_store_uses_it_but_the_modules_listed():
     """vivibox.db is opened by the modules in STORE_USERS and by no other, so no behaviour changes
     until a step says which module starts to use it."""
-    users = {
-        where for where, source in modules() if not where.startswith("store/") and uses_store(where, source)
-    }
+    users = store_users(modules())
     assert users == set(STORE_USERS), "a module that uses vivibox.store goes into STORE_USERS, with why"
+
+
+def test_a_reader_of_the_events_that_reached_the_store_would_fail_the_guard():
+    """The list's cost, u, stats, fold and the timeline read the log: one of them reading the
+    database is a module more than STORE_USERS lists."""
+    for where in ("ui.py", "usage.py", "stats.py", "fold.py", "timeline.py", "sections.py", "cli_reports.py"):
+        sources = [(w, s + "\nfrom .store import events\n" if w == where else s) for w, s in modules()]
+        assert store_users(sources) == {*STORE_USERS, where}, where
 
 
 def test_the_store_reaches_nothing_above_it():

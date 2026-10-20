@@ -446,6 +446,13 @@ with `--project` or no live tasks, and are never added to a task's DISK figure. 
 is an object with `tasks` (the task rows) and `shared_caches` (tool names mapped to bytes,
 `null` when Docker could not be measured).
 
+`vivibox events <id> --json` prints a task's events as `vivibox.db` keeps them
+(`~/.local/share/vivibox/vivibox.db`), one JSON line each, the same lines as the task's
+`events.jsonl`. The database holds the events written since this version kept them there; the
+list, the panel, `u`, `stats`, `usage` and the timeline still read `events.jsonl`. An event
+whose fields pass 8 KiB is kept there cut, with `"truncated": true`; `events.jsonl` keeps it
+whole.
+
 ## When a task costs too much
 
 `cost_warning` and `cost_limit` in `config.toml` (under `k`, limits) are dollars per task. Past

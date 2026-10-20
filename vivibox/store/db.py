@@ -13,6 +13,10 @@ it (StoreNewer), read opens it with every write refused.
 Every connection waits for another process's write lock up to BUSY_TIMEOUT_MS inside SQLite;
 transaction then tries again, ATTEMPTS times in all, and says StoreBusy. Only the BEGIN is tried
 again, never the body: a transaction holds the lock for its writes and for nothing else.
+
+Inside available(), a database that cannot be used (the file cannot be opened, is no database,
+is damaged, or the disk refuses it) says StoreUnavailable, and one held past every wait
+StoreBusy; any other error of SQLite's is the code's, and raised as it is.
 """
 
 from __future__ import annotations
@@ -81,6 +85,22 @@ class StoreBusy(StoreError):
     pass
 
 
+class StoreUnavailable(StoreError):
+    pass
+
+
+# The primary result codes that say the file cannot be used now, not that the code is wrong.
+UNAVAILABLE = {
+    sqlite3.SQLITE_CANTOPEN,
+    sqlite3.SQLITE_NOTADB,
+    sqlite3.SQLITE_CORRUPT,
+    sqlite3.SQLITE_IOERR,
+    sqlite3.SQLITE_FULL,
+    sqlite3.SQLITE_READONLY,
+    sqlite3.SQLITE_PERM,
+}
+
+
 def path() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(base) / "vivibox" / "vivibox.db"
@@ -116,6 +136,24 @@ def read(where: Path | None = None) -> sqlite3.Connection:
     conn = _open(where, "rw")
     conn.execute("PRAGMA query_only = ON")
     return conn
+
+
+@contextmanager
+def available(where: Path) -> Iterator[None]:
+    """The body, with what says the database at where cannot be used now as StoreUnavailable
+    (UNAVAILABLE, or the file system refusing its folder or file) or StoreBusy (held past
+    SQLite's wait, where transaction does not try again: opening, migrating)."""
+    try:
+        yield
+    except OSError as e:
+        raise StoreUnavailable(f"{where}: {e.strerror or e}") from e
+    except sqlite3.Error as e:
+        code = getattr(e, "sqlite_errorcode", None)
+        if code is not None and code & 0xFF == sqlite3.SQLITE_BUSY:
+            raise StoreBusy(f"{where}: another vivibox is writing to it") from e
+        if code is not None and code & 0xFF in UNAVAILABLE:
+            raise StoreUnavailable(f"{where}: {e}") from e
+        raise
 
 
 @contextmanager

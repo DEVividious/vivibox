@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,8 @@ from pathlib import Path
 from . import version
 from .config import DEFAULT_ORCHESTRATION, current_mode
 from .states import State, check_transition
+from .store import db
+from .store import events as store_events
 
 TASK_ID = re.compile(r"^(?P<project>[a-z0-9][a-z0-9-]*)-(?P<seq>\d+)$")
 
@@ -136,6 +139,46 @@ def record(entry: dict) -> bytes:
     is written as the escapes JSON has for it, and read back as the same name."""
     line = json.dumps(entry, ensure_ascii=False).translate(ENDS_A_LINE)
     return line.encode("utf-8", "backslashreplace") + b"\n"
+
+
+# Who this process's events are by, in vivibox.db: you at the command line and in the view (cli),
+# the supervisor in its own process (supervise), vivibox where neither said.
+ACTORS = ("you", "supervisor", "vivibox")
+_actor = "vivibox"
+
+
+def acting_as(actor: str) -> None:
+    if actor not in ACTORS:
+        raise ValueError(f"no actor {actor!r}: one of {', '.join(ACTORS)}")
+    global _actor
+    _actor = actor
+
+
+def write_event(log: Path, task_id: str, type_: str, data: dict) -> None:
+    """One event of a task: into vivibox.db first, then onto log, its events.jsonl, which every
+    reader reads (plan P1.2). The database is a copy nothing decides on yet: one that cannot be
+    written now (held by another past every wait, unopenable, no database, a newer vivibox's)
+    goes without it, and the log and the writer carry on (store/events.py says what is counted).
+    A payload that is no JSON, or a row the schema refuses, is the code's fault: raised, and
+    written nowhere. An end between the two leaves the event in the database alone."""
+    entry = {"ts": now(), "task": task_id, "type": type_, "data": data}
+    line = record(entry)
+    with suppress(db.StoreBusy, db.StoreUnavailable, db.StoreNewer):
+        store_events.append(entry, actor=_actor, made_by=version.current())
+    with log.open("ab") as f:
+        f.write(line)
+
+
+class EventsUnread(Exception):
+    """vivibox.db could not be read for a task's events: what it said."""
+
+
+def recorded_events(task_id: str) -> list[bytes]:
+    """The task's events as vivibox.db keeps them, each the line its events.jsonl has for it."""
+    try:
+        return [record(e) for e in store_events.of_task(task_id)]
+    except db.StoreError as e:
+        raise EventsUnread(str(e)) from e
 
 
 class Task:
@@ -369,8 +412,7 @@ class Task:
         (self.meta / self.LIVE_TURN).unlink(missing_ok=True)
 
     def event(self, type_: str, **data) -> None:
-        with (self.meta / "events.jsonl").open("ab") as f:
-            f.write(record({"ts": now(), "task": self.id, "type": type_, "data": data}))
+        write_event(self.meta / "events.jsonl", self.id, type_, data)
 
     def events(self) -> list[dict]:
         path = self.meta / "events.jsonl"

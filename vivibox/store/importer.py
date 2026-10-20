@@ -8,9 +8,10 @@ is the import's alone, says how many of its first bytes were imported (byte_offs
 past a line feed) and what they were (hash, the sha256 of them). Its events go in in the log's
 order, each new one with its place, each known one without a place given one, and the cursor is
 moved in the same transaction: the cursor is never past an event the database does not have, and
-a run stopped anywhere leaves it where it was. A log whose imported bytes are no longer what they
-were (cut short, written over) is refused whole: the record changed under the database, and a
-person says which is right.
+a run stopped anywhere leaves it where it was. A log read before another import moved its cursor
+past what was read is read again inside the transaction, and judged by those bytes. A log whose
+imported bytes are no longer what they were (cut short, written over) is refused whole: the
+record changed under the database, and a person says which is right.
 
 A record is a line ending in a line feed; a line of blanks is none, though its bytes count; the
 end of a log without a line feed is no record yet, and waits. A record that is no event stops its
@@ -38,7 +39,7 @@ from pathlib import Path
 
 from . import db, events
 
-ID = re.compile(r"^[0-9a-f]{32}$")
+ID = re.compile(r"[0-9a-f]{32}")  # the whole of the id: fullmatch
 
 
 @dataclass
@@ -87,20 +88,17 @@ def run(logs: Iterable[tuple[str, Path]], *, made_by: str, where: Path | None = 
 
 
 def _log(conn, task_id: str, path: Path, report: Report) -> None:
-    try:
-        data = _read(path)
-    except FileNotFoundError:
-        return  # a task with no event yet
-    except NotPlain:
-        report.refused.append(f"{path}: not imported: not a plain file")
-        return
-    except OSError as e:
-        report.refused.append(f"{path}: not imported: {e.strerror or e}")
+    if (data := _snapshot(path, report)) is None:
         return
     report.files += 1
     with db.transaction(conn):
         cursor = conn.execute("SELECT hash, byte_offset FROM imports WHERE path = ?", (str(path),)).fetchone()
         start = cursor[1] if cursor else 0
+        # Read before another import read more and moved the cursor on: read again, under the
+        # database's lock, and judge by what the log holds now. A writer holds the log's lock and
+        # never waits for the database while it does, so this waits for no one that waits.
+        if len(data) < start and (data := _snapshot(path, report)) is None:
+            return
         if cursor and (len(data) < start or _hash(data[:start]) != cursor[0]):
             why = "shorter" if len(data) < start else "rewritten"
             report.refused.append(
@@ -115,6 +113,20 @@ def _log(conn, task_id: str, path: Path, report: Report) -> None:
                 " ON CONFLICT (path) DO UPDATE SET hash = excluded.hash, byte_offset = excluded.byte_offset",
                 (str(path), _hash(data[:end]), end),
             )
+
+
+def _snapshot(path: Path, report: Report) -> bytes | None:
+    """The log as _read gives it; None for one there is nothing to import from, said where it
+    is refused (no plain file, unreadable) and not where it is not there (no event yet, or gone)."""
+    try:
+        return _read(path)
+    except FileNotFoundError:
+        return None
+    except NotPlain:
+        report.refused.append(f"{path}: not imported: not a plain file")
+    except OSError as e:
+        report.refused.append(f"{path}: not imported: {e.strerror or e}")
+    return None
 
 
 def _records(conn, task_id: str, path: Path, data: bytes, start: int, report: Report) -> int:
@@ -164,7 +176,7 @@ def _event(raw: bytes, task_id: str, offset: int) -> dict:
         raise NotEvent("no data")
     if not isinstance(line["data"], dict):
         raise NotEvent("data is not a JSON object")
-    if "id" in line and not (isinstance(line["id"], str) and ID.match(line["id"])):
+    if "id" in line and not (isinstance(line["id"], str) and ID.fullmatch(line["id"])):
         raise NotEvent("id is not 32 hex digits")
     if "actor" in line and not (isinstance(line["actor"], str) and line["actor"].strip()):
         raise NotEvent("actor is not a name")

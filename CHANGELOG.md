@@ -17,8 +17,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   list, the panel, `u`, `vivibox stats`, `vivibox usage` and the timeline read it as before.
 - `vivibox import` brings every task's `events.jsonl`, live and archived, into `vivibox.db`, as
   every command and the view now do when they start, and says how many events it brought in and
-  any log it could not: one changed since it was imported, or a line that is no event (its file,
-  line, byte and why; nothing after it is brought in until it is one). At a start only such a
+  any log it could not: one changed since it was imported (never one another import read further
+  meanwhile), or a line that is no event (its file, line, byte and why; nothing after it is
+  brought in until it is one). At a start only such a
   refusal is said, and nothing when there is none. Each event is brought in once, by its
   identity, never by what it looks like, and no log is changed.
 - `vivibox backup <file>` copies `vivibox.db` whole into a new file.

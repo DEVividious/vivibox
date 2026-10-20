@@ -5,6 +5,7 @@ it is and stays the record every reader reads."""
 import hashlib
 import json
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -133,6 +134,16 @@ def test_a_line_with_an_id_keeps_it_and_its_actor(where, one):
     logged(one).write_bytes(task.record(entry))
     run(one, where)
     assert table(where) == [(1, "f" * 32, "supervisor", "goal", {"goal": "a"}, 0, 1)]
+
+
+def test_an_id_is_the_whole_of_32_hex_digits_or_the_line_s_own(where, one):
+    """A writer's id is taken as it is; a line without one is named line: and 64 hex digits."""
+    given = "0123456789abcdef" * 2
+    logged(one).write_bytes(task.record({**json.loads(changed()), "id": given}) + old(goal="a"))
+    assert run(one, where).refused == []
+    ids = [r[1] for r in table(where)]
+    assert ids[0] == given
+    assert re.fullmatch(r"line:[0-9a-f]{64}", ids[1]), ids[1]
 
 
 def test_the_data_is_cut_to_fit_as_the_writer_cuts_it(where, one):
@@ -309,6 +320,42 @@ def test_a_log_changed_under_the_import_is_refused_and_nothing_moves(where, one,
     assert (table(where), cursors(where)) == (before, marks)
 
 
+def test_a_log_read_before_another_import_moved_its_cursor_on_is_read_again(where, one, monkeypatch):
+    """B reads the log; a writer appends; A reads the longer log and moves the cursor past B's
+    read; then B takes the lock. B's bytes end before the cursor, and the log is not shorter for
+    it: B reads it again, under the lock, and goes on from the cursor."""
+    logged(one).write_bytes(old(goal="a"))
+    run(one, where)
+    with logged(one).open("ab") as f:
+        f.write(old(goal="b"))
+    read = importer._read
+    reads = []
+
+    def before_another(path):
+        data = read(path)
+        reads.append(len(data))
+        if len(reads) == 1:  # B's read, then the writer and A, before B's transaction
+            with logged(one).open("ab") as f:
+                f.write(old(goal="c"))
+            monkeypatch.setattr(importer, "_read", read)
+            assert run(one, where).inserted == 2, "A brings in b and c"
+            monkeypatch.setattr(importer, "_read", before_another)
+            with logged(one).open("ab") as f:
+                f.write(old(goal="d"))
+        return data
+
+    monkeypatch.setattr(importer, "_read", before_another)
+    report = run(one, where)
+    assert report.refused == [] and report.inserted == 1, "d, from A's cursor on"
+    assert reads == [len(old(goal="a") + old(goal="b")), len(logged(one).read_bytes())]
+    assert [r[4] for r in table(where)] == [{"goal": g} for g in "abcd"]
+    whole = logged(one).read_bytes()
+    assert cursors(where) == [(str(logged(one)), hashlib.sha256(whole).hexdigest(), len(whole))]
+    monkeypatch.setattr(importer, "_read", read)
+    again = run(one, where)
+    assert (again.refused, again.inserted) == ([], 0)
+
+
 def test_a_last_line_not_yet_ended_waits(where, one):
     tail = b'{"ts": "' + TS.encode()
     logged(one).write_bytes(old(goal="a") + tail)
@@ -345,6 +392,11 @@ def changed(**fields) -> bytes:
         (changed(data=[1]), "data is not a JSON object"),
         (changed(id="line:ab"), "id is not 32 hex digits"),
         (changed(id="A" * 32), "id is not 32 hex digits"),
+        (changed(id="a" * 32 + "\n"), "id is not 32 hex digits"),
+        (changed(id="a" * 32 + " "), "id is not 32 hex digits"),
+        (changed(id=" " + "a" * 32), "id is not 32 hex digits"),
+        (changed(id="a" * 31), "id is not 32 hex digits"),
+        (changed(id="a" * 33), "id is not 32 hex digits"),
         (changed(actor=""), "actor is not a name"),
         (changed(actor=3), "actor is not a name"),
     ],

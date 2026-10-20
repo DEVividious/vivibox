@@ -10,12 +10,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
 
 ### Added
 
-- `vivibox events <id> --json` prints a task's events as `vivibox.db` keeps them, a line each,
-  in the shape of its `events.jsonl` and byte for byte the same, for a script to compare the two.
-  The database keeps the events written from this version on; a task's earlier ones are only in
-  its `events.jsonl` (the command says so), and an event whose fields pass 8 KiB is kept there
-  cut, with `"truncated": true`. Nothing else reads it: the list, the panel, `u`, `vivibox
-  stats`, `vivibox usage` and the timeline read `events.jsonl` as before.
+- `vivibox events <id> --json` prints the events of a task that `vivibox.db` holds, a line each,
+  in the shape of its `events.jsonl`, for a script to compare the two. It is not the task's
+  whole history: the database holds only the events written from this version on, less any it
+  could not take then, and an event whose fields pass 8 KiB is kept there cut, with
+  `"truncated": true`. `events.jsonl` stays the history: the list, the panel, `u`, `vivibox
+  stats`, `vivibox usage` and the timeline read it as before.
 
 ### Fixed
 
@@ -56,12 +56,13 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   whether a turn was on a subscription or a CLI's use.
 - Every event a task writes goes into `vivibox.db` first (`vivibox/store/events.py`: who wrote
   it, `you`, `supervisor` or `vivibox`, by the process; numbered in the order written; fields
-  past 8 KiB cut field by field, the largest first, and said to be cut), then onto its
+  past 8 KiB cut field by field, the largest first, a field left out where not even its start
+  fits, and said to be cut), then onto its
   `events.jsonl` as before, one path for a live task's and an archived one's. The log stays
   what every reader reads. A database another process holds past every wait, one that cannot
   be opened or is no database, or a newer vivibox's, is left without the event and the log is
   written all the same; the next event written there is preceded by an `audit.lost` with the
-  count. A payload that is no JSON, or a row the schema refuses, is raised and written nowhere.
+  count, in the same transaction, said once even by two threads of the view. A payload that is no JSON, or a row the schema refuses, is raised and written nowhere.
   `task.py` is the one module outside the store that uses it (structure test).
 
 ## [0.2.2] - 2026-10-18

@@ -21,7 +21,9 @@ the first writer of a type says which it carries here.
 What could not be written for the database (another process held it past every wait, the file
 cannot be opened or is no database) is counted for that database, in this process, and said
 with the first event written there after: audit.lost{count}, of no task, in the same
-transaction. The log has every event lost here, for the import to bring in.
+transaction. The log has every event lost here, for the import to bring in. A database made
+again where one was removed is no loss seen here: nothing failed to write, and the import
+rebuilds what it held from the log.
 """
 
 from __future__ import annotations
@@ -36,7 +38,10 @@ from . import db
 LOST = "audit.lost"
 
 _lost: dict[Path, int] = {}  # events this process could not write, per database
-_counting = threading.Lock()
+# Held over the whole of a write, from reading what is owed to settling it: two threads of one
+# process (the view's) never say the same loss twice.
+_writing = threading.Lock()
+MARK = "truncated"
 
 
 def encoded(data: dict) -> str:
@@ -52,31 +57,41 @@ def _size(value) -> int:
 def fitted(data: dict) -> dict:
     """data as it fits DATA_LIMIT bytes: as it is when it does. Else cut field by field, the
     largest first, until it fits: a text to as much of its start as fits, a list to as many of
-    its first items, anything else left out; and truncated: true. The log keeps it whole."""
+    its first items, anything else, and a field of which not even an empty start fits, left out;
+    and truncated: true, which takes the place of a field of the event's own of that name. With
+    every field left out what is left is the mark alone, so the result always fits. The log
+    keeps it whole."""
     if _size(data) <= db.DATA_LIMIT:
         return data
-    out = {**data, "truncated": True}
-    for key in sorted(data, key=lambda k: _size(data[k]), reverse=True):
+    out = {**data, MARK: True}
+    for key in sorted((k for k in data if k != MARK), key=lambda k: _size(data[k]), reverse=True):
         if _size(out) <= db.DATA_LIMIT:
             break
         value = data[key]
-        if isinstance(value, str | list | tuple):
-            kept, past = 0, len(value)  # the longest start that fits, by halving
-            while kept < past:
-                middle = (kept + past + 1) // 2
-                if _size({**out, key: value[:middle]}) <= db.DATA_LIMIT:
-                    kept = middle
-                else:
-                    past = middle - 1
-            out[key] = value[:kept]
-        else:
+        cut = isinstance(value, str | list | tuple)
+        if cut:
+            out[key] = value[:0]  # in its place: the fields keep their order
+        if not cut or _size(out) > db.DATA_LIMIT:
             del out[key]
+            continue
+        kept, past = 0, len(value)  # the longest start that fits, by halving
+        while kept < past:
+            middle = (kept + past + 1) // 2
+            if _size({**out, key: value[:middle]}) <= db.DATA_LIMIT:
+                kept = middle
+            else:
+                past = middle - 1
+        out[key] = value[:kept]
     return out
 
 
 def insert(conn, entry: dict, actor: str) -> int:
-    """One event, inside the caller's transaction: its seq."""
-    row = (entry["ts"], entry["task"], actor, entry["type"], encoded(fitted(entry["data"])))
+    """One event, inside the caller's transaction: its seq. Data past DATA_LIMIT after fitted is
+    the code's fault, refused here and not by the schema."""
+    data = encoded(fitted(entry["data"]))
+    if (size := len(data.encode("utf-8"))) > db.DATA_LIMIT:
+        raise ValueError(f"{entry['type']}: {size} bytes of data past {db.DATA_LIMIT} after fitting")
+    row = (entry["ts"], entry["task"], actor, entry["type"], data)
     found = conn.execute("INSERT INTO events (ts, task, actor, type, data) VALUES (?, ?, ?, ?, ?)", row)
     return found.lastrowid
 
@@ -88,22 +103,24 @@ def append(entry: dict, *, actor: str, made_by: str, where: Path | None = None) 
     StoreBusy, StoreUnavailable: not written, and counted. StoreNewer: never written by this
     vivibox, so no loss to say. Anything else is the code's fault and raised as it is."""
     where = where or db.path()
-    with _counting:
+    with _writing:
         owed = _lost.get(where, 0)
-    try:
-        with db.available(where), closing(db.connect(where, made_by=made_by)) as conn, db.transaction(conn):
-            if owed:
-                lost = {"ts": entry["ts"], "task": None, "type": LOST, "data": {"count": owed}}
-                insert(conn, lost, actor)
-            seq = insert(conn, entry, actor)
-    except (db.StoreBusy, db.StoreUnavailable):
-        with _counting:
-            _lost[where] = _lost.get(where, 0) + 1
-        raise
-    if owed:
-        with _counting:
-            _lost[where] -= owed
-    return seq
+        try:
+            with db.available(where), closing(db.connect(where, made_by=made_by)) as conn:
+                seq = _write(conn, entry, actor, owed)
+        except (db.StoreBusy, db.StoreUnavailable):
+            _lost[where] = owed + 1
+            raise
+        _lost.pop(where, None)
+        return seq
+
+
+def _write(conn, entry: dict, actor: str, owed: int) -> int:
+    """The audit.lost owed, then the event, in one transaction: both or neither."""
+    with db.transaction(conn):
+        if owed:
+            insert(conn, {"ts": entry["ts"], "task": None, "type": LOST, "data": {"count": owed}}, actor)
+        return insert(conn, entry, actor)
 
 
 def of_task(task: str, where: Path | None = None) -> list[dict]:

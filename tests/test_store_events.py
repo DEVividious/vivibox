@@ -3,6 +3,7 @@ stays what every reader reads (plan P1.2). The database is a copy nothing decide
 that cannot be written leaves the event out of it, never out of the log, and never stops the
 writer; one the code gets wrong does."""
 
+import copy
 import json
 import os
 import signal
@@ -10,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -173,6 +175,70 @@ def test_cutting_one_field_may_be_enough_and_then_no_other_is_cut(where):
     assert events.fitted({"a": "x"}) == {"a": "x"}
 
 
+def size(data: dict) -> int:
+    return len(events.encoded(data).encode())
+
+
+def test_names_that_alone_pass_the_limit_leave_fields_out_until_it_fits(where, one):
+    """Even every value empty would not fit: fields are left out, the largest first, and the
+    event still reaches the database and the log."""
+    data = {f"key_{n:05}": "v" for n in range(1000)}
+    one.event("gate", **data)
+    kept = json.loads(rows(where)[0][5])
+    assert kept["truncated"] is True and size(kept) <= db.DATA_LIMIT
+    assert 0 < len(kept) - 1 < 1000 and all(kept[k] == "v" for k in kept if k != "truncated")
+    assert log(one)[0]["data"] == data, "the log keeps all of it"
+
+
+def test_empty_values_whose_names_pass_the_limit_fit_too():
+    for empty in ("", [], {}, None, 0):
+        kept = events.fitted({f"name_{n:05}_{'x' * 20}": empty for n in range(400)})
+        assert kept["truncated"] is True and size(kept) <= db.DATA_LIMIT, repr(empty)
+
+
+def test_many_fields_of_text_beyond_ascii_fit_each_character_whole():
+    data = {f"pole_ż_{n:04}": "żółw🐢" * 3 for n in range(600)}
+    kept = events.fitted(data)
+    assert kept["truncated"] is True and size(kept) <= db.DATA_LIMIT
+    for key, value in kept.items():
+        if key != "truncated":
+            assert data[key].startswith(value) and value.encode().decode() == value
+
+
+def test_data_at_the_limit_is_kept_whole_and_a_byte_past_it_is_cut_to_it():
+    room = db.DATA_LIMIT - size({"a": ""})
+    assert events.fitted({"a": "x" * room}) == {"a": "x" * room}
+    kept = events.fitted({"a": "x" * (room + 1)})
+    assert kept["truncated"] is True and size(kept) <= db.DATA_LIMIT
+    assert size({**kept, "a": kept["a"] + "x"}) > db.DATA_LIMIT, "as much as fits beside the mark"
+
+
+def test_the_data_given_is_left_as_it_was():
+    data = {"a": "x" * 9000, "b": list(range(3000)), "c": {"d": ["e" * 9000]}, "f": 1}
+    before = copy.deepcopy(data)
+    events.fitted(data)
+    assert data == before
+
+
+def test_a_field_of_its_own_named_truncated_is_kept_until_something_is_cut():
+    """No new kind of mark: the event's own truncated is kept while nothing is cut, and its
+    place is the mark's once something is (the log keeps the field)."""
+    assert events.fitted({"truncated": "no", "a": "x"}) == {"truncated": "no", "a": "x"}
+    kept = events.fitted({"truncated": "y" * 9000, "a": "x"})
+    assert kept == {"truncated": True, "a": "x"}
+    kept = events.fitted({"truncated": 5, "a": "x" * 9000})
+    assert kept["truncated"] is True and size(kept) <= db.DATA_LIMIT
+
+
+def test_data_the_fitting_left_too_large_is_refused_before_the_insert(where, one, monkeypatch):
+    """The check of the bytes comes before SQLite's: what passes the limit is the code's fault,
+    said as such and written nowhere, not a constraint SQLite failed."""
+    monkeypatch.setattr(events, "fitted", lambda data: data)
+    with pytest.raises(ValueError, match="8192"):
+        one.event("paused", problem="x" * 9000)
+    assert not (one.meta / "events.jsonl").exists()
+
+
 def test_text_that_is_no_utf_8_is_kept_as_its_escapes(where, one):
     """A name as the file system gave it, not UTF-8: JSON's escapes for it, as on the log, and
     read back as the same name."""
@@ -276,6 +342,78 @@ def test_a_loss_is_counted_for_the_database_it_was_meant_for(where, one, tmp_pat
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     one.event("goal", goal="back")
     assert lost(where) == [(None, "you", {"count": 1})]
+
+
+def test_two_threads_owing_the_same_loss_say_it_once(where, one, monkeypatch):
+    """The view writes from more than one thread: what one of them says of the loss the other
+    never says again, and the count never goes below none."""
+    events._lost[where] = 2
+    inside, reached, go = threading.Event(), threading.Event(), threading.Event()
+    connect = db.connect
+
+    def held(at, made_by):
+        if not inside.is_set():
+            inside.set()
+            assert go.wait(timeout=10)
+        else:
+            reached.set()
+        return connect(at, made_by=made_by)
+
+    monkeypatch.setattr(db, "connect", held)
+    first = threading.Thread(target=one.event, args=("goal",), kwargs={"goal": "first"})
+    second = threading.Thread(target=one.event, args=("goal",), kwargs={"goal": "second"})
+    first.start()
+    assert inside.wait(timeout=10)
+    second.start()
+    reached.wait(timeout=0.5)  # the second gets no further while the first writes
+    go.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+    assert lost(where) == [(None, "you", {"count": 2})]
+    assert events._lost.get(where, 0) == 0
+    one.event("goal", goal="later")
+    assert len(lost(where)) == 1
+
+
+def test_the_loss_and_the_event_are_one_transaction(where, one, monkeypatch):
+    """The loss is said with the event that follows it, or not at all: an event the database
+    refuses takes the audit.lost with it, and the loss is still owed."""
+    events._lost[where] = 3
+    insert = events.insert
+
+    def refused(conn, entry, actor):
+        return insert(conn, entry, actor if entry["type"] == events.LOST else None)
+
+    monkeypatch.setattr(events, "insert", refused)
+    with pytest.raises(sqlite3.IntegrityError):
+        one.event("goal", goal="refused")
+    assert lost(where) == [] and events._lost[where] == 3
+    monkeypatch.setattr(events, "insert", insert)
+    began = []
+    transaction = db.transaction
+    monkeypatch.setattr(db, "transaction", lambda conn: began.append(conn) or transaction(conn))
+    one.event("goal", goal="after")
+    assert len(began) == 1, "one transaction for the two rows"
+    assert [(r[0], r[4], json.loads(r[5])) for r in rows(where)] == [
+        (1, "audit.lost", {"count": 3}),
+        (2, "goal", {"goal": "after"}),
+    ]
+    assert events._lost.get(where, 0) == 0
+
+
+def test_an_event_the_database_cannot_take_keeps_the_loss_owed_and_one_more(where, one, monkeypatch):
+    events._lost[where] = 2
+    insert = events.insert
+
+    def full(conn, entry, actor):
+        if entry["type"] != events.LOST:
+            raise OSError(28, "No space left on device")
+        return insert(conn, entry, actor)
+
+    monkeypatch.setattr(events, "insert", full)
+    one.event("goal", goal="disk full")
+    assert [e["data"]["goal"] for e in log(one)] == ["disk full"]
+    assert lost(where) == [] and events._lost[where] == 3
 
 
 def test_an_event_that_is_no_json_is_written_nowhere(where, one):

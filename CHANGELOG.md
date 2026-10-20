@@ -39,6 +39,12 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   flags; every profile, however made, checked as `[limits]` is (`Limits.checked`: each figure
   in its range, and across them); nothing reads it yet. A structure test
   fails on a module outside `vivibox/store/` that reaches `sqlite3`.
+- `vivibox/fold.py`: a task's events folded once, in one pass, into what the list's cost, the
+  panel's roles, `u` and `vivibox usage`, and `vivibox stats` add up (each turn and each use of
+  an agent's CLI read one way, the times and the gate runs); the four loops of their own are
+  gone. Every figure they show is the one they showed, a test against copies of the old loops
+  says it field by field; a structure test fails on a module other than `fold.py` that reads
+  whether a turn was on a subscription or a CLI's use.
 
 ## [0.2.2] - 2026-10-18
 

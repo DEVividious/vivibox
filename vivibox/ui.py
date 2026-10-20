@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import cli_session, display, prepare
+from .fold import PLANNING_STATES, fold
 from .plan import PlanError, parse_plan
 from .states import State
 from .task import CURRENT, EARLIER, NEWER, Task, TaskState, layout, layout_problem
@@ -68,10 +69,6 @@ def ago(ts: str, now: datetime | None = None) -> str:
         if seconds >= size:
             return f"{seconds // size} {unit} ago"
     return "just now"
-
-
-# The states whose turns are planning; every other turn is implementing, fixing, or a demo.
-PLANNING_STATES = {str(State.PLAN), str(State.CHECKPOINT_PLAN)}
 
 
 @dataclass(frozen=True)
@@ -202,43 +199,13 @@ def cost_cells(spent: Spend | None) -> tuple[str, str, str]:
     return plan, impl, review
 
 
-def _stage(state: str | None) -> str:
-    if state in PLANNING_STATES:
-        return "planning"
-    return "review" if state == str(State.REVIEW) else "implementation"
-
-
 def cost(task: Task) -> Spend:
     """What vivibox itself spent on the task, from its turn events. For a box that is only the
     turn that works out how to run the app; what you run in it by hand is on your own keys."""
-    planning = implementation = review = 0.0
-    subscription: dict[str, float] = {}
-    unknown: set[str] = set()
-    tokens = 0
-    limits: dict[str, float] = {}
-    for event in task.events():
-        data = event["data"]
-        if event["type"] == "cli_usage":
-            stage = data.get("stage") or "conversation"
-            if data.get("cost") is None:
-                unknown.add(stage)
-            else:
-                subscription[stage] = subscription.get(stage, 0.0) + data["cost"]
-            tokens += sum(n for n in (data.get("tokens") or {}).values() if isinstance(n, int))
-            limits = data.get("limits") or limits
-            continue
-        if event["type"] != "turn":
-            continue
-        spent = data.get("cost") or 0
-        stage = _stage(data.get("state"))
-        if data.get("metered") is False:
-            subscription[stage] = subscription.get(stage, 0.0) + spent
-        elif stage == "planning":
-            planning += spent
-        elif stage == "review":
-            review += spent
-        else:
-            implementation += spent
+    folded = fold(task.events())
+    planning, implementation, review = (
+        folded.on_keys.get(s, 0.0) for s in ("planning", "implementation", "review")
+    )
     st = task.read_state()
     # The turn under way, so far: its event comes when it ends, and a long turn is exactly when
     # watching the figure move is the only sign the agent is at work.
@@ -254,10 +221,10 @@ def cost(task: Task) -> Spend:
         round(implementation, 6),
         round(review, 6),
         split=not st.box,
-        subscription={k: round(v, 6) for k, v in subscription.items()},
-        subscription_unknown=frozenset(unknown),
-        subscription_tokens=tokens,
-        subscription_limits=dict(limits),
+        subscription={k: round(v, 6) for k, v in folded.subscription.items()},
+        subscription_unknown=frozenset(folded.unknown),
+        subscription_tokens=folded.cli_tokens,
+        subscription_limits=dict(folded.cli_limits),
     )
 
 

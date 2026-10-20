@@ -12,13 +12,11 @@ from datetime import UTC, datetime
 
 from . import actions, resources, stats, ui
 from .config import load_config
+from .fold import fold, seconds_between
 from .task import list_tasks
 
 TIMES = ("PLAN", "WRITE", "REVIEW", "GATE", "TOTAL")
 COLUMNS = ("TASK", *TIMES, "COST", "SUB", "CPU", "RAM", "DISK")
-# A role's turns come from the states it works in, for events written before turns named their role.
-ROLE_OF_STATE = {**dict.fromkeys(ui.PLANNING_STATES, "planner"), "review": "reviewer"}
-COLUMN_OF_ROLE = {"planner": "plan", "writer": "write", "reviewer": "review"}
 
 
 @dataclass
@@ -41,55 +39,27 @@ class Usage:
     now: resources.Resources | None = None
 
 
-def seconds_between(start: str, end: str | datetime) -> float:
-    end = end if isinstance(end, datetime) else datetime.fromisoformat(end)
-    return max((end - datetime.fromisoformat(start)).total_seconds(), 0.0)
-
-
 def of_events(
     task_id: str, project: str, events: list[dict], live: bool, now: datetime | None = None
 ) -> Usage:
     """One task's times. A turn under way counts until now on a live task; a verification from
     before gates said how long they took counts from entering verify to its result."""
     now = now or datetime.now(UTC)
-    used = Usage(task_id, project, live)
-    started: tuple[str, str] | None = None  # (column, ts) of the turn under way
-    verifying = ""
-    for event in events:
-        kind, data, ts = event["type"], event.get("data", {}), event["ts"]
-        if kind == "turn":
-            if data.get("metered") is False:
-                used.subscription += data.get("cost") or 0
-            else:
-                used.cost += data.get("cost") or 0
-        elif kind == "cli_usage":
-            if data.get("cost") is None:
-                used.subscription_unknown = True
-            else:
-                used.subscription += data["cost"]
-        if kind == "turn_started":
-            role = data.get("role") or ROLE_OF_STATE.get(data.get("state"), "writer")
-            started = (COLUMN_OF_ROLE.get(role, "write"), ts)
-        elif kind == "turn" and started:
-            column, since = started
-            setattr(used, column, getattr(used, column) + seconds_between(since, ts))
-            started = None
-        elif kind == "state" and data.get("current") == "verify":
-            verifying = ts
-        elif kind == "gate":
-            if isinstance(data.get("seconds"), (int, float)):
-                used.gate += data["seconds"]
-            elif verifying:
-                used.gate += seconds_between(verifying, ts)
-            verifying = ""
-    if started and live:
-        column, since = started
+    folded = fold(events)
+    used = Usage(
+        task_id,
+        project,
+        live,
+        **folded.seconds,
+        cost=folded.spent,
+        subscription=folded.subscription_spent,
+        subscription_unknown=bool(folded.unknown),
+    )
+    if folded.open_turn and live:
+        column, since = folded.open_turn
         setattr(used, column, getattr(used, column) + seconds_between(since, now))
     if events:
-        done = next(
-            (e["ts"] for e in events if e["type"] == "state" and e["data"].get("current") == "done"), ""
-        )
-        end = done or (now if live else events[-1]["ts"])
+        end = folded.done or (now if live else events[-1]["ts"])
         used.total = seconds_between(events[0]["ts"], end)
     return used
 

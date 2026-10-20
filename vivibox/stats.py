@@ -12,21 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import ui
-
-# What a failed gate run can be refused for, in the order the report lists them, with the summary
-# key each comes from (gate.GateResult.summary).
-REASONS = (
-    ("failed_commands", "a command failed"),
-    ("missing_criteria", "criteria not met"),
-    ("commit_problems", "commit problems"),
-    ("switched_off_tests", "tests switched off"),
-    ("uncommitted", "uncommitted files"),
-    ("no_red_evidence", "tests without red evidence"),
-    ("hidden_characters", "hidden characters"),
-    ("environment", "outside the code"),
-    ("risky_stopped", "scan budget exceeded"),
-    ("build_skipped", "build not run"),
-)
+from .fold import fold
 
 
 @dataclass
@@ -65,41 +51,33 @@ def add_task(stats: Stats, events: list[dict], live: bool, since: str = "") -> N
     events = [e for e in events if e.get("ts", "") >= since]
     if not events:
         return
+    folded = fold(events)
     stats.tasks += 1
     stats.live += live
-    runs = 0
-    passed_at = 0
-    for event in events:
-        kind, data = event["type"], event.get("data", {})
-        if kind == "gate":
-            runs += 1
-            stats.gates += 1
-            if data.get("passed"):
-                stats.gates_passed += 1
-                passed_at = passed_at or runs
-            else:
-                for key, said in REASONS:
-                    if data.get(key):
-                        stats.reasons[said] += 1
-        elif kind == "turn":
-            stats.turns += 1
-            stats.failed_turns += data.get("ok") is False
-            role = data.get("role") or data.get("kind") or "?"
-            state = data.get("state") or data.get("kind") or "?"
-            for bucket in (stats.by_role[role], stats.by_state[state]):
-                bucket[0] += data.get("cost") or 0
-                bucket[1] += data.get("tokens") or 0
-                bucket[2] += 1
-        elif kind == "cli_usage":
-            if data.get("cost") is None:
-                stats.unpriced += 1
-            else:
-                stats.subscription_used += data["cost"]
-        elif kind == "turn_retry":
-            stats.retries += 1
-    if passed_at:
-        stats.iterations.append(passed_at)
-    elif runs:
+    stats.gates += folded.gates
+    stats.gates_passed += folded.gates_passed
+    stats.reasons.update(folded.reasons)
+    stats.retries += folded.retries
+    # Added a turn and a use at a time, as they came: a task's sum added at once would round
+    # differently in the last digit.
+    for turn in folded.turns:
+        stats.turns += 1
+        stats.failed_turns += turn.ok is False
+        # What the events name, as they name it: a demo's turns apart, "?" for none.
+        role = turn.role or turn.kind or "?"
+        state = turn.state or turn.kind or "?"
+        for bucket in (stats.by_role[role], stats.by_state[state]):
+            bucket[0] += turn.cost
+            bucket[1] += turn.tokens
+            bucket[2] += 1
+    for use in folded.cli:
+        if use.cost is None:
+            stats.unpriced += 1
+        else:
+            stats.subscription_used += use.cost
+    if folded.passed_at:
+        stats.iterations.append(folded.passed_at)
+    elif folded.gates:
         stats.never_passed += 1
 
 

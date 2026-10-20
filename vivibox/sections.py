@@ -11,15 +11,12 @@ from dataclasses import dataclass
 
 from . import display, gate, handoff, orchestration, reviewing, ui
 from .config import ConfigError, load_config
+from .fold import ROLE_OF_STATE, fold
 from .markdown import listed, prose
 from .plan import PlanError, parse_plan
 from .plan import body as plan_body
 from .roles import role_of
-from .states import State
 from .task import Task, TaskState
-
-# A role's turns come from the states it works in, for events written before turns named their role.
-ROLE_OF_STATE = {**dict.fromkeys(ui.PLANNING_STATES, "planner"), str(State.REVIEW): "reviewer"}
 
 
 def criteria(task: Task) -> str:
@@ -151,19 +148,15 @@ def agents(task: Task, st: TaskState) -> list[Agent]:
             # No [roles.reviewer]: the mode's reviewer reads on the writer's model (ADR-0029).
             model = display.words(role_of(task, "writer", config).model)
             found[agent] = Agent("reviewer", f"{model} (the writer's)")
-    for event in task.events():
-        if event["type"] != "turn":
-            continue
-        data = event["data"]
-        role = data.get("role") or ROLE_OF_STATE.get(data.get("state"), "writer")
+    for turn in fold(task.events()).turns:
         # The agent the turn names, else the one this mode gives its role; one no longer
         # configured still took the turn, and its cost is in the total.
-        agent = data.get("agent") if data.get("agent") in found else mode.agents.get(role, role)
-        found.setdefault(agent, Agent(role, "-"))
+        agent = turn.agent if turn.agent in found else mode.agents.get(turn.played, turn.played)
+        found.setdefault(agent, Agent(turn.played, "-"))
         found[agent].turns += 1
         # A turn on a subscription is not money this agent spent (ADR-0036).
-        if data.get("metered") is not False:
-            found[agent].cost += data.get("cost") or 0
+        if turn.metered:
+            found[agent].cost += turn.cost
     # The turn under way, so far: its event comes when it ends.
     agent = mode.agents.get(ROLE_OF_STATE.get(str(st.state), "writer"))
     if (live := task.live_turn()) and agent in found:

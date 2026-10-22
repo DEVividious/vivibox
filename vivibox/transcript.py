@@ -18,7 +18,8 @@ ROLES = ("planner", "writer", "reviewer")
 # The first message of a role opens with its brief, the same every task, and the ask comes after.
 PROMPT_LINES = 6
 PROMPT_CHARACTERS = 600
-FOOTER = re.compile(r"^--- \S+ · (ok|failed)(?:: [^·]*)? · \$([\d.]+)", re.MULTILINE)
+# A failed turn's error may hold " · " itself: the cost is the line's last " · $", after it.
+FOOTER = re.compile(r"^--- \S+ · (ok|failed)(?:: .*)? · \$([\d.]+)", re.MULTILINE)
 
 
 def path(task: Task, role: str) -> Path:

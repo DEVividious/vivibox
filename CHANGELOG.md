@@ -49,6 +49,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   from the root of the repository, never with a `cd` into its own clone.
 - `vivibox wait --timeout` whose time ran out just as it was about to sleep ends with nothing
   found, exit 124, instead of failing on a negative sleep.
+- Transcript summaries no longer skip failed turns when their error messages contain `·` (middle dot). 
+  Failed-turn counts and total costs now include those turns, including in previously recorded transcripts.
 
 ### Internal
 

@@ -100,3 +100,23 @@ def test_a_header_in_a_comment_is_none_and_an_array_of_tables_ends_the_table(tmp
     )
     data = tomllib.loads(text)
     assert data["plugins"] == [{"ide": "idea {path}"}] and data["limits"]["ide"] == "code {path}"
+
+
+def test_a_line_of_an_array_is_no_header_and_the_key_after_it_is_still_the_tables(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[review]\nitems = [\n  ["a", "b"]\n]\nnames = [\n  ["c"],\n["d"]\n]\n'
+        'note = """\n[review]\n"""\nide = "old"\n'
+    )
+    configfile.set_value(path, "ide", "code {path}", "review")
+    text = path.read_text()
+    assert text == (
+        '[review]\nitems = [\n  ["a", "b"]\n]\nnames = [\n  ["c"],\n["d"]\n]\n'
+        'note = """\n[review]\n"""\nide = "code {path}"\n'
+    ), "the arrays and the string as they were, the key replaced in its own line"
+    assert tomllib.loads(text)["review"] == {
+        "items": [["a", "b"]],
+        "names": [["c"], ["d"]],
+        "note": "[review]\n",
+        "ide": "code {path}",
+    }

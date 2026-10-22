@@ -55,7 +55,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   `config.toml` when the table's header is indented, has spaces inside its brackets
   (`[ review ]`, `[ roles . writer ]`) or a comment after it, where a second `[review]` was added
   and the file could no longer be read. An array of tables (`[[name]]`) now ends the table above it, so a key
-  under it is no longer taken for that table's.
+  under it is no longer taken for that table's. A line of an array over several lines (`["a", "b"]`) or of a
+  multi-line string that looks like a header no longer ends the table, so a key after it is replaced
+  where it is, not written a second time.
 
 ### Internal
 

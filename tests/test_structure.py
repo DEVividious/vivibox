@@ -1113,7 +1113,7 @@ def test_the_schema_refuses_a_change_of_every_column_of_an_event_but_its_place()
     columns = set(re.findall(r"^\s*(\w+)\s+(?:INTEGER|TEXT|REAL|BLOB|ANY)\b", table, re.M))
     trigger = next(s for s in db.EVENTS if "events_immutable" in s)
     guarded = re.search(r"BEFORE UPDATE OF (.*?)\s+ON events", trigger, re.S)
-    assert guarded and PLACE < columns, (table, trigger)
+    assert guarded and columns > PLACE, (table, trigger)
     assert {c.strip() for c in guarded[1].split(",")} == columns - PLACE
     once = next(s for s in db.EVENTS if "events_placed_once" in s)
     assert re.search(r"UPDATE OF log_offset, placed_seq ON events\s+WHEN OLD\.log_offset IS NOT NULL", once)

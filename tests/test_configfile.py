@@ -1,3 +1,5 @@
+import tomllib
+
 from vivibox import configfile
 from vivibox.config import load_config, load_project
 
@@ -56,3 +58,45 @@ def test_a_project_files_lists_are_written_on_one_line(env):
     assert project.demo == ["npm install", "npm start"] and project.java == "17"
     configfile.set_value(env / "config" / "config.toml", "max_iterations", 7, "limits")
     assert load_config().max_rounds == 7, "the old key carries over as the round limit"
+
+
+def test_a_header_with_spaces_or_a_note_is_the_tables_own_and_is_not_written_twice(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[limits]\nmax_iterations = 3\n\n  [ review ]   # where the diff opens\n# ide = "idea {path}"\n'
+        'auto_open = true\n\n[ roles . writer ]\t# the writer\nharness = "opencode"\n'
+    )
+    configfile.set_value(path, "ide", "code {path}", "review")
+    configfile.set_value(path, "harness", "claude", "roles.writer")
+    configfile.set_value(path, "max_iterations", 5, "limits")
+    text = path.read_text()
+    assert text == (
+        '[limits]\nmax_iterations = 5\n\n  [ review ]   # where the diff opens\nide = "code {path}"\n'
+        'auto_open = true\n\n[ roles . writer ]\t# the writer\nharness = "claude"\n'
+    ), "each key in its own table, the headers and their notes as they were"
+    data = tomllib.loads(text)
+    assert data["review"] == {"ide": "code {path}", "auto_open": True}
+    assert data["roles"]["writer"] == {"harness": "claude"} and data["limits"]["max_iterations"] == 5
+
+
+def test_a_key_the_table_lacks_goes_under_a_header_with_a_note(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[review] # where the diff opens\nauto_open = true\n")
+    configfile.set_value(path, "ide", "code {path}", "review")
+    text = path.read_text()
+    assert text == '[review] # where the diff opens\nide = "code {path}"\nauto_open = true\n'
+    assert tomllib.loads(text)["review"] == {"ide": "code {path}", "auto_open": True}
+
+
+def test_a_header_in_a_comment_is_none_and_an_array_of_tables_ends_the_table(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('# [review]\n[limits]\nmax_iterations = 3\n[[plugins]]\nide = "idea {path}"\n')
+    configfile.set_value(path, "ide", "code {path}", "limits")
+    configfile.set_value(path, "ide", "vim {path}", "review")
+    text = path.read_text()
+    assert text == (
+        '# [review]\n[limits]\nide = "code {path}"\nmax_iterations = 3\n[[plugins]]\nide = "idea {path}"\n'
+        '\n[review]\nide = "vim {path}"\n'
+    )
+    data = tomllib.loads(text)
+    assert data["plugins"] == [{"ide": "idea {path}"}] and data["limits"]["ide"] == "code {path}"

@@ -8,7 +8,14 @@ import json
 import re
 from pathlib import Path
 
-HEADER = re.compile(r"^\[([^\]\n]+)\][ \t]*$", re.MULTILINE)
+# A table's header, indented or not, with a note after it or not; an array of tables' [[name]] ends
+# a table too, and is never one, its name keeping the brackets.
+HEADER = re.compile(r"^[ \t]*\[(\[[^\[\]\n]*\]|[^\[\]\n]+)\][ \t]*(?:#[^\n]*)?$", re.MULTILINE)
+
+
+def _name(header: str) -> str:
+    """A header's table as set_value names it: "[ roles . writer ]" is "roles.writer"."""
+    return re.sub(r"[ \t]*\.[ \t]*", ".", header.strip())
 
 
 def render(value: object) -> str:
@@ -31,7 +38,7 @@ def _span(text: str, table: str) -> tuple[int, int] | None:
     if not table:
         return 0, headers[0].start() if headers else len(text)
     for i, found in enumerate(headers):
-        if found.group(1).strip() == table:
+        if _name(found.group(1)) == table:
             end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
             return found.end(), end
     return None

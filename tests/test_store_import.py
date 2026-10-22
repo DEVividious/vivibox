@@ -356,6 +356,39 @@ def test_a_log_read_before_another_import_moved_its_cursor_on_is_read_again(wher
     assert (again.refused, again.inserted) == ([], 0)
 
 
+@pytest.mark.parametrize(
+    "fails, said",
+    [
+        (PermissionError(13, "Permission denied"), ["{log}: not imported: Permission denied"]),
+        (FileNotFoundError(2, "No such file or directory"), []),
+    ],
+)
+def test_a_log_whose_second_read_fails_is_no_log_read(where, one, monkeypatch, fails, said):
+    """The first read ends before the cursor another import moved on, and the read again under
+    the lock fails: the log is said as the read says it, never counted among the logs read, and
+    nothing moves. The next run reads it whole and counts it."""
+    first = old(goal="a")
+    logged(one).write_bytes(first + old(goal="b"))
+    run(one, where)
+    before, marks = table(where), cursors(where)
+    read, reads = importer._read, []
+
+    def failing_again(path):
+        reads.append(path)
+        if len(reads) == 1:
+            return first  # read before the other import moved the cursor past it
+        raise fails
+
+    monkeypatch.setattr(importer, "_read", failing_again)
+    report = run(one, where)
+    assert len(reads) == 2, "read again"
+    assert (report.files, report.inserted, report.placed) == (0, 0, 0)
+    assert report.refused == [s.format(log=logged(one)) for s in said] and report.waiting == []
+    assert (table(where), cursors(where)) == (before, marks)
+    monkeypatch.setattr(importer, "_read", read)
+    assert run(one, where).files == 1
+
+
 def test_a_last_line_not_yet_ended_waits(where, one):
     tail = b'{"ts": "' + TS.encode()
     logged(one).write_bytes(old(goal="a") + tail)

@@ -16,8 +16,9 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   (vivibox stopped between the two) comes after the rest. `events.jsonl` stays the history: the
   list, the panel, `u`, `vivibox stats`, `vivibox usage` and the timeline read it as before.
 - `vivibox import` brings every task's `events.jsonl`, live and archived, into `vivibox.db`, as
-  every command and the view now do when they start, and says how many events it brought in and
-  any log it could not: one changed since it was imported (never one another import read further
+  every command and the view now do when they start, and says how many events it brought in from
+  how many logs (never counting one it had to read again and could not), and any log it could
+  not: one changed since it was imported (never one another import read further
   meanwhile), or a line that is no event (its file, line, byte and why; nothing after it is
   brought in until it is one). At a start only such a
   refusal is said, and nothing when there is none. Each event is brought in once, by its
@@ -98,7 +99,10 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   copied beside itself (`vivibox.db.v1`, through a temporary file put in place at once) before
   it is migrated. A line from before identities is named by its offset and bytes, its actor
   `unknown-before-wave-b`. The import (`vivibox/store/importer.py`) keeps a cursor of bytes per
-  log, moved in the transaction of the events it covers, and is the one writer of it.
+  log, moved in the transaction of the events it covers, and is the one writer of it. A
+  structure test fails on a statement of the package that updates an event (`UPDATE`, `REPLACE`
+  or an upsert of `events`) but `events.placed`'s, which sets the place of one that has none, and
+  on a column of `events` but the place's that the trigger refusing every change leaves out.
 - `task.append_record` is the one place that appends to an event log (structure test): under
   the writers' lock, it says the byte the record began at, goes on after a short write, and
   takes back what it wrote of a record it could not finish. The archive copies the log last,

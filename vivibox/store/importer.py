@@ -90,7 +90,6 @@ def run(logs: Iterable[tuple[str, Path]], *, made_by: str, where: Path | None = 
 def _log(conn, task_id: str, path: Path, report: Report) -> None:
     if (data := _snapshot(path, report)) is None:
         return
-    report.files += 1
     with db.transaction(conn):
         cursor = conn.execute("SELECT hash, byte_offset FROM imports WHERE path = ?", (str(path),)).fetchone()
         start = cursor[1] if cursor else 0
@@ -99,6 +98,7 @@ def _log(conn, task_id: str, path: Path, report: Report) -> None:
         # never waits for the database while it does, so this waits for no one that waits.
         if len(data) < start and (data := _snapshot(path, report)) is None:
             return
+        report.files += 1  # read, the second read too where there was one
         if cursor and (len(data) < start or _hash(data[:start]) != cursor[0]):
             why = "shorter" if len(data) < start else "rewritten"
             report.refused.append(

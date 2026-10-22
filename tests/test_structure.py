@@ -1019,6 +1019,106 @@ def test_only_the_importer_writes_the_imports():
     )
 
 
+# An event once written is never changed, and its place is set once (store/db.py's triggers): the
+# one statement of the package that updates a row of events is events.placed's, which sets the
+# place of an event that has none. A REPLACE or an upsert of an event updates it too.
+UPDATES_EVENTS = re.compile(
+    r"\bUPDATE\s+(OR\s+\w+\s+)?events\b|\bREPLACE\s+INTO\s+events\b|\bINTO\s+events\b.*\bDO\s+UPDATE\b",
+    re.I | re.S,
+)
+PLACE = {"log_offset", "placed_seq"}
+
+
+def updates_of_events(source: str) -> list[tuple[str, str]]:
+    """(the function it is in, the statement) of every string of source that updates events."""
+    tree = parsed(source)
+    told = docstrings(tree)
+    found = []
+
+    def visit(node: ast.AST, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            named = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else function
+            if (
+                isinstance(child, ast.Constant)
+                and isinstance(child.value, str)
+                and id(child) not in told
+                and UPDATES_EVENTS.search(child.value)
+            ):
+                found.append((function, child.value))
+            visit(child, named)
+
+    visit(tree, "<module>")
+    return found
+
+
+def sets_the_place_of_an_unplaced_event(statement: str) -> bool:
+    """UPDATE events SET of the place's columns alone, of an event whose log_offset IS NULL."""
+    update = re.search(r"\bUPDATE\s+events\s+SET\s+(.*?)\s+WHERE\s+(.*)", statement, re.I | re.S)
+    if not update:
+        return False
+    columns = {part.split("=")[0].strip().lower() for part in update[1].split(",")}
+    return columns <= PLACE and bool(re.search(r"\blog_offset\s+IS\s+NULL\b", update[2], re.I))
+
+
+def test_no_event_once_written_is_updated_but_to_set_its_place_once():
+    updates = [
+        (where, function, statement)
+        for where, source in modules()
+        for function, statement in updates_of_events(source)
+    ]
+    assert {(where, function) for where, function, _ in updates} == {("store/events.py", "placed")}, updates
+    for *_, statement in updates:
+        assert sets_the_place_of_an_unplaced_event(statement), statement
+
+
+def test_the_guard_on_updating_events_sees_every_way_of_it():
+    def placing(sql: str) -> str:
+        return f"def placed(conn):\n    conn.execute({sql!r})"
+
+    for shape in (
+        "UPDATE events SET data = ? WHERE id = ?",
+        "update events set ts = ?",
+        "UPDATE OR REPLACE events SET actor = ?",
+        "REPLACE INTO events (seq, id) VALUES (?, ?)",
+        "INSERT OR REPLACE INTO events (seq, id) VALUES (?, ?)",
+        "INSERT INTO events (seq, id) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+    ):
+        assert updates_of_events(placing(shape)) == [("placed", shape)], shape
+    for shape in (
+        "INSERT INTO events (seq, id) VALUES (?, ?)",
+        "SELECT log_offset FROM events WHERE id = ?",
+        "UPDATE knowledge SET n = n + 1",
+        "INSERT INTO imports (path) VALUES (?) ON CONFLICT (path) DO UPDATE SET hash = excluded.hash",
+        "CREATE TRIGGER t BEFORE UPDATE OF data ON events BEGIN SELECT 1; END",
+    ):
+        assert updates_of_events(placing(shape)) == [], shape
+    assert sets_the_place_of_an_unplaced_event(
+        "UPDATE events SET log_offset = ?, placed_seq = ? WHERE id = ? AND log_offset IS NULL"
+    )
+    for shape in (
+        "UPDATE events SET log_offset = ?, placed_seq = ? WHERE id = ?",  # one placed already
+        "UPDATE events SET data = ?, log_offset = ? WHERE log_offset IS NULL",
+        "UPDATE events SET log_offset = ?, placed_seq = ?",
+        "REPLACE INTO events (seq, id) VALUES (?, ?)",
+    ):
+        assert not sets_the_place_of_an_unplaced_event(shape), shape
+
+
+def test_the_schema_refuses_a_change_of_every_column_of_an_event_but_its_place():
+    """The trigger that refuses every change of an event names every column of events but the
+    place's, which the other lets be set once: a column added to the table is added to it."""
+    from vivibox.store import db
+
+    table = next(s for s in db.EVENTS if "CREATE TABLE IF NOT EXISTS events" in s)
+    columns = set(re.findall(r"^\s*(\w+)\s+(?:INTEGER|TEXT|REAL|BLOB|ANY)\b", table, re.M))
+    trigger = next(s for s in db.EVENTS if "events_immutable" in s)
+    guarded = re.search(r"BEFORE UPDATE OF (.*?)\s+ON events", trigger, re.S)
+    assert guarded and PLACE < columns, (table, trigger)
+    assert {c.strip() for c in guarded[1].split(",")} == columns - PLACE
+    once = next(s for s in db.EVENTS if "events_placed_once" in s)
+    assert re.search(r"UPDATE OF log_offset, placed_seq ON events\s+WHEN OLD\.log_offset IS NOT NULL", once)
+
+
 def test_nothing_reads_a_resource_profile_yet():
     """vivibox/profile.py is a model with no reader: limits come from config.toml and limits.json
     as before, until the step that stores the profile with the task says which module reads it."""

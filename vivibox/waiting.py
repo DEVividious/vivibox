@@ -62,6 +62,8 @@ def wait(
                 found.append((task, st, why))
         if found:
             return found
-        if deadline is not None and clock() >= deadline:
+        # One reading for both: the deadline may pass between two, and sleep refuses a negative time.
+        left = None if deadline is None else deadline - clock()
+        if left is not None and left <= 0:
             return []
-        sleep(INTERVAL if deadline is None else min(INTERVAL, deadline - clock()))
+        sleep(INTERVAL if left is None else min(INTERVAL, left))

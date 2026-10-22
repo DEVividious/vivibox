@@ -47,6 +47,8 @@ every commit past it is `X.Y.(Z+1).devN+g<commit>`, which `vivibox --version` pr
   into the earlier task's clone, gone once its work was accepted, starts the app instead of
   failing on the `cd`. The agent that works out how to run the app is told to write the commands
   from the root of the repository, never with a `cd` into its own clone.
+- `vivibox wait --timeout` whose time ran out just as it was about to sleep ends with nothing
+  found, exit 124, instead of failing on a negative sleep.
 
 ### Internal
 

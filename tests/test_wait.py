@@ -91,6 +91,22 @@ def test_a_timeout_ends_the_wait_with_nothing(env):
     assert sum(clock.slept) == 5 and max(clock.slept) <= waiting.INTERVAL
 
 
+def test_a_deadline_passed_between_two_readings_ends_the_wait_with_nothing(env):
+    """The deadline passed after wait saw time left and before it measured its sleep, and the
+    negative sleep raised a ValueError, as time.sleep does, instead of ending the wait."""
+    readings = iter([0.0, 4.9, 5.1])
+    slept = []
+
+    def sleep(seconds):
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
+        slept.append(seconds)
+
+    found = waiting.wait([make(env)], lambda t: True, timeout=5, clock=lambda: next(readings), sleep=sleep)
+    assert found == []
+    assert slept == [pytest.approx(0.1)]
+
+
 def test_the_command_line_says_what_ended_the_wait(env, capsys, monkeypatch):
     from vivibox.cli import main
 

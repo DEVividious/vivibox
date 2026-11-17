@@ -7,7 +7,7 @@ on:
   pull_request:
 
 # The token reads the repository and nothing more, unless a job says otherwise. Actions are pinned
-# to a commit, their version beside it; Dependabot (.github/dependabot.yml) proposes new ones.
+# to a commit, their version beside it.
 permissions:
   contents: read
 
